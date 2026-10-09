@@ -24,4 +24,4 @@ bootstrap → network → eks → platform
 
 - 버킷: `clothes-query-tfstate-<AWS계정ID>` (프로젝트 전체에 하나)
 - key: `clothes-query/dev/<스택명>/terraform.tfstate` (스택마다 다르게)
-- `bootstrap`만 local state를 쓴다. 자세한 내용은 [bootstrap/README.md](bootstrap/README.md) 참고.
+- `bootstrap`만 local state를 쓴다. 자세한 내용은 [bootstrap/bootstrap.md](bootstrap/bootstrap.md) 참고.
