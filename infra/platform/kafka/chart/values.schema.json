@@ -139,8 +139,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,248}$",
+            "maxLength": 249
           },
           "partitions": {
             "type": "integer",
@@ -151,6 +151,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 31536000000
+          },
+          "resourceName": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
           }
         },
         "required": [
@@ -176,8 +181,8 @@
             "type": "array",
             "items": {
               "type": "string",
-              "maxLength": 63,
-              "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,248}$",
+              "maxLength": 249
             },
             "uniqueItems": true
           },
@@ -185,8 +190,8 @@
             "type": "array",
             "items": {
               "type": "string",
-              "maxLength": 63,
-              "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,248}$",
+              "maxLength": 249
             },
             "uniqueItems": true
           },
@@ -241,8 +246,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,248}$",
+            "maxLength": 249
           },
           "uniqueItems": true
         },

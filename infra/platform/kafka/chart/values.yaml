@@ -18,6 +18,7 @@ kafka:
   clientNamespaces: []
 # Business contracts are not yet fixed. No invented six-topic mapping.
 # Each item: {name: literal-topic-name, partitions: positive-int, retentionMs: positive-int}
+# Add resourceName for Kafka names with underscores/uppercase (Kubernetes DNS name differs).
 topics: []
 # Each item: {name: user-name, produceTopics: [], consumeTopics: [], consumerGroups: []}
 # Users and generated TLS Secrets reside in kafka. No credentials in values.

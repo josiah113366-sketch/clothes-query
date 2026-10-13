@@ -4,7 +4,7 @@
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
-  name: {{ .name }}
+  name: {{ default .name .resourceName }}
   labels:
     strimzi.io/cluster: {{ $.Values.kafka.name }}
 spec:

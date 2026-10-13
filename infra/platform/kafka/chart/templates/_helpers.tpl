@@ -5,10 +5,15 @@
 {{- if not .Values.kafka.storageGi }}{{ fail "kafka.storageGi is required when enabled" }}{{ end -}}
 {{- if not .Values.kafka.retentionHours }}{{ fail "kafka.retentionHours is required when enabled" }}{{ end -}}
 {{- $names := dict -}}
+{{- $resourceNames := dict -}}
 {{- $reserved := list (printf "%s-configs" .Values.connect.name) (printf "%s-offsets" .Values.connect.name) (printf "%s-status" .Values.connect.name) -}}
 {{- range .Values.topics -}}
 {{- if or (hasKey $names .name) (has .name $reserved) }}{{ fail "Duplicate or reserved topic name" }}{{ end -}}
 {{- $_ := set $names .name true -}}
+{{- $resourceName := default .name .resourceName -}}
+{{- if or (gt (len $resourceName) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $resourceName)) }}{{ fail "Topic name needs a DNS-compatible resourceName" }}{{ end -}}
+{{- if hasKey $resourceNames $resourceName }}{{ fail "Duplicate KafkaTopic resourceName" }}{{ end -}}
+{{- $_ := set $resourceNames $resourceName true -}}
 {{- end -}}
 {{- $users := dict -}}
 {{- range .Values.clients -}}

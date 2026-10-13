@@ -2,7 +2,7 @@
 
 상태: 코드·로컬 검증 준비 / AWS·Kubernetes 미배포.
 
-로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 12개 거부, Connect Linux/amd64 이미지 빌드 및 네트워크 차단 플러그인 발견 검사 통과. 기존 Terraform 10개 root/36 mock도 통과했다. DB→Kafka 실전달·장애 복구는 아직 확인하지 않았다.
+로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 14개 거부, Connect Linux/amd64 이미지 빌드 및 플러그인 발견 검사 통과. 임시 PostgreSQL→Kafka snapshot/insert/update/delete와 Connect 중단 후 재전달도 확인했다. Terraform 10개 root/38 mock 통과. 실제 RDS/EKS 전달·AZ/디스크 장애 복구는 아직 확인하지 않았다.
 
 사용자 결정은 **EKS 자체 운영**이다. 공식 Strimzi 1.3.0 Helm chart, Kafka 4.3.1, PostgreSQL CDC용 Debezium 3.7.0.Final을 고정했다. Strimzi의 시험 범위 Kubernetes 1.32~1.37에 현재 EKS 코드의 1.36이 포함된다. Debezium 호환 표는 Kafka Connect 3.1 이상, PostgreSQL 14~18을 명시한다. 실제 조합의 실행 검증은 남아 있다. [Strimzi 버전 표](https://strimzi.io/downloads/), [Debezium 호환 표](https://debezium.io/releases/)
 
@@ -29,6 +29,8 @@ Kafka request 합계는 1.5 vCPU/6Gi, Connect는 0.5 vCPU/2Gi다. 운영자 0.2 
 실제 활성화하면 노드 증가, broker당 EBS `storageGi`(합계 3배), AZ 간 복제 트래픽, 이미지 전송 비용이 발생할 수 있다. Retain 볼륨은 Pod/release 삭제 후에도 비용이 남는다. 이번 준비 작업 자체는 클라우드 자원을 생성하지 않았다.
 
 ## 보안과 데이터 보존
+
+Debezium 기본 토픽 이름의 점·밑줄은 [chart의 `resourceName`](chart/README.md)으로 Kubernetes 리소스 이름과 분리할 수 있다. [로컬 CDC 검사](local-smoke/README.md)는 임시 DB에서 실제 전달과 재시작 후 전달을 확인하며 EKS/RDS 검증을 대체하지 않는다.
 
 - Kafka client listener는 내부 9093만 제공하며 TLS 서버 인증과 client 인증서 인증을 요구한다. 외부 LoadBalancer·Ingress·평문 listener를 만들지 않는다.
 - User Operator가 KafkaUser와 같은 이름의 TLS Secret(`user.crt`, `user.key`, `ca.crt` 등)을 `kafka` namespace에 만든다. Connect는 자신의 Secret와 cluster CA를 직접 참조한다. 업무 클라이언트 ACL은 literal topic/group만 허용한다. `IdempotentWrite`는 Kafka가 요구하는 cluster 범위 작업이며 관리자 권한을 부여하지 않는다.

@@ -1,0 +1,167 @@
+"""Run a disposable local-only CDC smoke test; never uses AWS, host ports or business data."""
+import json
+import os
+from pathlib import Path
+import secrets
+import subprocess
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parent
+TOPIC = "smoke.public.cdc_probe"
+
+
+def main():
+    # Reject remote Docker contexts before any mutations or cleanup.
+    clean_env = {k: v for k, v in os.environ.items() if not k.startswith(("AWS_", "TF_", "KUBE"))}
+    if clean_env.get("DOCKER_HOST") or clean_env.get("DOCKER_CONTEXT"):
+        raise RuntimeError("Use a local Docker context without DOCKER_HOST/DOCKER_CONTEXT overrides")
+    context = json.loads(subprocess.check_output(["docker", "context", "inspect"], env=clean_env, text=True))[0]
+    host = context["Endpoints"]["docker"]["Host"]
+    if not host.startswith(("npipe://", "unix://")):
+        raise RuntimeError("Only a local Docker socket is supported")
+    if subprocess.check_output(["docker", "info", "--format", "{{.OSType}}"], env=clean_env, text=True).strip() != "linux":
+        raise RuntimeError("Start Docker Desktop Linux engine first")
+    project = "cq-cdc-" + secrets.token_hex(5)
+    print("Local test project: " + project, flush=True)
+    image = project + "-connect:local"
+    admin_password, cdc_password = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+
+    def redact(value):
+        return value.replace(admin_password, "[redacted]").replace(cdc_password, "[redacted]")
+
+    def docker(*args, stdin=None, timeout=90, check=True):
+        result = subprocess.run(["docker", *map(str, args)], input=stdin, capture_output=True,
+                                text=True, encoding="utf-8", env=clean_env, timeout=timeout)
+        if check and result.returncode:
+            raise RuntimeError(redact(result.stderr[-2500:] or result.stdout[-2500:]))
+        return result
+
+    with tempfile.TemporaryDirectory(prefix=project + "-") as temp:
+        directory = Path(temp)
+        (directory / "username").write_text("cdc_user", encoding="utf-8")
+        (directory / "password").write_text(cdc_password, encoding="utf-8")
+        clean_env.update(SMOKE_ADMIN_PASSWORD=admin_password, SMOKE_CONNECT_IMAGE=image,
+                         SMOKE_SECRET_DIR=str(directory))
+
+        def compose(*args, **kwargs):
+            return docker("compose", "--project-name", project, "--file", ROOT / "compose.yaml", *args, **kwargs)
+
+        def sql(statement):
+            return compose("exec", "-T", "postgres", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
+                           "-U", "postgres", "-d", "smoke", "-At", stdin=statement).stdout.strip()
+
+        def until(description, function, timeout=120):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    result = function()
+                    if result:
+                        return result
+                except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+                    pass
+                time.sleep(2)
+            raise RuntimeError("Timed out: " + description)
+
+        def rest(path, payload=None):
+            args = ["exec", "-T", "connect", "curl", "--fail", "--silent", "--show-error", "--max-time", "5"]
+            if payload is not None:
+                args += ["-H", "Content-Type: application/json", "--data-binary", "@-"]
+            return json.loads(compose(*args, "http://localhost:8083" + path,
+                                      stdin=None if payload is None else json.dumps(payload), timeout=15).stdout)
+
+        def running():
+            status = rest("/connectors/smoke-postgres/status")
+            return status["connector"]["state"] == "RUNNING" and bool(status["tasks"]) and all(t["state"] == "RUNNING" for t in status["tasks"])
+
+        def events():
+            result = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-console-consumer.sh",
+                             "--bootstrap-server", "kafka:9092", "--topic", TOPIC, "--from-beginning",
+                             "--partition", "0", "--timeout-ms", "3000", timeout=20, check=False)
+            parsed = []
+            for line in result.stdout.splitlines():
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict) and isinstance(record.get("payload"), dict):
+                    parsed.append(record["payload"])
+            return parsed
+
+        def has(records, op, row_id, value):
+            field = "before" if op == "d" else "after"
+            return any(e.get("op") == op and e.get(field) == {"id": row_id, "value": value} for e in records)
+
+        cleanup_error = None
+        try:
+            print("Building pinned Connect image for isolated local test...", flush=True)
+            docker("build", "--platform", "linux/amd64", "--tag", image,
+                   ROOT.parent / "connect-image", timeout=300)
+            compose("config", "--quiet")
+            compose("up", "--detach", "postgres", "kafka", timeout=300)
+            until("PostgreSQL ready", lambda: compose("exec", "-T", "postgres", "pg_isready", "-U", "postgres").returncode == 0)
+            until("Kafka ready", lambda: compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh",
+                                                "--bootstrap-server", "kafka:9092", "--list", timeout=15).returncode == 0)
+            print("DB and Kafka ready; preparing restricted test scope...", flush=True)
+            sql(f"""
+                CREATE ROLE cdc_user WITH LOGIN REPLICATION PASSWORD '{cdc_password}';
+                GRANT CONNECT ON DATABASE smoke TO cdc_user;
+                CREATE TABLE public.cdc_probe (id integer PRIMARY KEY, value integer NOT NULL);
+                CREATE TABLE public.cdc_excluded (id integer PRIMARY KEY);
+                ALTER TABLE public.cdc_probe REPLICA IDENTITY FULL;
+                GRANT USAGE ON SCHEMA public TO cdc_user;
+                GRANT SELECT ON public.cdc_probe TO cdc_user;
+                CREATE PUBLICATION smoke_publication FOR TABLE public.cdc_probe;
+                INSERT INTO public.cdc_probe VALUES (1, 10);
+            """)
+            assert sql("SELECT rolreplication AND NOT rolsuper FROM pg_roles WHERE rolname='cdc_user';") == "t"
+            for topic in [TOPIC, "smoke-connect-configs", "smoke-connect-offsets", "smoke-connect-status"]:
+                args = ["exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092",
+                        "--create", "--topic", topic, "--partitions", "1", "--replication-factor", "1"]
+                if topic != TOPIC:
+                    args += ["--config", "cleanup.policy=compact"]
+                compose(*args)
+            compose("up", "--detach", "connect", timeout=120)
+            until("Connect REST ready", lambda: rest("/"))
+            plugins = rest("/connector-plugins")
+            assert any(p["class"] == "io.debezium.connector.postgresql.PostgresConnector" and p["version"] == "3.7.0.Final" for p in plugins)
+            rest("/connectors", {"name": "smoke-postgres", "config": {
+                "connector.class": "io.debezium.connector.postgresql.PostgresConnector", "tasks.max": "1",
+                "database.hostname": "postgres", "database.port": "5432", "database.dbname": "smoke",
+                "database.user": "${directory:/mnt/cdc-database:username}",
+                "database.password": "${directory:/mnt/cdc-database:password}",
+                "database.sslmode": "disable", "plugin.name": "pgoutput", "topic.prefix": "smoke",
+                "table.include.list": r"public\.cdc_probe", "publication.name": "smoke_publication",
+                "publication.autocreate.mode": "disabled", "slot.name": "smoke_slot",
+                "snapshot.mode": "initial", "slot.drop.on.stop": "false"
+            }})
+            until("Connector RUNNING", running)
+            until("Initial snapshot", lambda: has(events(), "r", 1, 10))
+            sql("INSERT INTO public.cdc_probe VALUES (2,20); UPDATE public.cdc_probe SET value=11 WHERE id=1; DELETE FROM public.cdc_probe WHERE id=2; INSERT INTO public.cdc_excluded VALUES (99);")
+            def changes_received():
+                data = events()
+                return all(has(data, *expected) for expected in [("c", 2, 20), ("u", 1, 11), ("d", 2, 20)])
+            until("Insert/update/delete delivered", changes_received)
+            print("PASS: snapshot and insert/update/delete delivered; dedicated non-superuser and mounted credentials", flush=True)
+            compose("stop", "--timeout", "20", "connect")
+            assert sql("SELECT NOT active FROM pg_replication_slots WHERE slot_name='smoke_slot';") == "t"
+            sql("INSERT INTO public.cdc_probe VALUES (3,30);")
+            compose("start", "connect")
+            until("Connector resumed", running)
+            until("Change made while Connect was stopped", lambda: has(events(), "c", 3, 30))
+            topics = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list").stdout.splitlines()
+            assert TOPIC in topics and not any("cdc_excluded" in topic for topic in topics)
+            print("PASS: change during Connect outage delivered after restart; excluded table produced no topic", flush=True)
+        finally:
+            # Only resources in this invocation's random Compose project are removed.
+            result = compose("down", "--volumes", "--remove-orphans", "--timeout", "20", timeout=120, check=False)
+            if result.returncode:
+                cleanup_error = redact(result.stderr[-2000:])
+            docker("image", "rm", image, timeout=30, check=False)
+            if cleanup_error:
+                raise RuntimeError("Local test cleanup failed for " + project + ": " + cleanup_error)
+            print("Cleaned this test's containers/network/volume/image tag.", flush=True)
+
+
+if __name__ == "__main__":
+    main()

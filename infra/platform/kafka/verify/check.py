@@ -96,6 +96,13 @@ def main():
         full["connect"] = {"enabled": True, "image": "example.invalid/connect@sha256:" + "a" * 64,
                            "produceTopics": ["example-orders"]}
         docs = render(full)
+        cdc = copy.deepcopy(full)
+        cdc["topics"][0].update(name="smoke.public.cdc_probe", resourceName="smoke-public-cdc-probe")
+        cdc["clients"][0]["consumeTopics"] = ["smoke.public.cdc_probe"]
+        cdc["connect"]["produceTopics"] = ["smoke.public.cdc_probe"]
+        cdc_docs = render(cdc)
+        assert any(d["kind"] == "KafkaTopic" and d["metadata"]["name"] == "smoke-public-cdc-probe"
+                   and d["spec"]["topicName"] == "smoke.public.cdc_probe" for d in cdc_docs)
         kafka = next(d["spec"]["kafka"] for d in docs if d["kind"] == "Kafka")
         listener = kafka["listeners"][0]
         assert listener["type"] == "internal" and listener["tls"]
@@ -143,6 +150,10 @@ def main():
         render(bad, error="name")
         bad = copy.deepcopy(base); bad["clients"][0]["consumerGroups"] = []
         render(bad, error="Consumers require explicit")
+        bad = copy.deepcopy(cdc); del bad["topics"][0]["resourceName"]
+        render(bad, error="DNS-compatible resourceName")
+        bad = copy.deepcopy(cdc); bad["topics"].append({"name": "other", "resourceName": "smoke-public-cdc-probe", "partitions": 1, "retentionMs": 1000})
+        render(bad, error="Duplicate KafkaTopic resourceName")
 
         op = run("template", "strimzi", operator_chart, "--namespace", "kafka",
                  "--values", ROOT / "operator-values.yaml", "--include-crds", "--kube-version", "1.36.0")
@@ -159,7 +170,7 @@ def main():
         assert storage["provisioner"] == "ebs.csi.eks.amazonaws.com"
         assert storage["reclaimPolicy"] == "Retain" and storage["parameters"]["encrypted"] == "true"
         assert storage["volumeBindingMode"] == "WaitForFirstConsumer"
-    print(f"PASS: lint, disabled/Kafka/Connect rendering, {len(docs)} CRs against Strimzi 1.3.0 schemas, 12 rejected inputs, operator/storage checks")
+    print(f"PASS: lint, disabled/Kafka/Connect/CDC topic rendering, {len(docs)} CRs against Strimzi 1.3.0 schemas, 14 rejected inputs, operator/storage checks")
     print("No Kubernetes/AWS connection, apply, push or runtime claim.")
 
 
