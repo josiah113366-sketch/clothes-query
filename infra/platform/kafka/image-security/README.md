@@ -10,6 +10,6 @@ python -X utf8 infra/platform/kafka/image-security/check.py
 
 결과는 무시되는 `.cache/connect-security/`의 `report.json`, `summary.json`, `summary.md`에 저장한다. OS/Java 전체 심각도를 검사하고 ignorefile·미수정 항목 제외를 사용하지 않는다. 중복은 CVE/package/설치 버전으로 집계하며 원본 개수도 보존한다. summary에는 실제 이미지 ID·scanner digest·Dockerfile hash·DB 시각을 기록한다. 임시 image tag·tar·scanner container만 정리하며 DB와 이미지 레이어 캐시는 남는다.
 
-취약점이 있어도 검사 자체가 끝나면 결과를 기록한다. 배포 허용 정책이나 취약점 무시를 의미하지 않는다. 공급처의 수정 버전 표시는 해당 조합에서 안전하게 교체할 수 있다는 보증이 아니다. 기반 Strimzi/Kafka와 Debezium 플러그인의 업데이트는 호환 버전 확인·TLS/CDC/재생성 검증 후 별도 변경한다. 이번 작업은 검사/분류이며 라이브러리 강제 덮어쓰기를 하지 않는다.
+취약점이 있어도 검사 자체가 끝나면 결과를 기록한다. 배포 허용 정책이나 취약점 무시를 의미하지 않는다. 공급처의 수정 버전 표시는 해당 조합에서 안전하게 교체할 수 있다는 보증이 아니다. 기반 Strimzi/Kafka와 Debezium 플러그인의 업데이트는 호환 버전 확인·TLS/CDC/재생성 검증 후 별도 변경한다. [Connect 조치 기록](../../../../docs/design/infra/connect-image-remediation-2026-10-14.md)은 미사용 구성요소 제거·OS 패치 후 Critical 0/High 35와 재검증 결과를 담는다. 개별 Java 라이브러리는 덮어쓰지 않았다.
 
 공식 근거: [Trivy image/archive 검사](https://trivy.dev/docs/latest/target/container_image/), [고정 scanner 릴리스](https://github.com/aquasecurity/trivy/releases/tag/v0.75.0).

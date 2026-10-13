@@ -2,6 +2,8 @@
 
 상태: 검사·분류 완료 / 취약점 조치 미완료. 이 문서는 2026-10-14 한국 시간의 로컬 검사 스냅샷이다. 실제 이미지 ECR 배포 검사는 아니며 아래 image ID는 레지스트리 digest를 대신하지 않는다.
 
+이 문서는 조치 전 결과를 보존한다. 이후 Connect 이미지 구성요소 제거·OS 패치와 동일 DB 재검사를 수행했다. 최신 결과와 잔여 항목은 [조치 기록](connect-image-remediation-2026-10-14.md)을 따른다.
+
 UTC: 2026-10-13T18:49:39.776066+00:00
 Scanner: Trivy 0.75.0 (digest pinned)
 Image ID: `sha256:d81fc79eb8583febe06038dfd54e45f70c5e0a5b67a487db5664efc1bf42d9ac`

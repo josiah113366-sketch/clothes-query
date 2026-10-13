@@ -22,7 +22,7 @@ Kafka/Connect도 기본 비활성이며 [Kafka runtime 안내](../../../infra/pl
 
 [후속 결과](../../tasks/infra-kafka-followups.md)는 선택적 Connect 저장소, 일회성 로컬 DB→Kafka 전달/재시작, 선택적 지표 노출을 포함한다. 로컬 연결 검증 결과와 AWS/EKS 완료 기준을 구분한다.
 
-[추가 검증](../../tasks/infra-kafka-validation.md)은 로컬 TLS/ACL·Kafka 재생성 후 메시지/Connect offset 보존·자동 검사 코드 연결을 포함한다. [이미지 검사](connect-image-security-2026-10-14.md)는 Critical 1/High 73 등 미조치 결과가 있으며 배포 허용을 뜻하지 않는다. 실제 Secret 공급·EKS/RDS/스토리지/장애·수집 서버·알림 검증은 남아 있다.
+[추가 검증](../../tasks/infra-kafka-validation.md)은 로컬 TLS/ACL·Kafka 재생성 후 메시지/Connect offset 보존·자동 검사 코드 연결을 포함한다. Connect 이미지 조치 후 [재검사](connect-image-remediation-2026-10-14.md)는 Critical 0/High 35이며 잔여 취약점이 있다. 실제 Secret 공급·EKS/RDS/스토리지/장애·수집 서버·알림 검증은 남아 있다.
 
 ## RDS CDC 활성화 조건
 

@@ -10,6 +10,8 @@ python -X utf8 infra/platform/kafka/local-smoke/check.py
 
 검사 범위는 플러그인 발견, 전용 replication 계정(비 superuser), 실제 Secret 디렉터리 참조, 초기 snapshot, insert/update/delete envelope, Connect 중단 중 발생한 변경의 재시작 후 전달, 캡처 범위 밖 테이블의 토픽 미생성이다. 전달 중복은 허용하며 exactly-once를 주장하지 않는다.
 
+Connect는 Strimzi의 `kafka_connect_run.sh`로 시작하고 worker 설정을 `/opt/kafka/custom-config/kafka-connect.properties`에 mount한다. 이미지 구성요소를 제거한 뒤에도 Strimzi 시작 경로·플러그인 로딩·REST·지표·CDC가 동작하는지 함께 확인한다. Kubernetes operator가 설정/Secret을 생성하는 과정은 이 로컬 검사에 포함하지 않는다.
+
 Kafka 데이터 경로는 임시 CA의 mTLS·hostname 검증과 StandardAuthorizer ACL을 사용한다. Connect는 허용 토픽에 쓰고 reader는 허용 토픽/group을 읽는다. 인증서 없음·다른 CA 인증서·권한 없는 토픽/group을 실제 오류 종류로 구분해 거부되는지 검사한다. CA 개인 키는 workload에 mount하지 않는다. 인증서 발급 스크립트는 bytes stdin으로 전달해 Windows에서도 Linux 줄바꿈을 유지한다.
 
 Kafka의 KRaft/log는 실행별 named volume에 둔다. Connect 정지 후 Kafka를 force-recreate해 새 container ID/같은 volume, 보존된 메시지 end offset과 Connect source offset을 확인한다. Connector config를 다시 등록하지 않고 재시작해 중단 중 추가한 행이 초기 snapshot 대신 변경 이벤트로 전달되는지 검사한다. 로컬 volume 초기화 컨테이너는 해당 실행의 volume에서만 Kafka UID 소유권을 맞춘다. 다른 volume/host 경로는 수정하지 않는다.

@@ -62,7 +62,7 @@ python -X utf8 infra/platform/kafka/image-security/check.py
 
 Docker Linux 엔진, 약 4.25Gi 검사 상한과 엔진 여유, 이미지/취약점 DB 다운로드가 필요하다. Linux에서 임시 인증서 생성은 host UID를 쓰고 mount된 leaf 파일에만 Kafka GID 읽기 권한을 준다. CA 키는 workload에 mount하지 않는다.
 
-이미지 검사는 scanner 실행/결과 생성 실패 시 job이 실패한다. 취약점 발견 자체는 report-only이며 Critical/High는 workflow warning과 summary에 표시한다. 현재 [검사 스냅샷](../../docs/design/infra/connect-image-security-2026-10-14.md)에는 Critical 1/High 73이 있으므로 scan job 성공을 무취약·배포 허용으로 해석하지 않는다. 저장소 Secrets·AWS identity·PR 쓰기 권한을 사용하지 않는다. raw 보고서·인증서·DB/이미지를 원격 artifact로 업로드하지 않는다.
+이미지 검사는 scanner 실행/결과 생성 실패 시 job이 실패한다. 취약점 발견 자체는 report-only이며 Critical/High는 workflow warning과 summary에 표시한다. Connect 이미지 [조치 후 검사](../../docs/design/infra/connect-image-remediation-2026-10-14.md)는 Critical 0/High 35이며 scan job 성공을 무취약·배포 허용으로 해석하지 않는다. 저장소 Secrets·AWS identity·PR 쓰기 권한을 사용하지 않는다. raw 보고서·인증서·DB/이미지를 원격 artifact로 업로드하지 않는다.
 
 ## 실패 시
 

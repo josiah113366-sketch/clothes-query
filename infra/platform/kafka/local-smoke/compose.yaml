@@ -54,12 +54,13 @@ services:
     environment:
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
       LOG_DIR: /tmp/connect-app-logs
+      KAFKA_LOG4J_OPTS: -Dlog4j2.configurationFile=/opt/kafka/config/connect-log4j2.yaml
       KAFKA_OPTS: -javaagent:/opt/prometheus-jmx-exporter/jmx_prometheus_javaagent-1.6.0.jar=9404:/mnt/metrics.yml
-    entrypoint: [/opt/kafka/bin/connect-distributed.sh, /mnt/worker.properties]
+    entrypoint: [/opt/kafka/kafka_connect_run.sh]
     volumes:
       - type: bind
         source: ${SMOKE_WORKER_CONFIG:?run check.py}
-        target: /mnt/worker.properties
+        target: /opt/kafka/custom-config/kafka-connect.properties
         read_only: true
       - type: bind
         source: ${SMOKE_SECRET_DIR:?run check.py}
