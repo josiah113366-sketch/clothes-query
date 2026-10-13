@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    command: ["postgres", "-c", "wal_level=logical"]
+    ports:
+      - "5432:5432"
+    environment:
+      # 로컬 전용 더미 값
+      POSTGRES_DB: clothes
+      POSTGRES_USER: sim
+      POSTGRES_PASSWORD: sim
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/schema:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sim -d clothes"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
