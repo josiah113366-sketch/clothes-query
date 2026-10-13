@@ -1,5 +1,14 @@
 # Disposable single-broker test only. No host ports or external Docker network.
 services:
+  kafka-data-init:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    user: "0:0"
+    entrypoint: [/bin/bash, -ec, 'mkdir -p /data/logs && chown -R 1001:0 /data']
+    volumes:
+      - kafka-data:/data
+    mem_limit: 128m
+    networks: [smoke]
   postgres:
     image: postgres@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4
     platform: linux/amd64
@@ -24,6 +33,7 @@ services:
         /opt/kafka/bin/kafka-storage.sh format --standalone --cluster-id cqCdcSmokeTestCluster01 --config /mnt/server.properties --ignore-formatted
         exec /opt/kafka/bin/kafka-server-start.sh /mnt/server.properties
     volumes:
+      - kafka-data:/var/lib/cq-kafka
       - type: bind
         source: ./server.properties
         target: /mnt/server.properties
@@ -94,6 +104,7 @@ services:
     networks: [smoke]
 volumes:
   postgres-data: {}
+  kafka-data: {}
 networks:
   smoke:
     internal: true

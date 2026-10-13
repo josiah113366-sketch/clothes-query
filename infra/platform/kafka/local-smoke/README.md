@@ -12,6 +12,8 @@ python -X utf8 infra/platform/kafka/local-smoke/check.py
 
 Kafka 데이터 경로는 임시 CA의 mTLS·hostname 검증과 StandardAuthorizer ACL을 사용한다. Connect는 허용 토픽에 쓰고 reader는 허용 토픽/group을 읽는다. 인증서 없음·다른 CA 인증서·권한 없는 토픽/group을 실제 오류 종류로 구분해 거부되는지 검사한다. CA 개인 키는 workload에 mount하지 않는다. 인증서 발급 스크립트는 bytes stdin으로 전달해 Windows에서도 Linux 줄바꿈을 유지한다.
 
+Kafka의 KRaft/log는 실행별 named volume에 둔다. Connect 정지 후 Kafka를 force-recreate해 새 container ID/같은 volume, 보존된 메시지 end offset과 Connect source offset을 확인한다. Connector config를 다시 등록하지 않고 재시작해 중단 중 추가한 행이 초기 snapshot 대신 변경 이벤트로 전달되는지 검사한다. 로컬 volume 초기화 컨테이너는 해당 실행의 volume에서만 Kafka UID 소유권을 맞춘다. 다른 volume/host 경로는 수정하지 않는다.
+
 [chart와 같은 지표 규칙](../metrics/README.md)을 agent로 읽어 Kafka 복제/controller·Connect task/CDC 연결 상태와 실제 backlog의 consumer lag 노출도 검사한다. exporter 추가 메모리 상한은 256Mi다. Prometheus 서버는 실행하지 않는다.
 
 2026-10-14 이 PC에서 전체 검사와 해당 project 정리를 완료했다. 짧은 그룹 할당 대기 때문에 메시지를 놓치는 검사 오류를 피하도록 단일 partition을 직접 읽는다. 이는 업무 Consumer 구현이 아니다.

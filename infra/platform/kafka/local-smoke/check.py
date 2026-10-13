@@ -72,7 +72,7 @@ def main():
             return compose("exec", "-T", "postgres", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
                            "-U", "postgres", "-d", "smoke", "-At", stdin=statement).stdout.strip()
 
-        def until(description, function, timeout=120):
+        def until(description, function, timeout=120, ignore_stopped=()):
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 try:
@@ -86,7 +86,7 @@ def main():
                     if not line.startswith("{"):
                         continue
                     state = json.loads(line)
-                    if state.get("State") in {"exited", "dead"}:
+                    if state.get("State") in {"exited", "dead"} and state["Service"] not in ignore_stopped:
                         raise RuntimeError("Local service exited during " + description + ": " + state["Service"])
                 time.sleep(2)
             raise RuntimeError("Timed out: " + description)
@@ -121,6 +121,30 @@ def main():
             field = "before" if op == "d" else "after"
             return any(e.get("op") == op and e.get(field) == {"id": row_id, "value": value} for e in records)
 
+        def stored_offsets():
+            result = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-console-consumer.sh",
+                             "--bootstrap-server", "kafka:9092", "--topic", "smoke-connect-offsets", "--partition", "0",
+                             "--from-beginning", "--timeout-ms", "3000", "--property", "print.key=true",
+                             "--property", "key.separator=\t", timeout=20, check=False)
+            latest = {}
+            for line in result.stdout.splitlines():
+                if "\t" not in line:
+                    continue
+                key, value = line.split("\t", 1)
+                try:
+                    parsed_key, parsed_value = json.loads(key), json.loads(value)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed_key, list) and parsed_key[0] == "smoke-postgres":
+                    latest[json.dumps(parsed_key, sort_keys=True)] = parsed_value
+            return latest
+
+        def kafka_container():
+            container_id = compose("ps", "--quiet", "kafka").stdout.strip()
+            inspected = json.loads(docker("inspect", container_id).stdout)[0]
+            volume = next(m["Name"] for m in inspected["Mounts"] if m["Destination"] == "/var/lib/cq-kafka" and m["Type"] == "volume")
+            return container_id, volume
+
         def metrics(service):
             return compose("exec", "-T", service, "curl", "--fail", "--silent", "--show-error",
                            "--max-time", "10", "http://localhost:9404/metrics", timeout=20).stdout
@@ -141,6 +165,7 @@ def main():
             docker("run", "--interactive", "--rm", "--network", "none", "--mount", f"type=bind,source={tls_dir},target=/work",
                    "--entrypoint", "/bin/bash", image, "-s", stdin=(ROOT / "make-tls.sh").read_text(), timeout=60)
             compose("config", "--quiet")
+            compose("run", "--rm", "--no-deps", "kafka-data-init")
             compose("up", "--detach", "postgres", "kafka", timeout=300)
             until("PostgreSQL ready", lambda: compose("exec", "-T", "postgres", "pg_isready", "-U", "postgres").returncode == 0)
             until("Kafka ready", lambda: compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh",
@@ -231,6 +256,29 @@ def main():
             topics = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list").stdout.splitlines()
             assert TOPIC in topics and not any("cdc_excluded" in topic for topic in topics)
             print("PASS: change during Connect outage delivered after restart; excluded table produced no topic", flush=True)
+            compose("stop", "--timeout", "20", "connect")
+            offsets_before = stored_offsets()
+            assert offsets_before and all(isinstance(v, dict) and v.get("lsn", 0) > 0 for v in offsets_before.values())
+            end_before = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-get-offsets.sh",
+                                 "--bootstrap-server", "kafka:9092", "--topic", TOPIC, "--time", "-1").stdout.strip()
+            before_id, before_volume = kafka_container()
+            compose("up", "--detach", "--force-recreate", "--no-deps", "kafka", timeout=120)
+            until("Recreated Kafka ready", lambda: compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh",
+                                                         "--bootstrap-server", "kafka:9092", "--list", timeout=15).returncode == 0,
+                  ignore_stopped=("connect",))
+            after_id, after_volume = kafka_container()
+            assert before_id != after_id and before_volume == after_volume
+            end_after = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-get-offsets.sh",
+                                "--bootstrap-server", "kafka:9092", "--topic", TOPIC, "--time", "-1").stdout.strip()
+            assert end_before and end_before == end_after
+            assert offsets_before == stored_offsets()
+            sql("INSERT INTO public.cdc_probe VALUES (4,40);")
+            compose("start", "connect")
+            until("Connector recovered from persisted config", running)
+            until("CDC resumed without new snapshot", lambda: has(events(), "c", 4, 40))
+            retained = events()
+            assert all(has(retained, *expected) for expected in [("r", 1, 10), ("c", 2, 20), ("u", 1, 11), ("d", 2, 20), ("c", 3, 30)])
+            print("PASS: new Kafka container reused its volume; messages/Connect offsets retained and CDC resumed", flush=True)
             kafka_metrics = metrics("kafka")
             assert metric_values(kafka_metrics, "jmx_scrape_error") == [0]
             assert metric_values(kafka_metrics, "kafka_controller_active_controller_count") == [1]
