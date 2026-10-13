@@ -24,6 +24,8 @@ Terraform이 PATH에 없으면 `--terraform`으로 실행 파일을 지정한다
 
 Linux에서는 가상환경 Python 경로를 `.cache/infra-checks-venv/bin/python`으로 바꾸거나 CI처럼 준비된 Python/Terraform을 사용한다.
 
+provider 버전을 변경하면 backend 없는 별도 작업 폴더에서 `terraform providers lock -platform=windows_amd64 -platform=linux_amd64`로 두 플랫폼의 공식 체크섬을 준비하고 해당 root의 lockfile을 커밋한다. 특히 `-lockfile=readonly` 검증에는 Linux package의 `h1`도 필요하다. 체크섬 검증을 끄거나 CI에서 lockfile을 자동 갱신하지 않는다. [공식 providers lock 안내](https://developer.hashicorp.com/terraform/cli/commands/providers/lock)
+
 ## 검사 방식
 
 1. 기본 실행은 Git 추적 파일의 **현재 작업 내용**을 임시 폴더에 복사한다. 신규 파일은 먼저 `git add`해야 검사 대상이 된다. `--ref`는 그 Git ref의 커밋 내용을 읽으며 미커밋 변경은 포함하지 않는다.

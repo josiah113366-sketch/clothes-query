@@ -33,3 +33,9 @@
 - 통합 변경의 로컬 Markdown 링크 오류 0건, 예상 밖 영역 변경 0건, 민감 확장자 파일 0건, Git 공백 오류 0건. 새로 들어오는 16개 커밋의 infra/docs/workflow에서 AWS key·private key·계정 ID 포함 ARN 패턴 발견 0건. 패턴 검사는 완전한 비밀 탐지 보증이 아니다.
 
 원격 업로드 후 아래에 실제 결과를 기록한다. AWS 배포·ECR 업로드·`main` 병합은 수행하지 않는다.
+
+## 원격 확인과 CI 보완
+
+`8a0647d`를 `origin/infra/local-ready`에 push하고 원격 tip 일치를 확인했다. [최초 GitHub 실행](https://github.com/josiah113366-sketch/clothes-query/actions/runs/38454389883)에서 Helm·Kafka 로컬 연결·이미지 scan job은 성공했다. Terraform은 Kubernetes 2.38.0의 Linux `h1` 체크섬이 lockfile에 없어 readonly init 이후 validate에서 실패했다.
+
+공식 registry에서 Windows/Linux 서명된 package를 확인해 apps/compute/tests lockfile에 Linux checksum을 추가했다. 기존 provider 버전·제약은 유지했다. 이 보완은 임시 소스 복사본에서 backend 없는 init과 `providers lock`으로 수행하고 lockfile만 되가져왔다. AWS/state를 읽거나 변경하지 않았다. 보완 후 검증과 원격 결과를 이어 기록한다.

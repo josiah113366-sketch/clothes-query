@@ -4,7 +4,7 @@
 
 로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 18개 거부, Connect Linux/amd64 이미지 빌드 및 플러그인 발견 검사 통과. 임시 PostgreSQL→Kafka snapshot/insert/update/delete, Connect 중단 후 재전달, JMX/consumer lag 지표 노출도 확인했다. Terraform 10개 root/38 mock 통과. 실제 RDS/EKS 전달·AZ/디스크 장애 복구는 아직 확인하지 않았다.
 
-후속으로 로컬 mTLS/hostname·ACL 허용/거부와 Kafka 컨테이너 재생성 후 메시지/Connect offset 보존·CDC 이어받기를 확인했다. [통합 검사](local-smoke/README.md), [자동 검사 코드](../../../.github/workflows/infra-checks.yml)를 준비했다. GitHub 원격 실행은 미확인이다. Connect 이미지 조치 후 [재검사](../../../docs/design/infra/connect-image-remediation-2026-10-14.md)는 Critical 0/High 35이며 잔여 취약점과 별도 broker/exporter 이미지 검토가 필요하다.
+후속으로 로컬 mTLS/hostname·ACL 허용/거부와 Kafka 컨테이너 재생성 후 메시지/Connect offset 보존·CDC 이어받기를 확인했다. [통합 검사](local-smoke/README.md), [자동 검사 코드](../../../.github/workflows/infra-checks.yml)를 준비했다. 원격 CI 실행 결과는 [통합 작업 기록](../../../docs/tasks/infra-local-ready.md)에서 확인한다. Connect 이미지 조치 후 [재검사](../../../docs/design/infra/connect-image-remediation-2026-10-14.md)는 Critical 0/High 35이며 잔여 취약점과 별도 broker/exporter 이미지 검토가 필요하다.
 
 사용자 결정은 **EKS 자체 운영**이다. 공식 Strimzi 1.3.0 Helm chart, Kafka 4.3.1, PostgreSQL CDC용 Debezium 3.7.0.Final을 고정했다. Strimzi의 시험 범위 Kubernetes 1.32~1.37에 현재 EKS 코드의 1.36이 포함된다. Debezium 호환 표는 Kafka Connect 3.1 이상, PostgreSQL 14~18을 명시한다. 실제 조합의 실행 검증은 남아 있다. [Strimzi 버전 표](https://strimzi.io/downloads/), [Debezium 호환 표](https://debezium.io/releases/)
 
