@@ -32,18 +32,35 @@ def main():
         return value.replace(admin_password, "[redacted]").replace(cdc_password, "[redacted]")
 
     def docker(*args, stdin=None, timeout=90, check=True):
-        result = subprocess.run(["docker", *map(str, args)], input=stdin, capture_output=True,
-                                text=True, encoding="utf-8", env=clean_env, timeout=timeout)
+        # Bytes preserve LF when a Linux shell reads stdin from a Windows Python process.
+        result = subprocess.run(["docker", *map(str, args)], input=None if stdin is None else stdin.encode("utf-8"),
+                                capture_output=True, env=clean_env, timeout=timeout)
+        result.stdout = result.stdout.decode("utf-8", errors="replace")
+        result.stderr = result.stderr.decode("utf-8", errors="replace")
         if check and result.returncode:
             raise RuntimeError(redact(result.stderr[-2500:] or result.stdout[-2500:]))
         return result
 
     with tempfile.TemporaryDirectory(prefix=project + "-") as temp:
         directory = Path(temp)
-        (directory / "username").write_text("cdc_user", encoding="utf-8")
-        (directory / "password").write_text(cdc_password, encoding="utf-8")
+        database_dir = directory / "database"
+        database_dir.mkdir()
+        tls_dir = directory / "tls"
+        tls_dir.mkdir()
+        (database_dir / "username").write_text("cdc_user", encoding="utf-8")
+        (database_dir / "password").write_text(cdc_password, encoding="utf-8")
+        worker = (ROOT / "worker.properties").read_text().replace("bootstrap.servers=kafka:9092", "bootstrap.servers=kafka:9093")
+        for prefix in ["", "producer.", "consumer.", "admin."]:
+            for key, value in {"security.protocol": "SSL", "ssl.truststore.type": "PEM",
+                               "ssl.truststore.location": "/mnt/tls/ca.crt", "ssl.keystore.type": "PEM",
+                               "ssl.keystore.location": "/mnt/tls/identity.pem",
+                               "ssl.endpoint.identification.algorithm": "https"}.items():
+                worker += f"\n{prefix}{key}={value}"
+        worker_path = directory / "worker.properties"
+        worker_path.write_text(worker + "\n", encoding="utf-8")
         clean_env.update(SMOKE_ADMIN_PASSWORD=admin_password, SMOKE_CONNECT_IMAGE=image,
-                         SMOKE_SECRET_DIR=str(directory))
+                         SMOKE_SECRET_DIR=str(database_dir), SMOKE_TLS_DIR=str(tls_dir),
+                         SMOKE_WORKER_CONFIG=str(worker_path))
 
         def compose(*args, **kwargs):
             # Kafka CLI JVMs must not bind the broker's already active javaagent port.
@@ -64,6 +81,13 @@ def main():
                         return result
                 except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
                     pass
+                states = compose("ps", "--all", "--format", "json").stdout
+                for line in states.splitlines():
+                    if not line.startswith("{"):
+                        continue
+                    state = json.loads(line)
+                    if state.get("State") in {"exited", "dead"}:
+                        raise RuntimeError("Local service exited during " + description + ": " + state["Service"])
                 time.sleep(2)
             raise RuntimeError("Timed out: " + description)
 
@@ -79,8 +103,9 @@ def main():
             return status["connector"]["state"] == "RUNNING" and bool(status["tasks"]) and all(t["state"] == "RUNNING" for t in status["tasks"])
 
         def events():
-            result = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-console-consumer.sh",
-                             "--bootstrap-server", "kafka:9092", "--topic", TOPIC, "--from-beginning",
+            result = compose("exec", "-T", "client", "/opt/kafka/bin/kafka-console-consumer.sh",
+                             "--bootstrap-server", "kafka:9093", "--consumer.config", "/mnt/tls/reader.properties",
+                             "--topic", TOPIC, "--from-beginning",
                              "--partition", "0", "--timeout-ms", "3000", timeout=20, check=False)
             parsed = []
             for line in result.stdout.splitlines():
@@ -113,6 +138,8 @@ def main():
             print("Building pinned Connect image for isolated local test...", flush=True)
             docker("build", "--platform", "linux/amd64", "--tag", image,
                    ROOT.parent / "connect-image", timeout=300)
+            docker("run", "--interactive", "--rm", "--network", "none", "--mount", f"type=bind,source={tls_dir},target=/work",
+                   "--entrypoint", "/bin/bash", image, "-s", stdin=(ROOT / "make-tls.sh").read_text(), timeout=60)
             compose("config", "--quiet")
             compose("up", "--detach", "postgres", "kafka", timeout=300)
             until("PostgreSQL ready", lambda: compose("exec", "-T", "postgres", "pg_isready", "-U", "postgres").returncode == 0)
@@ -137,7 +164,22 @@ def main():
                 if topic != TOPIC:
                     args += ["--config", "cleanup.policy=compact"]
                 compose(*args)
-            compose("up", "--detach", "connect", timeout=120)
+            def acl(principal, resource_flag, resource_name, operations):
+                args = ["exec", "-T", "kafka", "/opt/kafka/bin/kafka-acls.sh", "--bootstrap-server", "kafka:9092",
+                        "--add", "--allow-principal", "User:CN=" + principal, resource_flag, resource_name,
+                        "--resource-pattern-type", "literal"]
+                for operation in operations:
+                    args += ["--operation", operation]
+                compose(*args)
+            for topic in ["smoke-connect-configs", "smoke-connect-offsets", "smoke-connect-status"]:
+                acl("smoke-connect", "--topic", topic, ["Read", "Write", "Describe", "DescribeConfigs"])
+            acl("smoke-connect", "--topic", TOPIC, ["Write", "Describe"])
+            acl("smoke-connect", "--group", "smoke-connect", ["Read"])
+            compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-acls.sh", "--bootstrap-server", "kafka:9092",
+                    "--add", "--allow-principal", "User:CN=smoke-connect", "--cluster", "--operation", "IdempotentWrite")
+            acl("smoke-reader", "--topic", TOPIC, ["Read", "Describe"])
+            acl("smoke-reader", "--group", "smoke-reader", ["Read"])
+            compose("up", "--detach", "connect", "client", timeout=120)
             until("Connect REST ready", lambda: rest("/"))
             plugins = rest("/connector-plugins")
             assert any(p["class"] == "io.debezium.connector.postgresql.PostgresConnector" and p["version"] == "3.7.0.Final" for p in plugins)
@@ -153,6 +195,27 @@ def main():
             }})
             until("Connector RUNNING", running)
             until("Initial snapshot", lambda: has(events(), "r", 1, 10))
+            for identity in ["no-cert", "wrong"]:
+                rejected = compose("exec", "-T", "client", "/opt/kafka/bin/kafka-console-consumer.sh",
+                                   "--bootstrap-server", "kafka:9093", "--consumer.config", f"/mnt/tls/{identity}.properties",
+                                   "--topic", TOPIC, "--partition", "0", "--from-beginning", "--timeout-ms", "5000",
+                                   timeout=20, check=False)
+                assert "SSLHandshakeException" in rejected.stdout + rejected.stderr or "SslAuthenticationException" in rejected.stdout + rejected.stderr, identity
+            forbidden = "smoke-denied"
+            compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092",
+                    "--create", "--topic", forbidden, "--partitions", "1", "--replication-factor", "1")
+            for denied_topic, group, error in [(forbidden, None, "TopicAuthorizationException"),
+                                                (TOPIC, "denied-group", "GroupAuthorizationException")]:
+                args = ["exec", "-T", "client", "/opt/kafka/bin/kafka-console-consumer.sh", "--bootstrap-server", "kafka:9093",
+                        "--consumer.config", "/mnt/tls/reader.properties", "--topic", denied_topic, "--from-beginning", "--timeout-ms", "5000"]
+                args += ["--group", group] if group else ["--partition", "0"]
+                rejected = compose(*args, timeout=20, check=False)
+                assert error in rejected.stdout + rejected.stderr, error
+            allowed = compose("exec", "-T", "client", "/opt/kafka/bin/kafka-console-consumer.sh", "--bootstrap-server", "kafka:9093",
+                              "--consumer.config", "/mnt/tls/reader.properties", "--topic", TOPIC, "--from-beginning",
+                              "--group", "smoke-reader", "--max-messages", "1", "--timeout-ms", "10000", timeout=25)
+            assert '"op":"r"' in allowed.stdout
+            print("PASS: mTLS/hostname and allowed topic/group; missing/rogue certificates and forbidden topic/group rejected", flush=True)
             sql("INSERT INTO public.cdc_probe VALUES (2,20); UPDATE public.cdc_probe SET value=11 WHERE id=1; DELETE FROM public.cdc_probe WHERE id=2; INSERT INTO public.cdc_excluded VALUES (99);")
             def changes_received():
                 data = events()

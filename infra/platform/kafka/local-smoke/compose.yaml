@@ -32,6 +32,10 @@ services:
         source: ../chart/files/kafka-metrics.yml
         target: /mnt/metrics.yml
         read_only: true
+      - type: bind
+        source: ${SMOKE_TLS_DIR:?run check.py}/server
+        target: /mnt/tls
+        read_only: true
     mem_limit: 1536m
     networks: [smoke]
   connect:
@@ -44,7 +48,7 @@ services:
     entrypoint: [/opt/kafka/bin/connect-distributed.sh, /mnt/worker.properties]
     volumes:
       - type: bind
-        source: ./worker.properties
+        source: ${SMOKE_WORKER_CONFIG:?run check.py}
         target: /mnt/worker.properties
         read_only: true
       - type: bind
@@ -55,7 +59,25 @@ services:
         source: ../chart/files/connect-metrics.yml
         target: /mnt/metrics.yml
         read_only: true
+      - type: bind
+        source: ${SMOKE_TLS_DIR:?run check.py}/connect
+        target: /mnt/tls
+        read_only: true
     mem_limit: 1536m
+    networks: [smoke]
+  client:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    entrypoint: [/bin/bash, -c, 'exec sleep infinity']
+    environment:
+      KAFKA_HEAP_OPTS: -Xms128m -Xmx256m
+      LOG_DIR: /tmp/client-logs
+    volumes:
+      - type: bind
+        source: ${SMOKE_TLS_DIR:?run check.py}/clients
+        target: /mnt/tls
+        read_only: true
+    mem_limit: 512m
     networks: [smoke]
   lag-exporter:
     image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
