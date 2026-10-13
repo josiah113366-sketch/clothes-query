@@ -1,8 +1,10 @@
 import typer
 
 from sim import __version__
+from sim.member.cli import app as member_app
 
 app = typer.Typer(help="clothes-query 시뮬레이터")
+app.add_typer(member_app, name="member")
 
 
 @app.callback()
