@@ -1,12 +1,13 @@
 # ecr module
 
-WEB/WAS용 ECR 두 개, immutable tag·scan on push를 관리한다.
+WEB/WAS용 ECR 두 개와 선택적 Connect 저장소, immutable tag·scan on push를 관리한다.
 
 ## 입력과 출력
 
 - 배포 사양: 추가 앱별 필수 입력 없음. 이름은 clothes-query-dev/web 및 clothes-query-dev/was다.
 - 연결 입력: `name`. [호출 스택](../../stacks/ecr/main.tf)에서 연결한다.
-- 출력: `repository_urls`.
+- `enable_connect_repository=false`가 기본이다. true이면 기존 WEB/WAS 주소를 유지하고 `<name>/connect`만 추가한다.
+- 출력: 민감한 `repository_urls`, `repository_arns`, 선택적 `connect_publisher_policy` JSON. 정책 출력은 IAM 역할/정책을 생성하거나 연결하지 않는다.
 - 전체 타입/기본값: [variables.tf](variables.tf), [outputs.tf](outputs.tf).
 
 ## 실행과 주의점

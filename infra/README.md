@@ -17,7 +17,7 @@ bootstrap → network → eks → compute → apps
 | `compute` | `stacks/compute/` | custom NodeClass/NodePool, 타입·증설 한도·자동 축소 | network, eks | 코드 작성·정적 검증 |
 | `rds` | `stacks/rds/` | private Multi-AZ PostgreSQL | network, eks | 코드 작성·정적 검증 |
 | `storage` | `stacks/storage/` | 데이터 S3, 버저닝·암호화·보호 | bootstrap | 코드 작성·정적 검증 |
-| `ecr` | `stacks/ecr/` | WEB/WAS 이미지 저장소 | bootstrap | 실배포·S3 state 저장 검증 완료 |
+| `ecr` | `stacks/ecr/` | WEB/WAS 및 선택적 Connect 이미지 저장소 | bootstrap | WEB/WAS 기존 배포 기록, Connect 코드·mock 준비 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |

@@ -1,5 +1,5 @@
 resource "aws_ecr_repository" "this" {
-  for_each             = toset(["web", "was"])
+  for_each             = toset(concat(["web", "was"], var.enable_connect_repository ? ["connect"] : []))
   name                 = "${var.name}/${each.key}"
   image_tag_mutability = "IMMUTABLE"
   force_delete         = false
