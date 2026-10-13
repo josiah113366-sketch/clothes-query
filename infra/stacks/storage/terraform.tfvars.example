@@ -1,0 +1,3 @@
+# Copy to deployment.local.tfvars (ignored by Git).
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+bucket_name = "REPLACE_WITH_APPROVED_GLOBALLY_UNIQUE_NAME"

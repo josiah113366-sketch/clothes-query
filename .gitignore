@@ -229,3 +229,9 @@ crash.*.log
 
 # Simulator
 simulator/.local/
+
+# Private Terraform deployment inputs (shared terraform.tfvars stays tracked)
+infra/**/*.local.tfvars
+infra/**/*.local.tfvars.json
+infra/**/*.backend.hcl
+infra/**/terraform.tfstate.d/

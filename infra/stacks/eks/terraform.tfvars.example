@@ -1,0 +1,6 @@
+# Copy to deployment.local.tfvars (ignored by Git).
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+# Set TF_VAR_state_bucket privately to the existing bootstrap bucket.
+kubernetes_version = "1.36"
+admin_role_arns = ["REPLACE_WITH_APPROVED_ROLE_ARN"]
+public_access_cidrs = ["REPLACE_WITH_ADMIN_IPV4_CIDR"]
