@@ -1,6 +1,6 @@
 # 로컬 인프라 통합 및 Connect 이미지 조치
 
-상태: 진행 중
+상태: 완료 (요청한 로컬 이미지 조치·재검증·브랜치 통합·업로드·원격 CI 확인 범위 / 잔여 취약점·실제 배포는 별도)
 
 사용자가 Connect 이미지 취약점 조치·재검증과 로컬 브랜치 통합 후 업로드를 요청했다. 최신 `origin/main`에서 `infra/local-ready`를 만들고 기존 인프라 브랜치를 병합한다. `main` 직접 변경·AWS 배포·ECR 이미지 업로드는 이 작업에 포함하지 않는다.
 
@@ -19,7 +19,7 @@
 - [x] 전체 스캔 전후 결과와 잔여 취약점·조치 한계 기록
 - [x] TLS/ACL·CDC·재생성/offset·지표 재검증 및 임시 자원 정리
 - [x] 통합 Terraform/Helm/CI 검사와 모든 대상 브랜치 포함 확인
-- [ ] 민감 파일·최신 main 확인 후 통합 브랜치 push 및 원격 상태 확인
+- [x] 민감 파일·최신 main 확인 후 통합 브랜치 push 및 원격 상태 확인
 
 기존 검사 스냅샷은 [최초 결과](../design/infra/connect-image-security-2026-10-14.md)로 보존한다. 실제 AWS/EKS/RDS 및 GitHub Actions 실행 결과는 로컬 검사와 구분한다.
 
@@ -32,10 +32,14 @@
 - Terraform fmt·backend 없는 init/validate 10 roots, mock 8 suites/38 plans, 검사기 unit 9개, Helm lint/고정 CRD/입력 거부 18개/metrics selector, actionlint 통과.
 - 통합 변경의 로컬 Markdown 링크 오류 0건, 예상 밖 영역 변경 0건, 민감 확장자 파일 0건, Git 공백 오류 0건. 새로 들어오는 16개 커밋의 infra/docs/workflow에서 AWS key·private key·계정 ID 포함 ARN 패턴 발견 0건. 패턴 검사는 완전한 비밀 탐지 보증이 아니다.
 
-원격 업로드 후 아래에 실제 결과를 기록한다. AWS 배포·ECR 업로드·`main` 병합은 수행하지 않는다.
+원격 업로드와 CI 결과는 아래에 기록한다. AWS 배포·ECR 업로드·`main` 병합은 수행하지 않았다.
 
 ## 원격 확인과 CI 보완
 
 `8a0647d`를 `origin/infra/local-ready`에 push하고 원격 tip 일치를 확인했다. [최초 GitHub 실행](https://github.com/josiah113366-sketch/clothes-query/actions/runs/38454389883)에서 Helm·Kafka 로컬 연결·이미지 scan job은 성공했다. Terraform은 Kubernetes 2.38.0의 Linux `h1` 체크섬이 lockfile에 없어 readonly init 이후 validate에서 실패했다.
 
 공식 registry에서 Windows/Linux 서명된 package를 확인해 apps/compute/tests lockfile에 Linux checksum을 추가했다. 기존 provider 버전·제약은 유지했다. 이 보완은 임시 소스 복사본에서 backend 없는 init과 `providers lock`으로 수행하고 lockfile만 되가져왔다. AWS/state를 읽거나 변경하지 않았다. 보완 후 검증과 원격 결과를 이어 기록한다.
+
+보완 후 Windows 로컬 10 roots/38 mock plan을 재검증했다. `8bbd72c`를 같은 통합 브랜치에 push한 뒤 [최종 GitHub 실행](https://github.com/josiah113366-sketch/clothes-query/actions/runs/38455289322)에서 Terraform·Helm·Kafka TLS/ACL/CDC/재생성/지표·Connect image scan **4개 job 모두 success**를 확인했다. Ubuntu 24.04의 실제 실행 결과이며 AWS/EKS 배포 검증은 아니다. 원격 scanner 집계도 Critical 0/High 35/Medium 241/Low 127이다. scan은 report-only이며 잔여 취약점이 배포 승인된 것은 아니다.
+
+검증된 구현·lockfile 기준은 `8bbd72c`다. 이후 마무리 커밋은 이 작업 기록만 변경하며 CI 검사 대상 소스와 설정을 바꾸지 않는다. 원격 업로드 대상은 [infra/local-ready](https://github.com/josiah113366-sketch/clothes-query/tree/infra/local-ready) 하나다. 기존 8개 local branch/worktree를 보존했고 `main`은 `f0a6059`로 유지했다. PR 생성과 `main` 병합은 수행하지 않았다.
