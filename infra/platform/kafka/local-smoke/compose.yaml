@@ -17,6 +17,7 @@ services:
     environment:
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
       LOG_DIR: /tmp/kafka-app-logs
+      KAFKA_OPTS: -javaagent:/opt/prometheus-jmx-exporter/jmx_prometheus_javaagent-1.6.0.jar=9404:/mnt/metrics.yml
     entrypoint: [/bin/bash, -ec]
     command:
       - |
@@ -27,6 +28,10 @@ services:
         source: ./server.properties
         target: /mnt/server.properties
         read_only: true
+      - type: bind
+        source: ../chart/files/kafka-metrics.yml
+        target: /mnt/metrics.yml
+        read_only: true
     mem_limit: 1536m
     networks: [smoke]
   connect:
@@ -35,6 +40,7 @@ services:
     environment:
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
       LOG_DIR: /tmp/connect-app-logs
+      KAFKA_OPTS: -javaagent:/opt/prometheus-jmx-exporter/jmx_prometheus_javaagent-1.6.0.jar=9404:/mnt/metrics.yml
     entrypoint: [/opt/kafka/bin/connect-distributed.sh, /mnt/worker.properties]
     volumes:
       - type: bind
@@ -45,7 +51,24 @@ services:
         source: ${SMOKE_SECRET_DIR:?run check.py}
         target: /mnt/cdc-database
         read_only: true
+      - type: bind
+        source: ../chart/files/connect-metrics.yml
+        target: /mnt/metrics.yml
+        read_only: true
     mem_limit: 1536m
+    networks: [smoke]
+  lag-exporter:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    entrypoint: [/opt/kafka-exporter/kafka_exporter]
+    command:
+      - --kafka.server=kafka:9092
+      - --kafka.version=4.3.1
+      - --web.listen-address=:9404
+      - '--topic.filter=^smoke\.public\.cdc_probe$$'
+      - '--group.filter=^smoke-lag$$'
+      - --offset.show-all
+    mem_limit: 256m
     networks: [smoke]
 volumes:
   postgres-data: {}

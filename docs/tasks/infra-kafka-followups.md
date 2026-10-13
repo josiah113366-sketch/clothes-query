@@ -1,6 +1,6 @@
 # Kafka 후속 인프라 준비
 
-상태: 진행 중
+상태: 완료 (로컬 준비·검증 범위, AWS/EKS 미배포)
 
 사용자가 승인한 순서: Connect ECR → 로컬 CDC 전달 검증 → Kafka·Connect 지표 노출.
 
@@ -14,8 +14,8 @@
 
 - [x] ECR 기본 주소 유지, 선택 활성 및 push 정책 범위 mock 검증
 - [x] 로컬 CDC insert/update/delete 전달 및 재시작 후 전달 확인
-- [ ] Kafka·Connect 지표 설정의 기본 비활성·활성 렌더 및 공식 CRD 검증
-- [ ] 문서·실행 결과·남은 범위 기록, 단계별 로컬 커밋
+- [x] Kafka·Connect 지표 설정의 기본 비활성·활성 렌더 및 공식 CRD 검증
+- [x] 문서·실행 결과·남은 범위 기록, 단계별 로컬 커밋
 
 ## 1단계 결과
 
@@ -30,3 +30,17 @@ Terraform fmt·backend 없는 init/validate 10 root·mock 8 suite/38 plan run �
 검사 과정에서 로컬 로그 디렉터리 권한과 consumer 초기 group 할당 대기를 수정했다. Debezium 실제 토픽 이름의 점/밑줄을 지원하도록 KafkaTopic `resourceName` 선택 입력을 추가했다. 기존 이름은 유지하며 ACL은 실제 Kafka 토픽 이름을 참조한다. Helm/공식 CRD 검사와 잘못된 입력 14개 거부가 통과했다.
 
 로컬 1 broker·평문·DB SSL 비활성 격리 환경의 연결 검사이며 RDS/EKS/TLS/ACL/HA/성능/S3 전달 검증은 아니다. exactly-once를 보장하지 않는다.
+
+## 3단계 결과
+
+선택적 JMX ConfigMap/CR 참조와 consumer lag exporter를 추가했다. 기본값은 비활성이고 exporter 활성 시 실제 topic/group regex가 필요하다. 수집 서버/Prometheus Operator/알림 자원은 생성하지 않는다. 클러스터 내부 Pod 발견을 위한 scrape 예시와 권한·포트·자원·보안 계약을 문서화했다.
+
+- Helm lint/template·Strimzi 1.3.0 공식 스키마·지표 참조·기본 비활성·Kafka만/Connect 포함·잘못된 입력 18개 거부 통과.
+- scrape 예시 YAML/namespace/port/대상 선택 검사 통과. 실제 Prometheus discovery는 미실행.
+- 같은 지표 파일로 로컬 CDC 검사를 재실행: snapshot/insert/update/delete/Connect 중단 후 전달/대상 제외 모두 통과.
+- JMX scrape error 0, Kafka active controller 1/under-replicated partition 0, Connect task running/CDC streaming connected 1, 의도적 backlog의 positive consumer lag를 실제 HTTP endpoint에서 확인했다.
+- 마지막 실행 project `cq-cdc-0b0a0638a5`의 container/network/volume/image tag를 정리했다. 이미지 레이어 캐시는 남을 수 있다.
+
+## 남은 실제 배포 항목
+
+승인된 업무 토픽/키/용량/보존/SLO, RDS 버전·복제 계정·publication/slot·CA/Secret 공급, ECR 생성·스캔·push와 digest, EKS scheduling/TLS/ACL/스토리지/장애 검증, Consumer/Bronze 연결, 수집 서버·RBAC·경보 임계값/알림 채널은 남아 있다. 기존 2 AZ의 quorum 한계와 공유 노드 상한은 변경하지 않았다. 원격 push/PR/AWS 변경은 수행하지 않았다.

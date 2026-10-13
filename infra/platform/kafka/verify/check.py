@@ -3,6 +3,7 @@ import argparse
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -79,6 +80,11 @@ def main():
             assert result.returncode == 0, result.stderr
             docs = [d for d in yaml.safe_load_all(result.stdout) if d]
             for doc in docs:
+                if doc["kind"] == "ConfigMap":
+                    assert doc["apiVersion"] == "v1" and set(doc["data"]) == {"kafka.yml", "connect.yml"}
+                    for config in doc["data"].values():
+                        assert yaml.safe_load(config)["rules"]
+                    continue
                 assert doc["apiVersion"] == "kafka.strimzi.io/v1"
                 jsonschema.Draft7Validator(schemas[doc["kind"]]).validate(doc)
             return docs
@@ -96,6 +102,25 @@ def main():
         full["connect"] = {"enabled": True, "image": "example.invalid/connect@sha256:" + "a" * 64,
                            "produceTopics": ["example-orders"]}
         docs = render(full)
+        assert not any(d["kind"] == "ConfigMap" for d in docs)
+        assert all("metricsConfig" not in d["spec"] for d in docs if d["kind"] == "KafkaConnect")
+        monitored = copy.deepcopy(full)
+        monitored["metrics"] = {"enabled": True, "lagExporter": {
+            "enabled": True, "topicRegex": "^example-orders$", "groupRegex": "^example-reader$"}}
+        monitored_docs = render(monitored)
+        configmap = next(d for d in monitored_docs if d["kind"] == "ConfigMap")
+        monitored_kafka = next(d["spec"] for d in monitored_docs if d["kind"] == "Kafka")
+        monitored_connect = next(d["spec"] for d in monitored_docs if d["kind"] == "KafkaConnect")
+        for spec, key in [(monitored_kafka["kafka"], "kafka.yml"), (monitored_connect, "connect.yml")]:
+            ref = spec["metricsConfig"]["valueFrom"]["configMapKeyRef"]
+            assert ref == {"name": configmap["metadata"]["name"], "key": key}
+            assert spec["metricsConfig"]["type"] == "jmxPrometheusExporter"
+        assert monitored_kafka["kafkaExporter"]["topicRegex"] == "^example-orders$"
+        assert monitored_kafka["kafkaExporter"]["groupRegex"] == "^example-reader$"
+        metrics_only = copy.deepcopy(base); metrics_only["metrics"] = {"enabled": True}
+        metrics_only_docs = render(metrics_only)
+        assert not any(d["kind"] == "KafkaConnect" for d in metrics_only_docs)
+        assert "kafkaExporter" not in next(d["spec"] for d in metrics_only_docs if d["kind"] == "Kafka")
         cdc = copy.deepcopy(full)
         cdc["topics"][0].update(name="smoke.public.cdc_probe", resourceName="smoke-public-cdc-probe")
         cdc["clients"][0]["consumeTopics"] = ["smoke.public.cdc_probe"]
@@ -154,6 +179,12 @@ def main():
         render(bad, error="DNS-compatible resourceName")
         bad = copy.deepcopy(cdc); bad["topics"].append({"name": "other", "resourceName": "smoke-public-cdc-probe", "partitions": 1, "retentionMs": 1000})
         render(bad, error="Duplicate KafkaTopic resourceName")
+        render({"metrics": {"enabled": True}}, error="metrics requires kafka.enabled")
+        render({"metrics": {"lagExporter": {"enabled": True}}}, error="lagExporter requires metrics.enabled")
+        bad = copy.deepcopy(full); bad["metrics"] = {"enabled": True, "lagExporter": {"enabled": True}}
+        render(bad, error="explicit topicRegex and groupRegex")
+        bad = copy.deepcopy(monitored); bad["metrics"]["lagExporter"]["topicRegex"] = "["
+        render(bad, error="mustRegexMatch")
 
         op = run("template", "strimzi", operator_chart, "--namespace", "kafka",
                  "--values", ROOT / "operator-values.yaml", "--include-crds", "--kube-version", "1.36.0")
@@ -170,7 +201,26 @@ def main():
         assert storage["provisioner"] == "ebs.csi.eks.amazonaws.com"
         assert storage["reclaimPolicy"] == "Retain" and storage["parameters"]["encrypted"] == "true"
         assert storage["volumeBindingMode"] == "WaitForFirstConsumer"
-    print(f"PASS: lint, disabled/Kafka/Connect/CDC topic rendering, {len(docs)} CRs against Strimzi 1.3.0 schemas, 14 rejected inputs, operator/storage checks")
+        jobs = yaml.safe_load((ROOT / "metrics" / "scrape-jobs.yaml").read_text())
+        fixtures = [
+            {"__meta_kubernetes_pod_label_strimzi_io_cluster": "clothes-query-dev-kafka",
+             "__meta_kubernetes_pod_label_strimzi_io_pool_name": "combined"},
+            {"__meta_kubernetes_pod_label_strimzi_io_name": "clothes-query-dev-connect-connect"},
+            {"__meta_kubernetes_pod_label_strimzi_io_name": "clothes-query-dev-kafka-kafka-exporter"},
+        ]
+        assert len(jobs) == 3 and len({j["job_name"] for j in jobs}) == 3
+        for index, job in enumerate(jobs):
+            assert job["kubernetes_sd_configs"] == [{"role": "pod", "namespaces": {"names": ["kafka"]}}]
+            def selected(labels):
+                return all(re.fullmatch(rule["regex"], ";".join(labels.get(k, "") for k in rule["source_labels"]))
+                           for rule in job["relabel_configs"] if rule.get("action") == "keep")
+            for other, fixture in enumerate(fixtures):
+                labels = {**fixture, "__meta_kubernetes_pod_phase": "Running",
+                          "__meta_kubernetes_pod_container_port_name": "tcp-prometheus"}
+                assert bool(selected(labels)) == (index == other)
+                assert not selected({**labels, "__meta_kubernetes_pod_container_port_name": "rest-api"})
+                assert not selected({**labels, "__meta_kubernetes_pod_phase": "Pending"})
+    print(f"PASS: lint, Kafka/Connect/CDC/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 18 rejected inputs, operator/storage checks")
     print("No Kubernetes/AWS connection, apply, push or runtime claim.")
 
 

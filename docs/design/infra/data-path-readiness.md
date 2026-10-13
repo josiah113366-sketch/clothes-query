@@ -11,13 +11,16 @@
 | RDS → CDC | 선택적 parameter group·engine-major family 연결·slot/sender/WAL 입력 검증 | DB 사양·예산, 전용 계정, publication/slot·캡처 allowlist, 재시작·failover 검증 |
 | 데이터 서비스 → S3 | namespace/ServiceAccount별 Pod Identity·prefix/action 분리 모듈과 별도 stack | 서비스별 실제 namespace/SA·경로·작업 목록, SDK 호환성·권한 검증 |
 | S3 통신 경로 | 기본 endpoint 권한 유지, 명시적 optional action과 workload 요청의 일치 검증 | 필요한 optional action 결정 후 network state output 반영 |
-| Kafka/Connect | EKS 자체 운영 결정, Strimzi Helm·KRaft 영구 저장소·TLS/ACL·Connect Secret 참조·이미지 빌드 파일 | 실제 토픽/용량/보존·이미지 빌드 및 레지스트리 digest·Secret 공급·실행 검증 |
+| Kafka/Connect | EKS 자체 운영 결정, Strimzi Helm·영구 저장소·TLS/ACL·Secret 참조, Connect 이미지 빌드와 로컬 CDC/재시작 전달 검증, 선택적 ECR | 실제 업무 토픽/용량/보존·레지스트리 push/digest·Secret 공급·RDS/EKS 실행 검증 |
+| Kafka/Connect 관측 | 선택적 JMX/consumer lag 노출·scrape 예시, 로컬 HTTP 지표 확인 | 실제 수집 서버·RBAC·EKS discovery·RDS/노드/PVC 지표·경보/알림 |
 | Consumer | 입력/출력·관리 경계·S3 권한 입력 준비 | 서비스 실행 코드·이미지·배포 설정 |
 | 정제·조회·관제 | 서비스별 데이터 접근 계약을 수용할 권한 입력 구조 | 실행 방식·입출력/checkpoint·조회 API/SQL 경로·이미지·자원 요구 |
 
 기본 설정은 RDS `logical_replication = null`, 데이터 역할 `bindings = {}`다. CDC와 새 서비스 접근 권한은 자동 활성화되지 않는다. mock 검증을 데이터 경로 실행 성공으로 표시하지 않는다.
 
 Kafka/Connect도 기본 비활성이며 [Kafka runtime 안내](../../../infra/platform/kafka/README.md)에 설치 순서·2 AZ quorum 한계·자원 예산·팀원 경계를 정리했다. 플러그인의 PostgreSQL 호환 범위는 실제 RDS 버전과 별도 확인한다. 이 결정은 MSK 도입이나 기존 2 AZ 네트워크/노드 상한 변경을 포함하지 않는다.
+
+[후속 결과](../../tasks/infra-kafka-followups.md)는 선택적 Connect 저장소, 일회성 로컬 DB→Kafka 전달/재시작, 선택적 지표 노출을 포함한다. 로컬 연결 검증 결과와 AWS/EKS 완료 기준을 구분한다.
 
 ## RDS CDC 활성화 조건
 

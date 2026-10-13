@@ -59,6 +59,14 @@ spec:
   kafka:
     version: {{ .Values.kafka.version | quote }}
     image: {{ .Values.kafka.image | quote }}
+    {{- if .Values.metrics.enabled }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: {{ .Values.kafka.name }}-metrics
+          key: kafka.yml
+    {{- end }}
     brokerRackInitImage: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
     rack:
       type: topology-label
@@ -99,4 +107,23 @@ spec:
       image: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
     userOperator:
       image: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+  {{- if .Values.metrics.lagExporter.enabled }}
+  kafkaExporter:
+    image: {{ .Values.kafka.image | quote }}
+    topicRegex: {{ .Values.metrics.lagExporter.topicRegex | quote }}
+    groupRegex: {{ .Values.metrics.lagExporter.groupRegex | quote }}
+    showAllOffsets: true
+    resources:
+      {{- toYaml .Values.metrics.lagExporter.resources | nindent 6 }}
+    template:
+      pod:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: karpenter.sh/nodepool
+                      operator: In
+                      values: [{{ .Values.kafka.nodePool | quote }}]
+  {{- end }}
 {{- end }}

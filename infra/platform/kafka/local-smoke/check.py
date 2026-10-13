@@ -1,6 +1,7 @@
 """Run a disposable local-only CDC smoke test; never uses AWS, host ports or business data."""
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import subprocess
@@ -45,6 +46,9 @@ def main():
                          SMOKE_SECRET_DIR=str(directory))
 
         def compose(*args, **kwargs):
+            # Kafka CLI JVMs must not bind the broker's already active javaagent port.
+            if args[:3] == ("exec", "-T", "kafka") and str(args[3]).startswith("/opt/kafka/bin/"):
+                args = args[:3] + ("env", "KAFKA_OPTS=",) + args[3:]
             return docker("compose", "--project-name", project, "--file", ROOT / "compose.yaml", *args, **kwargs)
 
         def sql(statement):
@@ -91,6 +95,18 @@ def main():
         def has(records, op, row_id, value):
             field = "before" if op == "d" else "after"
             return any(e.get("op") == op and e.get(field) == {"id": row_id, "value": value} for e in records)
+
+        def metrics(service):
+            return compose("exec", "-T", service, "curl", "--fail", "--silent", "--show-error",
+                           "--max-time", "10", "http://localhost:9404/metrics", timeout=20).stdout
+
+        def metric_values(text, name, labels=()):
+            values = []
+            for line in text.splitlines():
+                match = re.match(r"^" + re.escape(name) + r"(?:\{([^}]*)\})?\s+(\S+)", line)
+                if match and all(label in (match[1] or "") for label in labels):
+                    values.append(float(match[2]))
+            return values
 
         cleanup_error = None
         try:
@@ -152,6 +168,26 @@ def main():
             topics = compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list").stdout.splitlines()
             assert TOPIC in topics and not any("cdc_excluded" in topic for topic in topics)
             print("PASS: change during Connect outage delivered after restart; excluded table produced no topic", flush=True)
+            kafka_metrics = metrics("kafka")
+            assert metric_values(kafka_metrics, "jmx_scrape_error") == [0]
+            assert metric_values(kafka_metrics, "kafka_controller_active_controller_count") == [1]
+            assert metric_values(kafka_metrics, "kafka_server_replicamanager_underreplicatedpartitions") == [0]
+            def connect_metrics_ready():
+                text = metrics("connect")
+                return (metric_values(text, "jmx_scrape_error") == [0]
+                        and metric_values(text, "kafka_connect_task_status", ['status="running"']) == [1]
+                        and metric_values(text, "debezium_postgres_connected", ['context="streaming"']) == [1])
+            until("Connect/CDC JMX metrics", connect_metrics_ready)
+            compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-consumer-groups.sh",
+                    "--bootstrap-server", "kafka:9092", "--group", "smoke-lag", "--topic", TOPIC,
+                    "--reset-offsets", "--to-earliest", "--execute")
+            compose("up", "--detach", "lag-exporter", timeout=60)
+            def lag_ready():
+                text = metrics("lag-exporter")
+                values = metric_values(text, "kafka_consumergroup_lag", ['consumergroup="smoke-lag"', 'topic="' + TOPIC + '"'])
+                return bool(values) and all(v > 0 for v in values)
+            until("Consumer lag metric", lag_ready)
+            print("PASS: Kafka replication/controller, Connect task/CDC connection and positive consumer lag metrics served", flush=True)
         finally:
             # Only resources in this invocation's random Compose project are removed.
             result = compose("down", "--volumes", "--remove-orphans", "--timeout", "20", timeout=120, check=False)

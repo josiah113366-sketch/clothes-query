@@ -1,6 +1,13 @@
 {{- define "cq.check" -}}
 {{- if ne .Release.Namespace "kafka" }}{{ fail "Install in namespace kafka; operator is scoped to this namespace" }}{{ end -}}
 {{- if and .Values.connect.enabled (not .Values.kafka.enabled) }}{{ fail "connect requires kafka.enabled" }}{{ end -}}
+{{- if and .Values.metrics.enabled (not .Values.kafka.enabled) }}{{ fail "metrics requires kafka.enabled" }}{{ end -}}
+{{- if .Values.metrics.lagExporter.enabled -}}
+{{- if not .Values.metrics.enabled }}{{ fail "lagExporter requires metrics.enabled" }}{{ end -}}
+{{- if or (not (trim .Values.metrics.lagExporter.topicRegex)) (not (trim .Values.metrics.lagExporter.groupRegex)) }}{{ fail "lagExporter requires explicit topicRegex and groupRegex" }}{{ end -}}
+{{- $_ := mustRegexMatch .Values.metrics.lagExporter.topicRegex "" -}}
+{{- $_ := mustRegexMatch .Values.metrics.lagExporter.groupRegex "" -}}
+{{- end -}}
 {{- if .Values.kafka.enabled -}}
 {{- if not .Values.kafka.storageGi }}{{ fail "kafka.storageGi is required when enabled" }}{{ end -}}
 {{- if not .Values.kafka.retentionHours }}{{ fail "kafka.retentionHours is required when enabled" }}{{ end -}}

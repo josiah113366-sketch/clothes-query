@@ -23,6 +23,8 @@ bootstrap → network → eks → compute → apps
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
 | Spark / Airflow | 미구현 | 정제·오케스트레이션 runtime | 실행 방식·서비스 입력 | 예정 |
 
+Kafka 후속 준비는 선택적 Connect ECR, [로컬 CDC 전달 검사](platform/kafka/local-smoke/README.md), [JMX/consumer lag 지표 노출](platform/kafka/metrics/README.md)까지 포함한다. 실제 AWS 생성·수집 서버·알림은 미배포다.
+
 ## apply / destroy 순서
 
 - apply: bootstrap 상태 확인 후 network → eks → compute 순서. rds/storage/ecr 준비 후 apps, platform은 후속이다. 생성 테스트는 사용자 요청으로 마지막 단계에 진행한다.

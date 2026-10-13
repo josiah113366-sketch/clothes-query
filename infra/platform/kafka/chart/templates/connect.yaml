@@ -34,6 +34,14 @@ spec:
   version: {{ .Values.kafka.version | quote }}
   replicas: {{ .Values.connect.replicas }}
   image: {{ .Values.connect.image | quote }}
+  {{- if .Values.metrics.enabled }}
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: {{ .Values.kafka.name }}-metrics
+        key: connect.yml
+  {{- end }}
   bootstrapServers: {{ .Values.kafka.name }}-kafka-bootstrap:9093
   groupId: {{ .Values.connect.name }}-cluster
   configStorageTopic: {{ .Values.connect.name }}-configs

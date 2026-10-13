@@ -2,7 +2,7 @@
 
 상태: 코드·로컬 검증 준비 / AWS·Kubernetes 미배포.
 
-로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 14개 거부, Connect Linux/amd64 이미지 빌드 및 플러그인 발견 검사 통과. 임시 PostgreSQL→Kafka snapshot/insert/update/delete와 Connect 중단 후 재전달도 확인했다. Terraform 10개 root/38 mock 통과. 실제 RDS/EKS 전달·AZ/디스크 장애 복구는 아직 확인하지 않았다.
+로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 18개 거부, Connect Linux/amd64 이미지 빌드 및 플러그인 발견 검사 통과. 임시 PostgreSQL→Kafka snapshot/insert/update/delete, Connect 중단 후 재전달, JMX/consumer lag 지표 노출도 확인했다. Terraform 10개 root/38 mock 통과. 실제 RDS/EKS 전달·AZ/디스크 장애 복구는 아직 확인하지 않았다.
 
 사용자 결정은 **EKS 자체 운영**이다. 공식 Strimzi 1.3.0 Helm chart, Kafka 4.3.1, PostgreSQL CDC용 Debezium 3.7.0.Final을 고정했다. Strimzi의 시험 범위 Kubernetes 1.32~1.37에 현재 EKS 코드의 1.36이 포함된다. Debezium 호환 표는 Kafka Connect 3.1 이상, PostgreSQL 14~18을 명시한다. 실제 조합의 실행 검증은 남아 있다. [Strimzi 버전 표](https://strimzi.io/downloads/), [Debezium 호환 표](https://debezium.io/releases/)
 
@@ -66,6 +66,6 @@ kubectl get kafkatopics,kafkausers,pvc --namespace kafka
 Helm `--wait`만으로 custom resource Ready가 보장되지는 않는다. `kubectl wait`와 status/observedGeneration을 확인하고, 각 topic/user Ready·3개 서로 다른 호스트·AZ 배치·PVC Binding을 확인한다. bootstrap 주소는 기본 이름 기준 `clothes-query-dev-kafka-kafka-bootstrap.kafka.svc:9093`이다. namespace/토픽 권한 없는 접근이 거부되는지도 확인한다.
 
 4. 별도 승인된 이미지 배포 절차로 Connect 이미지를 빌드·스캔·레지스트리에 저장하고 받은 digest를 `connect.image`에 작성한다. DB/CA Secret 준비 후 명시적 `connect.produceTopics`와 함께 Connect를 활성화한다. 동일 runtime release를 upgrade하고 Connect Ready·내부 토픽 Ready·플러그인 목록을 확인한다. 토픽/인증서 생성 순서 때문에 초기 reconciliation이 재시도될 수 있으므로 최종 Ready를 확인한다. CDC 담당자가 별도 관리하는 KafkaConnector를 등록한다.
-5. DB 변경 한 건 → Kafka 전달을 확인한다. Consumer를 연결한 뒤 Bronze 적재와 재시작 재처리·consumer lag·WAL/slot 지연·디스크/ISR/quorum 경보를 확인한다. 자동화된 모니터링 수집·경보 설정과 Consumer 배포는 이번 구성에 포함하지 않았다.
+5. DB 변경 한 건 → Kafka 전달을 확인한다. Consumer를 연결한 뒤 Bronze 적재와 재시작 재처리·consumer lag·WAL/slot 지연·디스크/ISR/quorum 경보를 확인한다. [지표 노출·수집 연결 예시](metrics/README.md)는 준비했으며 수집 서버·경보 전달과 Consumer 배포는 포함하지 않았다.
 
 이미 배포한 release에서 `enabled=false`, 이름 변경, 일반적인 `helm uninstall/rollback`을 단순 롤백으로 사용하지 않는다. CR 삭제·topic 삭제·재처리 영향이 있으므로 데이터·PVC·slot·offset 보존 및 복구 계획을 확인한다. Helm release를 지워도 보존된 EBS/PVC는 수동 복구·정리 대상이다. 운영자 제거는 모든 관리 대상 runtime을 정리하거나 보존 계획을 확인한 뒤 진행한다.

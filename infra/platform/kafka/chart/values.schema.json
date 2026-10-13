@@ -324,12 +324,95 @@
         "resources",
         "heapMi"
       ]
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "lagExporter"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lagExporter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "topicRegex",
+            "groupRegex",
+            "resources"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "topicRegex": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "groupRegex": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "resources": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requests": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "cpu": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*(m)?$"
+                    },
+                    "memory": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+                    }
+                  },
+                  "required": [
+                    "cpu",
+                    "memory"
+                  ]
+                },
+                "limits": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "cpu": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*(m)?$"
+                    },
+                    "memory": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+                    }
+                  },
+                  "required": [
+                    "cpu",
+                    "memory"
+                  ]
+                }
+              },
+              "required": [
+                "requests",
+                "limits"
+              ]
+            }
+          }
+        }
+      }
     }
   },
   "required": [
     "kafka",
     "topics",
     "clients",
-    "connect"
+    "connect",
+    "metrics"
   ]
 }
