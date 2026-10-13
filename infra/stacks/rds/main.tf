@@ -26,4 +26,5 @@ module "rds" {
   allocated_storage          = var.allocated_storage
   max_allocated_storage      = var.max_allocated_storage
   database_name              = var.database_name
+  logical_replication        = var.logical_replication
 }

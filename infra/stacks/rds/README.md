@@ -7,6 +7,7 @@
 - 입력: `engine_version`, `instance_class`, `allocated_storage`, `max_allocated_storage`, 선택 `database_name`(clothes). Multi-AZ 지원 조합을 배포 전 조회한다.
 - 모든 스택은 `expected_account_id`를 비공개 환경변수로 받는다. 종속 state 읽기에는 `state_bucket`, 필요시 `state_region`도 입력한다.
 - 출력: `address`, `port`, `database_name`, `master_secret_arn`.
+- 선택 `logical_replication`은 기본 null. 활성화에는 명시적 `max_replication_slots`, `max_wal_senders`, `max_slot_wal_keep_size_mb`가 필요하다. 추가 출력은 설정 요청 여부 `logical_replication_enabled`와 `cdc_parameter_group_name`이다.
 
 ## 실행
 
@@ -17,3 +18,5 @@
 ## 삭제 및 운영 주의
 
 Multi-AZ 비용이 발생한다. prevent_destroy와 deletion_protection이 켜져 있다. final snapshot 이름이 이미 있다면 삭제 작업 전에 별도 고유 이름과 복구 계획이 필요하다. 엔진 변경/import/교체는 자동 수행하지 않는다.
+
+CDC 입력은 [실측 전 준비와 배포 조건](../../../docs/design/infra/data-path-readiness.md)을 확인한 뒤 비공개 파일에서 공급한다. 테스트 수치를 배포 기본값으로 사용하지 않는다. 실제 family/파라미터 지원·연결 예산·WAL 여유·재시작 시점을 검토한다. slot/계정/캡처 범위와 복구 검증은 DB/CDC 담당자와 함께 진행한다.

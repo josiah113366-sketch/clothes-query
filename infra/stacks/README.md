@@ -9,5 +9,6 @@
 - [storage](storage/README.md)
 - [ecr](ecr/README.md)
 - [apps](apps/README.md)
+- [workload-access](workload-access/README.md): network/eks/storage 이후 명시된 서비스 입력으로 AWS 접근 역할 준비
 
 설정과 검증 절차는 [전체 실행 안내](../IMPLEMENTATION.md)를 따른다. platform(Kafka/Spark/Airflow)은 후속 작업이다.

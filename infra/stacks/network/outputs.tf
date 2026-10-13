@@ -21,3 +21,4 @@ output "availability_zones" {
 output "s3_endpoint_id" {
   value = module.network.s3_endpoint_id
 }
+output "s3_endpoint_actions" { value = module.network.s3_endpoint_actions }

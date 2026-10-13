@@ -2,6 +2,10 @@ variable "aws_region" {
   type    = string
   default = "ap-northeast-1"
 }
+variable "additional_s3_endpoint_actions" {
+  type    = set(string)
+  default = []
+}
 variable "expected_account_id" {
   description = "Supply privately via TF_VAR_expected_account_id; prevents use of the wrong AWS account."
   type        = string

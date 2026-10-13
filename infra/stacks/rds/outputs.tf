@@ -15,3 +15,5 @@ output "master_secret_arn" {
   value     = module.rds.master_secret_arn
   sensitive = true
 }
+output "logical_replication_enabled" { value = module.rds.logical_replication_enabled }
+output "cdc_parameter_group_name" { value = module.rds.cdc_parameter_group_name }

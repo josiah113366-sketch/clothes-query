@@ -3,6 +3,28 @@ variable "vpc_id" { type = string }
 variable "db_subnet_ids" { type = list(string) }
 variable "workload_security_group_id" { type = string }
 variable "engine_version" { type = string }
+variable "logical_replication" {
+  description = "Explicit CDC budgets; null keeps the existing default parameter-group behavior."
+  type = object({
+    max_replication_slots     = number
+    max_wal_senders           = number
+    max_slot_wal_keep_size_mb = number
+  })
+  default = null
+  validation {
+    condition = var.logical_replication == null ? true : alltrue([
+      for value in values(var.logical_replication) : value > 0 && floor(value) == value
+    ])
+    error_message = "CDC requires explicit positive integer slot/sender counts and a finite WAL budget in MiB."
+  }
+  validation {
+    condition = var.logical_replication == null ? true : (
+      can(regex("^[1-9][0-9]*(\\.[0-9]+)*$", var.engine_version)) &&
+      try(tonumber(split(".", var.engine_version)[0]) >= 13, false)
+    )
+    error_message = "CDC settings require an explicit PostgreSQL version >= 13; verify RDS family support before deployment."
+  }
+}
 variable "instance_class" { type = string }
 variable "allocated_storage" {
   type = number

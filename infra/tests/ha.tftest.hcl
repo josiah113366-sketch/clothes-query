@@ -38,6 +38,10 @@ run "network_ha" {
     condition     = alltrue([for s in aws_subnet.app : !s.map_public_ip_on_launch]) && alltrue([for s in aws_subnet.db : !s.map_public_ip_on_launch])
     error_message = "App and DB subnets must not assign public IPv4 addresses."
   }
+  assert {
+    condition     = output.s3_endpoint_actions == toset(["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"])
+    error_message = "Existing network defaults must not broaden endpoint transport permissions."
+  }
 }
 run "reject_overlapping_subnets" {
   command = plan

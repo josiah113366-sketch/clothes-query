@@ -19,11 +19,13 @@ bootstrap → network → eks → compute → apps
 | `storage` | `stacks/storage/` | 데이터 S3, 버저닝·암호화·보호 | bootstrap | 코드 작성·정적 검증 |
 | `ecr` | `stacks/ecr/` | WEB/WAS 이미지 저장소 | bootstrap | 실배포·S3 state 저장 검증 완료 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
+| `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
 | `platform` | `stacks/platform/` | Helm으로 Kafka / Spark / Airflow 설치 | eks | 예정 |
 
 ## apply / destroy 순서
 
 - apply: bootstrap 상태 확인 후 network → eks → compute 순서. rds/storage/ecr 준비 후 apps, platform은 후속이다. 생성 테스트는 사용자 요청으로 마지막 단계에 진행한다.
+- workload-access는 network/eks/storage 이후 서비스별 namespace/ServiceAccount·prefix/action 합의 시 준비한다. runtime 배포는 각 서비스 담당자의 별도 작업이다.
 - destroy: apps/platform → compute → eks → network 순서로 종속성을 검토한다. RDS·S3 삭제 보호는 자동 해제하지 않는다. bootstrap은 state 보존 대상이다.
 
 ## state
@@ -41,3 +43,7 @@ bootstrap → network → eks → compute → apps
 노드 및 WEB/WAS 용량은 변수로 조정한다. [Generator 부하에 따른 증설·축소 가이드](SCALING.md)를 참고한다.
 
 사용자 요청으로 ECR만 실환경 plan/apply 및 S3 state 저장을 검증했다. 다른 스택은 미배포다. 기존 bootstrap은 보존하며 재생성하지 않는다. 삭제 시에는 앱/ALB 등 종속 리소스를 먼저 검토하고 RDS·S3 삭제 보호를 자동 해제하지 않는다.
+
+## 데이터 경로의 실측 전 준비
+
+RDS의 선택적 CDC 파라미터와 데이터 서비스별 S3 접근 코드를 준비했다. 기본값에서는 활성화하지 않으며 실제 예산·서비스 입력은 미정이다. [준비 범위와 연결 계약](../docs/design/infra/data-path-readiness.md)을 참고한다. Kafka/Connect·정제·조회 runtime이 구현/배포됐다는 의미는 아니다.

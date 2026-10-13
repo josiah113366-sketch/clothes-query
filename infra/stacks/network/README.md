@@ -7,6 +7,7 @@
 - 입력: `vpc_cidr`, `subnets`(서로 다른 두 AZ와 public/app/db CIDR). 범위 포함·중복·리전 AZ 검사를 수행한다.
 - 모든 스택은 `expected_account_id`를 비공개 환경변수로 받는다.
 - 출력: `vpc_id`, `public_subnet_ids`, `app_subnet_ids`, `db_subnet_ids`, `availability_zones`, `s3_endpoint_id`.
+- 선택 `additional_s3_endpoint_actions`는 기본 빈 set이며 기존 경로 권한을 유지한다. 새 출력 `s3_endpoint_actions`를 workload-access에서 읽어 서비스 요청과 대조한다.
 
 ## 실행
 
@@ -17,3 +18,5 @@
 ## 삭제 및 운영 주의
 
 NAT 2개와 EIP 2개에 지속 요금이 발생한다. app subnet은 같은 AZ의 NAT를 사용한다. DB route table에는 인터넷 기본 경로가 없다.
+
+데이터 서비스에 multipart/버전/삭제 action이 필요하면 해당 서비스의 prefix별 IAM과 endpoint의 optional action을 함께 검토한다. endpoint 변경만으로 IAM 권한이 부여되지 않는다. 기존 저장 plan은 코드 변경 후 재생성해 최종 차이를 확인한다.

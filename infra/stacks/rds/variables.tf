@@ -22,6 +22,15 @@ variable "state_region" {
   default = "ap-northeast-1"
 }
 variable "engine_version" { type = string }
+variable "logical_replication" {
+  description = "Opt-in CDC budgets. Leave null until the DB/CDC owner approves explicit values."
+  type = object({
+    max_replication_slots     = number
+    max_wal_senders           = number
+    max_slot_wal_keep_size_mb = number
+  })
+  default = null
+}
 
 variable "instance_class" { type = string }
 

@@ -107,8 +107,11 @@ resource "aws_vpc_endpoint" "s3" {
     Statement = [{
       Effect    = "Allow"
       Principal = "*"
-      Action    = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"]
-      Resource  = "*"
+      Action = concat(
+        ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"],
+        sort(tolist(var.additional_s3_endpoint_actions))
+      )
+      Resource = "*"
     }]
   })
 }

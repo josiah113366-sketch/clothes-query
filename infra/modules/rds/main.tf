@@ -14,6 +14,31 @@ resource "aws_vpc_security_group_ingress_rule" "postgres" {
   to_port                      = 5432
   ip_protocol                  = "tcp"
 }
+resource "aws_db_parameter_group" "cdc" {
+  count       = var.logical_replication == null ? 0 : 1
+  name_prefix = "${var.name}-cdc-"
+  family      = "postgres${split(".", var.engine_version)[0]}"
+  description = "Opt-in PostgreSQL CDC settings with explicit replication budgets"
+
+  parameter {
+    name         = "rds.logical_replication"
+    value        = "1"
+    apply_method = "pending-reboot"
+  }
+  dynamic "parameter" {
+    for_each = var.logical_replication == null ? {} : {
+      max_replication_slots  = tostring(var.logical_replication.max_replication_slots)
+      max_wal_senders        = tostring(var.logical_replication.max_wal_senders)
+      max_slot_wal_keep_size = tostring(var.logical_replication.max_slot_wal_keep_size_mb)
+    }
+    content {
+      name         = parameter.key
+      value        = parameter.value
+      apply_method = "pending-reboot"
+    }
+  }
+  lifecycle { create_before_destroy = true }
+}
 resource "aws_db_instance" "this" {
   identifier                  = var.name
   engine                      = "postgres"
@@ -30,6 +55,7 @@ resource "aws_db_instance" "this" {
   multi_az                    = true
   publicly_accessible         = false
   db_subnet_group_name        = aws_db_subnet_group.this.name
+  parameter_group_name        = var.logical_replication == null ? null : aws_db_parameter_group.cdc[0].name
   vpc_security_group_ids      = [aws_security_group.this.id]
   backup_retention_period     = 7
   copy_tags_to_snapshot       = true
