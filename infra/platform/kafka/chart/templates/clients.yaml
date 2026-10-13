@@ -1,0 +1,33 @@
+{{- if .Values.kafka.enabled }}
+{{- range .Values.clients }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ .name }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.kafka.name }}
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      {{- range .produceTopics }}
+      - resource: {type: topic, name: {{ . | quote }}, patternType: literal}
+        operations: [Write, Describe]
+      {{- end }}
+      {{- if .produceTopics }}
+      - resource: {type: cluster}
+        operations: [IdempotentWrite]
+      {{- end }}
+      {{- range .consumeTopics }}
+      - resource: {type: topic, name: {{ . | quote }}, patternType: literal}
+        operations: [Read, Describe]
+      {{- end }}
+      {{- range .consumerGroups }}
+      - resource: {type: group, name: {{ . | quote }}, patternType: literal}
+        operations: [Read]
+      {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,330 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kafka": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "version": {
+          "const": "4.3.1"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$"
+        },
+        "replicas": {
+          "const": 3
+        },
+        "storageClass": {
+          "const": "clothes-query-kafka-gp3"
+        },
+        "storageGi": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            }
+          ]
+        },
+        "retentionHours": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8760
+            }
+          ]
+        },
+        "nodePool": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(m)?$"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ]
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(m)?$"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ]
+            }
+          },
+          "required": [
+            "requests",
+            "limits"
+          ]
+        },
+        "heapMi": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 32768
+        },
+        "clientNamespaces": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "enabled",
+        "name",
+        "version",
+        "image",
+        "replicas",
+        "storageClass",
+        "nodePool",
+        "resources",
+        "heapMi",
+        "clientNamespaces"
+      ]
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "partitions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "retentionMs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31536000000
+          }
+        },
+        "required": [
+          "name",
+          "partitions",
+          "retentionMs"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "clients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "produceTopics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 63,
+              "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+            },
+            "uniqueItems": true
+          },
+          "consumeTopics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 63,
+              "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+            },
+            "uniqueItems": true
+          },
+          "consumerGroups": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 63,
+              "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "name",
+          "produceTopics",
+          "consumeTopics",
+          "consumerGroups"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "connect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 10
+        },
+        "image": {
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$"
+            }
+          ]
+        },
+        "produceTopics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "uniqueItems": true
+        },
+        "databaseSecret": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "rdsCaSecret": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(m)?$"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ]
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpu": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(m)?$"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ]
+            }
+          },
+          "required": [
+            "requests",
+            "limits"
+          ]
+        },
+        "heapMi": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 32768
+        }
+      },
+      "required": [
+        "enabled",
+        "name",
+        "replicas",
+        "image",
+        "produceTopics",
+        "databaseSecret",
+        "rdsCaSecret",
+        "resources",
+        "heapMi"
+      ]
+    }
+  },
+  "required": [
+    "kafka",
+    "topics",
+    "clients",
+    "connect"
+  ]
+}

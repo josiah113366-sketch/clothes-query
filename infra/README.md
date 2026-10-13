@@ -1,12 +1,12 @@
 # infra
 
-clothes-query의 AWS 인프라를 Terraform으로 관리한다. 리전은 `ap-northeast-1`(도쿄).
+clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별도 Helm release로 준비한다. 리전은 `ap-northeast-1`(도쿄).
 
 ## 스택 순서와 의존 관계
 
 ```
 bootstrap → network → eks → compute → apps
-                          └→ platform (후속)
+                          └→ Kafka 운영자 → Kafka/Connect (Helm, 미배포)
 ```
 
 | 스택 | 위치 | 내용 | 의존 | 상태 |
@@ -20,12 +20,14 @@ bootstrap → network → eks → compute → apps
 | `ecr` | `stacks/ecr/` | WEB/WAS 이미지 저장소 | bootstrap | 실배포·S3 state 저장 검증 완료 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
-| `platform` | `stacks/platform/` | Helm으로 Kafka / Spark / Airflow 설치 | eks | 예정 |
+| Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
+| Spark / Airflow | 미구현 | 정제·오케스트레이션 runtime | 실행 방식·서비스 입력 | 예정 |
 
 ## apply / destroy 순서
 
 - apply: bootstrap 상태 확인 후 network → eks → compute 순서. rds/storage/ecr 준비 후 apps, platform은 후속이다. 생성 테스트는 사용자 요청으로 마지막 단계에 진행한다.
 - workload-access는 network/eks/storage 이후 서비스별 namespace/ServiceAccount·prefix/action 합의 시 준비한다. runtime 배포는 각 서비스 담당자의 별도 작업이다.
+- Kafka는 EKS 자체 운영으로 결정했다. Terraform 기반 준비 후 공식 운영자/CRD·StorageClass → runtime 순서이며, [Kafka 안내](platform/kafka/README.md)의 2 AZ 한계·노드 예산·비용 영향을 확인한다. Spark/Airflow와 CDC 커넥터 설정은 포함하지 않았다.
 - destroy: apps/platform → compute → eks → network 순서로 종속성을 검토한다. RDS·S3 삭제 보호는 자동 해제하지 않는다. bootstrap은 state 보존 대상이다.
 
 ## state
@@ -46,4 +48,4 @@ bootstrap → network → eks → compute → apps
 
 ## 데이터 경로의 실측 전 준비
 
-RDS의 선택적 CDC 파라미터와 데이터 서비스별 S3 접근 코드를 준비했다. 기본값에서는 활성화하지 않으며 실제 예산·서비스 입력은 미정이다. [준비 범위와 연결 계약](../docs/design/infra/data-path-readiness.md)을 참고한다. Kafka/Connect·정제·조회 runtime이 구현/배포됐다는 의미는 아니다.
+RDS의 선택적 CDC 파라미터와 데이터 서비스별 S3 접근 코드, Kafka/Connect 배포 구성을 준비했다. 기본값에서는 활성화하지 않으며 실제 예산·서비스 입력은 미정이다. [준비 범위와 연결 계약](../docs/design/infra/data-path-readiness.md)을 참고한다. Kafka/Connect의 실행 검증·Consumer·정제·조회 runtime 구현/배포는 남아 있다.

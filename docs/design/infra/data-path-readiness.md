@@ -11,10 +11,13 @@
 | RDS → CDC | 선택적 parameter group·engine-major family 연결·slot/sender/WAL 입력 검증 | DB 사양·예산, 전용 계정, publication/slot·캡처 allowlist, 재시작·failover 검증 |
 | 데이터 서비스 → S3 | namespace/ServiceAccount별 Pod Identity·prefix/action 분리 모듈과 별도 stack | 서비스별 실제 namespace/SA·경로·작업 목록, SDK 호환성·권한 검증 |
 | S3 통신 경로 | 기본 endpoint 권한 유지, 명시적 optional action과 workload 요청의 일치 검증 | 필요한 optional action 결정 후 network state output 반영 |
-| Kafka/Connect·Consumer | 입력/출력·관리 경계·배포 전 조건을 아래에 정리 | 운영 방식·릴리스/이미지·인증·스토리지·서비스 실행 코드 |
+| Kafka/Connect | EKS 자체 운영 결정, Strimzi Helm·KRaft 영구 저장소·TLS/ACL·Connect Secret 참조·이미지 빌드 파일 | 실제 토픽/용량/보존·이미지 빌드 및 레지스트리 digest·Secret 공급·실행 검증 |
+| Consumer | 입력/출력·관리 경계·S3 권한 입력 준비 | 서비스 실행 코드·이미지·배포 설정 |
 | 정제·조회·관제 | 서비스별 데이터 접근 계약을 수용할 권한 입력 구조 | 실행 방식·입출력/checkpoint·조회 API/SQL 경로·이미지·자원 요구 |
 
 기본 설정은 RDS `logical_replication = null`, 데이터 역할 `bindings = {}`다. CDC와 새 서비스 접근 권한은 자동 활성화되지 않는다. mock 검증을 데이터 경로 실행 성공으로 표시하지 않는다.
+
+Kafka/Connect도 기본 비활성이며 [Kafka runtime 안내](../../../infra/platform/kafka/README.md)에 설치 순서·2 AZ quorum 한계·자원 예산·팀원 경계를 정리했다. 플러그인의 PostgreSQL 호환 범위는 실제 RDS 버전과 별도 확인한다. 이 결정은 MSK 도입이나 기존 2 AZ 네트워크/노드 상한 변경을 포함하지 않는다.
 
 ## RDS CDC 활성화 조건
 
@@ -39,7 +42,7 @@ family는 명시한 PostgreSQL major에서 계산한다. 이번 WAL 예산 옵�
 | 서비스/담당 | 인프라에 제공할 입력 | 인프라가 연결할 것 |
 |---|---|---|
 | DB/CDC | 캡처 테이블·컬럼 allowlist, snapshot·slot/publication 소유자, 필요한 DB 권한·Secret 참조, 플러그인/이미지 | RDS 설정·네트워크·Secret 공급 경계 |
-| Kafka | 운영 방식·버전, 내부 주소·인증 방식, 처리량·메시지 크기·보존·partition/복제 요구 | 선택한 실행 환경·네트워크·스토리지·접근 제어 |
+| Kafka | 업무 토픽·키, 처리량·메시지 크기·보존·partition 요구, 클라이언트 namespace·group | 결정된 EKS/Strimzi·내부 TLS·영구 저장소·명시적 ACL |
 | Connect | 호환 버전·플러그인 이미지, worker/내부 토픽 요구, 커넥터 등록·Secret 회전 담당 | 런타임 배포·관리 API 접근·자원/설정 전달 |
 | Consumer | 이미지/명령·환경변수·Secret 참조, 종료/재처리·health, Bronze/checkpoint 경로, 필요한 S3 action | 실행 ServiceAccount·S3 역할·자원/로그 |
 | 정제 | 실행 방식·이미지/패키지·driver/executor 또는 task 요구, 입력/출력/checkpoint 및 임시 경로 | 실행 권한·S3 역할·자원 한도 |
@@ -53,7 +56,7 @@ workload-access는 network의 `s3_endpoint_actions`도 읽는다. 기본 endpoin
 
 **실측 없이 준비:** 코드 구조, state 경계, 선택적 CDC 설정, 명시적 서비스/prefix/action 권한, mock·정적 검증, 입력/출력 계약, 배포 및 복구 검증 기준.
 
-**팀의 설계 결정 필요:** Kafka/Connect·정제·오케스트레이션 운영 방식, 서비스 소유자, 데이터 형식/스키마·보존·PII 범위, 허용 중단·유실·복구 목표, Secret 공급 방식, 조회 경로. 실측 대기가 이 결정을 대신하지 않는다.
+**팀의 설계 결정 필요:** 정제·오케스트레이션 운영 방식, 서비스 소유자, 데이터 형식/스키마·보존·PII 범위, 허용 중단·유실·복구 목표, Secret 공급 방식, 조회 경로. Kafka는 EKS 자체 운영으로 결정했고 실제 배포 입력은 남아 있다. 실측 대기가 이 결정을 대신하지 않는다.
 
 **실측으로 조정:** 처리량에 따른 broker/partition·스토리지 예산, Consumer 및 정제 동시성, CPU/메모리·노드 한도, DB 연결/IO/WAL 여유, 경보 임계값. 현재 8 vCPU/32 GiB를 전체 플랫폼의 충분한 용량으로 보장하지 않는다.
 
