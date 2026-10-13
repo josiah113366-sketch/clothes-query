@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "faker",
     "psycopg[binary]",
+    "python-dotenv",
     "typer",
 ]
 
@@ -29,3 +30,7 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m \"not integration\""
+markers = [
+    "integration: 로컬 PostgreSQL이 필요한 통합 테스트",
+]
