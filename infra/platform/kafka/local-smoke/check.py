@@ -162,7 +162,8 @@ def main():
             print("Building pinned Connect image for isolated local test...", flush=True)
             docker("build", "--platform", "linux/amd64", "--tag", image,
                    ROOT.parent / "connect-image", timeout=300)
-            docker("run", "--interactive", "--rm", "--network", "none", "--mount", f"type=bind,source={tls_dir},target=/work",
+            generator_uid = os.getuid() if hasattr(os, "getuid") else 1001
+            docker("run", "--interactive", "--rm", "--user", f"{generator_uid}:0", "--network", "none", "--mount", f"type=bind,source={tls_dir},target=/work",
                    "--entrypoint", "/bin/bash", image, "-s", stdin=(ROOT / "make-tls.sh").read_text(), timeout=60)
             compose("config", "--quiet")
             compose("run", "--rm", "--no-deps", "kafka-data-init")

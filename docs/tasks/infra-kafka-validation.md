@@ -1,6 +1,6 @@
 # Kafka 배포 전 검증 마무리
 
-상태: 진행 중
+상태: 완료 (요청한 로컬 검증·검사·CI 코드 연결 범위 / 이미지 취약점 조치·실배포 미완료)
 
 사용자가 승인한 순서: 로컬 TLS/ACL → Kafka 재생성 데이터 보존 → Connect 이미지 취약점 검사 → 자동 검증 연결.
 
@@ -11,8 +11,8 @@
 - [x] 정상 TLS/ACL 및 인증서·토픽/group 권한 거부 실제 확인
 - [x] Kafka container 재생성 후 메시지·Connect offset·CDC 이어받기 확인
 - [x] 고정 Connect 이미지 취약점 검사와 실제 결과/한계 기록
-- [ ] 기존 Terraform CI 초안과 Helm/로컬 검사 연결·로컬 검증
-- [ ] 단계별 로컬 커밋·임시 자원 정리·남은 실배포 범위 기록
+- [x] 기존 Terraform CI 초안과 Helm/로컬 검사 연결·로컬 검증
+- [x] 단계별 로컬 커밋·임시 자원 정리·남은 실배포 범위 기록
 
 ## 1단계 결과
 
@@ -33,3 +33,18 @@ digest 고정 Trivy 0.75.0으로 현재 Dockerfile의 Connect 이미지를 빌�
 CVE/package/설치 버전 기준 511개: Critical 1, High 73, Medium 297, Low 133, Unknown 7. 수정 버전 정보가 있는 항목은 각각 1/49/73/6/6개다. [검사 시점·이미지 ID·DB·주요 결과](../design/infra/connect-image-security-2026-10-14.md)를 기록했다. 실제 exploitability·업데이트 호환성을 확정하지 않았다. 라이브러리를 임의 교체하거나 취약점을 무시하지 않았다.
 
 Critical로 분류된 Netty는 이미지에 포함된 Cruise Control jar에서 발견됐다. 현재 runtime은 Cruise Control을 활성화하지 않지만 이 사실만으로 위험을 제외하지 않는다. 공급자 advisory의 severity와 scanner 분류도 구분했다. 임시 scanner/container/image tag/tar 정리 완료, DB와 로컬 보고서는 `.cache/connect-security`에 보존한다.
+
+## 4단계 결과
+
+기존 `infra/ci`의 검사기/단위 검사/workflow를 재사용하고 Helm, local TLS/ACL·CDC·보존·지표, 이미지 취약점 보고 job을 연결했다. workflow는 `contents: read`, checkout credential 보존 없음, AWS/클러스터 Secret·push·배포 없음이다. 취약점 scan은 report-only이며 Critical/High를 warning과 job summary에 표시한다. raw 보고서/임시 인증서/DB는 원격 artifact로 올리지 않는다.
+
+- actionlint 1.7.12 workflow 문법 검사 통과.
+- 검사기 단위 검사 9개 통과.
+- 현재 branch에서 Terraform fmt·backend 없는 init/validate 10 root·mock 8 suite/38 plan run 통과.
+- SHA-256 고정 Helm 3.19.0 Windows/Linux archive 확인. Windows Helm/공식 CRD/입력 거부 18개/scrape 선택 검사 및 Linux binary의 컨테이너 내부 chart lint 통과.
+- CI용 host UID/인증서 읽기 권한 처리 후 로컬 전체 TLS/ACL·CDC·Kafka 재생성/offset·지표 검사를 재실행해 통과. project `cq-cdc-ea4f97c60f` 정리 완료.
+- 실제 GitHub workflow는 실행하지 않았다. 로컬에서 코드/문법/실행 명령을 확인한 범위이며 Linux 호스트에서의 전체 workflow 성공을 보장하지 않는다.
+
+## 남은 목표
+
+이미지 취약점 조치 후보·도달 가능성·업데이트 호환성 검토, 업무 토픽/키/용량/보존/SLO 확정, Secret 공급/회전·publisher identity·실제 ECR 배포, RDS/EKS TLS/ACL/PVC/AZ/장애 검증, Consumer/Bronze 연결, 수집 서버/경보/알림, 사용자 검토 후 원격 CI 실행은 남아 있다. 기존 네트워크 2 AZ와 노드 상한은 유지했다. 원본 작업 폴더·backend·실제 AWS·원격 저장소는 변경하지 않았다.

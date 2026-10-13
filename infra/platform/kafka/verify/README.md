@@ -12,4 +12,4 @@ python -m venv .cache/kafka-venv
 .cache/kafka-venv/Scripts/python.exe infra/platform/kafka/verify/check.py --helm <helm.exe 경로>
 ```
 
-CRD의 Kubernetes CEL 검증·admission·권한·실제 scheduling·영구 볼륨 연결·플러그인 로딩은 실제 클러스터에서 별도 확인한다. 로컬 스키마 검증 통과는 실행 성공을 의미하지 않는다. 이 검증은 기존 Terraform 검사 워크플로에 자동 연결되어 있지 않다.
+CRD의 Kubernetes CEL 검증·admission·권한·실제 scheduling·영구 볼륨 연결·플러그인 로딩은 실제 클러스터에서 별도 확인한다. 로컬 스키마 검증 통과는 실행 성공을 의미하지 않는다. [인프라 workflow](../../../../.github/workflows/infra-checks.yml)의 kafka-helm job에 연결했으며 실제 GitHub 실행은 미확인이다.

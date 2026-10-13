@@ -25,6 +25,8 @@ bootstrap → network → eks → compute → apps
 
 Kafka 후속 준비는 선택적 Connect ECR, [로컬 CDC 전달 검사](platform/kafka/local-smoke/README.md), [JMX/consumer lag 지표 노출](platform/kafka/metrics/README.md)까지 포함한다. 실제 AWS 생성·수집 서버·알림은 미배포다.
 
+로컬 TLS/ACL·Kafka 재생성/offset 검증과 [통합 자동 검사 코드](checks/README.md)도 준비했다. 이미지 취약점 검사에는 [미조치 Critical/High 결과](../docs/design/infra/connect-image-security-2026-10-14.md)가 남아 있다. 실제 GitHub workflow와 AWS 배포 성공을 의미하지 않는다.
+
 ## apply / destroy 순서
 
 - apply: bootstrap 상태 확인 후 network → eks → compute 순서. rds/storage/ecr 준비 후 apps, platform은 후속이다. 생성 테스트는 사용자 요청으로 마지막 단계에 진행한다.

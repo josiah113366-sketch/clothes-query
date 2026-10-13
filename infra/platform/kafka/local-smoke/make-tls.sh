@@ -32,6 +32,8 @@ socket.connection.setup.timeout.ms=2000
 socket.connection.setup.timeout.max.ms=2000
 EOF
 done
+# The host UID owns temporary files for cleanup; Kafka's GID 0 can read only mounted leaf directories.
+chmod -R g+rX server connect clients
 cat > clients/no-cert.properties <<EOF
 security.protocol=SSL
 ssl.truststore.type=PEM
