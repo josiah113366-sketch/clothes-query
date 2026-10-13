@@ -1,0 +1,8 @@
+# Copy to deployment.local.tfvars (ignored by Git).
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+# Example CIDRs only: replace after confirming existing networks and AZ availability.
+vpc_cidr = "10.70.0.0/16"
+subnets = {
+ a = { az = "ap-northeast-1a", public_cidr = "10.70.0.0/24", app_cidr = "10.70.16.0/20", db_cidr = "10.70.64.0/24" }
+ c = { az = "ap-northeast-1c", public_cidr = "10.70.1.0/24", app_cidr = "10.70.32.0/20", db_cidr = "10.70.65.0/24" }
+}
