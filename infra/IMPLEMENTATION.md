@@ -69,7 +69,7 @@ terraform plan -input=false -var-file=deployment.local.tfvars
 
 ## WEB/WAS 두 단계 준비
 
-1. AWS 선행 스택 준비 후 apps를 기본 `deploy_workloads=false`로 plan하고 승인 후 배포한다. Namespace, ServiceAccount, Pod Identity 및 ConfigMap까지만 만든다.
+1. AWS 선행 스택 준비 후 apps를 기본 `deploy_workloads=false`로 plan하고 승인 후 배포한다. Namespace, ServiceAccount, IAM 역할/권한, Pod Identity, ConfigMap 및 Metrics Server add-on을 준비한다. WEB/WAS Deployment·Service·Ingress·HPA는 만들지 않는다.
 2. 앱 담당자가 PostgreSQL 앱 계정을 만들고 DB schema를 검토된 migration으로 적용한다. 해당 계정은 RDS master와 별개다. 만들어진 namespace에 `was-database` Secret을 승인된 비밀 공급 방식으로 준비한다. 키는 `DB_USER`, `DB_PASSWORD`다. Terraform에는 Secret 값을 넣지 않으며 비밀 값을 조회해 state에 저장하지 않는다. 회전 및 재시작 책임도 공급 도구/담당자에게 있다.
 3. PostgreSQL/S3를 지원하는 WAS 이미지를 빌드해 ECR에 push한다. 기존 ZIP의 PyMySQL 앱은 그대로 사용할 수 없다. WAS 계약은 8000 포트, /health, /api/*, DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD, AWS_REGION/S3_BUCKET/S3_PREFIX 및 Pod Identity를 지원하는 AWS SDK 기본 자격증명 체인이다. DB 연결은 TLS 및 CA 검증을 앱에서 적용한다.
 4. WEB 이미지는 nginx의 /etc/nginx/conf.d/default.conf를 사용하고 /usr/share/nginx/html에서 정적 파일을 제공해야 한다. ConfigMap이 /api/를 was-service:8000으로 프록시한다. 다른 웹 서버라면 이 계약을 먼저 수정한다.
@@ -96,6 +96,8 @@ AZ별 NAT는 1개 구성보다 NAT 시간/EIP 비용이 추가되고, Multi-AZ R
 
 bootstrap 및 초기 6개 스택 validate에 이어 compute 추가와 eks/apps 변경을 검증했다. 신규 코드 fmt와 AWS/Kubernetes mock plan 검증도 수행한다. mock 테스트는 실제 리소스를 생성하지 않는다. 결과는 [작업 기록](../docs/tasks/infra-analysis.md)에 기록한다. network 미배포로 선행 state가 없으며, EKS/CRD도 아직 없어 eks/compute/apps의 실환경 plan은 현재 실행할 수 없다. 이를 위해 가짜 state나 실제 리소스를 만들지 않는다.
 
-ECR 이외 스택은 실제 AWS plan과 배포를 수행하지 않았다. 앱 소스 수정/이미지 빌드/DB 계정·Secret 공급/DNS는 별도 선행 작업이다. ECR은 이후 실제 S3 backend로 초기화해 배포했으며 bootstrap lock/state는 변경하지 않았다.
+2026-10-14 후속 검토에서 빈 인증서·공백 hostname의 배포 입력 검증을 보완하고 기존 연결 계약 테스트를 추가했다. 9개 root의 정적 검사와 총 24개 mock plan을 통과했다. 상세와 미검증 범위는 [1차 연결 검증 기록](../docs/tasks/infra-first-stage-checks.md)을 참고한다.
+
+기존 작업 기록에서 ECR은 실제 plan/apply와 S3 backend 저장을 검증했고, network는 23개 생성·변경/삭제 없음의 실제 plan까지만 확인했다. 다른 스택의 실환경 plan과 ECR 이외 배포는 미실행이다. network 상세는 [배포 전 검토](../docs/design/infra/network-plan.md)를 따른다. 이 내용은 기존 기록이며 이 PC에서 AWS를 재조회한 결과가 아니다. 앱 소스 수정/이미지 빌드/DB 계정·Secret 공급/DNS는 별도 선행 작업이다. bootstrap lock/state는 변경하지 않았다.
 
 삭제는 앱과 ALB → 종속 스택 → eks → network 순서를 검토하되 RDS/데이터 S3/state S3는 보호되어 있다. 삭제 보호를 자동 해제하거나 테스트 목적으로 전체 destroy하지 않는다.

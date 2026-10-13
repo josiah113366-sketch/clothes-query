@@ -8,3 +8,5 @@ terraform -chdir=infra/tests test
 ```
 
 검사: AZ별 NAT 및 S3 경로, subnet 공개 IP 차단, CIDR 중복 거부, 타 리전 AZ 거부, RDS Multi-AZ/백업/보호/SG, S3 버전 및 공개 차단. 실제 AWS quota, 엔진 조합, IAM 권한, 앱·클러스터 동작은 보증하지 않는다. 모든 run은 `command = plan`이며 테스트에 state/backend는 없다.
+
+[apps-connections.tftest.hcl](apps-connections.tftest.hcl)은 기존 1차 연결 계약을 검사한다. HTTPS/인증서·허용 CIDR, ALB→WEB→WAS의 Service/포트·프록시 정합성, WAS의 DB 설정/외부 Secret 참조·Pod Identity 및 S3 prefix 최소 권한을 확인한다. 이미지/TLS 입력 없는 기초 단계와 잘못된 배포 입력도 확인한다. 실제 앱 이미지·Secret·인증서의 존재나 DB/S3 연결 성공을 검증하는 테스트는 아니다.
