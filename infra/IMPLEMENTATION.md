@@ -2,6 +2,8 @@
 
 상태: 코드 작성 및 로컬 검증 완료 · ECR만 사용자 요청으로 실배포 검증 완료 · 2026-10-13
 
+> 이 문서는 `infra/analysis` 작성 당시의 기반 구성·이전 작업 환경의 ECR 배포 기록이다. 아래 “현재 브랜치”·main 기준·인증 확인 표현은 당시 상황을 뜻한다. 이후 작업은 최신 main에서 만든 `infra/local-ready`에 통합했다. 다른 로컬에서는 [통합 지시서의 읽기 순서·변경 목록](../docs/tasks/infra-local-ready.md#다른-로컬에서-읽는-순서)을 먼저 확인한다. 이 PC에서 AWS 배포/state 변경을 실행한 것은 아니며 이전 ECR 기록을 현재 AWS 상태 확인으로 취급하지 않는다.
+
 ## 최소 배포 검증 결과
 
 사용자가 요청한 state 저장 테스트로 ECR 스택만 실행했다. 기존 이름/state 충돌을 확인한 후 저장한 plan(2 create, 0 change, 0 destroy)을 apply했다. 생성한 저장소는 `clothes-query-dev/web`, `clothes-query-dev/was`이며 이미지 push는 하지 않았다.

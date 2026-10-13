@@ -4,6 +4,50 @@
 
 사용자가 Connect 이미지 취약점 조치·재검증과 로컬 브랜치 통합 후 업로드를 요청했다. 최신 `origin/main`에서 `infra/local-ready`를 만들고 기존 인프라 브랜치를 병합한다. `main` 직접 변경·AWS 배포·ECR 이미지 업로드는 이 작업에 포함하지 않는다.
 
+## 다른 로컬에서 읽는 순서
+
+최초 인수인계서의 기존 코드/state 보존·1차 VPC/EKS/WEB/WAS/RDS/S3 준비를 기준으로 삼았다. 이후 사용자가 승인한 로컬 연결 검증·EKS 자체 운영 Kafka·관측 설정·CI·이미지 조치·브랜치 통합과 push를 단계별 지시서로 추가했다. 제네레이터·업무 앱·Consumer/Spark/DAG/AI 로직은 이 작업에서 구현하지 않았다. WEB/WAS 소스가 없어 포트·경로는 인프라 연결 계약이며 실제 앱과 맞는지는 담당자 확인이 남아 있다.
+
+1. 최신 `origin/infra/local-ready`를 별도 작업 폴더에서 확인한다. 기존 `infra/analysis` 폴더만 보면 후속 변경이 보이지 않는다.
+2. [인프라 지도](../../infra/README.md)에서 스택 순서·의존 관계·기본 비활성 구성을 읽는다.
+3. 아래 표의 작업 지시서에서 변경 목적·완료 확인·실제 결과를 읽고 연결된 README에서 입력과 재실행 방법을 확인한다.
+4. [데이터 경로 준비 현황](../design/infra/data-path-readiness.md)과 [이미지 잔여 취약점](../design/infra/connect-image-remediation-2026-10-14.md)을 보고 다음 작업을 정한다.
+
+새 폴더에 받는 예시:
+
+```powershell
+git clone --branch infra/local-ready https://github.com/josiah113366-sketch/clothes-query.git clothes-query-infra-review
+cd clothes-query-infra-review
+```
+
+기존 배포 PC의 미커밋 변경·비공개 입력·state는 clone에 포함되지 않는다. 기존 폴더를 덮어쓰거나 초기화하지 않는다. 다른 로컬의 미커밋 코드는 이번 통합에서 대조하지 못했다. 실제 AWS 작업 전에는 기존 관리 state·리소스와 코드의 소유 관계를 해당 환경에서 확인한다.
+
+| 단계와 지시서 | 핵심 변경·판단 | 구현·재검증 진입점 |
+|---|---|---|
+| [기반 분석·구현](infra-analysis.md) | 기존 실습 재사용, Auto Mode·2 AZ·WEB/WAS·RDS·S3·state 경계 | [기반 실행 안내](../../infra/IMPLEMENTATION.md), 각 stack README |
+| [플랫폼 계획](infra-platform-plan.md) | 인프라/데이터 담당 경계와 결정·미정 항목. 당시 계획은 후속 승인으로 일부 구현됨 | [계획 지도](../design/platform/README.md) |
+| [초기 CI](infra-ci.md) | 인증 없는 Terraform 복사본 검사·mock provider 강제 | [검사 사용법](../../infra/checks/README.md) |
+| [1차 연결 검사](infra-first-stage-checks.md) | WEB/WAS 연결 계약, HTTPS·이미지 입력 검증, foundation 배포 분리 | [apps](../../infra/stacks/apps/README.md), [mock 검사](../../infra/tests/README.md) |
+| [데이터 경로 준비](infra-data-path-prep.md) | 선택적 RDS 논리 복제, 서비스별 S3 prefix/Pod Identity·endpoint 권한 연결 | [RDS](../../infra/stacks/rds/README.md), [workload-access](../../infra/stacks/workload-access/README.md) |
+| [Kafka runtime](infra-kafka-runtime.md) | Strimzi·Kafka/Connect·영구 저장소·TLS/ACL·플러그인 이미지 | [Kafka 설치/입력](../../infra/platform/kafka/README.md), [Helm 검증](../../infra/platform/kafka/verify/README.md) |
+| [Kafka 후속 준비](infra-kafka-followups.md) | 선택적 Connect ECR, 로컬 CDC, JMX/consumer lag | [ECR](../../infra/stacks/ecr/README.md), [로컬 검사](../../infra/platform/kafka/local-smoke/README.md), [지표](../../infra/platform/kafka/metrics/README.md) |
+| [추가 검증](infra-kafka-validation.md) | mTLS·권한 거부, Kafka 재생성/offset 보존, 최초 스캔·CI 연결 | [통합 검사 명령](../../infra/checks/README.md) |
+| 이 통합 지시서 | 8개 branch 통합, Connect 조치, Linux checksum 보완, 원격 CI 확인 | 아래 실제 결과와 [이미지 조치 기록](../design/infra/connect-image-remediation-2026-10-14.md) |
+
+이전 단계 지시서의 “미배포/미정/미실행”은 해당 단계의 기록이다. 현재 결과는 이 통합 지시서와 각 기능의 최신 README를 우선한다. 특히 `infra/IMPLEMENTATION.md`의 ECR 배포 기록은 이전 환경의 기록이며 이 PC가 AWS 상태를 새로 확인한 결과가 아니다.
+
+## 브랜치 생성과 통합 관계
+
+`origin/main@f0a6059`에서 `infra/local-ready`를 생성했다. 그다음 `infra/analysis@7cdd4d5`가 이미 병합된 `infra/kafka-validation@f06d195`의 누적 구현을 fast-forward로 반영하고, `infra/platform-plan@90b26cf`와 `infra/ci@0006086`을 병합했다. 이후 이 문서의 이미지 조치와 Linux 체크섬 보완을 추가했다. 따라서 main에서 시작했으며 analysis의 변경도 전부 포함한다. 원격 `main`에 통합한 것은 아니다.
+
+`infra/analysis`와 비교하면 그동안 main에 들어간 팀원 변경도 보인다. 이 인프라 작업 자체의 변경을 검토할 때는 최신 main과 통합 브랜치를 비교한다.
+
+```powershell
+git fetch origin
+git diff --stat origin/main...origin/infra/local-ready
+git log --oneline origin/main..origin/infra/local-ready
+```
+
 ## 결정과 범위
 
 - `infra/kafka-validation`의 누적 구현을 이어받고 별도로 남은 `infra/platform-plan`, `infra/ci` 이력을 병합한다. 초기 CI의 add/add 충돌 두 파일은 이미 확장 검증을 포함한 최신 내용을 유지한다.
@@ -42,4 +86,4 @@
 
 보완 후 Windows 로컬 10 roots/38 mock plan을 재검증했다. `8bbd72c`를 같은 통합 브랜치에 push한 뒤 [최종 GitHub 실행](https://github.com/josiah113366-sketch/clothes-query/actions/runs/38455289322)에서 Terraform·Helm·Kafka TLS/ACL/CDC/재생성/지표·Connect image scan **4개 job 모두 success**를 확인했다. Ubuntu 24.04의 실제 실행 결과이며 AWS/EKS 배포 검증은 아니다. 원격 scanner 집계도 Critical 0/High 35/Medium 241/Low 127이다. scan은 report-only이며 잔여 취약점이 배포 승인된 것은 아니다.
 
-검증된 구현·lockfile 기준은 `8bbd72c`다. 이후 마무리 커밋은 이 작업 기록만 변경하며 CI 검사 대상 소스와 설정을 바꾸지 않는다. 원격 업로드 대상은 [infra/local-ready](https://github.com/josiah113366-sketch/clothes-query/tree/infra/local-ready) 하나다. 기존 8개 local branch/worktree를 보존했고 `main`은 `f0a6059`로 유지했다. PR 생성과 `main` 병합은 수행하지 않았다.
+검증된 구현·lockfile 기준은 `8bbd72c`다. 이후 마무리와 인수인계 보완 커밋은 문서만 변경하며 runtime 소스·설정·lockfile을 바꾸지 않는다. 원격 업로드 대상은 [infra/local-ready](https://github.com/josiah113366-sketch/clothes-query/tree/infra/local-ready) 하나다. 기존 8개 local branch/worktree를 보존했고 `main`은 `f0a6059`로 유지했다. PR 생성과 `main` 병합은 수행하지 않았다.
