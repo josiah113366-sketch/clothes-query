@@ -54,7 +54,7 @@ class FakeStore:
         self.connects = 0
         self.fail_connect = 0  # 앞으로 이만큼 연결 실패
         self.fail_insert_with: Exception | None = None
-        self.phone_conflicts = 0  # 앞으로 이만큼 member_phone_key 위반
+        self.phone_conflicts = 0  # 앞으로 이만큼 members_phone_key 위반
         self.connect_times: list[datetime] = []
         self.clock: SimClock | None = None
         self.on_insert = None
@@ -78,11 +78,11 @@ class FakeStore:
             raise error
         if self.phone_conflicts > 0:
             self.phone_conflicts -= 1
-            raise _Violation("member_phone_key")
+            raise _Violation("members_phone_key")
         if member.member_id in self.ids:
-            raise _Violation("member_pkey")
+            raise _Violation("members_pkey")
         if member.phone in self.phones or member.phone in self.preset_phones:
-            raise _Violation("member_phone_key")
+            raise _Violation("members_phone_key")
         self.ids.add(member.member_id)
         self.phones.add(member.phone)
         self.rows.append(member)
@@ -262,10 +262,10 @@ def test_phone_retry_changes_only_phone_and_gives_up_after_limit(regions) -> Non
 
 def test_other_constraint_violation_is_not_retried(regions) -> None:
     runner, store, _, _ = make(regions, max_signups=1)
-    store.fail_insert_with = _Violation("member_pkey")
+    store.fail_insert_with = _Violation("members_pkey")
     with pytest.raises(SafeDatabaseError) as info:
         runner.run()
-    assert "member_pkey" in str(info.value) and PII not in str(info.value)
+    assert "members_pkey" in str(info.value) and PII not in str(info.value)
     assert runner.summary.phone_retries == 0
 
 
