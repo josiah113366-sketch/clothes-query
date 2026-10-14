@@ -57,7 +57,7 @@ simulator/
 ## 개발 환경과 명령
 
 - Python 3.12, 로컬 DB는 Docker Compose의 PostgreSQL이다.
-- 의존성: 실행용 `confluent-kafka`, `faker`, `psycopg[binary]`(v3), `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`
+- 의존성: 실행용 `boto3`, `confluent-kafka`, `faker`, `psycopg[binary]`(v3), `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`
 
 ```bash
 cd simulator
