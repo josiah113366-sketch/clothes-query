@@ -5,7 +5,7 @@
 | 폴더 | 내용 |
 |---|---|
 | `simulator/` | 회원·행동 시뮬레이터 (RDS PostgreSQL 에 씀) |
-| `review-simulator/` | 상품 리뷰 시뮬레이터 (Bedrock 으로 리뷰 생성 → Kafka) |
+| `review-simulator/` | 상품 리뷰 시뮬레이터 (Bedrock 으로 리뷰 생성 → RDS PostgreSQL `reviews`, 실험용 Kafka 전송도 있음) |
 | `db/` | DDL |
 | `infra/` | Terraform |
 | `docs/tasks/` | 브랜치별 작업 지시서 |

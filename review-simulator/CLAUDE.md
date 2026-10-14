@@ -13,7 +13,11 @@
 가상 쇼핑몰 상품 리뷰를 Bedrock(gemma)으로 만들어 **Kafka 토픽 두 개**(`reviews.raw`, `reviews.truth`)로 보낸다.
 무엇을 쓸지(명세 = 정답 라벨)는 코드가 정하고, 문장만 LLM 이 쓴다. 검수 모델이 본문을 다시 라벨링해서 명세와 비교한다.
 
-`simulator/`(회원·행동, RDS 에 씀)와는 따로 개발·실행한다. 서로 import 하지 않는다.
+주문 기반 실행(`--source orders`)은 결제 후 1~14일 뒤 리뷰를 만들어 Postgres `reviews` 테이블에 넣는다(`--sink postgres`).
+확정한 구상(2026-10-14)은 RDS 결제 테이블 → 리뷰 → RDS `reviews` → CDC → Kafka → S3 이고, 지금은 로컬 파일 주문 + 로컬 Postgres 로 돈다.
+정답 라벨은 DB 에 넣지 않는다.
+
+`simulator/`(회원·행동, RDS 에 씀)와는 따로 개발·실행한다. 서로 import 하지 않고, 데이터는 DB 로 주고받는다.
 
 ## 지켜야 할 규칙
 
@@ -31,7 +35,7 @@
 ## 개발 환경과 명령
 
 - Python 3.12, 로컬 Kafka 는 Docker Compose 다.
-- 의존성: 실행용 `confluent-kafka`, `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`. Bedrock SDK 는 쓰지 않는다.
+- 의존성: 실행용 `confluent-kafka`, `psycopg[binary]`, `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`. Bedrock SDK 는 쓰지 않는다.
 
 ```bash
 cd review-simulator

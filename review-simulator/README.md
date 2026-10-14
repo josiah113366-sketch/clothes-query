@@ -19,7 +19,7 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 
 ## 의존하는 것
 
-- Python 3.12, Docker (로컬 Kafka + kafka-ui)
+- Python 3.12, Docker (로컬 Kafka + kafka-ui, 로컬 Postgres 는 `simulator/docker-compose.yml`)
 - Amazon Bedrock API 키 (`.env` 의 `AWS_BEARER_TOKEN_BEDROCK`, 도쿄 리전). `--llm fake` 는 키 없이 돈다
 - 말투 예시 원본: 같은 PC 의 `review-analysis` 폴더 (합성 리뷰, AI Hub 데이터). 저장소에는 없다
 
@@ -36,6 +36,7 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 | `src/rsim/review/generator.py` | 생성 프롬프트(`PROMPT_VERSION`), 검수 루프, 가짜 생성기 |
 | `src/rsim/review/verifier.py` | 검수 프롬프트(`VERIFIER_PROMPT_VERSION`), 명세 비교, 정답 라벨 합치기 |
 | `src/rsim/review/bedrock.py` | Bedrock Converse 호출 (표준 라이브러리, SDK 없음) |
+| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~14일 텀, 가짜 주문 만들기 |
 | `src/rsim/review/sinks.py`, `run.py` | Kafka / 콘솔 / 파일 전송, 실행 흐름 |
 | `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 검수 모델 정확도 측정 |
 | `src/rsim/seeds_prep.py` | 말투 예시 파일 `.local/seeds.jsonl` 만들기 |
@@ -75,6 +76,42 @@ ruff check . && ruff format --check .
 pytest
 ```
 
+## 주문 기반 실행 (결제 후 1~14일 뒤 리뷰)
+
+확정한 구상(2026-10-14): 결제 시뮬레이터가 RDS 에 쌓은 결제를 읽고, 결제 후 1~14일이 지난 주문에 리뷰를 단다.
+리뷰는 RDS `reviews` 테이블에 쓰고 RDS → CDC → Kafka → S3 로 흘린다. **지금은 RDS 가 없어서 로컬 기준으로 돈다.**
+
+- 주문은 로컬 파일 `.local/orders.jsonl` 에서 읽는다(`ORDERS_PATH`). 결제 시뮬레이터가 생기기 전에는 `rsim orders-fake` 로 만든다.
+- 주문마다 리뷰를 쓸지(`REVIEW_RATE`)와 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`)는
+  **order_id 로만** 정해진다. RANDOM_SEED 가 바뀌어도 같은 주문의 리뷰 날짜는 같다.
+- `rsim run --source orders` 는 `결제 시각 + 텀 ≤ --now` 이고 아직 리뷰가 없는 주문만 만든다. 리뷰 시각(`created_at`)은 그 주문의 리뷰 시각이다.
+- 리뷰는 **로컬 Postgres 의 `reviews` 테이블**에 넣는다(`--sink postgres`, 2026-10-14 lemin 결정). 회원 시뮬레이터와 같은 DB 다.
+  정답 라벨은 DB 에 넣지 않고 `.local/out/reviews_truth.jsonl` 에 쓴다. 나중에 `DATABASE_URL` 만 RDS 로 바꾼다.
+- "아직 리뷰가 없는지"는 `reviews` 테이블의 `order_id` 로 판단한다(같은 주문은 UNIQUE 라 두 번 들어가지 않는다).
+  `--sink jsonl` 은 리뷰 파일의 `order_id` 로 같은 판단을 한다. stdout·kafka 는 보낸 기록을 몰라서 차례가 된 주문을 매번 전부 보낸다.
+- 리뷰 생성이 실패한 주문은 리뷰가 없으므로 다음 실행에서 다시 골라진다.
+
+```powershell
+# 로컬 Postgres 띄우기 (simulator 폴더의 compose. 빈 볼륨으로 처음 띄울 때 db\schema\*.sql 이 자동 적용된다)
+cd ..\simulator; docker compose up -d; cd ..\review-simulator
+# 이미 볼륨이 있어서 reviews 테이블이 없으면 한 번만 직접 적용
+Get-Content ..\db\schema\003_review.sql | docker compose -f ..\simulator\docker-compose.yml exec -T postgres psql -U sim -d clothes
+
+# 가짜 주문 14일치 (하루 평균 1000건, Bedrock 호출 없음)
+rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
+
+# 10월 8일 0시 기준으로 차례가 된 주문에 리뷰 (가짜 문장, 0원) → reviews 테이블
+rsim run --source orders --llm fake --sink postgres --now 2026-10-08T00:00:00+09:00
+
+# 하루 뒤 기준으로 다시 돌리면 그 사이 차례가 된 주문만 추가된다
+rsim run --source orders --llm fake --sink postgres --now 2026-10-09T00:00:00+09:00
+
+# 확인
+docker compose -f ..\simulator\docker-compose.yml exec postgres psql -U sim -d clothes -c "select count(*) from reviews"
+```
+
+Postgres 통합 테스트는 `TEST_DATABASE_URL` 이 있을 때만 돈다(`tests/test_postgres_sink.py`, 임시 스키마를 만들고 지운다).
+
 ## 자주 바꿀 곳
 
 | 바꾸고 싶은 것 | 위치 |
@@ -87,6 +124,7 @@ pytest
 | 생성 프롬프트 | `src/rsim/review/generator.py` 의 `SYSTEM_PROMPT` (바꾸면 `PROMPT_VERSION` 올리기) |
 | 검수 기준 | `src/rsim/review/verifier.py` 의 `VERIFIER_SYSTEM_PROMPT`, `BLOCKING_KINDS` |
 | 불만 급증 상황 | `data/incidents.json` (형식은 `data/incidents.example.json`) |
+| 주문 중 리뷰 비율, 결제 후 리뷰까지 기간 | `.env` 의 `REVIEW_RATE`, `REVIEW_DELAY_MIN_DAYS`, `REVIEW_DELAY_MAX_DAYS` |
 
 ## Kafka 메시지 (토픽 2개)
 
@@ -97,8 +135,10 @@ pytest
 - `reviews.truth` (키 `review_id`, 스키마 `review_truth.v1`): 본문 + 정답 라벨(`aspects`, 각 원소의 `source` 가
   `spec` 또는 `verifier`) + `spec_aspects` + `incident_id` + 생성 조건. `KAFKA_TRUTH_TOPIC=none` 이면 보내지 않는다
 - `--sink jsonl` 이면 `reviews.jsonl` / `reviews_truth.jsonl` 두 파일로 저장한다
+- `--sink postgres` 이면 리뷰는 `reviews` 테이블(`db/schema/003_review.sql`, `created_at`→`written_at`, `text`→`body`), 정답은 `reviews_truth.jsonl`
 
 product_id, product_name, category, member_id, age_group 은 임시 값이다. 나중에 order·member 테이블에서 가져온다.
+주문 모드(`--source orders`)에서는 `order_id`, `member_id`, `product_id` 가 주문 파일 값이고, 무작위 모드에서는 `order_id` 가 null 이다.
 
 ## 데이터 주의
 

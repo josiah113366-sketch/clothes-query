@@ -37,8 +37,8 @@
 | 컬럼 | 타입 | 예 | 상태 | 설명 |
 |---|---|---|---|---|
 | member_id | string | C-9ba27683d5 | ✅🕒 | 임시 무작위 값, 추후 order 테이블에서 |
-| order_id | string | O-… | ➕ | 어떤 주문의 리뷰인지. 결제 이상탐지와 묶을 때 필요 |
-| purchased_at | timestamp | … | ➕ | 구매(배송완료) 시각. 리뷰는 보통 구매 후 1~14일 |
+| order_id | string | O-1a2b3c4d5e6f | ✅ | 어떤 주문의 리뷰인지. 주문 모드(`--source orders`)에서만 값이 있고 무작위 모드는 null. 정답 이벤트에도 같이 넣는다 (2026-10-14) |
+| purchased_at | timestamp | … | ➕ | 구매(결제) 시각. 주문 테이블에 있으므로 리뷰에는 넣지 않고 order_id 로 이어 붙이는 쪽을 제안 |
 | age_group | string | 30대 | ✅🕒 | 작성자 연령대. 임시 값, 추후 member 테이블에서 member_id 와 같이 |
 
 ## 5. 리뷰 내용
@@ -74,7 +74,7 @@
 
 ## 남은 결정
 
-- order_id, purchased_at: order 테이블과 같이 들어올 값. 그때 함께 추가하는 쪽이 자연스러움
+- purchased_at: 주문 테이블에서 order_id 로 가져올 수 있어 리뷰에는 넣지 않는 쪽을 제안 (order_id 는 2026-10-14 추가)
 - 그 밖의 ➕ 후보: emitted_at, option_size, option_color, has_photo
 
 ## 추후 고려사항
