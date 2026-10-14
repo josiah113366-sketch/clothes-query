@@ -84,6 +84,11 @@ class Settings:
     # 토픽이 없을 때 만들면서 쓸 파티션 수. 메시지 키가 product_id 라서 같은 상품 리뷰는 같은 파티션(=순서 보장)으로 간다.
     kafka_partitions: int = field(default_factory=lambda: int(_env("KAFKA_PARTITIONS", "3")))
 
+    # ---------------------------------------------------------------- PostgreSQL (--sink postgres)
+    # 리뷰를 넣을 DB. 지금은 회원 시뮬레이터와 같은 로컬 Postgres(simulator/docker-compose.yml),
+    # 나중에 RDS 주소로 바꾼다(2026-10-14 구상). 실제 접속 정보는 .env 에만 두고 커밋하지 않는다.
+    database_url: str = field(default_factory=lambda: _env("DATABASE_URL", ""))
+
     # ---------------------------------------------------------------- 데이터 파일
     # rsim seeds 가 만든 시드(말투 예시) 파일. AI Hub 원문이 들어 있어서 .local/ 에만 두고 커밋하지 않는다.
     seeds_path: Path = field(default_factory=lambda: _path("SEEDS_PATH", ".local/seeds.jsonl"))
@@ -92,6 +97,21 @@ class Settings:
     # 이상 상황(불만 급증) 시나리오 JSON (선택). 형식은 scenario.py 와 incidents.example.json 참고.
     incidents_path: Path = field(
         default_factory=lambda: _path("INCIDENTS_PATH", "data/incidents.json")
+    )
+
+    # ---------------------------------------------------------------- 주문 기반 리뷰 (rsim run --source orders)
+    # 주문(결제) 파일. RDS 결제 테이블이 생기기 전까지 쓰는 로컬 입력이다(review/orders.py 참고).
+    # rsim orders-fake 가 만든 가짜 주문을 기본으로 읽는다. 회원 ID 가 들어 있어서 .local/ 에만 둔다.
+    orders_path: Path = field(default_factory=lambda: _path("ORDERS_PATH", ".local/orders.jsonl"))
+    # 주문 중 리뷰를 쓰는 비율 (0~1). 1.0 = 모든 주문에 리뷰. 실제 쇼핑몰 리뷰 작성률에 맞춰 낮추면 된다.
+    # 하루 리뷰 수 ≈ 하루 주문 수 x 이 값. 값을 바꾸면 "어느 주문에 리뷰가 달리는지"도 바뀐다.
+    review_rate: float = field(default_factory=lambda: float(_env("REVIEW_RATE", "1.0")))
+    # 결제 후 리뷰까지 걸리는 기간(일). 주문마다 이 사이에서 고르게 정해진다(2026-10-14 구상: 1~14일).
+    review_delay_min_days: float = field(
+        default_factory=lambda: float(_env("REVIEW_DELAY_MIN_DAYS", "1"))
+    )
+    review_delay_max_days: float = field(
+        default_factory=lambda: float(_env("REVIEW_DELAY_MAX_DAYS", "14"))
     )
 
     # ---------------------------------------------------------------- 시뮬레이션

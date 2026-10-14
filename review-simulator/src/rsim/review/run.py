@@ -16,6 +16,15 @@ rsim run --sink jsonl --start 2026-10-10T00:00:00+09:00 --reviews-per-hour 30 --
 
 # 5) 멈출 때까지 계속 생성 (ECS 에서 상시 실행할 때) — 초당 최대 0.5건
 rsim run --sink kafka --count 0 --max-rps 0.5
+
+주문 기반 실행 (--source orders, 2026-10-14 구상: 결제 후 1~14일 뒤 리뷰)
+-----------------------------------------------------------------------
+# 6) 가짜 주문 14일치(하루 1000건)를 만들고, 그중 리뷰 쓸 차례가 된 주문에만 리뷰를 단다
+rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
+rsim run --source orders --llm fake --sink jsonl --now 2026-10-15T00:00:00+09:00
+
+# 7) 하루 뒤 다시 돌리면 그 사이 차례가 된 주문만 새로 만든다(이미 리뷰가 있는 주문은 건너뜀)
+rsim run --source orders --llm fake --sink jsonl --now 2026-10-16T00:00:00+09:00
 """
 
 from __future__ import annotations
@@ -24,7 +33,7 @@ import logging
 import random
 import signal
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from rsim import SCHEMA_VERSION, TRUTH_SCHEMA_VERSION
@@ -33,15 +42,20 @@ from rsim.common.rng import derive_seed, make_rng, resolve_seed, seeded_uuid
 
 from .catalog import Catalog
 from .generator import PROMPT_VERSION, FakeGenerator, make_generator
+from .orders import JsonlOrderSource, ReviewTiming, catalog_rng, due_orders
 from .scenario import ReviewSpec, ScenarioEngine, SimClock, load_incidents
 from .seeds import SeedPool
-from .sinks import JsonlSink, KafkaSink, StdoutSink
+from .sinks import JsonlSink, KafkaSink, PostgresSink, StdoutSink
 
 log = logging.getLogger("rsim")
 
 
 def build_events(
-    spec: ReviewSpec, generated: dict, model_id: str, rng: random.Random
+    spec: ReviewSpec,
+    generated: dict,
+    model_id: str,
+    rng: random.Random,
+    order_id: str | None = None,
 ) -> tuple[dict, dict]:
     """명세 + 생성된 문장 → (리뷰 이벤트, 정답 이벤트) 두 개를 만든다.
 
@@ -71,11 +85,14 @@ def build_events(
         "event_type": "review_created",
         "review_id": review_id,
         "created_at": created_at,
-        # [임시] 아래 4개는 나중에 order 테이블에서 가져온다
+        # 어떤 주문의 리뷰인지. 주문 모드(--source orders)에서만 값이 있고, 무작위 모드는 null.
+        # 결제 이상탐지와 리뷰를 묶을 때, 그리고 "이미 리뷰가 달린 주문"을 거를 때 쓴다.
+        "order_id": order_id,
+        # [임시] 아래 3개는 나중에 order·상품 테이블에서 가져온다 (주문 모드에서는 product_id 가 주문 값)
         "product_id": p.product_id,
         "product_name": p.product_name,
         "category": p.category,
-        "member_id": spec.member_id,
+        "member_id": spec.member_id,  # 주문 모드에서는 주문의 member_id
         # [임시] 나중에 member 테이블에서 member_id 와 같이 가져온다
         "age_group": spec.age_group,
         "rating": spec.rating,
@@ -86,6 +103,7 @@ def build_events(
     truth = {
         "schema_version": TRUTH_SCHEMA_VERSION,
         "review_id": review_id,  # 리뷰 이벤트와 연결하는 키
+        "order_id": order_id,
         "created_at": created_at,
         "product_id": p.product_id,
         "category": p.category,
@@ -108,6 +126,58 @@ def build_events(
     return review, truth
 
 
+def _order_specs(
+    engine: ScenarioEngine,
+    catalog: Catalog,
+    settings,
+    sink,
+    orders_path: Path,
+    now: datetime | None,
+    limit: int,
+) -> list[tuple[ReviewSpec, str]]:
+    """주문 모드: 리뷰를 쓸 차례가 된 주문을 골라 (명세, order_id) 목록을 만든다.
+
+    1) 주문 파일을 읽는다 (나중에 RDS 결제 테이블로 바뀌는 부분)
+    2) 전송처에 이미 리뷰가 있는 주문을 뺀다 (sink.reviewed_order_ids)
+    3) 결제 시각 + 텀(1~14일) ≤ now 인 주문만 남긴다 (orders.due_orders)
+    4) 상품 목록에 없는 상품의 주문은 건너뛰고 건수만 로그에 남긴다
+    limit > 0 이면 리뷰 시각이 빠른 순서로 그 수만큼만 만든다.
+    """
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None:
+        raise SystemExit("--now 에는 시간대를 넣어 주세요 (예: 2026-10-15T00:00:00+09:00)")
+    orders = JsonlOrderSource(orders_path).load()
+    reviewed = sink.reviewed_order_ids()
+    timing = ReviewTiming(
+        rate=settings.review_rate,
+        min_days=settings.review_delay_min_days,
+        max_days=settings.review_delay_max_days,
+    )
+    due = due_orders(orders, timing, now, reviewed)
+
+    todo: list[tuple[ReviewSpec, str]] = []
+    unknown = 0
+    for order, due_at in due:
+        product = catalog.by_id.get(order.product_id)
+        if product is None:
+            unknown += 1
+            continue
+        todo.append((engine.spec_for_order(product, due_at, order.member_id), order.order_id))
+        if limit and len(todo) >= limit:
+            break
+    log.info(
+        "주문 %d건 중 이미 리뷰 있음 %d건, 지금(%s) 리뷰 쓸 차례 %d건, 이번에 만들 %d건",
+        len(orders),
+        len(reviewed),
+        now.isoformat(),
+        len(due),
+        len(todo),
+    )
+    if unknown:
+        log.warning("상품 목록에 없는 product_id 주문 %d건은 건너뜀 (catalog.py 참고)", unknown)
+    return todo
+
+
 def make_sink(kind: str, settings, out_path: Path):
     if kind == "kafka":
         return KafkaSink(
@@ -115,6 +185,11 @@ def make_sink(kind: str, settings, out_path: Path):
             settings.kafka_topic,
             settings.kafka_truth_topic,
             settings.kafka_partitions,
+        )
+    if kind == "postgres":
+        # 리뷰는 reviews 테이블, 정답은 --out 옆 <이름>_truth.jsonl (DB 에 정답 라벨을 넣지 않는다)
+        return PostgresSink(
+            settings.database_url, out_path.with_name(out_path.stem + "_truth" + out_path.suffix)
         )
     if kind == "jsonl":
         # 정답은 같은 폴더의 <이름>_truth.jsonl 에 따로 저장 (예: reviews.jsonl / reviews_truth.jsonl)
@@ -126,14 +201,23 @@ def run(
     *,
     llm: str = "bedrock",
     sink_kind: str = "stdout",
-    count: int = 10,
+    source: str = "random",
+    count: int | None = None,
     max_rps: float = 0.0,
     start: datetime | None = None,
     reviews_per_hour: float = 20.0,
     out: Path = Path(".local/out/reviews.jsonl"),
     batch_size: int | None = None,
+    orders_path: Path | None = None,
+    now: datetime | None = None,
 ) -> int:
-    """리뷰를 만들어 전송한다. 반환: 전송한 리뷰 수. 인자 설명은 cli.py 의 rsim run 도움말과 같다."""
+    """리뷰를 만들어 전송한다. 반환: 전송한 리뷰 수. 인자 설명은 cli.py 의 rsim run 도움말과 같다.
+
+    source
+      random : 가상 시계 + 무작위 상품으로 리뷰를 만든다 (예전 방식). count 기본 10, 0 이면 계속.
+      orders : 주문 파일에서 "결제 후 텀이 지났고 아직 리뷰가 없는 주문"을 골라 리뷰를 만든다.
+               count 기본 0 = 차례가 된 주문 전부. 리뷰 시각은 주문마다 정해진 시각(결제 + 1~14일).
+    """
     settings = load_settings()
     batch_size = batch_size or settings.batch_size
     seed = resolve_seed(settings.random_seed)
@@ -143,7 +227,12 @@ def run(
 
     # ---- 준비: 시드 → 상품 → 이상 상황 → 명세 엔진 → 생성기 → 전송처
     seeds = SeedPool.load(settings.seeds_path, rng)
-    catalog = Catalog.build(settings.products_path, seeds.product_names(), rng)
+    if source == "orders":
+        # 주문 모드는 상품 목록을 RANDOM_SEED 와 무관한 고정 난수로 만든다.
+        # rsim orders-fake 와 같은 상품 목록(같은 product_id → 같은 상품명)이 나와야 주문과 이어지기 때문이다.
+        catalog = Catalog.build(settings.products_path, seeds.product_names(), catalog_rng())
+    else:
+        catalog = Catalog.build(settings.products_path, seeds.product_names(), rng)
     incidents = load_incidents(settings.incidents_path)
     engine = ScenarioEngine(
         catalog, incidents, SimClock(start, reviews_per_hour, rng), rng, id_rng=id_rng
@@ -152,14 +241,31 @@ def run(
     sink = make_sink(sink_kind, settings, out)
 
     log.info(
-        "시드 %d건, 상품 %d개, 이상 상황 %d개, 모델=%s, 전송=%s, RANDOM_SEED=%d",
+        "시드 %d건, 상품 %d개, 이상 상황 %d개, 모델=%s, 입력=%s, 전송=%s, RANDOM_SEED=%d",
         len(seeds.rows),
         len(catalog.products),
         len(incidents),
         generator.model_id,
+        source,
         sink_kind,
         seed,
     )
+
+    # ---- 만들 명세 목록 정하기
+    # random : 필요할 때마다 engine.next_spec() 으로 하나씩 만든다 (todo = None)
+    # orders : 차례가 된 주문을 미리 골라 (명세, order_id) 목록으로 만들어 둔다
+    todo: list[tuple[ReviewSpec, str]] | None = None
+    if source == "orders":
+        todo = _order_specs(
+            engine, catalog, settings, sink, orders_path or settings.orders_path, now, count or 0
+        )
+        count = len(todo)
+        if count == 0:
+            log.info("리뷰를 쓸 차례가 된 주문이 없습니다")
+            sink.close()
+            return 0
+    elif count is None:
+        count = 10
 
     # Ctrl+C(SIGINT) / ECS 종료 신호(SIGTERM)를 받으면 현재 배치까지만 보내고 깔끔하게 끝낸다
     stop = {"flag": False}
@@ -175,17 +281,24 @@ def run(
     started = time.monotonic()
     try:
         while not stop["flag"] and (count == 0 or produced < count):
-            n = batch_size if count == 0 else min(batch_size, count - produced)
-            specs = [engine.next_spec() for _ in range(n)]
+            if todo is None:
+                n = batch_size if count == 0 else min(batch_size, count - produced)
+                batch = [(engine.next_spec(), None) for _ in range(n)]
+            else:
+                # 주문 모드: 앞에서부터 batch_size 개씩. 실패한 주문은 리뷰가 없으니 다음 실행에서 다시 골라진다
+                if not todo:
+                    break
+                batch, todo = todo[:batch_size], todo[batch_size:]
+            specs = [spec for spec, _ in batch]
             results = generator.generate(specs)
 
-            for spec in specs:
+            for spec, order_id in batch:
                 gen = results.get(spec.spec_id)
                 if not gen or not gen.get("text"):
                     # 생성 실패/검수 탈락한 명세는 버린다 (다음 배치에서 새 명세로 채워짐)
                     skipped += 1
                     continue
-                review, truth = build_events(spec, gen, generator.model_id, id_rng)
+                review, truth = build_events(spec, gen, generator.model_id, id_rng, order_id)
                 sink.send(review, truth)
                 produced += 1
 

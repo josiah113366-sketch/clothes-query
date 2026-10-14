@@ -244,8 +244,24 @@ class ScenarioEngine:
         return aspects
 
     def next_spec(self) -> ReviewSpec:
+        """무작위 모드(rsim run 기본): 가상 시계로 시각을 정하고 상품도 무작위로 고른다."""
         now = self.clock.tick()
         product = self._pick_product(now)
+        return self._build_spec(now, product)
+
+    def spec_for_order(self, product: Product, created_at: datetime, member_id: str) -> ReviewSpec:
+        """주문 모드(rsim run --source orders): 상품·작성 시각·회원은 주문에서 정해진 값을 쓴다.
+
+        나머지(별점·속성·말투·길이·이상 상황)는 무작위 모드와 같은 규칙으로 정한다.
+        상품이 주문으로 정해지므로 이상 상황의 volume_multiplier(리뷰 수 늘리기)는 적용되지 않고,
+        share(해당 상품 리뷰에 불만을 넣는 비율)만 적용된다. 리뷰 수를 늘리려면 주문 쪽에서 늘려야 한다.
+        """
+        return self._build_spec(created_at, product, member_id=member_id)
+
+    def _build_spec(
+        self, now: datetime, product: Product, member_id: str | None = None
+    ) -> ReviewSpec:
+        # 난수를 뽑는 순서는 예전 next_spec 과 같게 둔다(같은 시드면 예전과 같은 명세가 나온다)
         rating = self._pick_rating(product)
         n_aspects = self.rng.choices([1, 2, 3], weights=ASPECT_COUNT_WEIGHTS)[0]
         aspects = self._pick_aspects(rating, n_aspects)
@@ -290,5 +306,6 @@ class ScenarioEngine:
             age_group=self.rng.choices(
                 list(AGE_GROUP_WEIGHTS), weights=list(AGE_GROUP_WEIGHTS.values())
             )[0],
-            member_id=f"C-{seeded_uuid(self.id_rng).hex[:10]}",
+            # 주문 모드는 주문의 member_id 를 쓰고, 무작위 모드는 [임시] 시드 고정 무작위 값을 만든다
+            member_id=member_id or f"C-{seeded_uuid(self.id_rng).hex[:10]}",
         )

@@ -3,6 +3,7 @@
 review-simulator/ 폴더에서 실행한다. 상대 경로(.env, .local/, data/)는 모두 현재 폴더 기준이다.
 
   rsim run ...          리뷰를 만들어 Kafka / 콘솔 / 파일로 보낸다 (review/run.py)
+  rsim orders-fake ...  주문 기반 실행용 가짜 주문 파일 만들기 (review/orders.py)
   rsim seeds ...        말투 예시(시드) 파일 .local/seeds.jsonl 만들기 (seeds_prep.py)
   rsim bench ...        소량 실행으로 비용·검수 결과 확인 (bench/bench.py, Kafka 로 안 보냄)
   rsim verify-eval ...  검수 모델 정확도 측정 (bench/verify_eval.py)
@@ -32,10 +33,16 @@ class Llm(str, Enum):
     fake = "fake"  # 규칙 기반 가짜 문장 (비용 0원, 배관 확인용)
 
 
+class Source(str, Enum):
+    random = "random"  # 가상 시계 + 무작위 상품 (예전 방식)
+    orders = "orders"  # 주문 파일에서 결제 후 1~14일이 지난 주문에 리뷰 (2026-10-14 구상)
+
+
 class SinkKind(str, Enum):
     kafka = "kafka"
     stdout = "stdout"
     jsonl = "jsonl"
+    postgres = "postgres"  # reviews 테이블 (DATABASE_URL), 정답은 --out 옆 *_truth.jsonl
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -62,9 +69,15 @@ def run(
         Llm, typer.Option(help="bedrock: Bedrock(gemma)으로 생성 / fake: 가짜 문장(0원)")
     ] = Llm.bedrock,
     sink: Annotated[SinkKind, typer.Option(help="결과를 보낼 곳")] = SinkKind.stdout,
+    source: Annotated[
+        Source, typer.Option(help="random: 무작위 상품 / orders: 주문 파일 기반(결제 후 1~14일)")
+    ] = Source.random,
     count: Annotated[
-        int, typer.Option(help="만들 리뷰 수. 0 이면 Ctrl+C 로 멈출 때까지 계속")
-    ] = 10,
+        int | None,
+        typer.Option(
+            help="만들 리뷰 수. random 기본 10(0 이면 멈출 때까지), orders 기본 0(차례가 된 주문 전부)"
+        ),
+    ] = None,
     max_rps: Annotated[float, typer.Option(help="초당 전송 상한. 0 이면 제한 없음")] = 0.0,
     start: Annotated[
         datetime | None,
@@ -77,10 +90,23 @@ def run(
         float, typer.Option(help="--start 를 줬을 때 가상 시간당 평균 리뷰 수")
     ] = 20.0,
     out: Annotated[
-        Path, typer.Option(help="--sink jsonl 저장 파일 (정답은 같은 폴더 *_truth.jsonl)")
+        Path,
+        typer.Option(
+            help="--sink jsonl 저장 파일 (정답은 같은 폴더 *_truth.jsonl). postgres 는 정답 파일 위치만 씀"
+        ),
     ] = Path(".local/out/reviews.jsonl"),
     batch_size: Annotated[
         int | None, typer.Option(help="Bedrock 호출당 리뷰 수 (기본: .env 의 BATCH_SIZE)")
+    ] = None,
+    orders: Annotated[
+        Path | None, typer.Option(help="--source orders 주문 파일 (기본: .env 의 ORDERS_PATH)")
+    ] = None,
+    now: Annotated[
+        datetime | None,
+        typer.Option(
+            formats=["%Y-%m-%dT%H:%M:%S%z"],
+            help="--source orders 기준 시각 (예: 2026-10-15T00:00:00+09:00). 없으면 현재 시각",
+        ),
     ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="디버그 로그 출력")] = False,
 ) -> None:
@@ -91,13 +117,40 @@ def run(
     run_reviews(
         llm=llm.value,
         sink_kind=sink.value,
+        source=source.value,
         count=count,
         max_rps=max_rps,
         start=start,
         reviews_per_hour=reviews_per_hour,
         out=out,
         batch_size=batch_size,
+        orders_path=orders,
+        now=now,
     )
+
+
+@app.command("orders-fake")
+def orders_fake(
+    start: Annotated[
+        datetime,
+        typer.Option(
+            formats=["%Y-%m-%dT%H:%M:%S%z"],
+            help="첫 결제 시각 (시간대 필수, 예: 2026-10-01T00:00:00+09:00)",
+        ),
+    ],
+    days: Annotated[int, typer.Option(help="며칠치 주문을 만들지")] = 14,
+    per_day: Annotated[float, typer.Option(help="하루 평균 주문 수")] = 1000.0,
+    out: Annotated[
+        Path | None, typer.Option(help="주문 파일 (기본: .env 의 ORDERS_PATH). 덮어쓴다")
+    ] = None,
+    seed: Annotated[int, typer.Option(help="주문 난수 시드 (같으면 같은 주문)")] = 42,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="디버그 로그 출력")] = False,
+) -> None:
+    """결제 시뮬레이터가 생기기 전까지 쓰는 가짜 주문 파일을 만든다 (Bedrock 호출 없음)."""
+    from rsim.review.orders import run_orders_fake
+
+    _setup_logging(verbose)
+    run_orders_fake(out=out, start=start, days=days, per_day=per_day, seed=seed)
 
 
 @app.command()

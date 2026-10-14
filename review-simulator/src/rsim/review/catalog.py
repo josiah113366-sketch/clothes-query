@@ -81,8 +81,8 @@ class Catalog:
                 )
         return cls(products, rng)
 
-    def pick(self) -> Product:
-        """카테고리 비율에 맞춰 상품 하나를 고른다.
+    def pick(self, rng: random.Random | None = None) -> Product:
+        """카테고리 비율에 맞춰 상품 하나를 고른다. rng 를 주면 그 난수열로 고른다(가짜 주문 만들 때).
 
         카테고리 가중치를 그 카테고리의 상품 수로 나눠서, 상품 수가 많은 카테고리가
         리뷰를 더 많이 가져가지 않게 한다(카테고리 간 비율은 CATEGORY_WEIGHTS 대로 유지).
@@ -93,4 +93,4 @@ class Catalog:
         weights = [
             CATEGORY_WEIGHTS.get(p.category, 0.1) / counts[p.category] for p in self.products
         ]
-        return self.rng.choices(self.products, weights=weights)[0]
+        return (rng or self.rng).choices(self.products, weights=weights)[0]
