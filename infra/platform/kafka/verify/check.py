@@ -92,9 +92,13 @@ def main():
         lint = run("lint", ROOT / "chart", "--strict", "--namespace", "kafka")
         assert lint.returncode == 0, lint.stdout + lint.stderr
         assert render() == []
-        retention_defaults = render({"kafka": {"enabled": True, "storageGi": 100}})
+        retention_defaults = render({"kafka": {"enabled": True}})
         default_broker = next(d["spec"]["kafka"] for d in retention_defaults if d["kind"] == "Kafka")
         assert default_broker["config"]["log.retention.hours"] == 24
+        default_pool = next(d["spec"] for d in retention_defaults if d["kind"] == "KafkaNodePool")
+        assert default_pool["replicas"] == 3
+        assert default_pool["storage"]["volumes"][0]["size"] == "20Gi"
+        assert default_pool["storage"]["volumes"][0]["deleteClaim"] is False
         base = {"kafka": {"enabled": True, "storageGi": 100, "retentionHours": 24},
                 "topics": [{"name": "example-orders", "partitions": 3, "retentionMs": 86400000}],
                 "clients": [{"name": "example-reader", "produceTopics": [],
@@ -161,7 +165,7 @@ def main():
                 assert not set(acl["operations"]) & {"All", "Delete", "Alter", "Create"}
 
         negatives = [
-            ({"kafka": {"enabled": True}}, "kafka.storageGi is required"),
+            ({"kafka": {"enabled": True, "storageGi": None}}, "kafka.storageGi is required"),
             ({"kafka": {"enabled": True, "storageGi": 100, "retentionHours": None}}, "kafka.retentionHours is required"),
             ({"connect": {"enabled": True}}, "connect requires kafka.enabled"),
             ({"kafka": {"replicas": 1}}, "replicas"),
@@ -212,6 +216,7 @@ def main():
         assert storage["provisioner"] == "ebs.csi.eks.amazonaws.com"
         assert storage["reclaimPolicy"] == "Retain" and storage["parameters"]["encrypted"] == "true"
         assert storage["volumeBindingMode"] == "WaitForFirstConsumer"
+        assert storage["allowVolumeExpansion"] is True
         jobs = yaml.safe_load((ROOT / "metrics" / "scrape-jobs.yaml").read_text())
         fixtures = [
             {"__meta_kubernetes_pod_label_strimzi_io_cluster": "clothes-query-dev-kafka",

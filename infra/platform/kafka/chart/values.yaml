@@ -7,7 +7,8 @@ kafka:
   # Combined broker/controller pool: 3 hosts, 2 AZs; not full AZ fault tolerance.
   replicas: 3
   storageClass: clothes-query-kafka-gp3
-  storageGi: null
+  # Approved starting disk per broker; 3 brokers provision 60 GiB total.
+  storageGi: 20
   # Approved starting retention: 24 hours. Topic-level retention can override this.
   retentionHours: 24
   nodePool: clothes-query-dev-compute

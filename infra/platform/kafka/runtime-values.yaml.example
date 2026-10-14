@@ -1,9 +1,9 @@
-# Rendering example: storage/topics/partitions are NOT approved deployment sizing.
-# Only the initial 24-hour retention is approved.
+# Rendering example: topics/partitions/client contracts are NOT approved.
+# Approved start: 20 GiB per broker (3 brokers) and 24-hour retention.
 # Copy to ignored runtime.local.yaml and replace all example contracts.
 kafka:
   enabled: true
-  storageGi: 100
+  storageGi: 20
   retentionHours: 24
   clientNamespaces: [example-consumer]
 topics:

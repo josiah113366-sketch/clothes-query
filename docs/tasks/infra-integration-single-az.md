@@ -28,6 +28,8 @@
 
 ## 후속 EKS 관리자 준비 (2026-10-14)
 
+후속 Kafka 디스크 결정: 사용자가 broker당 20 GiB씩 3개(총 60 GiB)로 시작하도록 승인했다. chart 기본값과 runtime 예제에 반영하고 기본 렌더의 replica/volume size/보존 정책 및 StorageClass 확장 가능 설정을 검증한다. 토픽·partition·client·CDC 예산은 미정이며 기본 비활성을 유지한다. 실제 생성과 PVC 확장은 수행하지 않았다.
+
 후속 Kafka 결정: 메시지 보관 기간은 24시간으로 시작한다. broker 기본 `retentionHours=24`를 반영하고 업무 토픽 예제의 `retentionMs=86400000`을 구분해 표시했다. 실제 업무 토픽은 아직 만들지 않았으며 디스크·토픽/partition·CDC slot/WAL 예산은 미정이다. Connect 내부 토픽의 compact 정책은 유지한다. Kafka 기본 비활성·실제 생성 마지막 원칙도 유지한다.
 
 후속 결정: 업무 버킷 이름은 `clothes-query-datalake`를 우선 후보로 두고 내부 경로 구조는 나중에 결정한다. application/bronze/silver/gold는 제안이었으며 승인된 경로가 아니다. apps 입력 예제도 미정 placeholder로 바꿨다. WEB/WAS 앱 준비와 도메인·HTTPS도 사용자 요청으로 보류했다. 다음 인프라 항목인 Kafka/CDC는 먼저 메시지 보관 기간을 결정하며, 디스크·토픽·복제 슬롯 예산을 예제 값으로 임의 확정하지 않는다.

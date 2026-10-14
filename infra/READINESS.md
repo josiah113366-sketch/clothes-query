@@ -25,7 +25,7 @@
 | apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 사용자 요청으로 내부 경로 구조 결정 보류. 현재 코드의 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
 | apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 사용자 요청으로 앱 준비 보류. 현재 저장소에 WEB/WAS 소스 없음. 실제 rollout·HPA 부하 검증은 앱 준비 이후 |
 | HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 사용자 요청으로 도메인·HTTPS 결정 보류. 실제 인증서 요청·DNS 변경은 수행하지 않음 |
-| Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | broker 기본 보관 24시간 결정·코드 반영. 디스크·업무 토픽·CDC 예산은 미정. 예제의 100Gi는 확정값이 아님 |
+| Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | 24시간 보관 및 [broker당 20Gi×3](../docs/design/infra/kafka-storage-sizing.md) 결정·코드 반영. 업무 토픽·ACL·CDC 예산은 미정. Kafka/Connect는 기본 비활성 |
 | 부하 테스트 | 목표 RPS, p95, 오류율, DB 연결 예산 | 미정. 현재 DB 직접 쓰기 제네레이터로 WAS HPA를 검증할 수 없음 |
 
 RDS 사양은 고가용성 여부와 별개다. 작은 사양으로도 Multi-AZ를 선택할 수 있지만 처리량은 실측해야 한다. HPA가 늘리는 것은 WAS Pod이며 RDS 사양·저장량을 줄이는 기능은 없다. [시작 사양·비용 검토](../docs/design/infra/rds-sizing.md)를 참고한다.

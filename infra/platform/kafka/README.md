@@ -22,7 +22,7 @@ Terraform 스택의 EKS·NodeClass·NodePool·RDS·S3는 그대로 관리한다.
 
 ## 실행 전 입력과 자원 영향
 
-기본 chart는 Kafka/Connect 모두 비활성이다. **사용자 결정으로 broker 기본 보관 기간은 24시간**이다. 활성화하려면 미정인 Kafka 디스크 크기를 먼저 정한다. 업무 토픽마다 이름·partition·보관 시간을 지정하고, Producer/Consumer의 토픽 및 consumer group을 명시한다. 초기 업무 토픽은 24시간에 해당하는 `retentionMs: 86400000`을 기준으로 작성하되 토픽별 변경은 별도 합의한다. 6개 토픽의 정확한 이름·키·파티션 계약은 팀과 확정해야 하므로 임의로 만들지 않았다. 추가 heartbeat/transaction 토픽을 쓰면 해당 토픽도 명시한다. 예시 파일의 이름·100Gi·partition 수는 확정된 배포 사양이 아니다.
+기본 chart는 Kafka/Connect 모두 비활성이다. **사용자 결정으로 broker 기본 보관 기간은 24시간, 디스크는 broker당 20 GiB × 3개(총 60 GiB)**다. 업무 토픽마다 이름·partition·보관 시간을 지정하고, Producer/Consumer의 토픽 및 consumer group을 명시한다. 초기 업무 토픽은 24시간에 해당하는 `retentionMs: 86400000`을 기준으로 작성하되 토픽별 변경은 별도 합의한다. 6개 토픽의 정확한 이름·키·파티션 계약은 팀과 확정해야 하므로 임의로 만들지 않았다. 추가 heartbeat/transaction 토픽을 쓰면 해당 토픽도 명시한다. 예시 파일의 토픽 이름·partition 수·client는 확정된 배포 사양이 아니다. [디스크 산정·증설 안내](../../../docs/design/infra/kafka-storage-sizing.md)를 따른다.
 
 24시간은 delete 정책 토픽의 보관 기준이며 정확히 24시간 뒤 메시지마다 삭제되는 타이머는 아니다. Connect의 configs/offsets/status 토픽은 기존 compact 정책을 유지하며 24시간 삭제 대상으로 변경하지 않는다. 실제 보관과 Consumer 재처리 가능 범위는 마지막 배포 검증에서 확인한다.
 
