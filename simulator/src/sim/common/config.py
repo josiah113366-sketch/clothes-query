@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from sim.member.params import DEFAULT_SEED
 
 DEFAULT_REGION_FILE = "data/region_weights_202609.csv"
+DEFAULT_CONNECT_URL = "http://localhost:8083"
+DEFAULT_KAFKA_BOOTSTRAP = "localhost:29092"
 
 
 class ConfigError(RuntimeError):
@@ -21,6 +23,8 @@ class Config:
     database_url: str = ""
     seed: int = DEFAULT_SEED
     region_file: Path = Path(DEFAULT_REGION_FILE)
+    connect_url: str = DEFAULT_CONNECT_URL
+    kafka_bootstrap: str = DEFAULT_KAFKA_BOOTSTRAP
 
     def __repr__(self) -> str:  # 접속 정보가 출력에 섞이지 않게 한다
         return f"Config(seed={self.seed}, region_file={self.region_file.name!r})"
@@ -50,4 +54,10 @@ def load_config(
     region_file = Path(env.get("SIM_REGION_FILE", "").strip() or DEFAULT_REGION_FILE)
     if not region_file.is_absolute():
         region_file = base / region_file
-    return Config(database_url=database_url, seed=seed, region_file=region_file)
+    return Config(
+        database_url=database_url,
+        seed=seed,
+        region_file=region_file,
+        connect_url=env.get("CONNECT_URL", "").strip() or DEFAULT_CONNECT_URL,
+        kafka_bootstrap=env.get("KAFKA_BOOTSTRAP", "").strip() or DEFAULT_KAFKA_BOOTSTRAP,
+    )
