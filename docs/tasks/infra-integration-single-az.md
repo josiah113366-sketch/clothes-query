@@ -28,6 +28,10 @@
 
 ## 후속 EKS 관리자 준비 (2026-10-14)
 
+후속 CDC 결정: DB→Kafka 캡처 범위와 업무 토픽은 팀원에게 받을 항목으로 보류했다. [팀원 입력 목록](../design/infra/team-inputs.md)에 DB/CDC 및 Kafka/Consumer 담당에게 받을 연결 정보를 정리했다. 기존 디스크·보관 설정 외의 업무 입력은 임의 확정하지 않는다.
+
+최신 코드 전체 정적 검사(2026-10-14): 전용 EKS 관리자 역할을 포함한 10개 Terraform root의 fmt/backend 없는 init/validate와 9개 suite의 mock plan 44개가 모두 통과했다. Kafka Helm 검사는 20 GiB/24시간 기본값 반영 후 21개 잘못된 입력 거부를 포함해 통과한 결과를 유지한다. 실제 AWS 리소스를 생성하거나 실환경 역할 assume/배포·연결 검증을 수행한 것은 아니다.
+
 후속 Kafka 디스크 결정: 사용자가 broker당 20 GiB씩 3개(총 60 GiB)로 시작하도록 승인했다. chart 기본값과 runtime 예제에 반영하고 기본 렌더의 replica/volume size/보존 정책 및 StorageClass 확장 가능 설정을 검증한다. 토픽·partition·client·CDC 예산은 미정이며 기본 비활성을 유지한다. 실제 생성과 PVC 확장은 수행하지 않았다.
 
 후속 Kafka 결정: 메시지 보관 기간은 24시간으로 시작한다. broker 기본 `retentionHours=24`를 반영하고 업무 토픽 예제의 `retentionMs=86400000`을 구분해 표시했다. 실제 업무 토픽은 아직 만들지 않았으며 디스크·토픽/partition·CDC slot/WAL 예산은 미정이다. Connect 내부 토픽의 compact 정책은 유지한다. Kafka 기본 비활성·실제 생성 마지막 원칙도 유지한다.

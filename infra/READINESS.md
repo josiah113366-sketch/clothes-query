@@ -12,6 +12,7 @@
 - ECR 두 저장소만 배포했다. S3 state 저장 및 후속 무변경 plan을 확인했다.
 - network 최종 실제 plan(2026-10-14)은 NAT 2개 기준 23개 생성, 변경·삭제 없음이다. 이전 NAT 1개 plan은 폐기된 중간 검토이며 apply하지 않았다.
 - 로컬 검증은 실제 클러스터의 CRD, 지표 수집, 스케줄링, 통신 성공을 보장하지 않는다.
+- 최신 코드 전체 정적 검사: Terraform 10개 root 및 mock plan 44개 통과. Kafka Helm 검사도 20 GiB/24시간 기본값과 잘못된 입력 21개 거부를 검증했다.
 
 ## 남은 입력과 결정
 
@@ -25,12 +26,14 @@
 | apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 사용자 요청으로 내부 경로 구조 결정 보류. 현재 코드의 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
 | apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 사용자 요청으로 앱 준비 보류. 현재 저장소에 WEB/WAS 소스 없음. 실제 rollout·HPA 부하 검증은 앱 준비 이후 |
 | HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 사용자 요청으로 도메인·HTTPS 결정 보류. 실제 인증서 요청·DNS 변경은 수행하지 않음 |
-| Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | 24시간 보관 및 [broker당 20Gi×3](../docs/design/infra/kafka-storage-sizing.md) 결정·코드 반영. 업무 토픽·ACL·CDC 예산은 미정. Kafka/Connect는 기본 비활성 |
+| Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | 24시간 보관 및 [broker당 20Gi×3](../docs/design/infra/kafka-storage-sizing.md) 결정·코드 반영. 캡처 범위·업무 토픽은 팀원에게 받을 항목으로 보류. ACL·CDC 예산은 미정. Kafka/Connect는 기본 비활성 |
 | 부하 테스트 | 목표 RPS, p95, 오류율, DB 연결 예산 | 미정. 현재 DB 직접 쓰기 제네레이터로 WAS HPA를 검증할 수 없음 |
 
 RDS 사양은 고가용성 여부와 별개다. 작은 사양으로도 Multi-AZ를 선택할 수 있지만 처리량은 실측해야 한다. HPA가 늘리는 것은 WAS Pod이며 RDS 사양·저장량을 줄이는 기능은 없다. [시작 사양·비용 검토](../docs/design/infra/rds-sizing.md)를 참고한다.
 
 ## 마지막 실행 순서
+
+현재 앱·도메인/HTTPS·S3 경로·DB 크기와 CDC 명세가 보류되어 있어 전체 서비스 배포 입력은 아직 완성되지 않았다. 보류 항목을 예제 값으로 채우지 않는다. [팀원에게 받을 입력](../docs/design/infra/team-inputs.md)을 준비한 뒤 필요한 스택별 plan을 진행한다.
 
 1. 코드·실제 계정·state 소유권·기존 리소스를 대조하고 스택별 plan을 검토한다. 저장해 둔 이전 plan을 그대로 재사용하지 않는다.
 2. network → eks → compute 순서로 준비한다. storage는 독립적이며 rds는 network/eks 출력 이후 준비한다. 각 단계의 실제 output이 생긴 다음 종속 plan을 실행한다.
