@@ -2,7 +2,8 @@ data "aws_availability_zones" "available" { state = "available" }
 
 # Compare inclusive IPv4 intervals to reject overlaps before AWS creates subnets.
 locals {
-  subnet_cidrs = flatten([for s in values(var.subnets) : [s.public_cidr, s.app_cidr, s.db_cidr]])
+  active_subnets = { for k, s in var.subnets : k => s if s.az == var.workload_az }
+  subnet_cidrs   = flatten([for s in values(var.subnets) : [s.public_cidr, s.app_cidr, s.db_cidr]])
   subnet_ranges = [for c in local.subnet_cidrs : {
     first = sum([for i, octet in split(".", cidrhost(c, 0)) : tonumber(octet) * pow(256, 3 - i)])
     last  = sum([for i, octet in split(".", cidrhost(c, -1)) : tonumber(octet) * pow(256, 3 - i)])
@@ -56,11 +57,11 @@ resource "aws_subnet" "db" {
   tags                    = { Name = "${var.name}-db-${each.key}" }
 }
 resource "aws_eip" "nat" {
-  for_each = var.subnets
+  for_each = local.active_subnets
   domain   = "vpc"
 }
 resource "aws_nat_gateway" "this" {
-  for_each      = var.subnets
+  for_each      = local.active_subnets
   allocation_id = aws_eip.nat[each.key].id
   subnet_id     = aws_subnet.public[each.key].id
   depends_on    = [aws_internet_gateway.this]
@@ -82,7 +83,7 @@ resource "aws_route_table" "app" {
   vpc_id   = aws_vpc.this.id
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this[each.key].id
+    nat_gateway_id = one(values(aws_nat_gateway.this)).id
   }
 }
 resource "aws_route_table_association" "app" {

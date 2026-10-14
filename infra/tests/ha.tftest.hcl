@@ -4,7 +4,7 @@ mock_provider "aws" {
     defaults = { names = ["ap-northeast-1a", "ap-northeast-1c"] }
   }
 }
-run "network_ha" {
+run "network_single_workload_az" {
   command = plan
   module { source = "../modules/network" }
   override_resource {
@@ -27,8 +27,8 @@ run "network_ha" {
     }
   }
   assert {
-    condition     = length(aws_nat_gateway.this) == 2 && length(aws_route_table.app) == 2
-    error_message = "Each AZ must have its own NAT and app route table."
+    condition     = length(aws_nat_gateway.this) == 1 && length(aws_route_table.app) == 2
+    error_message = "One NAT must serve both subnet route tables."
   }
   assert {
     condition     = aws_vpc_endpoint.s3.vpc_endpoint_type == "Gateway" && length(aws_vpc_endpoint.s3.route_table_ids) == 2
@@ -57,9 +57,10 @@ run "reject_wrong_region_az" {
   command = plan
   module { source = "../modules/network" }
   variables {
-    name     = "test-region"
-    region   = "ap-northeast-1"
-    vpc_cidr = "10.70.0.0/16"
+    workload_az = "us-east-2a"
+    name        = "test-region"
+    region      = "ap-northeast-1"
+    vpc_cidr    = "10.70.0.0/16"
     subnets = {
       a = { az = "us-east-2a", public_cidr = "10.70.0.0/24", app_cidr = "10.70.16.0/20", db_cidr = "10.70.64.0/24" }
       c = { az = "us-east-2c", public_cidr = "10.70.1.0/24", app_cidr = "10.70.32.0/20", db_cidr = "10.70.65.0/24" }
@@ -67,7 +68,7 @@ run "reject_wrong_region_az" {
   }
   expect_failures = [aws_vpc.this]
 }
-run "rds_ha_and_preservation" {
+run "rds_single_az_and_preservation" {
   command = plan
   module { source = "../modules/rds" }
   variables {
@@ -75,14 +76,15 @@ run "rds_ha_and_preservation" {
     vpc_id                     = "vpc-test"
     db_subnet_ids              = ["subnet-test-a", "subnet-test-c"]
     workload_security_group_id = "sg-test"
-    engine_version             = "16"
+    availability_zone          = "ap-northeast-1a"
+    engine_version             = "16.15"
     instance_class             = "db.m6g.large"
     allocated_storage          = 20
     max_allocated_storage      = 100
   }
   assert {
-    condition     = aws_db_instance.this.multi_az && !aws_db_instance.this.publicly_accessible && aws_db_instance.this.storage_encrypted
-    error_message = "RDS must be private, encrypted and Multi-AZ."
+    condition     = !aws_db_instance.this.multi_az && aws_db_instance.this.availability_zone == "ap-northeast-1a" && !aws_db_instance.this.publicly_accessible && aws_db_instance.this.storage_encrypted
+    error_message = "RDS must be private, encrypted and Single-AZ."
   }
   assert {
     condition     = aws_db_instance.this.deletion_protection && !aws_db_instance.this.skip_final_snapshot && aws_db_instance.this.backup_retention_period >= 7

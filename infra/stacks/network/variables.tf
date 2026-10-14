@@ -29,10 +29,20 @@ variable "subnets" {
   }))
   validation {
     condition     = length(var.subnets) == 2 && length(distinct([for s in values(var.subnets) : s.az])) == 2
-    error_message = "HA requires exactly two distinct availability zones."
+    error_message = "AWS EKS, ALB and RDS subnet groups require two distinct availability zones."
   }
   validation {
     condition     = alltrue(flatten([for s in values(var.subnets) : [for c in [s.public_cidr, s.app_cidr, s.db_cidr] : can(cidrnetmask(c))]]))
     error_message = "All subnet CIDRs must be valid IPv4 ranges."
+  }
+}
+
+variable "workload_az" {
+  description = "Single AZ for NAT, worker nodes and RDS; second-zone subnets remain for AWS service requirements."
+  type        = string
+  default     = "ap-northeast-1a"
+  validation {
+    condition     = contains([for s in values(var.subnets) : s.az], var.workload_az)
+    error_message = "The workload AZ must exist in the subnet map."
   }
 }

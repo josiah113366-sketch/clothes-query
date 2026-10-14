@@ -1,4 +1,19 @@
+> **현재 구성(2026-10-14):** 이전 HA 결정을 변경했다. 워커·앱·RDS는 ap-northeast-1a 한 AZ, NAT 1개, RDS Single-AZ다. AWS 서비스 요구사항 때문에 두 AZ의 서브넷은 유지한다. WEB 2개/WAS HPA 2~3개는 유지한다. 아래의 이전 HA 설명보다 infra/SINGLE_AZ.md의 최신 결정을 우선한다.
+
 # Network 배포 전 검토
+
+## 최신 검토: NAT 1개 구성 (2026-10-14)
+
+실제 S3 backend 및 비공개 입력으로 network plan을 다시 실행했다. `fmt -check`, `validate`, backend init이 통과했고 plan 종료 코드 2는 변경 계획이 있음을 뜻한다.
+
+- **21개 생성, 0개 변경, 0개 삭제, 교체 없음.** 아직 apply하지 않았다.
+- NAT 1개와 EIP 1개는 a에만 생성한다. 이전 23개 생성 계획에서 c의 NAT/EIP 예정 리소스가 빠졌다. 기존 자산을 삭제하는 계획은 아니다.
+- public/app/db subnet은 a/c에 총 6개 유지한다. route table 4개, association 6개, VPC/IGW/S3 Gateway Endpoint 각 1개다.
+- 두 app route table은 단일 NAT를 참조한다. workload AZ 출력은 `ap-northeast-1a`다.
+- 계획 파일은 `infra/stacks/network/network-single-az-review.tfplan`에 저장했고 Git 제외를 확인했다. 이전 `network-review.tfplan`은 사용하지 않는다. 실제 배포 시점에는 다시 plan을 생성·검토한다.
+- 이 검토는 network 스택만 대상으로 한다. EKS/compute/RDS/apps의 실환경 plan 및 연결 검증을 대신하지 않는다.
+
+아래는 이전 2-NAT 구성의 검토 기록이다.
 
 상태: 주소 구성 결정 / plan 검증 완료 / apply 대기 · 2026-10-13
 

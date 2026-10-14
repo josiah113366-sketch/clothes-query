@@ -27,7 +27,8 @@ resource "aws_db_instance" "this" {
   username                    = "dbadmin"
   manage_master_user_password = true
   port                        = 5432
-  multi_az                    = true
+  multi_az                    = false
+  availability_zone           = var.availability_zone
   publicly_accessible         = false
   db_subnet_group_name        = aws_db_subnet_group.this.name
   vpc_security_group_ids      = [aws_security_group.this.id]

@@ -22,3 +22,5 @@ variable "database_name" {
   type    = string
   default = "clothes"
 }
+
+variable "availability_zone" { type = string }

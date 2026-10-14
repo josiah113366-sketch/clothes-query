@@ -1,8 +1,8 @@
 # Copy to deployment.local.tfvars (ignored by Git).
 # Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
 # Set TF_VAR_state_bucket privately to the existing bootstrap bucket.
-engine_version = "REPLACE_WITH_APPROVED_POSTGRES_VERSION"
-instance_class = "REPLACE_WITH_APPROVED_MULTI_AZ_CLASS"
+engine_version = "16.15"
+instance_class = "REPLACE_WITH_APPROVED_INSTANCE_CLASS"
 # Example storage budget; confirm before plan.
 allocated_storage = 20
 max_allocated_storage = 100

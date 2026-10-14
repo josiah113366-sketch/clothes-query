@@ -1,3 +1,5 @@
+> **현재 구성(2026-10-14):** 이전 HA 결정을 변경했다. 워커·앱·RDS는 ap-northeast-1a 한 AZ, NAT 1개, RDS Single-AZ다. AWS 서비스 요구사항 때문에 두 AZ의 서브넷은 유지한다. WEB 2개/WAS HPA 2~3개는 유지한다. 아래의 이전 HA 설명보다 infra/SINGLE_AZ.md의 최신 결정을 우선한다.
+
 # Generator 부하에 따른 확장·축소
 
 상태: 결정 — WAS HPA 사용. 코드만 준비했으며 실제 생성·부하 테스트는 마지막에 진행한다.

@@ -1,3 +1,5 @@
+> **현재 구성(2026-10-14):** 이전 HA 결정을 변경했다. 워커·앱·RDS는 ap-northeast-1a 한 AZ, NAT 1개, RDS Single-AZ다. AWS 서비스 요구사항 때문에 두 AZ의 서브넷은 유지한다. WEB 2개/WAS HPA 2~3개는 유지한다. 아래의 이전 HA 설명보다 infra/SINGLE_AZ.md의 최신 결정을 우선한다.
+
 # infra
 
 clothes-query의 AWS 인프라를 Terraform으로 관리한다. 리전은 `ap-northeast-1`(도쿄).

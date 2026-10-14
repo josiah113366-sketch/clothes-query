@@ -1,7 +1,7 @@
 # Copy to deployment.local.tfvars (ignored by Git).
 # Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
 # Set TF_VAR_state_bucket privately to the existing bootstrap bucket.
-# First deploy only namespace, service account, Pod Identity and configuration.
+# Foundation includes namespace, service account, Pod Identity, configuration and Metrics Server.
 s3_prefix = "application/"
 deploy_workloads = false
 # WEB replicas are fixed; WAS replicas are HPA-managed.

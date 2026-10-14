@@ -35,6 +35,10 @@ run "size_was_resources_without_scaling_web" {
     error_message = "WAS must scale independently while WEB retains its HA default."
   }
   assert {
+    condition     = kubernetes_deployment_v1.was["was"].spec[0].template[0].spec[0].topology_spread_constraint[0].min_domains == 1 && kubernetes_deployment_v1.this["web"].spec[0].template[0].spec[0].topology_spread_constraint[0].min_domains == 1
+    error_message = "Single-AZ workloads must not wait for a second AZ."
+  }
+  assert {
     condition     = kubernetes_deployment_v1.was["was"].spec[0].template[0].spec[0].container[0].resources[0].requests.cpu == "250m"
     error_message = "WAS CPU requests must reflect the sizing input."
   }
