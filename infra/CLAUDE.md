@@ -110,7 +110,7 @@ provider "aws" {
 
 1. 최신 main에서 `infra/<스택명>` 브랜치를 만든다. (예: `infra/network`)
 2. 코드를 작성하고 `terraform fmt` → `validate` → `plan`까지 진행한다.
-3. **apply는 사용자(성철)가 직접 실행한다.** plan 결과를 눈으로 확인한 뒤 판단한다.
+3. **apply는 플랫폼·인프라 담당자(재영)가 직접 실행한다.** plan 결과를 눈으로 확인한 뒤 판단한다.
 4. apply 직전에 `origin/main`을 브랜치에 반영했는지 확인한다. 오래된 코드로 apply하면 다른 팀원의 변경을 되돌릴 수 있다.
 5. apply 후 동작을 확인하고, PR에 plan/apply 결과를 첨부해서 올린다. 빠르게 머지한다.
 6. PR 리뷰에서 코드가 바뀌면 다시 plan을 확인하고, 필요하면 다시 apply한다. 코드와 AWS 실제 상태가 어긋난 채로 두지 않는다.
@@ -128,9 +128,9 @@ provider "aws" {
 
 ## 팀원과의 경계
 
-- `infra/`는 성철만 수정한다. 팀원이 인프라 변경이 필요하면 GitHub 이슈로 요청한다.
+- `infra/`와 플랫폼 공통 실행 기반은 재영 담당이다. 팀원이 인프라 변경이 필요하면 GitHub 이슈로 요청한다.
 - 앱 레벨 설정(Airflow 워커 replica, 리소스 request/limit 등 Helm values)은 담당 팀원이 자기 values 파일을 직접 수정한다.
-- 인프라 용량(EKS 노드 수, 인스턴스 타입, 노드그룹 등)은 성철이 Terraform으로 변경한다.
+- 인프라 용량(EKS 노드 수, 인스턴스 타입, 노드그룹 등)은 재영이 Terraform으로 변경한다.
 - 인프라 PR을 머지하고 apply한 뒤, 팀원에게는 "머지 + apply 완료"와 함께 접속 방법(엔드포인트, kubectl 접근 방법 등)을 문서로 전달한다.
 
 ## 새 스택 만들 때 체크리스트
@@ -141,4 +141,4 @@ provider "aws" {
 - [ ] 필요한 모듈이 `modules/`에 있는지 확인, 없으면 새로 작성
 - [ ] `terraform fmt`, `terraform validate`, `terraform plan`
 - [ ] 폴더 README.md와 `infra/README.md`의 순서/의존 관계 갱신
-- [ ] 사용자가 apply → 결과 확인 → PR 작성 (plan/apply 결과 첨부)
+- [ ] 담당자(재영)가 apply → 결과 확인 → PR 작성 (plan/apply 결과 첨부)

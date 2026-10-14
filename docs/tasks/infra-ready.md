@@ -23,6 +23,8 @@
 
 ## 실행 결과
 
+후속 담당자 규칙 준비(2026-10-14): 사용자 지시에 따라 최신 origin/main 및 관련 PR을 조회했다. 최신 main은 이미 현재 브랜치의 ancestor이며 infra/CLAUDE.md의 성철 담당 문구는 아직 유지되어 있었다. [PR #5](https://github.com/josiah113366-sketch/clothes-query/pull/5)는 브랜치 영역/대장 문서 제안으로 OPEN·미병합 상태이며 담당자 변경을 포함하지 않는다. 제안 규칙을 병합된 규칙으로 취급하거나 해당 PR을 병합하지 않았다. 사용자에게 전달된 역할 변경에 따라 infra/CLAUDE.md의 수정/apply/용량 담당을 재영으로 로컬 수정하고, 에이전트 apply/destroy 금지와 팀원 앱 values 소유권은 유지한다. 이 변경은 추후 첫 infra PR에 포함할 준비이며 지금 PR 생성이나 push를 수행하지 않는다.
+
 후속 RDS 결정(2026-10-14): 사용자가 db.t4g.small·초기 20 GiB·자동 증가 최대 100 GiB를 선택했다. PostgreSQL 16.15·Single-AZ를 유지하고 rds 스택 공통 입력과 예제를 갱신했다. 도쿄 지원 조합·공식 단가를 재조회했고 월 730시간/초기 20 GiB 기준 $39.26(추가 사용료·세금 제외)다. fmt/validate를 실행하며 실제 plan은 network/eks output이 준비된 뒤 수행한다. apply는 실행하지 않는다. 아래 업로드 기록 당시의 DB 크기 보류는 이 결정으로 대체됐다.
 
 `infra/ready@d9b0a76`를 업로드해 원격 tip 일치를 확인했다. `infra/analysis@7cdd4d5`와 `infra/local-ready@84080d8`가 HEAD의 ancestor이며 원격 tip이 점검 당시 그대로임을 재확인한 후, atomic push와 각 ref의 force-with-lease로 두 원격 이름만 삭제했다. 로컬 `infra/analysis@088ee05`도 통합 이력이 포함된 상태에서 `git branch -d`로 정리했다. 현재 로컬 인프라 브랜치 이름은 `infra/ready` 하나다. `main`, `infra/bootstrap`, 팀원 브랜치는 삭제하거나 수정하지 않았다.
