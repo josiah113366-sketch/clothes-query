@@ -130,6 +130,10 @@ class ConnectClient:
     def ping(self) -> None:
         self._ok("GET", "/")
 
+    def plugin_classes(self) -> set[str]:
+        """Connect에 올라와 있는 커넥터 플러그인의 클래스 이름 집합."""
+        return {str(p.get("class", "")) for p in self._ok("GET", "/connector-plugins") or []}
+
     def list_connectors(self) -> list[str]:
         return list(self._ok("GET", "/connectors") or [])
 
