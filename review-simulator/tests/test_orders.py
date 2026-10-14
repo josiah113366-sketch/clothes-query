@@ -1,7 +1,7 @@
 """주문 기반 리뷰 발생(orders.py)과 rsim run --source orders 흐름 테스트. Bedrock·DB 는 부르지 않는다."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -36,17 +36,21 @@ def test_review_rate() -> None:
     assert 450 < picked < 750  # 약 30%
 
 
-def test_due_orders_skips_reviewed_and_future() -> None:
+def test_due_orders_window() -> None:
     timing = ReviewTiming()
-    orders = [_order(i) for i in range(50)]
-    now = T0 + timedelta(days=7)
-    due = due_orders(orders, timing, now, reviewed={"O-0001", "O-0002"})
-    ids = {o.order_id for o, _ in due}
-    assert ids.isdisjoint({"O-0001", "O-0002"})
-    assert all(at <= now for _, at in due)
+    orders = [_order(i) for i in range(200)]
+    day = T0 + timedelta(days=5)
+    due = due_orders(orders, timing, day, day + timedelta(days=1))
+    assert due and all(day <= at < day + timedelta(days=1) for _, at in due)
     assert [at for _, at in due] == sorted(at for _, at in due)
-    # 14일이 지나면(이미 리뷰 있는 2건 빼고) 전부 차례가 된다
-    assert len(due_orders(orders, timing, T0 + timedelta(days=15), {"O-0001", "O-0002"})) == 48
+    # 날짜를 하루씩 이어 붙이면 모든 주문이 정확히 한 번씩 나온다
+    seen = []
+    for d in range(16):
+        start = T0 + timedelta(days=d)
+        seen += [
+            o.order_id for o, _ in due_orders(orders, timing, start, start + timedelta(days=1))
+        ]
+    assert sorted(seen) == sorted(o.order_id for o in orders)
 
 
 def test_fake_orders_reproducible() -> None:
@@ -64,7 +68,12 @@ def _reviews(path: Path) -> list[dict]:
     return [json.loads(x) for x in path.read_text("utf-8").splitlines() if x.strip()]
 
 
-def test_run_from_orders_twice_does_not_duplicate(workdir) -> None:
+def _lake(workdir: Path, table: str) -> dict[str, list[dict]]:
+    root = workdir / ".local/lake" / table
+    return {d.name: _reviews(d / "part-00000.jsonl") for d in sorted(root.glob("dt=*"))}
+
+
+def test_run_from_orders_by_date_to_lake(workdir) -> None:
     res = runner.invoke(
         app,
         ["orders-fake", "--start", "2026-10-01T00:00:00+09:00", "--days", "3", "--per-day", "20"],
@@ -72,30 +81,37 @@ def test_run_from_orders_twice_does_not_duplicate(workdir) -> None:
     assert res.exit_code == 0, res.output
     orders = {o["order_id"]: o for o in _reviews(workdir / ".local/orders.jsonl")}
 
-    args = ["run", "--source", "orders", "--llm", "fake", "--sink", "jsonl", "--now"]
-    res = runner.invoke(app, [*args, "2026-10-08T00:00:00+09:00"])
+    args = ["run", "--source", "orders", "--llm", "fake", "--sink", "lake", "--date"]
+    res = runner.invoke(app, [*args, "2026-10-08"])
     assert res.exit_code == 0, res.output
-    out = workdir / ".local/out/reviews.jsonl"
-    first = _reviews(out)
-    assert first, "1주일 뒤에는 차례가 된 주문이 있어야 한다"
+    first = _lake(workdir, "reviews")["dt=2026-10-08"]
+    assert first
     for r in first:
         o = orders[r["order_id"]]
         assert r["member_id"] == o["member_id"] and r["product_id"] == o["product_id"]
+        assert r["purchased_at"] == o["paid_at"]
+        assert r["schema_version"] == "review.v2" and r["option_size"] and r["option_color"]
+        assert isinstance(r["has_photo"], bool) and r["emitted_at"]
         created = datetime.fromisoformat(r["created_at"])
-        paid = datetime.fromisoformat(o["paid_at"])
-        assert (
-            paid + timedelta(days=1)
-            <= created
-            <= datetime.fromisoformat("2026-10-08T00:00:00+09:00")
-        )
+        assert created.astimezone(UTC).date().isoformat() == "2026-10-08"  # dt = UTC 날짜
 
-    # 같은 시각으로 다시 돌리면 새로 만들 주문이 없다
-    runner.invoke(app, [*args, "2026-10-08T00:00:00+09:00"])
-    assert len(_reviews(out)) == len(first)
+    # 같은 날짜를 다시 돌리면 파티션을 덮어써서 같은 주문·같은 ID·같은 옵션이 남는다
+    runner.invoke(app, [*args, "2026-10-08"])
+    again = _lake(workdir, "reviews")["dt=2026-10-08"]
 
-    # 3주 뒤에는 모든 주문에 리뷰가 하나씩만 있다
-    runner.invoke(app, [*args, "2026-10-22T00:00:00+09:00"])
-    ids = [r["order_id"] for r in _reviews(out)]
+    def strip(rows):
+        keys = ("review_id", "order_id", "option_size", "option_color", "has_photo", "created_at")
+        return [tuple(r[k] for k in keys) for r in rows]
+
+    assert strip(again) == strip(first)
+
+    # 모든 날짜를 돌리면 주문마다 리뷰가 정확히 하나
+    for d in range(1, 20):
+        runner.invoke(app, [*args, f"2026-10-{d:02d}"])
+    parts = _lake(workdir, "reviews")
+    ids = [r["order_id"] for rows in parts.values() for r in rows]
     assert len(ids) == len(set(ids)) == len(orders)
-    truth = _reviews(workdir / ".local/out/reviews_truth.jsonl")
-    assert [t["order_id"] for t in truth] == ids
+    truth = _lake(workdir, "reviews_truth")
+    assert {k: [t["review_id"] for t in v] for k, v in truth.items()} == {
+        k: [r["review_id"] for r in v] for k, v in parts.items()
+    }

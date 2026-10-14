@@ -42,7 +42,7 @@ class SinkKind(str, Enum):
     kafka = "kafka"
     stdout = "stdout"
     jsonl = "jsonl"
-    postgres = "postgres"  # reviews 테이블 (DATABASE_URL), 정답은 --out 옆 *_truth.jsonl
+    lake = "lake"  # S3 레이크 경로 구조 (LAKE_ROOT, dt 별 파티션 덮어쓰기)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -70,12 +70,13 @@ def run(
     ] = Llm.bedrock,
     sink: Annotated[SinkKind, typer.Option(help="결과를 보낼 곳")] = SinkKind.stdout,
     source: Annotated[
-        Source, typer.Option(help="random: 무작위 상품 / orders: 주문 파일 기반(결제 후 1~14일)")
+        Source,
+        typer.Option(help="random: 무작위 상품 / orders: 주문 파일 기반(결제 후 1~14일, 날짜별)"),
     ] = Source.random,
     count: Annotated[
         int | None,
         typer.Option(
-            help="만들 리뷰 수. random 기본 10(0 이면 멈출 때까지), orders 기본 0(차례가 된 주문 전부)"
+            help="만들 리뷰 수. random 기본 10(0 이면 멈출 때까지), orders 기본 0(그날 주문 전부)"
         ),
     ] = None,
     max_rps: Annotated[float, typer.Option(help="초당 전송 상한. 0 이면 제한 없음")] = 0.0,
@@ -91,9 +92,7 @@ def run(
     ] = 20.0,
     out: Annotated[
         Path,
-        typer.Option(
-            help="--sink jsonl 저장 파일 (정답은 같은 폴더 *_truth.jsonl). postgres 는 정답 파일 위치만 씀"
-        ),
+        typer.Option(help="--sink jsonl 저장 파일 (정답은 같은 폴더 *_truth.jsonl)"),
     ] = Path(".local/out/reviews.jsonl"),
     batch_size: Annotated[
         int | None, typer.Option(help="Bedrock 호출당 리뷰 수 (기본: .env 의 BATCH_SIZE)")
@@ -101,11 +100,11 @@ def run(
     orders: Annotated[
         Path | None, typer.Option(help="--source orders 주문 파일 (기본: .env 의 ORDERS_PATH)")
     ] = None,
-    now: Annotated[
+    date: Annotated[
         datetime | None,
         typer.Option(
-            formats=["%Y-%m-%dT%H:%M:%S%z"],
-            help="--source orders 기준 시각 (예: 2026-10-15T00:00:00+09:00). 없으면 현재 시각",
+            formats=["%Y-%m-%d"],
+            help="--source orders 날짜(UTC, 예: 2026-10-08). 그날 리뷰 시각인 주문만. 없으면 어제",
         ),
     ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="디버그 로그 출력")] = False,
@@ -125,7 +124,7 @@ def run(
         out=out,
         batch_size=batch_size,
         orders_path=orders,
-        now=now,
+        day=date.date() if date else None,
     )
 
 

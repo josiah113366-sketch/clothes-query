@@ -3,12 +3,10 @@
 - KafkaSink  : Kafka 토픽으로 전송 (운영 흐름)
 - StdoutSink : 콘솔에 JSON 한 줄씩 출력 (눈으로 확인)
 - JsonlSink  : 파일에 JSON Lines 로 저장 (평가셋/재현용으로 보관)
-- PostgresSink : PostgreSQL reviews 테이블에 저장 (2026-10-14 구상: RDS → CDC → Kafka → S3).
-                 지금은 로컬 Postgres(simulator/docker-compose.yml), 나중에 DATABASE_URL 만 RDS 로 바꾼다.
+- LakeSink   : S3 레이크 경로 구조(dt 별 파티션)로 저장 (2026-10-14 결정: 리뷰는 S3 에 바로 쓴다).
+               지금은 로컬 폴더(.local/lake), 나중에 s3:// 경로를 지원한다.
 
-모든 sink 는 send(review, truth) / close() / reviewed_order_ids() 세 메서드를 가진다.
-  reviewed_order_ids : 이미 리뷰를 보낸 order_id 모음. 주문 모드(--source orders)가
-                       같은 주문에 리뷰를 두 번 달지 않으려고 쓴다. 알 수 없는 전송처는 빈 집합.
+모든 sink 는 send(review, truth) / close() 두 메서드만 가진다.
   review : 실제 쇼핑몰 리뷰와 같은 모양의 이벤트 → 운영 흐름(리뷰 토픽)
   truth  : 정답 라벨이 든 학습·채점용 이벤트 → 별도 흐름(정답 토픽)
 새 목적지(S3, Kinesis 등)가 필요하면 같은 모양의 클래스를 하나 더 만들고
@@ -20,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -32,10 +31,6 @@ def _dumps(event: dict) -> str:
 
 class StdoutSink:
     """콘솔 출력. 두 흐름을 구분할 수 있게 줄 앞에 [review] / [truth] 를 붙인다."""
-
-    def reviewed_order_ids(self) -> set[str]:
-        # 콘솔은 보낸 기록이 남지 않으므로, 주문 모드에서는 매번 차례가 된 주문 전부를 다시 출력한다
-        return set()
 
     def send(self, review: dict, truth: dict) -> None:
         sys.stdout.write("[review] " + _dumps(review) + "\n")
@@ -51,24 +46,9 @@ class JsonlSink:
 
     def __init__(self, review_path: Path, truth_path: Path):
         review_path.parent.mkdir(parents=True, exist_ok=True)
-        self.review_path = review_path
         # 실행 내내 열어 두고 close() 에서 닫는다(배치마다 열고 닫지 않게)
         self.review_fh = open(review_path, "a", encoding="utf-8")  # noqa: SIM115
         self.truth_fh = open(truth_path, "a", encoding="utf-8")  # noqa: SIM115
-
-    def reviewed_order_ids(self) -> set[str]:
-        """리뷰 파일에 이미 있는 order_id. 파일을 이어 쓰므로(append) 지난 실행 결과도 포함된다.
-
-        로컬 단계의 "아직 리뷰가 없는 주문" 판단 기준이다. 나중에 RDS 로 가면 reviews 테이블 조회로 바뀐다.
-        """
-        self.review_fh.flush()
-        ids = set()
-        for line in self.review_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                order_id = json.loads(line).get("order_id")
-                if order_id:
-                    ids.add(order_id)
-        return ids
 
     def send(self, review: dict, truth: dict) -> None:
         self.review_fh.write(_dumps(review) + "\n")
@@ -77,6 +57,56 @@ class JsonlSink:
     def close(self) -> None:
         self.review_fh.close()
         self.truth_fh.close()
+
+
+class LakeSink:
+    """S3 레이크와 같은 경로 구조로 저장한다. 날짜(dt) 파티션 하나 = 파일 하나.
+
+      <root>/reviews/dt=2026-10-08/part-00000.jsonl        리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
+      <root>/reviews_truth/dt=2026-10-08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
+
+    - dt 는 리뷰 작성 시각(created_at)을 **UTC 로 바꾼 날짜**다. 팀 규칙(Bronze 는 UTC, Silver 부터 KST)에 맞춘다.
+    - close() 에서 이번 실행이 만든 dt 파티션을 **통째로 덮어쓴다**(임시 파일에 쓴 뒤 이름 바꾸기).
+      주문 모드는 날짜 하나를 돌리므로, 같은 날짜를 다시 돌려도 주문당 리뷰가 하나만 남는다.
+      무작위 모드로 같은 날짜에 다시 쓰면 그 날짜의 예전 리뷰가 지워지니 주의한다.
+    - 하루 약 1,000건이라 메모리에 모았다가 한 번에 쓴다.
+    - root 가 s3:// 로 시작하면 아직 지원하지 않는다고 멈춘다. 나중에 같은 경로 규칙으로 S3 업로드만 추가하면 된다.
+    """
+
+    def __init__(self, root: str):
+        if root.startswith("s3://"):
+            raise SystemExit(
+                "S3 직접 저장은 아직 만들지 않았습니다. 지금은 로컬 폴더(LAKE_ROOT=.local/lake)만 씁니다."
+            )
+        self.root = Path(root)
+        # dt → (리뷰 줄 목록, 정답 줄 목록)
+        self.parts: dict[str, tuple[list[str], list[str]]] = {}
+
+    @staticmethod
+    def dt_of(review: dict) -> str:
+        """리뷰 작성 시각의 UTC 날짜 (예: 2026-10-08). 시각에 시간대가 없으면 UTC 로 본다."""
+        t = datetime.fromisoformat(review["created_at"])
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=UTC)
+        return t.astimezone(UTC).date().isoformat()
+
+    def path(self, table: str, dt: str) -> Path:
+        return self.root / table / f"dt={dt}" / "part-00000.jsonl"
+
+    def send(self, review: dict, truth: dict) -> None:
+        reviews, truths = self.parts.setdefault(self.dt_of(review), ([], []))
+        reviews.append(_dumps(review))
+        truths.append(_dumps(truth))
+
+    def close(self) -> None:
+        for dt, (reviews, truths) in sorted(self.parts.items()):
+            for table, lines in (("reviews", reviews), ("reviews_truth", truths)):
+                target = self.path(table, dt)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = target.with_suffix(".tmp")
+                tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                tmp.replace(target)  # 덮어쓰기 (쓰다가 멈춰도 예전 파일이 깨지지 않게)
+            log.info("저장: dt=%s 리뷰 %d건 → %s", dt, len(reviews), self.path("reviews", dt))
 
 
 class KafkaSink:
@@ -130,11 +160,6 @@ class KafkaSink:
             }
         )
 
-    def reviewed_order_ids(self) -> set[str]:
-        # 토픽을 처음부터 다시 읽지 않는 한 알 수 없다. 주문 모드에서는 jsonl 전송처를 쓴다
-        log.warning("Kafka 전송처는 이미 보낸 주문을 알 수 없어서, 차례가 된 주문을 전부 보냅니다")
-        return set()
-
     def _callback(self, kind: str):
         """브로커 전송 결과 콜백을 만든다. 실패하면 로그만 남기고 계속 진행한다."""
 
@@ -178,103 +203,3 @@ class KafkaSink:
             self.sent["truth"],
             self.failed,
         )
-
-
-class PostgresSink:
-    """PostgreSQL reviews 테이블(db/schema/003_review.sql)에 리뷰를 넣는다.
-
-    - 리뷰 이벤트만 DB 에 넣는다. 정답 이벤트는 실제 쇼핑몰에 없는 값이라 truth_path 파일(JSONL)에 따로 쓴다.
-    - 이벤트 칸 → 테이블 칸: created_at → written_at(리뷰 작성 시각), text → body.
-      테이블의 created_at 은 DB 기본값(now())이 채운다. schema_version·event_id·event_type 은 이벤트 전송용이라 넣지 않는다
-      (CDC 가 변경 이벤트를 따로 만든다).
-    - 같은 review_id 나 같은 order_id 가 이미 있으면 넣지 않는다(ON CONFLICT DO NOTHING). 이때 정답도 쓰지 않는다.
-    - 한 건마다 커밋한다(하루 약 1,000건이라 충분). 중간에 멈춰도 넣은 리뷰는 남고, 남은 주문은 다음 실행에서 골라진다.
-    - DB 오류 메시지에는 행 내용이 들어갈 수 있어서 오류 종류·sqlstate·제약 이름만 남긴다(simulator/ 와 같은 방식).
-    """
-
-    INSERT_SQL = """
-        INSERT INTO reviews (
-            review_id, order_id, member_id, product_id, product_name, category,
-            age_group, rating, body, source, written_at
-        ) VALUES (
-            %(review_id)s, %(order_id)s, %(member_id)s, %(product_id)s, %(product_name)s,
-            %(category)s, %(age_group)s, %(rating)s, %(text)s, %(source)s, %(created_at)s
-        )
-        ON CONFLICT DO NOTHING
-        RETURNING review_id
-    """
-
-    def __init__(self, database_url: str, truth_path: Path | None):
-        import psycopg
-
-        self._psycopg = psycopg
-        if not database_url:
-            raise SystemExit(
-                "DATABASE_URL 이 비어 있습니다. .env 에 로컬 Postgres 주소를 넣으세요 "
-                "(예는 .env.example)."
-            )
-        try:
-            # autocommit: INSERT 한 건마다 바로 반영 (위 설명의 "한 건마다 커밋")
-            self.conn = psycopg.connect(database_url, autocommit=True)
-        except psycopg.Error as e:
-            raise SystemExit(
-                f"Postgres 에 접속하지 못했습니다 ({_describe_db_error(e)}). "
-                "simulator/ 폴더에서 docker compose up -d 로 postgres 가 떠 있는지 확인하세요."
-            ) from None
-        self.truth_fh = None
-        if truth_path is not None:
-            truth_path.parent.mkdir(parents=True, exist_ok=True)
-            self.truth_fh = open(truth_path, "a", encoding="utf-8")  # noqa: SIM115
-        self.inserted = self.duplicated = 0
-
-    def reviewed_order_ids(self) -> set[str]:
-        """이미 리뷰가 있는 주문. RDS 로 옮겨도 같은 조회를 쓴다."""
-        with self._safe():
-            rows = self.conn.execute(
-                "SELECT order_id FROM reviews WHERE order_id IS NOT NULL"
-            ).fetchall()
-        return {r[0] for r in rows}
-
-    def send(self, review: dict, truth: dict) -> None:
-        with self._safe():
-            row = self.conn.execute(self.INSERT_SQL, review).fetchone()
-        if row is None:
-            # 같은 review_id 또는 같은 order_id 가 이미 있음 → 넣지 않음
-            self.duplicated += 1
-            return
-        self.inserted += 1
-        if self.truth_fh:
-            self.truth_fh.write(_dumps(truth) + "\n")
-
-    def close(self) -> None:
-        self.conn.close()
-        if self.truth_fh:
-            self.truth_fh.close()
-        log.info(
-            "Postgres 저장 완료: 리뷰 %d건, 중복으로 건너뜀 %d건", self.inserted, self.duplicated
-        )
-
-    def _safe(self):
-        """psycopg 오류를 행 내용 없는 메시지로 바꿔서 다시 던진다."""
-        from contextlib import contextmanager
-
-        psycopg = self._psycopg
-
-        @contextmanager
-        def _cm():
-            try:
-                yield
-            except psycopg.Error as e:
-                raise RuntimeError(f"Postgres 오류: {_describe_db_error(e)}") from None
-
-        return _cm()
-
-
-def _describe_db_error(error) -> str:
-    """오류 종류, sqlstate, 제약 이름만 돌려준다. str(error) 에는 행 내용이 들어갈 수 있어서 쓰지 않는다."""
-    parts = [type(error).__name__, f"sqlstate={getattr(error, 'sqlstate', None)}"]
-    diag = getattr(error, "diag", None)
-    constraint = getattr(diag, "constraint_name", None) if diag else None
-    if constraint:
-        parts.append(f"constraint={constraint}")
-    return " ".join(parts)

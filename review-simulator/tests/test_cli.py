@@ -30,9 +30,11 @@ def test_run_fake_is_reproducible_with_seed(workdir) -> None:
     args = ["run", "--llm", "fake", "--sink", "jsonl", "--count", "3", "--out"]
     runner.invoke(app, [*args, ".local/a.jsonl", "--start", "2026-10-01T00:00:00+09:00"])
     runner.invoke(app, [*args, ".local/b.jsonl", "--start", "2026-10-01T00:00:00+09:00"])
-    a = (workdir / ".local" / "a.jsonl").read_text("utf-8")
-    b = (workdir / ".local" / "b.jsonl").read_text("utf-8")
-    assert a == b  # 같은 RANDOM_SEED + 같은 시작 시각이면 ID·명세·문장까지 같다
+    a = [json.loads(x) for x in (workdir / ".local" / "a.jsonl").read_text("utf-8").splitlines()]
+    b = [json.loads(x) for x in (workdir / ".local" / "b.jsonl").read_text("utf-8").splitlines()]
+    for r in a + b:
+        r.pop("emitted_at")  # 실제 내보낸 시각은 실행마다 다르다
+    assert a == b  # 같은 RANDOM_SEED + 같은 시작 시각이면 ID·명세·옵션·문장까지 같다
 
 
 def test_run_bedrock_without_key_stops(workdir) -> None:

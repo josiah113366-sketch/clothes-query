@@ -2,26 +2,28 @@
 
 확정한 구상 (2026-10-14, lemin)
 --------------------------------
-결제 시뮬레이터가 RDS 에 쌓은 결제 정보를 읽어서, 결제 후 1~14일이 지난 주문에 리뷰를 단다.
-리뷰는 RDS reviews 테이블에 쓰고, 결제·회원과 같은 길(RDS → CDC → Kafka → S3)로 흘러간다.
+결제 정보를 읽어서 결제 후 1~14일 뒤에 리뷰를 단다(하루 약 1,000건).
+리뷰는 **S3 에 날짜(dt)별로 바로 쓴다.** RDS 에는 넣지 않는다(07:11 lemin 결정).
+상품·회원·결제 정보가 모두 S3 에 있으므로, 조인은 S3(레이크)에서 한다.
 
-지금(로컬 단계)은 RDS·결제 테이블이 아직 없어서 주문을 **로컬 JSONL 파일**에서 읽는다.
-읽는 부분은 OrderSource 하나로 모아 두었으므로, 나중에 RDS 가 생기면
+지금(로컬 단계)은 결제 데이터가 아직 없어서 주문을 **로컬 JSONL 파일**에서 읽는다.
+읽는 부분은 OrderSource 하나로 모아 두었으므로, 나중에 S3 결제 데이터를 읽을 때는
 같은 모양(load() → list[Order])의 클래스를 하나 만들어 run.py 에서 바꿔 끼우면 된다.
 
 주문 파일 형식 (.local/orders.jsonl, 한 줄에 주문 하나)
 ------------------------------------------------------
 {"order_id": "O-1a2b3c4d5e6f", "member_id": "C-9ba27683d5", "product_id": "W-0003",
  "paid_at": "2026-10-01T13:05:00+09:00"}
-- paid_at 은 시간대가 있는 ISO 시각이어야 한다(없으면 오류). DB 컬럼이 timestamptz 인 것과 맞춘다.
+- paid_at 은 시간대가 있는 ISO 시각이어야 한다(없으면 오류). 날짜 경계를 UTC 로 정확히 자르기 위해서다.
 - product_id 는 상품 목록(catalog.py)에 있는 ID 여야 한다. 없으면 그 주문은 건너뛰고 로그에 남긴다.
 - 가짜 주문 파일은 `rsim orders-fake` 로 만든다(fake_orders 함수).
 
-같은 주문은 언제 돌려도 같은 결과
---------------------------------
-"리뷰를 쓸지"와 "며칠 뒤에 쓸지"는 RANDOM_SEED 가 아니라 **order_id 만으로** 정한다.
-RANDOM_SEED 를 비워 두고(매번 새 시드) 매일 돌려도 주문마다 리뷰 날짜가 바뀌지 않아야
-"오늘 리뷰를 쓸 차례인 주문"을 매번 같은 기준으로 고를 수 있기 때문이다.
+같은 날짜는 언제 돌려도 같은 결과 (기록 조회가 필요 없는 이유)
+---------------------------------------------------------------
+"리뷰를 쓸지", "며칠 뒤에 쓸지", review_id 는 RANDOM_SEED 가 아니라 **order_id 만으로** 정한다.
+그래서 날짜 D 를 돌리면 "리뷰 시각이 D 하루 안에 떨어지는 주문"이 항상 같은 목록으로 나온다.
+결과를 dt=D 경로에 통째로 덮어쓰면, 같은 날짜를 몇 번 다시 돌려도 주문당 리뷰는 하나다.
+("이미 리뷰가 있는 주문"을 따로 조회할 필요가 없다. 리뷰 문장은 LLM 이라 다시 돌리면 달라질 수 있다)
 """
 
 from __future__ import annotations
@@ -63,13 +65,13 @@ class Order:
 
 
 class OrderSource(Protocol):
-    """주문을 읽어 오는 곳. 지금은 JsonlOrderSource 하나, 나중에 RDS 용을 추가한다."""
+    """주문을 읽어 오는 곳. 지금은 JsonlOrderSource 하나, 나중에 S3 결제 데이터용을 추가한다."""
 
     def load(self) -> list[Order]: ...
 
 
 class JsonlOrderSource:
-    """로컬 JSONL 파일에서 주문을 읽는다. (RDS 결제 테이블이 생기기 전까지 쓰는 임시 입력)"""
+    """로컬 JSONL 파일에서 주문을 읽는다. (결제 시뮬레이터가 S3 에 쌓기 전까지 쓰는 임시 입력)"""
 
     def __init__(self, path: Path):
         self.path = path
@@ -134,26 +136,32 @@ class ReviewTiming:
 def due_orders(
     orders: Iterable[Order],
     timing: ReviewTiming,
-    now: datetime,
-    reviewed: set[str],
+    start: datetime,
+    end: datetime,
 ) -> list[tuple[Order, datetime]]:
-    """지금 리뷰를 써야 할 주문들을 (주문, 리뷰 시각) 으로, 리뷰 시각이 빠른 순서로 돌려준다.
+    """리뷰 시각이 [start, end) 안에 떨어지는 주문을 (주문, 리뷰 시각) 으로, 리뷰 시각 순서로 돌려준다.
 
-    조건: 리뷰를 쓰는 주문이고, 리뷰 시각 ≤ now 이고, 아직 리뷰가 없는(reviewed 에 없는) 주문.
-    RDS 로 옮기면 같은 조건을 SQL 로 쓴다:
-      SELECT ... FROM orders o LEFT JOIN reviews r ON r.order_id = o.order_id
-      WHERE r.order_id IS NULL AND <리뷰 시각> <= now()
-    (텀은 order_id 로 정해지므로 시뮬레이터가 계산해서 거른다)
+    날짜 하나(dt=D)를 돌릴 때 start = D 00:00 UTC, end = 다음 날 00:00 UTC 다.
+    결제가 D-14 ~ D-1 일에 있었던 주문만 해당될 수 있으므로, 나중에 S3 결제 데이터를 읽을 때는
+    그 15일치 파티션만 읽으면 된다.
     """
     picked = []
     for order in orders:
-        if order.order_id in reviewed:
-            continue
         due = timing.due_at(order)
-        if due is not None and due <= now:
+        if due is not None and start <= due < end:
             picked.append((order, due))
     picked.sort(key=lambda x: (x[1], x[0].order_id))
     return picked
+
+
+def order_id_rng(order_id: str, purpose: str = "review-ids") -> random.Random:
+    """주문 모드에서 쓰는 주문별 난수 (order_id 로만 결정).
+
+    purpose="review-ids"   : review_id·event_id
+    purpose="review-attrs" : 구매 옵션·포토 여부 (options.py)
+    같은 날짜를 다시 돌려도 같은 주문이면 같은 값이 나와서, 덮어쓴 결과도 ID·옵션이 바뀌지 않는다.
+    """
+    return make_rng(derive_seed(ORDER_HASH_SALT, purpose, order_id))
 
 
 # ---------------------------------------------------------------- 가짜 주문 (rsim orders-fake)

@@ -8,7 +8,6 @@
 |---|---|
 | `schema/001_member.sql` | `member` 테이블 |
 | `schema/002_member_archive.sql` | `member_archive` 테이블 (`member` 참조) |
-| `schema/003_review.sql` | `reviews` 테이블 (리뷰 시뮬레이터가 씀) |
 
 파일 이름 순서대로 적용한다. 주문 테이블, 복제 슬롯·publication·Debezium 계정, 인덱스는 이후 브랜치에서 추가한다.
 
@@ -48,26 +47,6 @@
 | `phone` | `text` | NOT NULL |
 | `archived_at` | `timestamptz` | NOT NULL, `DEFAULT now()` |
 
-## `reviews`
-
-리뷰 시뮬레이터(`review-simulator/`)가 주문 기반 실행(`rsim run --source orders --sink postgres`)으로 쓴다.
-정답 라벨(속성·감성)은 넣지 않는다. `[임시]` 칸은 주문·상품 테이블이 생기면 참조로 바꾼다.
-
-| 컬럼 | 타입 | 제약 |
-|---|---|---|
-| `review_id` | `text` | PK |
-| `order_id` | `text` | NULL 허용, UNIQUE (주문 하나에 리뷰 하나) [임시: 이후 `orders` 참조] |
-| `member_id` | `text` | NOT NULL [임시: 시뮬레이터 값, `member.member_id`(uuid)와 아직 연결 안 함] |
-| `product_id` | `text` | NOT NULL [임시] |
-| `product_name` | `text` | NOT NULL [임시] |
-| `category` | `text` | NOT NULL [임시] |
-| `age_group` | `text` | NULL 허용 [임시] |
-| `rating` | `smallint` | NOT NULL, 1~5 |
-| `body` | `text` | NOT NULL (리뷰 본문) |
-| `source` | `text` | NOT NULL (`simulator`) |
-| `written_at` | `timestamptz` | NOT NULL (리뷰 작성 시각 = 결제 + 1~14일) |
-| `created_at` | `timestamptz` | NOT NULL, `DEFAULT now()` |
-
 ## 로컬에서 적용
 
 `simulator/docker-compose.yml`이 `db/schema/`를 `/docker-entrypoint-initdb.d`에 마운트하므로, **빈 볼륨으로 처음 시작할 때** DDL이 자동 적용된다.
@@ -77,7 +56,5 @@ cd simulator
 docker compose up -d
 docker compose exec postgres psql -U sim -d clothes -c '\d member'
 ```
-
-이미 볼륨이 있어 새 DDL만 넣으려면 그 파일만 적용한다: `docker compose exec -T postgres psql -U sim -d clothes < ../db/schema/003_review.sql`
 
 DDL을 고쳐 다시 적용하려면 볼륨을 지우고 다시 띄운다: `docker compose down -v && docker compose up -d`

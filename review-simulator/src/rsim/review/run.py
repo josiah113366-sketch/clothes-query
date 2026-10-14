@@ -17,14 +17,14 @@ rsim run --sink jsonl --start 2026-10-10T00:00:00+09:00 --reviews-per-hour 30 --
 # 5) 멈출 때까지 계속 생성 (ECS 에서 상시 실행할 때) — 초당 최대 0.5건
 rsim run --sink kafka --count 0 --max-rps 0.5
 
-주문 기반 실행 (--source orders, 2026-10-14 구상: 결제 후 1~14일 뒤 리뷰)
------------------------------------------------------------------------
-# 6) 가짜 주문 14일치(하루 1000건)를 만들고, 그중 리뷰 쓸 차례가 된 주문에만 리뷰를 단다
+주문 기반 실행 (--source orders, 2026-10-14 결정: 결제 후 1~14일 뒤 리뷰 → S3 에 날짜별로 저장)
+-------------------------------------------------------------------------------------------
+# 6) 가짜 주문 14일치(하루 1000건)를 만들고, 10월 8일(UTC) 하루에 리뷰 시각이 떨어지는 주문에 리뷰를 단다
+#    → .local/lake/reviews/dt=2026-10-08/part-00000.jsonl (정답은 reviews_truth/)
 rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
-rsim run --source orders --llm fake --sink jsonl --now 2026-10-15T00:00:00+09:00
+rsim run --source orders --llm fake --sink lake --date 2026-10-08
 
-# 7) 하루 뒤 다시 돌리면 그 사이 차례가 된 주문만 새로 만든다(이미 리뷰가 있는 주문은 건너뜀)
-rsim run --source orders --llm fake --sink jsonl --now 2026-10-16T00:00:00+09:00
+# 7) 같은 날짜를 다시 돌리면 그 날짜 파티션을 덮어쓴다(주문당 리뷰 하나). 다음 날은 --date 2026-10-09
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import logging
 import random
 import signal
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from rsim import SCHEMA_VERSION, TRUTH_SCHEMA_VERSION
@@ -42,10 +42,18 @@ from rsim.common.rng import derive_seed, make_rng, resolve_seed, seeded_uuid
 
 from .catalog import Catalog
 from .generator import PROMPT_VERSION, FakeGenerator, make_generator
-from .orders import JsonlOrderSource, ReviewTiming, catalog_rng, due_orders
+from .options import pick_options
+from .orders import (
+    JsonlOrderSource,
+    Order,
+    ReviewTiming,
+    catalog_rng,
+    due_orders,
+    order_id_rng,
+)
 from .scenario import ReviewSpec, ScenarioEngine, SimClock, load_incidents
 from .seeds import SeedPool
-from .sinks import JsonlSink, KafkaSink, PostgresSink, StdoutSink
+from .sinks import JsonlSink, KafkaSink, LakeSink, StdoutSink
 
 log = logging.getLogger("rsim")
 
@@ -55,7 +63,8 @@ def build_events(
     generated: dict,
     model_id: str,
     rng: random.Random,
-    order_id: str | None = None,
+    order: Order | None = None,
+    attr_rng: random.Random | None = None,
 ) -> tuple[dict, dict]:
     """명세 + 생성된 문장 → (리뷰 이벤트, 정답 이벤트) 두 개를 만든다.
 
@@ -74,8 +83,13 @@ def build_events(
 
     review_id·event_id 는 시드 고정 난수(rng)로 만든다. 같은 시드로 다시 돌리면 같은 ID 가 나오므로,
     이미 보낸 토픽에 다시 보낼 때는 RANDOM_SEED 를 바꾸거나 비워 둔다.
+    (주문 모드는 run() 이 order_id 로 만든 난수를 넘겨서, 같은 주문이면 항상 같은 ID 가 나온다)
+
+    order    : 주문 모드의 주문. 무작위 모드는 None → order_id·purchased_at 이 null
+    attr_rng : 구매 옵션·포토 여부용 난수(options.py). 없으면 rng 를 쓴다
     """
     p = spec.product
+    order_id = order.order_id if order else None
     review_id = f"R-{seeded_uuid(rng).hex[:12]}"
     created_at = spec.created_at.isoformat()
 
@@ -86,18 +100,25 @@ def build_events(
         "review_id": review_id,
         "created_at": created_at,
         # 어떤 주문의 리뷰인지. 주문 모드(--source orders)에서만 값이 있고, 무작위 모드는 null.
-        # 결제 이상탐지와 리뷰를 묶을 때, 그리고 "이미 리뷰가 달린 주문"을 거를 때 쓴다.
+        # 결제 데이터와 리뷰를 레이크에서 조인할 때 쓴다.
         "order_id": order_id,
         # [임시] 아래 3개는 나중에 order·상품 테이블에서 가져온다 (주문 모드에서는 product_id 가 주문 값)
         "product_id": p.product_id,
         "product_name": p.product_name,
         "category": p.category,
+        # [임시] 구매 옵션 사이즈·색상, 포토 리뷰 여부 (options.py, 2026-10-14 확정). 나중에 주문 데이터에서
+        **pick_options(p.category, attr_rng or rng),
         "member_id": spec.member_id,  # 주문 모드에서는 주문의 member_id
+        # 구매(결제) 시각. 주문 모드에서만 값이 있다 (2026-10-14 확정)
+        "purchased_at": order.paid_at.isoformat() if order else None,
         # [임시] 나중에 member 테이블에서 member_id 와 같이 가져온다
         "age_group": spec.age_group,
         "rating": spec.rating,
         "text": generated["text"],
         "source": "simulator",
+        # 실제로 내보낸 시각(UTC). 과거 날짜를 만들면 created_at 과 달라진다 (2026-10-14 확정).
+        # 실행할 때마다 바뀌는 유일한 칸이라, 재현성 비교는 이 칸을 빼고 한다.
+        "emitted_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
     }
 
     truth = {
@@ -130,46 +151,42 @@ def _order_specs(
     engine: ScenarioEngine,
     catalog: Catalog,
     settings,
-    sink,
     orders_path: Path,
-    now: datetime | None,
+    day: date,
     limit: int,
-) -> list[tuple[ReviewSpec, str]]:
-    """주문 모드: 리뷰를 쓸 차례가 된 주문을 골라 (명세, order_id) 목록을 만든다.
+) -> list[tuple[ReviewSpec, Order]]:
+    """주문 모드: 리뷰 시각이 날짜 day(UTC) 하루 안에 떨어지는 주문을 골라 (명세, 주문) 목록을 만든다.
 
-    1) 주문 파일을 읽는다 (나중에 RDS 결제 테이블로 바뀌는 부분)
-    2) 전송처에 이미 리뷰가 있는 주문을 뺀다 (sink.reviewed_order_ids)
-    3) 결제 시각 + 텀(1~14일) ≤ now 인 주문만 남긴다 (orders.due_orders)
-    4) 상품 목록에 없는 상품의 주문은 건너뛰고 건수만 로그에 남긴다
-    limit > 0 이면 리뷰 시각이 빠른 순서로 그 수만큼만 만든다.
+    1) 주문 파일을 읽는다 (나중에 S3 결제 데이터로 바뀌는 부분. 그때는 day-14 ~ day-1 파티션만 읽으면 된다)
+    2) 결제 시각 + 텀(1~14일)이 [day 00:00 UTC, 다음 날 00:00 UTC) 안인 주문만 남긴다 (orders.due_orders)
+    3) 상품 목록에 없는 상품의 주문은 건너뛰고 건수만 로그에 남긴다
+    limit > 0 이면 리뷰 시각이 빠른 순서로 그 수만큼만 만든다(--sink lake 면 그날 파티션에 그만큼만 남는다).
+    날짜는 UTC 기준이다. 레이크의 dt 파티션(Bronze = UTC)과 같은 경계로 잘라야 한 번 실행 = 파티션 하나가 된다.
     """
-    now = now or datetime.now(UTC)
-    if now.tzinfo is None:
-        raise SystemExit("--now 에는 시간대를 넣어 주세요 (예: 2026-10-15T00:00:00+09:00)")
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    end = start + timedelta(days=1)
     orders = JsonlOrderSource(orders_path).load()
-    reviewed = sink.reviewed_order_ids()
     timing = ReviewTiming(
         rate=settings.review_rate,
         min_days=settings.review_delay_min_days,
         max_days=settings.review_delay_max_days,
     )
-    due = due_orders(orders, timing, now, reviewed)
+    due = due_orders(orders, timing, start, end)
 
-    todo: list[tuple[ReviewSpec, str]] = []
+    todo: list[tuple[ReviewSpec, Order]] = []
     unknown = 0
     for order, due_at in due:
         product = catalog.by_id.get(order.product_id)
         if product is None:
             unknown += 1
             continue
-        todo.append((engine.spec_for_order(product, due_at, order.member_id), order.order_id))
+        todo.append((engine.spec_for_order(product, due_at, order.member_id), order))
         if limit and len(todo) >= limit:
             break
     log.info(
-        "주문 %d건 중 이미 리뷰 있음 %d건, 지금(%s) 리뷰 쓸 차례 %d건, 이번에 만들 %d건",
+        "주문 %d건 중 dt=%s(UTC)에 리뷰 시각이 있는 주문 %d건, 이번에 만들 %d건",
         len(orders),
-        len(reviewed),
-        now.isoformat(),
+        day.isoformat(),
         len(due),
         len(todo),
     )
@@ -186,11 +203,9 @@ def make_sink(kind: str, settings, out_path: Path):
             settings.kafka_truth_topic,
             settings.kafka_partitions,
         )
-    if kind == "postgres":
-        # 리뷰는 reviews 테이블, 정답은 --out 옆 <이름>_truth.jsonl (DB 에 정답 라벨을 넣지 않는다)
-        return PostgresSink(
-            settings.database_url, out_path.with_name(out_path.stem + "_truth" + out_path.suffix)
-        )
+    if kind == "lake":
+        # S3 레이크 경로 구조 (지금은 로컬 폴더 LAKE_ROOT). dt 파티션을 덮어쓴다
+        return LakeSink(settings.lake_root)
     if kind == "jsonl":
         # 정답은 같은 폴더의 <이름>_truth.jsonl 에 따로 저장 (예: reviews.jsonl / reviews_truth.jsonl)
         return JsonlSink(out_path, out_path.with_name(out_path.stem + "_truth" + out_path.suffix))
@@ -209,14 +224,14 @@ def run(
     out: Path = Path(".local/out/reviews.jsonl"),
     batch_size: int | None = None,
     orders_path: Path | None = None,
-    now: datetime | None = None,
+    day: date | None = None,
 ) -> int:
     """리뷰를 만들어 전송한다. 반환: 전송한 리뷰 수. 인자 설명은 cli.py 의 rsim run 도움말과 같다.
 
     source
       random : 가상 시계 + 무작위 상품으로 리뷰를 만든다 (예전 방식). count 기본 10, 0 이면 계속.
-      orders : 주문 파일에서 "결제 후 텀이 지났고 아직 리뷰가 없는 주문"을 골라 리뷰를 만든다.
-               count 기본 0 = 차례가 된 주문 전부. 리뷰 시각은 주문마다 정해진 시각(결제 + 1~14일).
+      orders : 주문 파일에서 "리뷰 시각(결제 + 1~14일)이 날짜 day(UTC) 안인 주문"을 골라 리뷰를 만든다.
+               day 기본 = 어제(UTC, 다 끝난 마지막 하루). count 기본 0 = 그날 주문 전부.
     """
     settings = load_settings()
     batch_size = batch_size or settings.batch_size
@@ -224,6 +239,8 @@ def run(
     # 용도별로 난수열을 나눈다. 시드 표본·상품·명세·ID 가 서로의 난수 소비에 영향을 주지 않게.
     rng = make_rng(derive_seed(seed, "review"))
     id_rng = make_rng(derive_seed(seed, "ids"))
+    # 구매 옵션·포토 여부용 (2026-10-14 추가). 따로 나눠서 기존 명세·ID 순서가 바뀌지 않게 한다
+    attr_rng = make_rng(derive_seed(seed, "attrs"))
 
     # ---- 준비: 시드 → 상품 → 이상 상황 → 명세 엔진 → 생성기 → 전송처
     seeds = SeedPool.load(settings.seeds_path, rng)
@@ -253,15 +270,16 @@ def run(
 
     # ---- 만들 명세 목록 정하기
     # random : 필요할 때마다 engine.next_spec() 으로 하나씩 만든다 (todo = None)
-    # orders : 차례가 된 주문을 미리 골라 (명세, order_id) 목록으로 만들어 둔다
-    todo: list[tuple[ReviewSpec, str]] | None = None
+    # orders : 그날 주문을 미리 골라 (명세, 주문) 목록으로 만들어 둔다
+    todo: list[tuple[ReviewSpec, Order]] | None = None
     if source == "orders":
+        day = day or (datetime.now(UTC) - timedelta(days=1)).date()
         todo = _order_specs(
-            engine, catalog, settings, sink, orders_path or settings.orders_path, now, count or 0
+            engine, catalog, settings, orders_path or settings.orders_path, day, count or 0
         )
         count = len(todo)
         if count == 0:
-            log.info("리뷰를 쓸 차례가 된 주문이 없습니다")
+            log.info("이 날짜에 리뷰를 쓸 주문이 없습니다")
             sink.close()
             return 0
     elif count is None:
@@ -292,13 +310,19 @@ def run(
             specs = [spec for spec, _ in batch]
             results = generator.generate(specs)
 
-            for spec, order_id in batch:
+            for spec, order in batch:
                 gen = results.get(spec.spec_id)
                 if not gen or not gen.get("text"):
                     # 생성 실패/검수 탈락한 명세는 버린다 (다음 배치에서 새 명세로 채워짐)
                     skipped += 1
                     continue
-                review, truth = build_events(spec, gen, generator.model_id, id_rng, order_id)
+                # 주문 모드는 ID·옵션을 order_id 로 정한다(같은 날짜를 다시 돌려도 같은 값)
+                if order:
+                    ids = order_id_rng(order.order_id)
+                    attrs = order_id_rng(order.order_id, "review-attrs")
+                else:
+                    ids, attrs = id_rng, attr_rng
+                review, truth = build_events(spec, gen, generator.model_id, ids, order, attrs)
                 sink.send(review, truth)
                 produced += 1
 
