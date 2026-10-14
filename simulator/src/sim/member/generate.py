@@ -28,12 +28,22 @@ def random_signup_at(rng: SimRandom) -> datetime:
     return params.SIGNUP_START + timedelta(seconds=rng.randrange(_SIGNUP_SECONDS))
 
 
+def format_phone(number: int) -> str:
+    """0~99,999,999를 010-XXXX-XXXX로 바꾼다. 베이스라인과 신규 가입이 같은 형식을 쓴다."""
+    return f"010-{number // 10_000:04d}-{number % 10_000:04d}"
+
+
+def draw_phone(rng: SimRandom) -> str:
+    """무작위 전화번호 하나. 다른 회원과 겹치는지는 확인하지 않는다 (DB UNIQUE가 막는다)."""
+    return format_phone(rng.randrange(params.PHONE_SPACE))
+
+
 def allocate_phones(rng: SimRandom, count: int) -> list[str]:
     """중복 없는 010 번호 count개."""
     if not 0 <= count <= params.PHONE_SPACE:
         raise ValueError("전화번호를 배정할 수 없는 인원입니다.")
     numbers = rng.random.sample(range(params.PHONE_SPACE), count)
-    return [f"010-{n // 10_000:04d}-{n % 10_000:04d}" for n in numbers]
+    return [format_phone(n) for n in numbers]
 
 
 def _random_birth_date(rng: SimRandom, year: int) -> date:

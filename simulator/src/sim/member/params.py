@@ -63,3 +63,14 @@ PROGRESS_EVERY = 10_000
 SIGMA_LIMIT = 5.0
 
 EMAIL_DOMAIN = "example.com"
+
+# live(신규 가입): 값은 모두 바꿀 수 있는 파라미터다
+NORMAL_DAILY_SIGNUPS = 1500  # 평상시 하루 평균 (설계 제안 범위 1,000~2,000)
+SURGE_MULTIPLIER = 4.6  # 폭주 모드일 때 평상시 대비 배율
+DEFAULT_SPEED = 1  # 시간 배속 (1 = 실시간)
+BASELINE_END = SIGNUP_END  # 이 시각 이후의 가입이 신규 가입이다
+CONTROL_POLL_SECONDS = 1.0  # 제어 신호 확인 주기 (실제 시간)
+PHONE_RETRY_LIMIT = 10  # 전화번호 중복 시 새 번호로 다시 시도하는 최대 횟수
+RECONNECT_MAX_WAIT_SECONDS = 30  # 재연결 대기 한계 (1, 2, 4, ... 초로 늘다가 여기서 멈춤)
+LIVE_PROGRESS_SECONDS = 10  # 진행 출력 주기 (실제 시간)
+SECONDS_PER_DAY = 86_400
