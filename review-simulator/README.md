@@ -81,7 +81,7 @@ pytest
 
 2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고, **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
 RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있으니 조인은 레이크(Athena 등)에서 한다.
-**지금은 로컬 기준이다:** 주문은 로컬 파일, 레이크는 같은 경로 구조의 로컬 폴더(`.local/lake`).
+**주문은 지금 로컬 파일이다.** 레이크는 기본이 로컬 폴더(`.local/lake`)이고, `LAKE_ROOT` 에 `s3://` 경로를 주면 S3 에 쓴다.
 
 - 주문은 `.local/orders.jsonl` 에서 읽는다(`ORDERS_PATH`). 결제 데이터가 생기기 전에는 `rsim orders-fake` 로 만든다.
 - 주문마다 리뷰를 쓸지(`REVIEW_RATE`), 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`), review_id, 구매 옵션은
@@ -105,6 +105,19 @@ rsim run --source orders --llm fake --sink lake --date 2026-10-08
 rsim run --source orders --llm fake --sink lake --date 2026-10-09
 ```
 
+### 팀 S3 버킷에 쓰기
+
+`.env` 에 레이크 경로를 넣으면 같은 명령이 S3 에 쓴다(버킷 이름은 공개 저장소에 넣지 않고 `.env` 에만 둔다).
+
+```
+LAKE_ROOT=s3://<버킷이름>/bronze          # → s3://<버킷이름>/bronze/reviews/dt=YYYY-MM-DD/part-00000.jsonl
+LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze)에 섞지 않는다. S3 에 두려면 bronze 밖의 경로
+```
+
+- AWS 자격 증명은 boto3 기본 방식(`aws configure sso`, 환경변수, ECS 태스크 역할)을 쓴다. Bedrock API 키와는 별개다.
+- 필요한 권한: 그 접두사에 대한 `s3:PutObject`. 같은 날짜를 다시 돌리면 같은 키로 덮어쓴다.
+- S3 저장 테스트는 가짜 S3(`moto`)로 돈다. 실제 AWS 를 부르지 않는다.
+
 ## 자주 바꿀 곳
 
 | 바꾸고 싶은 것 | 위치 |
@@ -119,7 +132,7 @@ rsim run --source orders --llm fake --sink lake --date 2026-10-09
 | 불만 급증 상황 | `data/incidents.json` (형식은 `data/incidents.example.json`) |
 | 주문 중 리뷰 비율, 결제 후 리뷰까지 기간 | `.env` 의 `REVIEW_RATE`, `REVIEW_DELAY_MIN_DAYS`, `REVIEW_DELAY_MAX_DAYS` |
 | 사이즈·색상 분포, 포토 리뷰 비율 | `src/rsim/review/options.py` 상단 상수 |
-| 레이크 저장 위치 | `.env` 의 `LAKE_ROOT` |
+| 레이크 저장 위치 (로컬 또는 S3) | `.env` 의 `LAKE_ROOT`, `LAKE_TRUTH_ROOT` |
 
 ## Kafka 메시지 (토픽 2개)
 

@@ -35,7 +35,7 @@ RDS 에는 넣지 않는다(2026-10-14 lemin 결정). 지금은 로컬 파일 �
 ## 개발 환경과 명령
 
 - Python 3.12, 로컬 Kafka 는 Docker Compose 다.
-- 의존성: 실행용 `confluent-kafka`, `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`. Bedrock SDK 는 쓰지 않는다.
+- 의존성: 실행용 `boto3`(S3 저장만), `confluent-kafka`, `python-dotenv`, `typer` / 개발용 `moto[s3]`, `pytest`, `ruff`. Bedrock 호출에는 SDK 를 쓰지 않는다.
 
 ```bash
 cd review-simulator

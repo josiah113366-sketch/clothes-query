@@ -85,9 +85,12 @@ class Settings:
     kafka_partitions: int = field(default_factory=lambda: int(_env("KAFKA_PARTITIONS", "3")))
 
     # ---------------------------------------------------------------- 레이크 (--sink lake)
-    # 리뷰를 날짜(dt)별로 쓰는 S3 레이크 경로 (2026-10-14 결정: 리뷰는 S3 에 바로 쓴다).
-    # 지금은 로컬 폴더(같은 경로 구조). s3://버킷/접두사 는 아직 지원하지 않는다(sinks.LakeSink).
+    # 리뷰를 날짜(dt)별로 쓰는 레이크 경로 (2026-10-14 결정: 리뷰는 S3 에 바로 쓴다).
+    # 로컬 폴더 또는 s3://버킷/접두사. 팀 버킷은 s3://<버킷>/bronze 로 주면 bronze/reviews/dt=.../ 에 쓴다.
+    # 버킷 이름은 공개 저장소에 넣지 않고 .env 에만 둔다. 기본값은 로컬 폴더(Bedrock·AWS 없이 시험).
     lake_root: str = field(default_factory=lambda: _env("LAKE_ROOT", ".local/lake"))
+    # 정답(reviews_truth) 저장 경로. 운영 레이크(bronze)에 정답 라벨을 섞지 않으려고 따로 둔다. 기본은 로컬.
+    lake_truth_root: str = field(default_factory=lambda: _env("LAKE_TRUTH_ROOT", ".local/lake"))
 
     # ---------------------------------------------------------------- 데이터 파일
     # rsim seeds 가 만든 시드(말투 예시) 파일. AI Hub 원문이 들어 있어서 .local/ 에만 두고 커밋하지 않는다.

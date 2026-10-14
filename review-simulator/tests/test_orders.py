@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from rsim.cli import app
@@ -115,3 +116,35 @@ def test_run_from_orders_by_date_to_lake(workdir) -> None:
     assert {k: [t["review_id"] for t in v] for k, v in truth.items()} == {
         k: [r["review_id"] for r in v] for k, v in parts.items()
     }
+
+
+def test_lake_sink_writes_s3_with_fake_bucket(monkeypatch) -> None:
+    # moto 의 가짜 S3 로 확인한다(실제 AWS 호출 없음). 같은 날짜를 두 번 써도 객체 하나로 덮어써진다
+    boto3 = pytest.importorskip("boto3")
+    moto = pytest.importorskip("moto")
+    from rsim.review.sinks import LakeSink
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    # .env 에 AWS_PROFILE= 빈 값이 남아 있어도 멈추지 않아야 한다 (2026-10-14 ProfileNotFound)
+    monkeypatch.setenv("AWS_PROFILE", "")
+    with moto.mock_aws():
+        LakeSink("s3://test-lake/bronze", ".", "ap-northeast-1")._client()
+        s3 = boto3.client("s3", region_name="ap-northeast-1")
+        s3.create_bucket(
+            Bucket="test-lake",
+            CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"},
+        )
+        review = {"review_id": "R-1", "created_at": "2026-10-08T23:30:00+09:00", "text": "좋아요"}
+        for _ in range(2):
+            sink = LakeSink("s3://test-lake/bronze", "s3://test-lake/sim-truth", "ap-northeast-1")
+            sink.send(review, {"review_id": "R-1"})
+            sink.close()
+        keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket="test-lake")["Contents"])
+        # KST 10월 8일 23:30 = UTC 10월 8일 14:30 → dt=2026-10-08
+        assert keys == [
+            "bronze/reviews/dt=2026-10-08/part-00000.jsonl",
+            "sim-truth/reviews_truth/dt=2026-10-08/part-00000.jsonl",
+        ]
+        body = s3.get_object(Bucket="test-lake", Key=keys[0])["Body"].read().decode("utf-8")
+        assert [json.loads(x)["review_id"] for x in body.splitlines()] == ["R-1"]

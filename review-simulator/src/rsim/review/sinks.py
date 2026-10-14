@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,25 +61,33 @@ class JsonlSink:
 
 
 class LakeSink:
-    """S3 레이크와 같은 경로 구조로 저장한다. 날짜(dt) 파티션 하나 = 파일 하나.
+    """S3 레이크 경로 구조로 저장한다. 날짜(dt) 파티션 하나 = 파일 하나.
 
-      <root>/reviews/dt=2026-10-08/part-00000.jsonl        리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
-      <root>/reviews_truth/dt=2026-10-08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
+      <root>/reviews/dt=2026-10-08/part-00000.jsonl              리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
+      <truth_root>/reviews_truth/dt=2026-10-08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
 
+    예) LAKE_ROOT=s3://<버킷>/bronze
+        → s3://<버킷>/bronze/reviews/dt=2026-10-08/part-00000.jsonl (2026-10-14 lemin 결정, 버킷 이름은 .env 에만)
+        LAKE_TRUTH_ROOT 기본값은 로컬 .local/lake 다. 정답 라벨은 실제 운영 데이터에 없는 값이라
+        운영 레이크(bronze)에 섞지 않는다. 정답도 S3 에 두려면 bronze 가 아닌 별도 경로를 준다.
+
+    - root 는 로컬 폴더 또는 s3://버킷/접두사. S3 는 boto3 의 기본 자격 증명(aws configure sso, 환경변수,
+      ECS 태스크 역할 등)을 쓴다. Bedrock API 키와는 별개다.
     - dt 는 리뷰 작성 시각(created_at)을 **UTC 로 바꾼 날짜**다. 팀 규칙(Bronze 는 UTC, Silver 부터 KST)에 맞춘다.
-    - close() 에서 이번 실행이 만든 dt 파티션을 **통째로 덮어쓴다**(임시 파일에 쓴 뒤 이름 바꾸기).
+    - close() 에서 이번 실행이 만든 dt 파티션 파일을 **통째로 덮어쓴다**.
+      (로컬: 임시 파일에 쓴 뒤 이름 바꾸기, S3: 같은 키로 put_object = 객체 전체 교체)
       주문 모드는 날짜 하나를 돌리므로, 같은 날짜를 다시 돌려도 주문당 리뷰가 하나만 남는다.
       무작위 모드로 같은 날짜에 다시 쓰면 그 날짜의 예전 리뷰가 지워지니 주의한다.
     - 하루 약 1,000건이라 메모리에 모았다가 한 번에 쓴다.
-    - root 가 s3:// 로 시작하면 아직 지원하지 않는다고 멈춘다. 나중에 같은 경로 규칙으로 S3 업로드만 추가하면 된다.
     """
 
-    def __init__(self, root: str):
-        if root.startswith("s3://"):
-            raise SystemExit(
-                "S3 직접 저장은 아직 만들지 않았습니다. 지금은 로컬 폴더(LAKE_ROOT=.local/lake)만 씁니다."
-            )
-        self.root = Path(root)
+    FILE_NAME = "part-00000.jsonl"
+
+    def __init__(self, root: str, truth_root: str, region: str | None = None):
+        self.root = root.rstrip("/")
+        self.truth_root = truth_root.rstrip("/")
+        self.region = region
+        self._s3 = None  # S3 클라이언트는 처음 쓸 때 만든다 (로컬만 쓸 때 boto3 가 없어도 되게)
         # dt → (리뷰 줄 목록, 정답 줄 목록)
         self.parts: dict[str, tuple[list[str], list[str]]] = {}
 
@@ -90,8 +99,10 @@ class LakeSink:
             t = t.replace(tzinfo=UTC)
         return t.astimezone(UTC).date().isoformat()
 
-    def path(self, table: str, dt: str) -> Path:
-        return self.root / table / f"dt={dt}" / "part-00000.jsonl"
+    def path(self, table: str, dt: str) -> str:
+        """파티션 파일 위치 (로컬 경로 또는 s3:// URI)."""
+        root = self.truth_root if table == "reviews_truth" else self.root
+        return f"{root}/{table}/dt={dt}/{self.FILE_NAME}"
 
     def send(self, review: dict, truth: dict) -> None:
         reviews, truths = self.parts.setdefault(self.dt_of(review), ([], []))
@@ -101,12 +112,38 @@ class LakeSink:
     def close(self) -> None:
         for dt, (reviews, truths) in sorted(self.parts.items()):
             for table, lines in (("reviews", reviews), ("reviews_truth", truths)):
-                target = self.path(table, dt)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_suffix(".tmp")
-                tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                tmp.replace(target)  # 덮어쓰기 (쓰다가 멈춰도 예전 파일이 깨지지 않게)
+                self._write(self.path(table, dt), "\n".join(lines) + "\n")
             log.info("저장: dt=%s 리뷰 %d건 → %s", dt, len(reviews), self.path("reviews", dt))
+
+    def _write(self, target: str, body: str) -> None:
+        if target.startswith("s3://"):
+            bucket, _, key = target[len("s3://") :].partition("/")
+            self._client().put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=body.encode("utf-8"),
+                ContentType="application/x-ndjson",
+            )
+            return
+        path = Path(target)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(body, encoding="utf-8")
+        tmp.replace(path)  # 덮어쓰기 (쓰다가 멈춰도 예전 파일이 깨지지 않게)
+
+    def _client(self):
+        if self._s3 is None:
+            try:
+                import boto3
+            except ImportError:
+                raise SystemExit("S3 에 쓰려면 boto3 가 필요합니다: pip install -e .") from None
+            # .env 에 AWS_PROFILE= 처럼 빈 값이 있으면 boto3 가 이름 없는 프로필을 찾다가
+            # ProfileNotFound 로 멈춘다. 빈 값이면 지워서 기본 자격 증명(aws login/sso 의 default)을 쓰게 한다.
+            for name in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+                if name in os.environ and not os.environ[name].strip():
+                    del os.environ[name]
+            self._s3 = boto3.client("s3", region_name=self.region)
+        return self._s3
 
 
 class KafkaSink:

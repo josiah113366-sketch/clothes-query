@@ -205,7 +205,7 @@ def make_sink(kind: str, settings, out_path: Path):
         )
     if kind == "lake":
         # S3 레이크 경로 구조 (지금은 로컬 폴더 LAKE_ROOT). dt 파티션을 덮어쓴다
-        return LakeSink(settings.lake_root)
+        return LakeSink(settings.lake_root, settings.lake_truth_root, settings.aws_region)
     if kind == "jsonl":
         # 정답은 같은 폴더의 <이름>_truth.jsonl 에 따로 저장 (예: reviews.jsonl / reviews_truth.jsonl)
         return JsonlSink(out_path, out_path.with_name(out_path.stem + "_truth" + out_path.suffix))
