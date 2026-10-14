@@ -4,6 +4,9 @@ output "app_subnet_ids" { value = [for s in aws_subnet.app : s.id] }
 output "db_subnet_ids" { value = [for s in aws_subnet.db : s.id] }
 output "availability_zones" { value = [for s in values(var.subnets) : s.az] }
 output "s3_endpoint_id" { value = aws_vpc_endpoint.s3.id }
-
-output "workload_az" { value = var.workload_az }
-output "workload_subnet_ids" { value = [for k, s in aws_subnet.app : s.id if var.subnets[k].az == var.workload_az] }
+output "s3_endpoint_actions" {
+  value = toset(concat(
+    ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"],
+    tolist(var.additional_s3_endpoint_actions)
+  ))
+}

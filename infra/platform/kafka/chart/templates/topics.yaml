@@ -1,0 +1,37 @@
+{{- if .Values.kafka.enabled }}
+{{- range .Values.topics }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ default .name .resourceName }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.kafka.name }}
+spec:
+  topicName: {{ .name | quote }}
+  partitions: {{ .partitions }}
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: {{ .retentionMs }}
+    cleanup.policy: delete
+{{- end }}
+{{- if .Values.connect.enabled }}
+{{- range $suffix := list "configs" "offsets" "status" }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ $.Values.connect.name }}-{{ $suffix }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.kafka.name }}
+spec:
+  topicName: {{ printf "%s-%s" $.Values.connect.name $suffix | quote }}
+  partitions: 1
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    cleanup.policy: compact
+{{- end }}
+{{- end }}
+{{- end }}

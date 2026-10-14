@@ -7,3 +7,11 @@ instance_class = "REPLACE_WITH_APPROVED_INSTANCE_CLASS"
 allocated_storage = 20
 max_allocated_storage = 100
 database_name = "clothes"
+
+# Optional: enable only after DB/CDC budgets and reboot timing are approved.
+# Test fixture sizes are not production or measured sizing defaults.
+# logical_replication = {
+#   max_replication_slots     = REPLACE_WITH_APPROVED_SLOT_COUNT
+#   max_wal_senders           = REPLACE_WITH_APPROVED_SENDER_COUNT
+#   max_slot_wal_keep_size_mb = REPLACE_WITH_APPROVED_FINITE_WAL_BUDGET
+# }

@@ -1,0 +1,31 @@
+# Selected JMX MBeans only. Based on the Strimzi 1.3.0 metric model.
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+includeObjectNames:
+  - kafka.server:type=ReplicaManager,*
+  - kafka.controller:type=KafkaController,*
+  - kafka.server:type=raft-metrics
+  - kafka.server:type=BrokerTopicMetrics,*
+  - kafka.log:type=Log,name=Size,*
+rules:
+  - pattern: 'kafka.server<type=ReplicaManager, name=(UnderReplicatedPartitions|UnderMinIsrPartitionCount|OfflineReplicaCount)><>Value'
+    name: kafka_server_replicamanager_$1
+    type: GAUGE
+  - pattern: 'kafka.controller<type=KafkaController, name=ActiveControllerCount><>Value'
+    name: kafka_controller_active_controller_count
+    type: GAUGE
+  - pattern: 'kafka.controller<type=KafkaController, name=OfflinePartitionsCount><>Value'
+    name: kafka_controller_offline_partitions_count
+    type: GAUGE
+  - pattern: 'kafka.server<type=raft-metrics><>(current-leader|commit-latency-avg|election-latency-avg|high-watermark|log-end-offset)'
+    name: kafka_raft_$1
+    type: GAUGE
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec|MessagesInPerSec)><>Count'
+    name: kafka_server_brokertopicmetrics_$1_total
+    type: COUNTER
+  - pattern: 'kafka.log<type=Log, name=Size, topic=(.+), partition=(.+)><>Value'
+    name: kafka_log_size_bytes
+    type: GAUGE
+    labels:
+      topic: "$1"
+      partition: "$2"

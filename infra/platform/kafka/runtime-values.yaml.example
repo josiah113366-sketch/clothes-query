@@ -1,0 +1,20 @@
+# Rendering example ONLY: values are not measured sizing or a deployment decision.
+# Copy to ignored runtime.local.yaml and replace all example contracts.
+kafka:
+  enabled: true
+  storageGi: 100
+  retentionHours: 24
+  clientNamespaces: [example-consumer]
+topics:
+  - name: example-orders
+    partitions: 3
+    retentionMs: 86400000
+clients:
+  - name: example-consumer
+    produceTopics: []
+    consumeTopics: [example-orders]
+    consumerGroups: [example-consumer]
+connect:
+  enabled: false
+  image: ""
+  produceTopics: [example-orders]

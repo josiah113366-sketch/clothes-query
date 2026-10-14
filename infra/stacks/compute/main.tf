@@ -10,8 +10,8 @@ module "compute" {
   source                     = "../../modules/compute"
   name                       = "clothes-query-dev-compute"
   node_role_name             = data.terraform_remote_state.eks.outputs.node_role_name
-  app_subnet_ids             = data.terraform_remote_state.network.outputs.workload_subnet_ids
-  availability_zones         = [data.terraform_remote_state.network.outputs.workload_az]
+  app_subnet_ids             = data.terraform_remote_state.network.outputs.app_subnet_ids
+  availability_zones         = data.terraform_remote_state.network.outputs.availability_zones
   cluster_security_group_id  = data.terraform_remote_state.eks.outputs.cluster_security_group_id
   instance_types             = var.instance_types
   node_pool_cpu_limit        = var.node_pool_cpu_limit

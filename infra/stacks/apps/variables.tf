@@ -59,8 +59,8 @@ variable "certificate_arn" {
   default  = null
   nullable = true
   validation {
-    condition     = !var.deploy_workloads || var.certificate_arn != null
-    error_message = "Provide an ACM certificate before enabling HTTPS workloads."
+    condition     = !var.deploy_workloads || try(length(trimspace(var.certificate_arn)) > 0, false)
+    error_message = "Provide a non-blank ACM certificate ARN before enabling HTTPS workloads."
   }
 }
 
@@ -69,8 +69,8 @@ variable "hostname" {
   default  = null
   nullable = true
   validation {
-    condition     = !var.deploy_workloads || try(length(var.hostname) > 0, false)
-    error_message = "Provide the application DNS hostname before enabling workloads."
+    condition     = !var.deploy_workloads || try(length(trimspace(var.hostname)) > 0, false)
+    error_message = "Provide a non-blank application DNS hostname before enabling workloads."
   }
 }
 

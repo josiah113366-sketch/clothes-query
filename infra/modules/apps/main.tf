@@ -146,7 +146,7 @@ resource "kubernetes_deployment_v1" "this" {
         automount_service_account_token = each.key == "was"
         topology_spread_constraint {
           max_skew           = 1
-          min_domains        = 1
+          min_domains        = 2
           topology_key       = "topology.kubernetes.io/zone"
           when_unsatisfiable = "DoNotSchedule"
           label_selector { match_labels = { app = each.key } }
@@ -257,7 +257,7 @@ resource "kubernetes_deployment_v1" "was" {
         automount_service_account_token = each.key == "was"
         topology_spread_constraint {
           max_skew           = 1
-          min_domains        = 1
+          min_domains        = 2
           topology_key       = "topology.kubernetes.io/zone"
           when_unsatisfiable = "DoNotSchedule"
           label_selector { match_labels = { app = each.key } }

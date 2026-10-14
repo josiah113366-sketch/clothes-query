@@ -1,6 +1,10 @@
-> **현재 구성(2026-10-14):** 이전 HA 결정을 변경했다. 워커·앱·RDS는 ap-northeast-1a 한 AZ, NAT 1개, RDS Single-AZ다. AWS 서비스 요구사항 때문에 두 AZ의 서브넷은 유지한다. WEB 2개/WAS HPA 2~3개는 유지한다. 아래의 이전 HA 설명보다 infra/SINGLE_AZ.md의 최신 결정을 우선한다.
+> **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
 
 # Network 배포 전 검토
+
+## 최종 사용자 정정 후 재확인 (2026-10-14)
+
+RDS만 Single-AZ로 두고 network/EKS는 두 AZ를 유지하도록 정정했다. 통합 코드로 실제 network plan을 재실행하여 **23개 생성, 변경 0, 삭제 0, 교체 없음**을 확인했다. NAT/EIP는 a/c 각각 1개씩 총 2개, subnet 6개다. `network-two-az-review.tfplan`은 Git 제외 파일로 저장했고 apply하지 않았다. 아래 NAT 1개·21개 생성 검토는 폐기된 중간 기록이며 해당 저장 plan은 사용하지 않는다. 최종 배포 시점에는 다시 plan을 생성한다.
 
 ## 최신 검토: NAT 1개 구성 (2026-10-14)
 

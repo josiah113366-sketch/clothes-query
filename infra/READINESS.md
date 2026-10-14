@@ -1,4 +1,4 @@
-> **현재 구성(2026-10-14):** 이전 HA 결정을 변경했다. 워커·앱·RDS는 ap-northeast-1a 한 AZ, NAT 1개, RDS Single-AZ다. AWS 서비스 요구사항 때문에 두 AZ의 서브넷은 유지한다. WEB 2개/WAS HPA 2~3개는 유지한다. 아래의 이전 HA 설명보다 infra/SINGLE_AZ.md의 최신 결정을 우선한다.
+> **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
 
 # 배포 준비 현황
 
@@ -6,11 +6,11 @@
 
 ## 확정 및 검증한 범위
 
-- 도쿄, 두 AZ, AZ별 NAT, private app/DB subnet, PostgreSQL Multi-AZ.
+- 도쿄, 두 AZ, AZ별 NAT 1개, private app/DB subnet, PostgreSQL Single-AZ. 서비스 요구사항 때문에 두 AZ subnet은 유지한다.
 - EKS Auto Mode 1.36, custom NodePool 8 vCPU/32 GiB, On-Demand.
 - WEB 2개, WAS HPA 2~3개·CPU 70%·축소 안정화 300초. [조절 방법](SCALING.md).
 - ECR 두 저장소만 배포했다. S3 state 저장 및 후속 무변경 plan을 확인했다.
-- network 최신 실제 plan(2026-10-14)은 NAT 1개 기준 21개 생성, 변경·삭제 없음이다. 아직 배포하지 않았다. 이전 23개 생성 계획은 대체되었으며 최종 배포 시 plan을 다시 만든다.
+- network 최종 실제 plan(2026-10-14)은 NAT 2개 기준 23개 생성, 변경·삭제 없음이다. 이전 NAT 1개 plan은 폐기된 중간 검토이며 apply하지 않았다.
 - 로컬 검증은 실제 클러스터의 CRD, 지표 수집, 스케줄링, 통신 성공을 보장하지 않는다.
 
 ## 남은 입력과 결정

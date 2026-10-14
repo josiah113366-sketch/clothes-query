@@ -5,8 +5,8 @@ variable "cluster_security_group_id" { type = string }
 variable "availability_zones" {
   type = list(string)
   validation {
-    condition     = length(distinct(var.availability_zones)) == 1
-    error_message = "Provide the single approved workload availability zone."
+    condition     = length(distinct(var.availability_zones)) == 2
+    error_message = "Provide the two approved availability zones."
   }
 }
 

@@ -26,5 +26,6 @@ module "rds" {
   allocated_storage          = var.allocated_storage
   max_allocated_storage      = var.max_allocated_storage
   database_name              = var.database_name
-  availability_zone          = data.terraform_remote_state.network.outputs.workload_az
+  availability_zone          = var.database_availability_zone
+  logical_replication        = var.logical_replication
 }

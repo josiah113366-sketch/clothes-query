@@ -1,6 +1,6 @@
-> **현재 구성(2026-10-14):** 이전 HA 결정을 변경했다. 워커·앱·RDS는 ap-northeast-1a 한 AZ, NAT 1개, RDS Single-AZ다. AWS 서비스 요구사항 때문에 두 AZ의 서브넷은 유지한다. WEB 2개/WAS HPA 2~3개는 유지한다. 아래의 이전 HA 설명보다 infra/SINGLE_AZ.md의 최신 결정을 우선한다.
+> **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
 
-# 고가용성 Terraform 구현 및 실행 안내
+# 두 AZ 인프라와 Single-AZ RDS 실행 안내
 
 상태: 코드 작성 및 로컬 검증 완료 · ECR만 사용자 요청으로 실배포 검증 완료 · 2026-10-13
 
@@ -17,7 +17,7 @@
 
 ## 이번에 확정한 사항
 
-사용자가 EKS Auto Mode와 고가용성을 선택했다. 도쿄/PostgreSQL을 유지하며 두 AZ 각각 NAT, private app/db subnet, Multi-AZ RDS, WEB/WAS 두 replica의 AZ 분산을 구현했다. 현재 브랜치는 사용자가 만든 `infra/analysis`를 유지한다. 원격 main은 작성 시작 시 로컬 기준 커밋 bbe9fae와 동일함을 확인했다.
+사용자의 정정에 따라 RDS만 Single-AZ이며 VPC·EKS는 두 AZ 구성을 유지한다. PostgreSQL 16.15, WEB 2개·WAS HPA 2~3개와 노드 풀 8 vCPU/32GiB는 유지한다. DB 크기는 보류다. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
 
 기존 Terraform은 bootstrap뿐이고 사용자는 다른 팀원 환경에 배포되어 있을 것으로 설명했다. **기배포 여부와 소유 state는 아직 확인되지 않았다.** bootstrap은 변경하지 않았다. 실제 AWS에 추가 리소스가 있다면 이 코드를 바로 plan/apply하지 말고 소유 state/주소를 먼저 대조한다.
 
@@ -25,10 +25,10 @@
 
 `bootstrap 확인 → network → eks → compute → rds → apps`. storage와 ecr은 bootstrap 확인 후 독립적으로 준비할 수 있다. apps는 eks/compute/rds/storage의 remote state를 읽는다. EKS와 Kubernetes provider는 별도 state다. 기존 platform 역할을 앱 배포로 바꾸지 않았다. 현재 사용자 지시로 실제 생성 테스트는 마지막 준비 단계까지 보류한다.
 
-- network: 2 AZ, 각 AZ NAT, public/app/db 분리, app S3 Gateway Endpoint. DB에 인터넷 기본 경로 없음.
+- network: 두 AZ에 각각 NAT 1개, public/app/db 분리, app S3 Gateway Endpoint. DB에 인터넷 기본 경로 없음.
 - eks: Kubernetes 1.36 Auto Mode, 기본 NodePool 비활성화, custom node EC2 access entry/AutoNodePolicy, 명시적 관리자 access entry, API CIDR 제한, 30일 로그.
-- compute: custom NodeClass/NodePool, 두 app subnet·cluster SG 명시, m6i.large/m7i.large On-Demand, 8 vCPU/32GiB 한도, 10분 consolidation 대기. 시스템과 앱이 공유한다.
-- rds: PostgreSQL, Multi-AZ, 암호화, 백업 7일, 삭제 보호, master password는 RDS가 Secrets Manager에서 관리.
+- compute: custom NodeClass/NodePool, 두 AZ의 app subnet·cluster SG 명시, m6i.large/m7i.large On-Demand, 8 vCPU/32GiB 한도, 10분 consolidation 대기. 시스템과 앱이 공유한다.
+- rds: PostgreSQL 16.15, Single-AZ, 암호화, 백업 7일, 삭제 보호, master password는 RDS가 Secrets Manager에서 관리.
 - storage: 업무 데이터 S3, 버저닝/SSE-S3/공개 차단/TLS 강제. bootstrap 버킷과 별개.
 - ecr: WEB/WAS 저장소, immutable tag, 이미지 자동 삭제 없음.
 - apps: Pod Identity로 지정 S3 prefix만 Get/Put/List, WEB/WAS Service와 Deployment, PDB 및 Auto Mode ALB.
@@ -80,11 +80,11 @@ terraform plan -input=false -var-file=deployment.local.tfvars
 
 S3 권한에는 삭제를 넣지 않았다. bronze/silver/gold 전체 권한을 WAS에 자동 부여하지 않고 `s3_prefix`만 허용한다. 테스트 객체 정리가 필요하면 담당자의 승인된 경로로 정리한다. ConfigMap 변경은 checksum으로 rollout을 유도하지만 외부 Secret 변경은 별도 rollout/회전 처리가 필요하다.
 
-## 고가용성 및 비용 한계
+## 가용성 및 비용 한계
 
-AZ별 NAT는 1개 구성보다 NAT 시간/EIP 비용이 추가되고, Multi-AZ RDS는 Single-AZ보다 비용이 높다. 앱 replicas와 분산 조건은 두 AZ의 노드 용량을 요구한다. 승인된 초기 NodePool 한도는 8 vCPU/32GiB이며 고정 노드 수나 엄격한 요금 상한을 뜻하지 않는다. Generator 부하에 따른 Pod 수/자원과 풀 한도 변경은 [증설·축소 가이드](SCALING.md)를 따른다. WAS HPA(2~3개, CPU 70%, 축소 안정화 300초)와 Metrics Server를 코드로 준비했다. 실제 생성은 마지막에 진행한다.
+NAT/EIP는 각각 2개이며 RDS standby는 없다. DB AZ 장애 시 자동 standby 전환은 제공하지 않는다. Kafka의 두 AZ 배치도 모든 AZ 장애에 대한 quorum 보장을 뜻하지 않는다. 실제 생성은 마지막에 진행한다.
 
-기존 분석의 월 $200~400은 NAT 1개·Single-AZ 개발 가정이므로 이번 HA 구성에 적용할 수 없다. 노드/DB 사양·시간·LCU·전송량이 정해지면 도쿄 단가로 새 견적을 내야 한다. EKS 지원 버전은 STANDARD로 설정해 연장 지원 요금 대신 버전 수명주기 관리가 필요하다.
+기존 월 비용은 참고 추정치다. 노드/DB 사양·시간·Kafka 디스크·LCU·전송량이 정해지면 새 견적을 내야 한다. EKS 지원 버전은 STANDARD로 설정했다.
 
 - [EKS/Auto Mode 가격](https://aws.amazon.com/eks/pricing/)
 - [VPC/NAT 가격](https://aws.amazon.com/vpc/pricing/)

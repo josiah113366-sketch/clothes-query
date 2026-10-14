@@ -1,3 +1,5 @@
+> **후속 결정:** 사용자가 통합을 승인했고 RDS만 Single-AZ로 정정했다. VPC·EKS/Kafka는 두 AZ를 유지하므로 아래 P1 배치 충돌은 더 이상 해당하지 않는다. 토픽 이름 충돌과 CDC 테스트는 통합 코드에서 수정했다. [통합 기록](../../tasks/infra-integration-single-az.md)을 따른다.
+
 # infra/local-ready 병합 검토
 
 2026-10-14. 대상 `origin/infra/local-ready@84080d8`, 현재 `infra/analysis@7cdd4d5`와 이 작업 폴더의 미커밋 단일 AZ 변경을 함께 비교했다. 실제 병합·AWS 배포·이미지 push는 하지 않는다.

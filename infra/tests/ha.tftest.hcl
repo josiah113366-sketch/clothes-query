@@ -4,7 +4,7 @@ mock_provider "aws" {
     defaults = { names = ["ap-northeast-1a", "ap-northeast-1c"] }
   }
 }
-run "network_single_workload_az" {
+run "network_ha" {
   command = plan
   module { source = "../modules/network" }
   override_resource {
@@ -27,8 +27,8 @@ run "network_single_workload_az" {
     }
   }
   assert {
-    condition     = length(aws_nat_gateway.this) == 1 && length(aws_route_table.app) == 2
-    error_message = "One NAT must serve both subnet route tables."
+    condition     = length(aws_nat_gateway.this) == 2 && length(aws_route_table.app) == 2
+    error_message = "Each AZ must have its own NAT and app route table."
   }
   assert {
     condition     = aws_vpc_endpoint.s3.vpc_endpoint_type == "Gateway" && length(aws_vpc_endpoint.s3.route_table_ids) == 2
@@ -37,6 +37,10 @@ run "network_single_workload_az" {
   assert {
     condition     = alltrue([for s in aws_subnet.app : !s.map_public_ip_on_launch]) && alltrue([for s in aws_subnet.db : !s.map_public_ip_on_launch])
     error_message = "App and DB subnets must not assign public IPv4 addresses."
+  }
+  assert {
+    condition     = output.s3_endpoint_actions == toset(["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"])
+    error_message = "Existing network defaults must not broaden endpoint transport permissions."
   }
 }
 run "reject_overlapping_subnets" {
@@ -57,10 +61,9 @@ run "reject_wrong_region_az" {
   command = plan
   module { source = "../modules/network" }
   variables {
-    workload_az = "us-east-2a"
-    name        = "test-region"
-    region      = "ap-northeast-1"
-    vpc_cidr    = "10.70.0.0/16"
+    name     = "test-region"
+    region   = "ap-northeast-1"
+    vpc_cidr = "10.70.0.0/16"
     subnets = {
       a = { az = "us-east-2a", public_cidr = "10.70.0.0/24", app_cidr = "10.70.16.0/20", db_cidr = "10.70.64.0/24" }
       c = { az = "us-east-2c", public_cidr = "10.70.1.0/24", app_cidr = "10.70.32.0/20", db_cidr = "10.70.65.0/24" }

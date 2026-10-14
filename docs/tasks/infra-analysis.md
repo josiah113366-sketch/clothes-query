@@ -46,3 +46,6 @@ HPA 추가로 달라진 기초 배포 안내를 수정하고 [배포 준비 현�
 
 ## 단일 AZ 변경 (2026-10-14)
 사용자 승인으로 워커·앱·RDS를 ap-northeast-1a로 모으고 NAT를 1개로 줄였다. AWS 제약으로 EKS/ALB/RDS subnet group의 두 AZ subnet은 유지한다. RDS Single-AZ, Pod zone spread min_domains=1로 변경했다. WEB 2개·WAS HPA 2~3개는 유지한다. DB 크기는 미정이며 micro Single-AZ + 20 GiB는 월 730시간 기준 21.01 USD다. mock plan 16개 통과, 실제 생성 없음. 이전 network plan은 사용하지 않고 최종 배포 때 다시 생성한다.
+
+## 최종 사용자 정정
+전체 단일 AZ는 오해였으며 RDS만 Single-AZ로 유지한다. VPC·EKS는 두 AZ, NAT 2개, 앱/Kafka 두 AZ 분산으로 복원했다. infra/integration-rds-single-az에서 local-ready 통합을 이어간다. DB 크기는 보류, 실제 생성은 마지막이다.

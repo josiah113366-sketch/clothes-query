@@ -3,9 +3,9 @@ mock_provider "kubernetes" {}
 variables {
   name                      = "test-compute"
   node_role_name            = "test-node-role"
-  app_subnet_ids            = ["subnet-test-a"]
+  app_subnet_ids            = ["subnet-test-a", "subnet-test-c"]
   cluster_security_group_id = "sg-test-cluster"
-  availability_zones        = ["ap-northeast-1a"]
+  availability_zones        = ["ap-northeast-1a", "ap-northeast-1c"]
 }
 
 run "bounded_on_demand_pool" {
@@ -20,12 +20,8 @@ run "bounded_on_demand_pool" {
     error_message = "The pool must explicitly prohibit Spot capacity."
   }
   assert {
-    condition     = kubernetes_manifest.node_class.manifest.spec.securityGroupSelectorTerms[0].id == "sg-test-cluster" && length(kubernetes_manifest.node_class.manifest.spec.subnetSelectorTerms) == 1
-    error_message = "Custom nodes must preserve the RDS-approved SG and the single workload subnet."
-  }
-  assert {
-    condition     = contains([for r in kubernetes_manifest.node_pool.manifest.spec.template.spec.requirements : jsonencode(r)], jsonencode({ key = "topology.kubernetes.io/zone", operator = "In", values = ["ap-northeast-1a"] }))
-    error_message = "Worker nodes must remain in the single workload AZ."
+    condition     = kubernetes_manifest.node_class.manifest.spec.securityGroupSelectorTerms[0].id == "sg-test-cluster" && length(kubernetes_manifest.node_class.manifest.spec.subnetSelectorTerms) == 2
+    error_message = "Custom nodes must preserve the RDS-approved SG and both app subnets."
   }
   assert {
     condition     = kubernetes_manifest.node_pool.manifest.spec.disruption.consolidationPolicy == "WhenEmptyOrUnderutilized" && kubernetes_manifest.node_pool.manifest.spec.disruption.consolidateAfter == "10m"

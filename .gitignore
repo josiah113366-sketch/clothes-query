@@ -235,3 +235,4 @@ infra/**/*.local.tfvars
 infra/**/*.local.tfvars.json
 infra/**/*.backend.hcl
 infra/**/terraform.tfstate.d/
+infra/**/*.local.yaml
