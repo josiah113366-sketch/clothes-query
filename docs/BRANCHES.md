@@ -19,7 +19,8 @@
 | `sim` | `simulator/` | 거래·회원 시뮬레이터 | 사용 중 |
 | `docs` | `docs/` | 설계 문서, 작업 지시서, 이 문서 | 사용 중 |
 | `conn` | `connectors/` | Debezium·Kafka 설정, Bronze 적재 | 시작 전 |
-| `review` | `review/` | 리뷰 시뮬레이터, 리뷰 AI 분석 | 시작 전 |
+| `review-sim` | `review-simulator/` | 리뷰 시뮬레이터 | 시작 전 |
+| `review-model` | `review-analysis/` | 리뷰 분석 모델 학습 | 시작 전 |
 | `silver` | `pipelines/silver/` | Bronze → Silver Spark 잡 | 시작 전 |
 | `gold-a` | `pipelines/gold_a/` | Gold A(대시보드용) 잡 | 시작 전 |
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
@@ -66,4 +67,4 @@ gitGraph
 | `docs/branch-rules` | - | 진행 중 | |
 
 ### 그 밖의 영역
-`infra`, `db`, `conn`, `review`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+`infra`, `db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
