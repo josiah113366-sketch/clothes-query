@@ -8,7 +8,8 @@ kafka:
   replicas: 3
   storageClass: clothes-query-kafka-gp3
   storageGi: null
-  retentionHours: null
+  # Approved starting retention: 24 hours. Topic-level retention can override this.
+  retentionHours: 24
   nodePool: clothes-query-dev-compute
   resources:
     requests: {cpu: "500m", memory: "2Gi"}

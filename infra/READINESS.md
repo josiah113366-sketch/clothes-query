@@ -21,10 +21,11 @@
 | 공통 | expected_account_id, state_bucket 및 backend 입력 | 실제 값은 Git 제외 파일에만 보관 |
 | eks | 전용 관리자 역할, trust 대상, 접근할 공인 IPv4 CIDR | 코드 및 현재 사용자·현재 PC용 비공개 입력 준비 완료. 팀원은 추후 추가. 실제 생성·접속 검증은 마지막에 진행. [접속 준비](EKS_ACCESS.md) |
 | rds | PostgreSQL 16.15, 인스턴스 사양, 초기/최대 저장량 | 16.15·Single-AZ 유지. 사용자 요청으로 인스턴스 크기 결정 보류, 저장량 미확정 |
-| storage | 전역 고유 업무 데이터 버킷 이름 | 미정. state 버킷과 별개 |
-| apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | prefix 예시는 application/. 최종 plan에서 버전 검토 |
-| apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 미준비. 실제 앱 구현은 별도 작업 |
-| HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 미정 |
+| storage | 전역 고유 업무 데이터 버킷 이름 | 우선 후보 clothes-query-datalake. 전역 이름 가용성은 생성 시 확인. state 버킷과 별개 |
+| apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 사용자 요청으로 내부 경로 구조 결정 보류. 현재 코드의 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
+| apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 사용자 요청으로 앱 준비 보류. 현재 저장소에 WEB/WAS 소스 없음. 실제 rollout·HPA 부하 검증은 앱 준비 이후 |
+| HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 사용자 요청으로 도메인·HTTPS 결정 보류. 실제 인증서 요청·DNS 변경은 수행하지 않음 |
+| Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | broker 기본 보관 24시간 결정·코드 반영. 디스크·업무 토픽·CDC 예산은 미정. 예제의 100Gi는 확정값이 아님 |
 | 부하 테스트 | 목표 RPS, p95, 오류율, DB 연결 예산 | 미정. 현재 DB 직접 쓰기 제네레이터로 WAS HPA를 검증할 수 없음 |
 
 RDS 사양은 고가용성 여부와 별개다. 작은 사양으로도 Multi-AZ를 선택할 수 있지만 처리량은 실측해야 한다. HPA가 늘리는 것은 WAS Pod이며 RDS 사양·저장량을 줄이는 기능은 없다. [시작 사양·비용 검토](../docs/design/infra/rds-sizing.md)를 참고한다.

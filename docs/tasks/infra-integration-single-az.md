@@ -28,4 +28,8 @@
 
 ## 후속 EKS 관리자 준비 (2026-10-14)
 
+후속 Kafka 결정: 메시지 보관 기간은 24시간으로 시작한다. broker 기본 `retentionHours=24`를 반영하고 업무 토픽 예제의 `retentionMs=86400000`을 구분해 표시했다. 실제 업무 토픽은 아직 만들지 않았으며 디스크·토픽/partition·CDC slot/WAL 예산은 미정이다. Connect 내부 토픽의 compact 정책은 유지한다. Kafka 기본 비활성·실제 생성 마지막 원칙도 유지한다.
+
+후속 결정: 업무 버킷 이름은 `clothes-query-datalake`를 우선 후보로 두고 내부 경로 구조는 나중에 결정한다. application/bronze/silver/gold는 제안이었으며 승인된 경로가 아니다. apps 입력 예제도 미정 placeholder로 바꿨다. WEB/WAS 앱 준비와 도메인·HTTPS도 사용자 요청으로 보류했다. 다음 인프라 항목인 Kafka/CDC는 먼저 메시지 보관 기간을 결정하며, 디스크·토픽·복제 슬롯 예산을 예제 값으로 임의 확정하지 않는다.
+
 사용자가 전용 관리자 역할을 선택했고 현재 사용자·현재 PC만 먼저 허용하며 팀원 추가는 나중에 하기로 했다. EKS 모듈에 명시적 trust 목록을 가진 전용 역할과 해당 클러스터 DescribeCluster 권한, 관리자 access entry 연결을 준비했다. compute/apps의 Kubernetes token도 이 역할을 사용한다. 실제 ARN/IP는 Git 제외 EKS 입력에만 저장했고 역할 이름이 현재 사용되지 않음을 읽기 전용 확인했다. 팀원 목록 확장과 잘못된 trust/CIDR 거부를 포함한 mock plan 6개 및 eks/compute/apps validate를 통과했다. 실제 생성·역할 assume·kubectl 검증은 미실행이다. [접속 준비](../../infra/EKS_ACCESS.md)를 따른다.

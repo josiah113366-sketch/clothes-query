@@ -92,6 +92,9 @@ def main():
         lint = run("lint", ROOT / "chart", "--strict", "--namespace", "kafka")
         assert lint.returncode == 0, lint.stdout + lint.stderr
         assert render() == []
+        retention_defaults = render({"kafka": {"enabled": True, "storageGi": 100}})
+        default_broker = next(d["spec"]["kafka"] for d in retention_defaults if d["kind"] == "Kafka")
+        assert default_broker["config"]["log.retention.hours"] == 24
         base = {"kafka": {"enabled": True, "storageGi": 100, "retentionHours": 24},
                 "topics": [{"name": "example-orders", "partitions": 3, "retentionMs": 86400000}],
                 "clients": [{"name": "example-reader", "produceTopics": [],
@@ -159,7 +162,7 @@ def main():
 
         negatives = [
             ({"kafka": {"enabled": True}}, "kafka.storageGi is required"),
-            ({"kafka": {"enabled": True, "storageGi": 100}}, "kafka.retentionHours is required"),
+            ({"kafka": {"enabled": True, "storageGi": 100, "retentionHours": None}}, "kafka.retentionHours is required"),
             ({"connect": {"enabled": True}}, "connect requires kafka.enabled"),
             ({"kafka": {"replicas": 1}}, "replicas"),
             ({"kafka": {"storageGi": -1}}, "storageGi"),

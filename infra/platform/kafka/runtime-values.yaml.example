@@ -1,4 +1,5 @@
-# Rendering example ONLY: values are not measured sizing or a deployment decision.
+# Rendering example: storage/topics/partitions are NOT approved deployment sizing.
+# Only the initial 24-hour retention is approved.
 # Copy to ignored runtime.local.yaml and replace all example contracts.
 kafka:
   enabled: true
@@ -8,6 +9,7 @@ kafka:
 topics:
   - name: example-orders
     partitions: 3
+    # 24 hours for delete-policy business topics; confirm each real topic contract.
     retentionMs: 86400000
 clients:
   - name: example-consumer
