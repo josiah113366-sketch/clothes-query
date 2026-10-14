@@ -37,7 +37,7 @@ def baseline(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="DB에 쓰지 않고 생성만 한다")] = False,
     yes: Annotated[bool, typer.Option("--yes", help="확인 질문을 건너뛴다")] = False,
 ) -> None:
-    """회원을 만들어 member 테이블에 한 번에 적재한다."""
+    """회원을 만들어 members 테이블에 한 번에 적재한다."""
     try:
         config = load_config(require_database=not dry_run)
         regions = load_regions(config.region_file)
