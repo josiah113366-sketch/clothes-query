@@ -1,5 +1,7 @@
 # infra
 
+현재 통합 브랜치는 `infra/ready`다. `infra/analysis`와 `infra/local-ready`의 이력을 포함하며 [업로드·정리 기록](../docs/tasks/infra-ready.md)을 따른다.
+
 현재 배치: **VPC·EKS 두 AZ, NAT 2개, RDS만 Single-AZ**. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
 
 clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별도 Helm release로 준비한다. 리전은 `ap-northeast-1`(도쿄).
