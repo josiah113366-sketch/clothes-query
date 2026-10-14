@@ -229,3 +229,6 @@ crash.*.log
 
 # Simulator
 simulator/.local/
+
+# Review simulator: 시드(AI Hub 원문), 생성 리뷰, 벤치 결과는 커밋하지 않는다
+review-simulator/.local/

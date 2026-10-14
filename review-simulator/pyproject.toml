@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clothes-query-review-simulator"
+version = "0.1.0"
+requires-python = ">=3.12"
+# Bedrock 호출은 표준 라이브러리(urllib)로 해서 SDK(anthropic/boto3)가 필요 없다.
+dependencies = [
+    "confluent-kafka",
+    "python-dotenv",
+    "typer",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+rsim = "rsim.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# 모델 단가표(벤치마크 비용 계산용)
+"rsim.bench" = ["prices.json"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
