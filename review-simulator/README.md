@@ -19,7 +19,7 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 
 ## 의존하는 것
 
-- Python 3.12, Docker (로컬 Kafka + kafka-ui, 로컬 Postgres 는 `simulator/docker-compose.yml`)
+- Python 3.12, Docker (로컬 Kafka + kafka-ui. 레이크 저장만 쓰면 Docker 없이 돈다)
 - Amazon Bedrock API 키 (`.env` 의 `AWS_BEARER_TOKEN_BEDROCK`, 도쿄 리전). `--llm fake` 는 키 없이 돈다
 - 말투 예시 원본: 같은 PC 의 `review-analysis` 폴더 (합성 리뷰, AI Hub 데이터). 저장소에는 없다
 
@@ -36,7 +36,8 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 | `src/rsim/review/generator.py` | 생성 프롬프트(`PROMPT_VERSION`), 검수 루프, 가짜 생성기 |
 | `src/rsim/review/verifier.py` | 검수 프롬프트(`VERIFIER_PROMPT_VERSION`), 명세 비교, 정답 라벨 합치기 |
 | `src/rsim/review/bedrock.py` | Bedrock Converse 호출 (표준 라이브러리, SDK 없음) |
-| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~14일 텀, 가짜 주문 만들기 |
+| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~14일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
+| `src/rsim/review/options.py` | 구매 옵션(사이즈·색상)과 포토 리뷰 여부 |
 | `src/rsim/review/sinks.py`, `run.py` | Kafka / 콘솔 / 파일 전송, 실행 흐름 |
 | `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 검수 모델 정확도 측정 |
 | `src/rsim/seeds_prep.py` | 말투 예시 파일 `.local/seeds.jsonl` 만들기 |
@@ -76,41 +77,33 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-## 주문 기반 실행 (결제 후 1~14일 뒤 리뷰)
+## 주문 기반 실행 (결제 후 1~14일 뒤 리뷰 → S3 날짜별 경로)
 
-확정한 구상(2026-10-14): 결제 시뮬레이터가 RDS 에 쌓은 결제를 읽고, 결제 후 1~14일이 지난 주문에 리뷰를 단다.
-리뷰는 RDS `reviews` 테이블에 쓰고 RDS → CDC → Kafka → S3 로 흘린다. **지금은 RDS 가 없어서 로컬 기준으로 돈다.**
+2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고, **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
+RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있으니 조인은 레이크(Athena 등)에서 한다.
+**지금은 로컬 기준이다:** 주문은 로컬 파일, 레이크는 같은 경로 구조의 로컬 폴더(`.local/lake`).
 
-- 주문은 로컬 파일 `.local/orders.jsonl` 에서 읽는다(`ORDERS_PATH`). 결제 시뮬레이터가 생기기 전에는 `rsim orders-fake` 로 만든다.
-- 주문마다 리뷰를 쓸지(`REVIEW_RATE`)와 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`)는
-  **order_id 로만** 정해진다. RANDOM_SEED 가 바뀌어도 같은 주문의 리뷰 날짜는 같다.
-- `rsim run --source orders` 는 `결제 시각 + 텀 ≤ --now` 이고 아직 리뷰가 없는 주문만 만든다. 리뷰 시각(`created_at`)은 그 주문의 리뷰 시각이다.
-- 리뷰는 **로컬 Postgres 의 `reviews` 테이블**에 넣는다(`--sink postgres`, 2026-10-14 lemin 결정). 회원 시뮬레이터와 같은 DB 다.
-  정답 라벨은 DB 에 넣지 않고 `.local/out/reviews_truth.jsonl` 에 쓴다. 나중에 `DATABASE_URL` 만 RDS 로 바꾼다.
-- "아직 리뷰가 없는지"는 `reviews` 테이블의 `order_id` 로 판단한다(같은 주문은 UNIQUE 라 두 번 들어가지 않는다).
-  `--sink jsonl` 은 리뷰 파일의 `order_id` 로 같은 판단을 한다. stdout·kafka 는 보낸 기록을 몰라서 차례가 된 주문을 매번 전부 보낸다.
-- 리뷰 생성이 실패한 주문은 리뷰가 없으므로 다음 실행에서 다시 골라진다.
+- 주문은 `.local/orders.jsonl` 에서 읽는다(`ORDERS_PATH`). 결제 데이터가 생기기 전에는 `rsim orders-fake` 로 만든다.
+- 주문마다 리뷰를 쓸지(`REVIEW_RATE`), 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`), review_id, 구매 옵션은
+  **order_id 로만** 정해진다. RANDOM_SEED 가 바뀌어도 같은 주문이면 같은 값이다.
+- `rsim run --source orders --date D` 는 리뷰 시각이 **D 하루(UTC)** 안에 떨어지는 주문만 만든다. `--date` 를 빼면 어제(UTC)다.
+- `--sink lake` 는 `<LAKE_ROOT>/reviews/dt=D/part-00000.jsonl`(리뷰)과 `reviews_truth/dt=D/`(정답)에 쓰고,
+  **그 날짜 파티션을 통째로 덮어쓴다.** 그래서 "이미 리뷰가 있는 주문"을 조회할 필요 없이, 같은 날짜를 다시 돌려도 주문당 리뷰는 하나다.
+- dt 는 UTC 날짜다(팀 규칙: Bronze 는 UTC, Silver 부터 KST). 하루 배치는 UTC 0시(KST 오전 9시) 이후에 전날을 돌린다.
+- 생성이 실패해서 버린 리뷰는 그 파티션에서 빠진다. 다시 채우려면 그 날짜를 다시 돌린다(그날 리뷰 문장은 새로 만들어진다).
+- 나중에 S3 결제 데이터를 읽을 때는 D-14 ~ D-1 결제 파티션만 읽으면 된다(`orders.due_orders` 설명 참고).
 
 ```powershell
-# 로컬 Postgres 띄우기 (simulator 폴더의 compose. 빈 볼륨으로 처음 띄울 때 db\schema\*.sql 이 자동 적용된다)
-cd ..\simulator; docker compose up -d; cd ..\review-simulator
-# 이미 볼륨이 있어서 reviews 테이블이 없으면 한 번만 직접 적용
-Get-Content ..\db\schema\003_review.sql | docker compose -f ..\simulator\docker-compose.yml exec -T postgres psql -U sim -d clothes
-
 # 가짜 주문 14일치 (하루 평균 1000건, Bedrock 호출 없음)
 rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
 
-# 10월 8일 0시 기준으로 차례가 된 주문에 리뷰 (가짜 문장, 0원) → reviews 테이블
-rsim run --source orders --llm fake --sink postgres --now 2026-10-08T00:00:00+09:00
+# 10월 8일(UTC)에 리뷰 시각이 있는 주문에 리뷰 (가짜 문장, 0원)
+#   → .local\lake\reviews\dt=2026-10-08\part-00000.jsonl, .local\lake\reviews_truth\dt=2026-10-08\...
+rsim run --source orders --llm fake --sink lake --date 2026-10-08
 
-# 하루 뒤 기준으로 다시 돌리면 그 사이 차례가 된 주문만 추가된다
-rsim run --source orders --llm fake --sink postgres --now 2026-10-09T00:00:00+09:00
-
-# 확인
-docker compose -f ..\simulator\docker-compose.yml exec postgres psql -U sim -d clothes -c "select count(*) from reviews"
+# 다음 날
+rsim run --source orders --llm fake --sink lake --date 2026-10-09
 ```
-
-Postgres 통합 테스트는 `TEST_DATABASE_URL` 이 있을 때만 돈다(`tests/test_postgres_sink.py`, 임시 스키마를 만들고 지운다).
 
 ## 자주 바꿀 곳
 
@@ -125,17 +118,19 @@ Postgres 통합 테스트는 `TEST_DATABASE_URL` 이 있을 때만 돈다(`tests
 | 검수 기준 | `src/rsim/review/verifier.py` 의 `VERIFIER_SYSTEM_PROMPT`, `BLOCKING_KINDS` |
 | 불만 급증 상황 | `data/incidents.json` (형식은 `data/incidents.example.json`) |
 | 주문 중 리뷰 비율, 결제 후 리뷰까지 기간 | `.env` 의 `REVIEW_RATE`, `REVIEW_DELAY_MIN_DAYS`, `REVIEW_DELAY_MAX_DAYS` |
+| 사이즈·색상 분포, 포토 리뷰 비율 | `src/rsim/review/options.py` 상단 상수 |
+| 레이크 저장 위치 | `.env` 의 `LAKE_ROOT` |
 
 ## Kafka 메시지 (토픽 2개)
 
 리뷰와 정답을 **다른 토픽**으로 보낸다. 운영 파이프라인은 실제처럼 라벨 없는 리뷰만 보고,
 학습·채점은 정답 토픽을 따로 소비한다. 두 토픽은 `review_id` 로 이어 붙인다. 컬럼 설명은 `docs/review-columns.md`.
 
-- `reviews.raw` (키 `product_id`, 스키마 `review.v1`): 실제 쇼핑몰 리뷰와 같은 모양. 정답 라벨 없음
-- `reviews.truth` (키 `review_id`, 스키마 `review_truth.v1`): 본문 + 정답 라벨(`aspects`, 각 원소의 `source` 가
+- `reviews.raw` (키 `product_id`, 스키마 `review.v2`): 실제 쇼핑몰 리뷰와 같은 모양. 정답 라벨 없음
+- `reviews.truth` (키 `review_id`, 스키마 `review_truth.v2`): 본문 + 정답 라벨(`aspects`, 각 원소의 `source` 가
   `spec` 또는 `verifier`) + `spec_aspects` + `incident_id` + 생성 조건. `KAFKA_TRUTH_TOPIC=none` 이면 보내지 않는다
 - `--sink jsonl` 이면 `reviews.jsonl` / `reviews_truth.jsonl` 두 파일로 저장한다
-- `--sink postgres` 이면 리뷰는 `reviews` 테이블(`db/schema/003_review.sql`, `created_at`→`written_at`, `text`→`body`), 정답은 `reviews_truth.jsonl`
+- `--sink lake` 이면 `<LAKE_ROOT>/reviews/dt=YYYY-MM-DD/`, `<LAKE_ROOT>/reviews_truth/dt=YYYY-MM-DD/` 에 날짜별로 저장한다(위 주문 기반 실행 참고)
 
 product_id, product_name, category, member_id, age_group 은 임시 값이다. 나중에 order·member 테이블에서 가져온다.
 주문 모드(`--source orders`)에서는 `order_id`, `member_id`, `product_id` 가 주문 파일 값이고, 무작위 모드에서는 `order_id` 가 null 이다.

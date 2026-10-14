@@ -44,16 +44,20 @@ ruff, pytest, Docker, `.env.example`, `CLAUDE.md`, `README.md`)으로 맞춘다.
 CLI(가짜 생성기 → jsonl, 재현성, 키 없을 때 멈춤, bench 는 `--yes` 없이 호출 안 함). Bedrock·Kafka 를 부르지 않는다.
 
 ### 4. 주문 기반 리뷰 (2026-10-14 lemin 요청, 로컬 기준)
-확정한 구상: 결제 시뮬레이터의 결제를 RDS 에서 읽어 결제 후 1~14일 뒤 리뷰를 만들고, 리뷰는 RDS `reviews` 테이블에 쓴 뒤
-RDS → CDC → Kafka → S3 로 흘린다(하루 약 1,000건). RDS·결제 테이블이 아직 없어서 이번에는 로컬 기준으로 만든다.
-- `src/rsim/review/orders.py`: 주문 읽기(`JsonlOrderSource`, 나중에 RDS 용으로 교체), 주문별 리뷰 여부·텀(`ReviewTiming`,
-  order_id 로만 결정), 차례가 된 주문 고르기(`due_orders`), 가짜 주문(`fake_orders`)
+결정: 결제 정보를 읽어 결제 후 1~14일 뒤 리뷰를 만들고(하루 약 1,000건), **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
+RDS 에는 넣지 않는다(조인은 레이크에서). 한때 로컬 Postgres `reviews` 테이블로 만들었다가 같은 날 이 결정으로 걷어냈다.
+결제 데이터·S3 가 아직 없어서 주문은 로컬 파일, 레이크는 같은 경로 구조의 로컬 폴더로 만든다.
+- `src/rsim/review/orders.py`: 주문 읽기(`JsonlOrderSource`, 나중에 S3 결제 데이터용으로 교체), 주문별 리뷰 여부·텀(`ReviewTiming`),
+  날짜 하루에 떨어지는 주문 고르기(`due_orders`), 가짜 주문(`fake_orders`). 리뷰 여부·텀·review_id·옵션은 order_id 로만 정한다.
 - `rsim orders-fake`: 가짜 주문 파일 `.local/orders.jsonl`
-- `rsim run --source orders [--now 시각]`: 차례가 되었고 아직 리뷰가 없는 주문에만 리뷰. 리뷰·정답 이벤트에 `order_id` 추가
-- 설정: `ORDERS_PATH`, `REVIEW_RATE`(기본 1.0, 주문 중 리뷰 비율), `REVIEW_DELAY_MIN_DAYS`/`MAX_DAYS`(1/14)
-- 리뷰 저장처: 로컬 Postgres `reviews` 테이블(2026-10-14 lemin 결정). `db/schema/003_review.sql`, `rsim run --sink postgres`(`DATABASE_URL`).
-  정답 라벨은 DB 에 넣지 않고 `.local/out/reviews_truth.jsonl` 에 쓴다. 이미 리뷰가 있는 주문은 테이블의 order_id(UNIQUE)로 거른다.
-  Postgres 통합 테스트(`tests/test_postgres_sink.py`)는 `TEST_DATABASE_URL` 이 있을 때만 돈다.
+- `rsim run --source orders --date D --sink lake`: 리뷰 시각이 D(UTC) 하루인 주문만 만들어 `<LAKE_ROOT>/reviews/dt=D/`,
+  `reviews_truth/dt=D/` 에 덮어쓴다. 같은 날짜를 다시 돌려도 주문당 리뷰 하나(기록 조회 없음). 경로는 날짜별(제품별 아님, lemin 확인).
+- 설정: `ORDERS_PATH`, `LAKE_ROOT`(기본 `.local/lake`, s3:// 는 아직 미지원), `REVIEW_RATE`(기본 1.0), `REVIEW_DELAY_MIN_DAYS`/`MAX_DAYS`(1/14)
+
+### 5. 확정 컬럼 추가 (2026-10-14 lemin: 제안 컬럼 모두 확정)
+`order_id`, `purchased_at`, `option_size`, `option_color`, `has_photo`, `emitted_at` → 스키마 `review.v2`, 정답은 `order_id` 추가로 `review_truth.v2`.
+사이즈·색상·포토 비율은 `src/rsim/review/options.py` 상수(임시 값, 나중에 주문 데이터에서). 프롬프트는 바꾸지 않았다.
+무작위 모드의 명세·ID 는 예전과 같다(새 칸은 별도 난수열).
 
 ## 완료 확인
 
@@ -64,8 +68,7 @@ RDS → CDC → Kafka → S3 로 흘린다(하루 약 1,000건). RDS·결제 테
 - [x] 스테이징에 키·계정 ID·리뷰 원문이 없는지 확인
 - [ ] (사용자) Windows 에서 `pip install -e ".[dev]"`, `.env`·`.local/seeds.jsonl` 확인 후 `rsim bench --yes --n 100`
 - [ ] (사용자) `docker compose up -d` 후 `rsim run --llm fake --sink kafka --count 20`
-- [x] 주문 기반: `rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000` 후 `rsim run --source orders --llm fake --sink jsonl|postgres --now ...` 를 날짜를 바꿔 반복해도 주문당 리뷰 1건 (Postgres 16 로 확인)
-- [ ] (사용자) Windows 에서 `simulator` compose 로 Postgres 를 띄우고 `003_review.sql` 적용 후 `--sink postgres` 실행
+- [x] 주문 기반: `rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000` 후 `rsim run --source orders --llm fake --sink lake --date ...` 를 같은 날짜로 반복해도 결과(주문·ID·옵션)가 같고, 모든 날짜를 돌리면 주문당 리뷰 1건
 
 ## README 갱신
 
