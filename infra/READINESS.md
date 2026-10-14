@@ -23,7 +23,7 @@
 | eks | 전용 관리자 역할, trust 대상, 접근할 공인 IPv4 CIDR | 코드 및 현재 사용자·현재 PC용 비공개 입력 준비 완료. 팀원은 추후 추가. 실제 생성·접속 검증은 마지막에 진행. [접속 준비](EKS_ACCESS.md) |
 | rds | PostgreSQL 16.15, 인스턴스 사양, 초기/최대 저장량 | db.t4g.small·Single-AZ·gp3 초기 20GiB / 자동 증가 최대 100GiB 결정·코드 반영. 실제 생성은 마지막 |
 | storage | 업무 데이터 버킷 | clothes-query-datalake를 도쿄에 생성 완료. 버저닝/AES256/퍼블릭 차단/TLS 강제 확인. 내부는 비어 있으며 경로 구조는 계속 보류. state 버킷과 별개 |
-| apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 사용자 요청으로 내부 경로 구조 결정 보류. 현재 코드의 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
+| apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 데이터·앱 담당자의 구조가 완성된 뒤 실제 경로를 받아 IAM/Pod Identity에 연결. 현재 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
 | apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 사용자 요청으로 앱 준비 보류. 현재 저장소에 WEB/WAS 소스 없음. 실제 rollout·HPA 부하 검증은 앱 준비 이후 |
 | HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 사용자 요청으로 도메인·HTTPS 결정 보류. 실제 인증서 요청·DNS 변경은 수행하지 않음 |
 | Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | 24시간 보관 및 [broker당 20Gi×3](../docs/design/infra/kafka-storage-sizing.md) 결정·코드 반영. 캡처 범위·업무 토픽은 팀원에게 받을 항목으로 보류. ACL·CDC 예산은 미정. Kafka/Connect는 기본 비활성 |
