@@ -2,7 +2,11 @@
 
 # RDS 시작 사양 검토
 
-최신 상태: **인스턴스 크기 결정 보류** (사용자 요청, 2026-10-14). PostgreSQL 16.15·Single-AZ는 유지한다. micro 또는 스탠다드 어느 쪽도 확정하지 않았으며 Terraform의 `instance_class`는 필수 입력으로 남긴다. 아래 Multi-AZ 비교는 과거 검토다.
+최신 상태: **db.t4g.small·Single-AZ·gp3 초기 20 GiB / 자동 증가 최대 100 GiB 결정** (사용자 선택, 2026-10-14). PostgreSQL 16.15를 유지하고 스택 공통 입력과 예제에 반영했다. 도쿄 API에서 해당 버전/클래스/gp3 지원과 최소 저장량 20 GiB를 재확인했다. 아래 크기 보류·Multi-AZ 비교는 과거 검토다.
+
+도쿄 Single-AZ 온디맨드 $0.050/시간, gp3 $0.138/GB-month를 기준으로 월 730시간·초기 20 GiB는 **$39.26**다. 실제 저장량이 100 GiB로 증가하면 **$50.30**다. 최대값 설정만으로 100 GiB를 처음부터 과금하지 않는다. CPU credit, 추가 백업, 전송, Secrets Manager, 세금 등은 별도다. [AWS 도쿄 가격 목록](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/ap-northeast-1/index.json)
+
+자동 증가한 저장소는 바로 축소할 수 없으며 데이터 이동·새 DB 준비 등이 별도로 필요할 수 있다. CDC slot/WAL 보존 예산은 아직 미정이고 디스크 자동 증가만으로 무한 WAL 보존을 허용하지 않는다. [RDS storage autoscaling](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIOPS.Autoscaling.html)
 
 최종 비교 기록: 도쿄 PostgreSQL 16.15·Single-AZ, 월 730시간 + gp3 20 GiB 기준 `db.t4g.micro`(2 vCPU/1 GiB)는 $21.01, 지원되는 최소 스탠다드 크기 중 최저가 후보 `db.m6g.large`(2 vCPU/8 GiB)는 $164.09였다. 추가 사용료·세금은 제외하며 향후 결정 시 지원 여부와 요금을 다시 확인한다.
 

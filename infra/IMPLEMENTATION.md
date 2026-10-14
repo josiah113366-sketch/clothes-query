@@ -19,7 +19,7 @@
 
 ## 이번에 확정한 사항
 
-사용자의 정정에 따라 RDS만 Single-AZ이며 VPC·EKS는 두 AZ 구성을 유지한다. PostgreSQL 16.15, WEB 2개·WAS HPA 2~3개와 노드 풀 8 vCPU/32GiB는 유지한다. DB 크기는 보류다. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
+사용자의 정정에 따라 RDS만 Single-AZ이며 VPC·EKS는 두 AZ 구성을 유지한다. PostgreSQL 16.15, WEB 2개·WAS HPA 2~3개와 노드 풀 8 vCPU/32GiB는 유지한다. RDS는 db.t4g.small·gp3 초기 20GiB / 자동 증가 최대 100GiB로 확정했다. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
 
 기존 Terraform은 bootstrap뿐이고 사용자는 다른 팀원 환경에 배포되어 있을 것으로 설명했다. **기배포 여부와 소유 state는 아직 확인되지 않았다.** bootstrap은 변경하지 않았다. 실제 AWS에 추가 리소스가 있다면 이 코드를 바로 plan/apply하지 말고 소유 state/주소를 먼저 대조한다.
 

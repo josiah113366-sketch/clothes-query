@@ -23,6 +23,8 @@
 
 ## 실행 결과
 
+후속 RDS 결정(2026-10-14): 사용자가 db.t4g.small·초기 20 GiB·자동 증가 최대 100 GiB를 선택했다. PostgreSQL 16.15·Single-AZ를 유지하고 rds 스택 공통 입력과 예제를 갱신했다. 도쿄 지원 조합·공식 단가를 재조회했고 월 730시간/초기 20 GiB 기준 $39.26(추가 사용료·세금 제외)다. fmt/validate를 실행하며 실제 plan은 network/eks output이 준비된 뒤 수행한다. apply는 실행하지 않는다. 아래 업로드 기록 당시의 DB 크기 보류는 이 결정으로 대체됐다.
+
 `infra/ready@d9b0a76`를 업로드해 원격 tip 일치를 확인했다. `infra/analysis@7cdd4d5`와 `infra/local-ready@84080d8`가 HEAD의 ancestor이며 원격 tip이 점검 당시 그대로임을 재확인한 후, atomic push와 각 ref의 force-with-lease로 두 원격 이름만 삭제했다. 로컬 `infra/analysis@088ee05`도 통합 이력이 포함된 상태에서 `git branch -d`로 정리했다. 현재 로컬 인프라 브랜치 이름은 `infra/ready` 하나다. `main`, `infra/bootstrap`, 팀원 브랜치는 삭제하거나 수정하지 않았다.
 
 이 완료 기록은 위 업로드 이후 문서만 보완한 것이다. 최종 원격 HEAD는 마지막 문서 커밋 업로드 후 다시 확인한다. 소스 브랜치 이름을 삭제했으므로 과거 지시서의 해당 branch checkout/diff 예시는 당시 기록으로만 읽고, 현재 소스와 상태는 `infra/ready`에서 확인한다. 새 GitHub Actions의 실행 결과는 별도로 확인한다.

@@ -4,6 +4,8 @@
 
 암호화된 private Single-AZ PostgreSQL과 SG 및 subnet group.
 
+현재 승인값은 PostgreSQL 16.15, db.t4g.small(2 vCPU/2 GiB), gp3 초기 20 GiB / 자동 증가 최대 100 GiB다. `terraform.tfvars`에 반영했으며 실제 생성은 마지막에 진행한다. 사양과 비용 근거는 [RDS 검토](../../../docs/design/infra/rds-sizing.md)를 따른다.
+
 - 선행: 기존 bootstrap 및 network, eks.
 - backend key: `clothes-query/dev/rds/terraform.tfstate`.
 - 입력: `engine_version`, `instance_class`, `allocated_storage`, `max_allocated_storage`, 선택 `database_name`(clothes). Single-AZ 지원 조합을 배포 전 조회한다.
