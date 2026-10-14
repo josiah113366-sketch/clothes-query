@@ -73,16 +73,36 @@ resource "aws_eks_access_policy_association" "node" {
   depends_on = [aws_eks_access_entry.node]
 }
 resource "aws_eks_access_entry" "admin" {
-  for_each      = var.admin_role_arns
+  for_each      = merge({ dedicated = aws_iam_role.admin.arn }, { for arn in var.admin_role_arns : arn => arn })
   cluster_name  = aws_eks_cluster.this.name
   principal_arn = each.value
   type          = "STANDARD"
 }
 resource "aws_eks_access_policy_association" "admin" {
-  for_each      = var.admin_role_arns
+  for_each      = merge({ dedicated = aws_iam_role.admin.arn }, { for arn in var.admin_role_arns : arn => arn })
   cluster_name  = aws_eks_cluster.this.name
   principal_arn = each.value
   policy_arn    = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
   access_scope { type = "cluster" }
   depends_on = [aws_eks_access_entry.admin]
+}
+
+resource "aws_iam_role" "admin" {
+  name = "${var.name}-admin"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = sort(tolist(var.admin_trusted_principal_arns)) }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+resource "aws_iam_role_policy" "admin_describe" {
+  name = "describe-project-cluster"
+  role = aws_iam_role.admin.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["eks:DescribeCluster"], Resource = [aws_eks_cluster.this.arn] }]
+  })
 }

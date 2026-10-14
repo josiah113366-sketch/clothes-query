@@ -25,3 +25,7 @@
 
 실제 EKS/RDS 연결·장애·성능 및 최신 취약점 검증은 별도다. 이번 통합에서 취약점 스캔을 새로 실행하지 않았고 이전 High 35개 기록은 배포 승인과 무관하다. 최종 배포 전 최신 plan을 다시 만든다. [현재 구성](../../infra/TOPOLOGY.md)을 따른다.
 - 최종 실제 network plan: NAT/EIP 각각 2개, 23 create / 0 change / 0 destroy, 교체 없음. apply 미실행. 이전 NAT 1개 plan은 사용하지 않는다.
+
+## 후속 EKS 관리자 준비 (2026-10-14)
+
+사용자가 전용 관리자 역할을 선택했고 현재 사용자·현재 PC만 먼저 허용하며 팀원 추가는 나중에 하기로 했다. EKS 모듈에 명시적 trust 목록을 가진 전용 역할과 해당 클러스터 DescribeCluster 권한, 관리자 access entry 연결을 준비했다. compute/apps의 Kubernetes token도 이 역할을 사용한다. 실제 ARN/IP는 Git 제외 EKS 입력에만 저장했고 역할 이름이 현재 사용되지 않음을 읽기 전용 확인했다. 팀원 목록 확장과 잘못된 trust/CIDR 거부를 포함한 mock plan 6개 및 eks/compute/apps validate를 통과했다. 실제 생성·역할 assume·kubectl 검증은 미실행이다. [접속 준비](../../infra/EKS_ACCESS.md)를 따른다.

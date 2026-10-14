@@ -4,11 +4,13 @@ EKS Auto Mode와 cluster/node IAM 및 명시적 관리자 access entry.
 
 - 선행: 기존 bootstrap 및 network.
 - backend key: `clothes-query/dev/eks/terraform.tfstate`.
-- 입력: `kubernetes_version`, `admin_role_arns`, `public_access_cidrs`(/24 이상으로 제한된 관리자 CIDR). 리전에서 지원되는 표준 지원 버전을 고른다.
+- 입력: `kubernetes_version`, `admin_trusted_principal_arns`(전용 역할을 assume할 사용자/역할), 선택 `admin_role_arns`(별도 기존 관리자 역할), `public_access_cidrs`(/24 또는 더 좁은 관리자 CIDR). 현재 PC는 /32로 준비한다.
 - 모든 스택은 `expected_account_id`를 비공개 환경변수로 받는다. 종속 state 읽기에는 `state_bucket`, 필요시 `state_region`도 입력한다.
-- 출력: `cluster_name`, `cluster_security_group_id`, `node_role_name`. 초기 버전은 사용자 승인에 따라 1.36으로 설정했다.
+- 출력: `cluster_name`, `cluster_security_group_id`, `node_role_name`, 민감 출력 `admin_role_arn`. compute/apps는 이 역할로 Kubernetes 토큰을 받는다. 초기 버전은 사용자 승인에 따라 1.36으로 설정했다.
 
 ## 실행
+
+관리자 신원·접속 장소 결정과 후속 Kubernetes provider의 인증 연결은 [EKS 접속 준비](../../EKS_ACCESS.md)를 따른다.
 
 [전체 안내](../../IMPLEMENTATION.md)를 먼저 읽는다. `terraform.tfvars.example`을 `deployment.local.tfvars`로 복사하고 승인된 값으로 편집한다. 파일을 복사하는 것만으로 배포할 수 없으며 계정/state 확인이 선행되어야 한다.
 

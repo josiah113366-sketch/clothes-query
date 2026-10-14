@@ -7,10 +7,11 @@ data "terraform_remote_state" "network" {
   }
 }
 module "eks" {
-  source              = "../../modules/eks"
-  name                = "clothes-query-dev-eks"
-  app_subnet_ids      = data.terraform_remote_state.network.outputs.app_subnet_ids
-  kubernetes_version  = var.kubernetes_version
-  admin_role_arns     = var.admin_role_arns
-  public_access_cidrs = var.public_access_cidrs
+  source                       = "../../modules/eks"
+  name                         = "clothes-query-dev-eks"
+  app_subnet_ids               = data.terraform_remote_state.network.outputs.app_subnet_ids
+  kubernetes_version           = var.kubernetes_version
+  admin_role_arns              = var.admin_role_arns
+  admin_trusted_principal_arns = var.admin_trusted_principal_arns
+  public_access_cidrs          = var.public_access_cidrs
 }

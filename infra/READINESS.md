@@ -19,7 +19,7 @@
 |---|---|---|
 | bootstrap | 최초 배포 PC의 local state 관리 위치·담당자 | 미확인. 기존 버킷을 다시 만들지 않는다 |
 | 공통 | expected_account_id, state_bucket 및 backend 입력 | 실제 값은 Git 제외 파일에만 보관 |
-| eks | 관리자 역할 ARN, 접근할 공인 IPv4 CIDR | 미정. 현재 인증 주체를 자동으로 관리자에 등록하지 않는다 |
+| eks | 전용 관리자 역할, trust 대상, 접근할 공인 IPv4 CIDR | 코드 및 현재 사용자·현재 PC용 비공개 입력 준비 완료. 팀원은 추후 추가. 실제 생성·접속 검증은 마지막에 진행. [접속 준비](EKS_ACCESS.md) |
 | rds | PostgreSQL 16.15, 인스턴스 사양, 초기/최대 저장량 | 16.15·Single-AZ 유지. 사용자 요청으로 인스턴스 크기 결정 보류, 저장량 미확정 |
 | storage | 전역 고유 업무 데이터 버킷 이름 | 미정. state 버킷과 별개 |
 | apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | prefix 예시는 application/. 최종 plan에서 버전 검토 |
