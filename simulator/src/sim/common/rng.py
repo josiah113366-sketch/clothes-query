@@ -1,9 +1,16 @@
 """시드 고정 난수 도구. 회원 모듈은 전역 random, 시드 없는 Faker()를 쓰지 않고 이것만 쓴다."""
 
+import hashlib
 import random
 from collections.abc import Sequence
 
 from faker import Faker
+
+
+def derive_seed(seed: int, *names: object) -> int:
+    """시드와 이름들로 다른 줄기의 시드를 만든다 (SHA-256 기반, 같은 입력이면 항상 같은 값)."""
+    material = "\x1f".join([str(seed), *(str(name) for name in names)]).encode()
+    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
 
 
 class SimRandom:
@@ -13,6 +20,12 @@ class SimRandom:
         self.seed = seed
         self.random = random.Random(seed)
         self.faker = Faker("ko_KR")
+        self.faker.seed_instance(seed)
+
+    def reseed(self, seed: int) -> None:
+        """난수열을 처음부터 다시 시작한다. SimRandom(seed)를 새로 만든 것과 같은 결과가 나온다."""
+        self.seed = seed
+        self.random.seed(seed)
         self.faker.seed_instance(seed)
 
     def randint(self, low: int, high: int) -> int:
