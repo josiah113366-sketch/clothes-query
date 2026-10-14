@@ -39,3 +39,7 @@
 후속 결정: 업무 버킷 이름은 `clothes-query-datalake`를 우선 후보로 두고 내부 경로 구조는 나중에 결정한다. application/bronze/silver/gold는 제안이었으며 승인된 경로가 아니다. apps 입력 예제도 미정 placeholder로 바꿨다. WEB/WAS 앱 준비와 도메인·HTTPS도 사용자 요청으로 보류했다. 다음 인프라 항목인 Kafka/CDC는 먼저 메시지 보관 기간을 결정하며, 디스크·토픽·복제 슬롯 예산을 예제 값으로 임의 확정하지 않는다.
 
 사용자가 전용 관리자 역할을 선택했고 현재 사용자·현재 PC만 먼저 허용하며 팀원 추가는 나중에 하기로 했다. EKS 모듈에 명시적 trust 목록을 가진 전용 역할과 해당 클러스터 DescribeCluster 권한, 관리자 access entry 연결을 준비했다. compute/apps의 Kubernetes token도 이 역할을 사용한다. 실제 ARN/IP는 Git 제외 EKS 입력에만 저장했고 역할 이름이 현재 사용되지 않음을 읽기 전용 확인했다. 팀원 목록 확장과 잘못된 trust/CIDR 거부를 포함한 mock plan 6개 및 eks/compute/apps validate를 통과했다. 실제 생성·역할 assume·kubectl 검증은 미실행이다. [접속 준비](../../infra/EKS_ACCESS.md)를 따른다.
+
+## 업무 S3 별도 생성 승인·검증 (2026-10-14)
+
+사용자가 전체 생성 마지막 원칙의 예외로 업무 버킷만 먼저 생성하도록 승인했다. 현재 인증 계정 및 후보 이름 부재를 확인한 뒤 storage 실제 plan(5 create / 0 change / 0 destroy)을 검토했고, 사용자 재확인 후 저장한 plan만 apply했다. 대상은 `clothes-query-datalake`이며 도쿄·버저닝 Enabled·AES256·퍼블릭 차단 4개·HTTPS 강제·빈 버킷을 확인했다. 후속 plan 종료 코드 0, 관리 리소스 5개다. storage state는 기존 backend의 `clothes-query/dev/storage/terraform.tfstate`에 8,078 bytes로 저장됐고 AES256·버저닝 및 lock 해제를 확인했다. bootstrap 변경·다른 스택 apply·내부 경로 생성은 수행하지 않았다. 실제 계정/state 내용과 비공개 입력/plan은 공개 Git에 넣지 않는다.

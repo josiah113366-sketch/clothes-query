@@ -9,7 +9,7 @@
 - 도쿄, 두 AZ, AZ별 NAT 1개, private app/DB subnet, PostgreSQL Single-AZ. 서비스 요구사항 때문에 두 AZ subnet은 유지한다.
 - EKS Auto Mode 1.36, custom NodePool 8 vCPU/32 GiB, On-Demand.
 - WEB 2개, WAS HPA 2~3개·CPU 70%·축소 안정화 300초. [조절 방법](SCALING.md).
-- ECR 두 저장소만 배포했다. S3 state 저장 및 후속 무변경 plan을 확인했다.
+- ECR 두 저장소와 업무 S3 버킷을 사용자 승인으로 배포했다. 각각 S3 state 저장 및 후속 무변경 plan을 확인했다. network/EKS/RDS/Kafka 등은 미배포다.
 - network 최종 실제 plan(2026-10-14)은 NAT 2개 기준 23개 생성, 변경·삭제 없음이다. 이전 NAT 1개 plan은 폐기된 중간 검토이며 apply하지 않았다.
 - 로컬 검증은 실제 클러스터의 CRD, 지표 수집, 스케줄링, 통신 성공을 보장하지 않는다.
 - 최신 코드 전체 정적 검사: Terraform 10개 root 및 mock plan 44개 통과. Kafka Helm 검사도 20 GiB/24시간 기본값과 잘못된 입력 21개 거부를 검증했다.
@@ -22,7 +22,7 @@
 | 공통 | expected_account_id, state_bucket 및 backend 입력 | 실제 값은 Git 제외 파일에만 보관 |
 | eks | 전용 관리자 역할, trust 대상, 접근할 공인 IPv4 CIDR | 코드 및 현재 사용자·현재 PC용 비공개 입력 준비 완료. 팀원은 추후 추가. 실제 생성·접속 검증은 마지막에 진행. [접속 준비](EKS_ACCESS.md) |
 | rds | PostgreSQL 16.15, 인스턴스 사양, 초기/최대 저장량 | 16.15·Single-AZ 유지. 사용자 요청으로 인스턴스 크기 결정 보류, 저장량 미확정 |
-| storage | 전역 고유 업무 데이터 버킷 이름 | 우선 후보 clothes-query-datalake. 전역 이름 가용성은 생성 시 확인. state 버킷과 별개 |
+| storage | 업무 데이터 버킷 | clothes-query-datalake를 도쿄에 생성 완료. 버저닝/AES256/퍼블릭 차단/TLS 강제 확인. 내부는 비어 있으며 경로 구조는 계속 보류. state 버킷과 별개 |
 | apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 사용자 요청으로 내부 경로 구조 결정 보류. 현재 코드의 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
 | apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 사용자 요청으로 앱 준비 보류. 현재 저장소에 WEB/WAS 소스 없음. 실제 rollout·HPA 부하 검증은 앱 준비 이후 |
 | HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 사용자 요청으로 도메인·HTTPS 결정 보류. 실제 인증서 요청·DNS 변경은 수행하지 않음 |

@@ -18,7 +18,7 @@ bootstrap → network → eks → compute → apps
 | `eks` | `stacks/eks/` | EKS Auto Mode, IAM, access entry | network | 코드 작성·정적 검증 |
 | `compute` | `stacks/compute/` | custom NodeClass/NodePool, 타입·증설 한도·자동 축소 | network, eks | 코드 작성·정적 검증 |
 | `rds` | `stacks/rds/` | private Single-AZ PostgreSQL | network, eks | 코드 작성·정적 검증 |
-| `storage` | `stacks/storage/` | 데이터 S3, 버저닝·암호화·보호 | bootstrap | 코드 작성·정적 검증 |
+| `storage` | `stacks/storage/` | 데이터 S3, 버저닝·암호화·보호 | bootstrap | 사용자 승인 배포·후속 무변경 plan 확인 |
 | `ecr` | `stacks/ecr/` | WEB/WAS 및 선택적 Connect 이미지 저장소 | bootstrap | WEB/WAS 기존 배포 기록, Connect 코드·mock 준비 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
@@ -50,7 +50,7 @@ Kafka 후속 준비는 선택적 Connect ECR, [로컬 CDC 전달 검사](platfor
 
 노드 및 WEB/WAS 용량은 변수로 조정한다. [Generator 부하에 따른 증설·축소 가이드](SCALING.md)를 참고한다.
 
-사용자 요청으로 ECR만 실환경 plan/apply 및 S3 state 저장을 검증했다. 다른 스택은 미배포다. 기존 bootstrap은 보존하며 재생성하지 않는다. 삭제 시에는 앱/ALB 등 종속 리소스를 먼저 검토하고 RDS·S3 삭제 보호를 자동 해제하지 않는다.
+사용자 요청으로 ECR과 업무 S3만 실환경 plan/apply 및 state 저장을 검증했다. 다른 스택은 미배포다. 기존 bootstrap은 보존하며 재생성하지 않는다. 삭제 시에는 앱/ALB 등 종속 리소스를 먼저 검토하고 RDS·S3 삭제 보호를 자동 해제하지 않는다.
 
 ## 데이터 경로의 실측 전 준비
 

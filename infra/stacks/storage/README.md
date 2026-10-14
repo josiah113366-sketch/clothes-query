@@ -1,5 +1,11 @@
 # storage stack
 
+## 사용자 승인 배포 결과 (2026-10-14)
+
+`clothes-query-datalake`를 도쿄에 생성했다. 저장한 plan의 5 create / 0 change / 0 destroy를 적용하고 후속 plan 종료 코드 0(변경 없음)을 확인했다. 버저닝 Enabled, AES256 암호화, 퍼블릭 액세스 차단 4개 모두 활성, bucket policy 공개 아님, 비보안 전송 거부를 AWS 조회로 확인했다. 내부 객체·경로는 만들지 않았다.
+
+state는 기존 state 버킷의 `clothes-query/dev/storage/terraform.tfstate`에 저장됐고 AES256·version ID·lock 해제를 확인했다. 실제 계정 입력과 plan은 Git 제외 파일에만 보관한다. 네트워크/EKS/RDS/Kafka는 이번 apply에 포함하지 않았다.
+
 state와 분리된 데이터 S3, 버저닝·암호화·공개 차단·TLS 정책.
 
 - 선행: 기존 bootstrap.

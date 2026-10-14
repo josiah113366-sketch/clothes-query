@@ -22,4 +22,4 @@ Kafka는 replicas=3/RF=3/min ISR=2를 유지한다. 두 AZ 중 한쪽에 control
 
 DB 크기 결정 및 실제 리소스 생성 테스트는 계속 보류한다. Kafka/Connect, CDC 논리 복제, workload-access bindings, Connect ECR의 기본 비활성 설정도 유지한다.
 
-업무 S3 이름은 clothes-query-datalake가 우선 후보이며 내부 경로는 미정이다. 앱·도메인/HTTPS는 보류했고 DB→Kafka 캡처 범위·업무 토픽은 팀원에게 받을 항목으로 남겼다. [입력 목록](../docs/design/infra/team-inputs.md)을 참고한다.
+업무 S3 clothes-query-datalake는 사용자 별도 승인으로 도쿄에 생성했다. 내부는 비어 있으며 경로는 미정이다. 앱·도메인/HTTPS는 보류했고 DB→Kafka 캡처 범위·업무 토픽은 팀원에게 받을 항목으로 남겼다. [입력 목록](../docs/design/infra/team-inputs.md)을 참고한다.

@@ -1,3 +1,5 @@
+> **후속 배포(2026-10-14):** 사용자 승인으로 storage 스택만 별도 적용해 clothes-query-datalake를 생성했다. 버저닝·암호화·퍼블릭 차단·TLS 강제와 후속 무변경 plan을 확인했다. [배포 기록](stacks/storage/README.md)을 따른다. 다른 미배포 스택의 생성 보류는 유지한다.
+
 > **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
 
 # 두 AZ 인프라와 Single-AZ RDS 실행 안내
