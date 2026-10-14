@@ -6,6 +6,7 @@ PostgreSQL 오류 메시지에는 행 내용이 들어 있다 (예: "Key (email)
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import psycopg
 from psycopg import sql
@@ -23,6 +24,19 @@ def describe_db_error(error: psycopg.Error) -> str:
     if constraint:
         parts.append(f"constraint={constraint}")
     return " ".join(parts)
+
+
+@dataclass(frozen=True)
+class DbErrorInfo:
+    """오류에서 꺼낸 PII 없는 값. 제어 흐름 판단(예: 어느 제약이 깨졌는가)에만 쓴다."""
+
+    sqlstate: str | None
+    constraint: str | None
+
+
+def db_error_info(error: psycopg.Error) -> DbErrorInfo:
+    """sqlstate와 제약 이름만 돌려준다. str(error)와 diag.message_detail은 읽지 않는다."""
+    return DbErrorInfo(sqlstate=error.sqlstate, constraint=error.diag.constraint_name)
 
 
 @contextmanager
