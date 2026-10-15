@@ -83,7 +83,7 @@ pytest -m integration
 베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
-sim member live                                   # 평상시, 실시간, 하루 평균 1,500명
+sim member live                                   # 평상시, 실시간, 하루 평균 5,000명
 sim member live --speed 1440 --duration 30        # 시뮬레이터 하루 = 실제 1분으로 30초 실행
 sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만들고 종료
 ```
@@ -91,7 +91,7 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `surge`) |
-| `--daily` | `SIM_LIVE_DAILY` | 1500 | 평상시 하루 평균 가입 수 |
+| `--daily` | `SIM_LIVE_DAILY` | 5000 | 평상시 하루 평균 가입 수 |
 | `--surge-multiplier` | `SIM_LIVE_SURGE_MULTIPLIER` | 4.6 | 폭주 모드의 배율 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
@@ -157,7 +157,7 @@ Kafka 토픽 `members-events`를 **S3의 `bronze/`에 JSON Lines 파일로 쌓�
 
 ```
 시뮬레이터 → Postgres → Debezium → Kafka 토픽 → S3 Sink → S3
-                                                   └ bronze/members-events/dt=YYYY-MM-DD/*.json
+                                                   └ bronze/members-events/year=YYYY/month=MM/day=DD/*.json
 ```
 
 ```bash
@@ -171,13 +171,13 @@ sim sink verify                              # 6. 11개 항목 확인, 하나라
 
 | 명령 | 설명 |
 |---|---|
-| `sim sink setup [--config PATH]` | 안전장치 검사(토픽이 source와 같음, 자격 증명 키·문자열 없음, 버킷 이름이 `${env:S3_BUCKET}` 참조, UTC 일별 `dt=` 파티션, JSON 형식)와 **S3 접근 확인**(버킷·`bronze/` 조회)을 통과해야 등록한다. 같은 이름의 커넥터가 있으면 **아무것도 바꾸지 않고** 상태만 보여 준다 |
+| `sim sink setup [--config PATH]` | 안전장치 검사(토픽이 source와 같음, 자격 증명 키·문자열 없음, 버킷 이름이 `${env:S3_BUCKET}` 참조, UTC 일별 `year=/month=/day=` 파티션, JSON 형식)와 **S3 접근 확인**(버킷·`bronze/` 조회)을 통과해야 등록한다. 같은 이름의 커넥터가 있으면 **아무것도 바꾸지 않고** 상태만 보여 준다 |
 | `sim sink status` | 커넥터·task 상태, **소비자 그룹이 얼마나 밀렸는지**, 버킷 공개 차단 설정(조회 권한이 있을 때), `bronze/members-events/` 아래 날짜별 파일 수·크기·가장 최근 파일 시각 (읽기 전용. 객체 내용은 읽지 않는다) |
-| `sim sink verify` | S3 파일과 토픽을 대조해 11개 항목을 확인한다. 아직 쓰는 중(밀림 > 0, 또는 마지막 파일 이후 30초 미만)이면 실패가 아니라 **종료 코드 2**로 "잠시 뒤 다시"라고 알린다 |
+| `sim sink verify` | S3 파일과 토픽을 대조해 11개 항목을 확인한다. 아직 쓰는 중(밀림 > 0, 또는 마지막 파일 이후 30초 미만. 파일을 15분마다 끊어서 방금 가입한 건은 최대 15분 뒤에 S3에 보인다)이면 실패가 아니라 **종료 코드 2**로 "잠시 뒤 다시"라고 알린다 |
 | `sim sink reset [--yes]` | 커넥터 정지 → 소비자 그룹 offset 삭제 → 커넥터 삭제. **S3 객체는 건드리지 않는다.** 지우는 `aws s3 rm` 명령을 출력만 한다 |
 
-- **경로 규칙:** `bronze/members-events/dt=YYYY-MM-DD/members-events+<파티션>+<시작offset>.json`. **`dt=`는 Kafka 레코드 시각(수집 시각, UTC)이고 가입일이 아니다.** 가입일은 값의 `signup_at`에 있다.
-- **파일을 끊는 조건:** 1,000건 또는 30초. 로컬 테스트 값이다. 실제 값은 팀에서 정한 뒤 바꾼다.
+- **경로 규칙:** `bronze/members-events/year=YYYY/month=MM/day=DD/members-events+<파티션>+<시작offset>.json`. **날짜 폴더는 Kafka 레코드 시각(수집 시각, UTC)이고 가입일이 아니다.** 가입일은 값의 `signup_at`에 있다.
+- **파일을 끊는 조건:** 15분마다(벽시계) 또는 파티션 파일 하나가 10,000건이 되면. 방금 만든 가입을 바로 확인하려면 `connectors/member-s3-sink.json`의 `rotate.schedule.interval.ms`를 임시로 `30000`으로 바꿔 등록한다 (확인이 끝나면 되돌린다).
 - **at-least-once다.** 재시작·오류 뒤에 같은 메시지가 파일에 두 번 들어갈 수 있다. Silver에서 `member_id` 기준으로 중복을 제거한다. `verify`는 겹친 구간과 초과 행을 "중복 N건"으로 보고만 한다.
 - **`reset` 뒤에 다시 `setup`하면 같은 데이터가 S3에 한 번 더 쌓인다.** 토픽을 처음부터 다시 읽기 때문이다. 먼저 S3 파일을 지울지 정한다.
 - **자격 증명을 파일에 쓰지 않는다.** 키와 버킷 이름은 `simulator/.env`(gitignore)에만 두고, compose는 `connect` 서비스에 환경 변수를 **이름만** 넘긴다. 커넥터 JSON에는 키도 버킷 이름도 없다. `docker compose config`와 `env` 출력에는 키 값이 나오니 화면 공유나 로그에 쓰지 않는다.
