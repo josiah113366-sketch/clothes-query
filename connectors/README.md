@@ -53,14 +53,14 @@ Debezium(Kafka Connect) 커넥터 설정이다. 로컬 구성(`simulator/docker-
 | `format.class` | `JsonFormat` | JSON Lines (한 줄에 JSON 하나) |
 | `key/value.converter` | `JsonConverter`, `schemas.enable=false` | 토픽 메시지가 스키마 없는 JSON이다 |
 | `schema.compatibility` | `NONE` | 스키마가 없다 |
-| `partitioner.class` / `path.format` | `TimeBasedPartitioner` / `'dt'=YYYY-MM-dd` | Hive 방식 일별 폴더 |
+| `partitioner.class` / `path.format` | `TimeBasedPartitioner` / `'year'=YYYY/'month'=MM/'day'=dd` | Hive 방식 일별 폴더 (Athena/Glue가 `year`, `month`, `day` 파티션으로 인식한다) |
 | `partition.duration.ms` / `timezone` / `locale` | `86400000` / `UTC` / `en-US` | 하루 단위, UTC 기준 |
 | `timestamp.extractor` | `Record` | **Kafka 레코드 시각(수집 시각)** 기준이다. 가입일이 아니다. 다시 읽어도 같은 폴더에 들어간다 |
-| `flush.size` | `1000` | 로컬 테스트 값. 실제 값은 팀에서 정한 뒤 바꾼다 |
-| `rotate.schedule.interval.ms` | `30000` | 트래픽이 적어도 30초마다 파일을 끊는다. 로컬 테스트 값 |
+| `flush.size` | `10000` | 파티션 하나의 파일이 이만큼 쌓이면 시간이 안 돼도 끊는다. 안전장치이고 평소에는 시간 기준으로 끊긴다 |
+| `rotate.schedule.interval.ms` | `900000` | 트래픽이 적어도 15분(벽시계)마다 파일을 끊는다. 하루 5,000명이면 파티션 3개 기준 하루 약 288개 파일, 파일당 약 17건이다. 로컬에서 바로 확인하려면 임시로 `30000`으로 바꾼다 |
 | `s3.compression.type` | `none` | |
 
-객체 경로: `bronze/members-events/dt=YYYY-MM-DD/members-events+<파티션>+<시작offset>.json`
+객체 경로: `bronze/members-events/year=YYYY/month=MM/day=DD/members-events+<파티션>+<시작offset>.json`
 
 - **at-least-once다.** 재시작이나 오류 뒤에 같은 메시지가 파일에 두 번 들어갈 수 있다. Silver에서 `member_id` 기준으로 중복을 제거한다.
 - S3에 PII가 가지 않는 것은 **source의 `column.include.list`가 지킨다.** 이 커넥터에는 컬럼을 거르는 설정이 없다.
@@ -95,5 +95,5 @@ Debezium(Kafka Connect) 커넥터 설정이다. 로컬 구성(`simulator/docker-
 ### 클라우드로 옮길 때 바뀌는 값
 
 - 자격 증명: 키 대신 역할(IRSA 등)을 쓴다. 환경 변수 키는 쓰지 않는다.
-- `flush.size`, `rotate.schedule.interval.ms`: 운영 값으로 바꾼다 (파일이 너무 작으면 작은 파일이 많아진다).
+- `flush.size`, `rotate.schedule.interval.ms`: 가입자 수와 지연 허용 시간에 맞춰 다시 정한다 (파일이 너무 작으면 작은 파일이 많아진다).
 - `topics`, `format.class`, `path.format`, `timezone`, `timestamp.extractor`는 그대로 쓴다.
