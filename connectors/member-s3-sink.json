@@ -14,12 +14,12 @@
   "value.converter.schemas.enable": "false",
   "schema.compatibility": "NONE",
   "partitioner.class": "io.confluent.connect.storage.partitioner.TimeBasedPartitioner",
-  "path.format": "'dt'=YYYY-MM-dd",
+  "path.format": "'year'=YYYY/'month'=MM/'day'=dd",
   "partition.duration.ms": "86400000",
   "timezone": "UTC",
   "locale": "en-US",
   "timestamp.extractor": "Record",
-  "flush.size": "1000",
-  "rotate.schedule.interval.ms": "30000",
+  "flush.size": "10000",
+  "rotate.schedule.interval.ms": "900000",
   "s3.compression.type": "none"
 }
