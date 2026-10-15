@@ -6,11 +6,14 @@
 |---|---|
 | `infra/` | `infra/CLAUDE.md` |
 | `simulator/` | `simulator/CLAUDE.md` |
+| `review-simulator/` | `review-simulator/CLAUDE.md` |
 | `db/`, `connectors/`, `docs/` | 별도 규칙 없음. 이 문서와 해당 폴더의 `README.md`를 따른다 |
 
 ## 프로젝트 한눈에
 
 H&M 상품 데이터를 바탕으로 한 가상 쇼핑몰 데이터 플랫폼이다. 시뮬레이터(로그 제너레이터)가 만든 회원·행동 데이터가 `RDS(PostgreSQL) → Debezium → Kafka(EKS) → S3 데이터 레이크`로 흐르고, AI 관제 에이전트가 문제의 원인을 찾는다. 리전은 도쿄(`ap-northeast-1`)다.
+
+상품 리뷰는 별도의 리뷰 시뮬레이터(`review-simulator/`)가 Bedrock으로 만든다. 결제 후 1~14일 뒤 주문에 리뷰를 달아 S3 레이크에 날짜(dt)별로 바로 쓴다(2026-10-14 결정, RDS 에는 넣지 않음. 지금은 같은 경로 구조의 로컬 폴더). 리뷰 감성분석·이상탐지용 데이터다.
 
 ## Git
 
