@@ -65,7 +65,7 @@ SIGMA_LIMIT = 5.0
 EMAIL_DOMAIN = "example.com"
 
 # live(신규 가입): 값은 모두 바꿀 수 있는 파라미터다
-NORMAL_DAILY_SIGNUPS = 1500  # 평상시 하루 평균 (설계 제안 범위 1,000~2,000)
+NORMAL_DAILY_SIGNUPS = 5000  # 평상시 하루 평균 (설계 제안 1,000~2,000에서 올림)
 SURGE_MULTIPLIER = 4.6  # 폭주 모드일 때 평상시 대비 배율
 DEFAULT_SPEED = 1  # 시간 배속 (1 = 실시간)
 BASELINE_END = SIGNUP_END  # 이 시각 이후의 가입이 신규 가입이다
