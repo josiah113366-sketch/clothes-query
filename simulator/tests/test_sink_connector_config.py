@@ -21,7 +21,7 @@ def test_daily_utc_hive_partition_by_record_time() -> None:
     config = _sink()
     assert config["partitioner.class"].endswith("TimeBasedPartitioner")
     assert config["timezone"] == "UTC"
-    assert config["path.format"] == "'dt'=YYYY-MM-dd"
+    assert config["path.format"] == "'year'=YYYY/'month'=MM/'day'=dd"
     assert config["partition.duration.ms"] == "86400000"
     assert config["timestamp.extractor"] == "Record"
     assert config["topics.dir"] == "bronze"

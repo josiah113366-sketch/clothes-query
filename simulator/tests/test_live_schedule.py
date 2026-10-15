@@ -38,7 +38,7 @@ def test_rate_formula() -> None:
 
 
 def test_normal_ten_days_within_5_sigma() -> None:
-    expected = 15_000
+    expected = 10 * params.NORMAL_DAILY_SIGNUPS
     count = _count_in(SimRandom(1), 10, params.NORMAL_DAILY_SIGNUPS, "normal")
     assert abs(count - expected) <= 5 * math.sqrt(expected)
 

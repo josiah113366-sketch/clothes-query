@@ -28,7 +28,9 @@ class Obj:
 
 
 def key(offset: int, partition: int = 0, dt: str = "2026-10-14") -> str:
-    return f"bronze/{params.TOPIC}/dt={dt}/{params.TOPIC}+{partition}+{offset:010d}.json"
+    year, month, day = dt.split("-")
+    folder = f"year={year}/month={month}/day={day}"
+    return f"bronze/{params.TOPIC}/{folder}/{params.TOPIC}+{partition}+{offset:010d}.json"
 
 
 def event(**changes: object) -> dict[str, object]:
@@ -114,7 +116,7 @@ def test_extra_pii_field_fails_checks_4_and_5() -> None:
 
 
 def test_phone_shaped_object_key_fails_check_5() -> None:
-    bad_key = f"bronze/{params.TOPIC}/dt=2026-10-14/010-1234-5678.json"
+    bad_key = f"bronze/{params.TOPIC}/year=2026/month=10/day=14/010-1234-5678.json"
     sink, ids = build([(Obj(bad_key), lines([event()]))], {0: (0, 1)})
     results = by_number(sink.results(ids))
     assert not results[5].passed
@@ -128,7 +130,7 @@ def test_time_without_z_fails_check_6() -> None:
     assert not by_number(sink.results(ids))[6].passed
 
 
-def test_dt_before_data_date_or_in_future_fails_check_7() -> None:
+def test_folder_date_before_data_date_or_in_future_fails_check_7() -> None:
     early = Obj(key(0, dt="2026-10-13"))
     sink, ids = build([(early, lines([event()]))], {0: (0, 1)})
     assert not by_number(sink.results(ids))[7].passed
@@ -244,7 +246,7 @@ def test_repo_config_passes_safety() -> None:
 def test_parse_key() -> None:
     parsed = checks.parse_key(key(30, partition=2))
     assert parsed is not None and parsed.partition == 2 and parsed.start_offset == 30
-    assert checks.parse_key("bronze/x/dt=2026-13-99/a.json") is None
+    assert checks.parse_key("bronze/x/year=2026/month=13/day=99/a.json") is None
 
 
 # --- 레포 전체 ---
