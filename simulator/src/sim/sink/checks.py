@@ -86,7 +86,7 @@ def parse_key(key: str) -> ParsedKey | None:
     if match is None:
         return None
     try:
-        dt = date.fromisoformat(match["dt"])
+        dt = date(int(match["year"]), int(match["month"]), int(match["day"]))
     except ValueError:
         return None
     return ParsedKey(dt, int(match["partition"]), int(match["offset"]))
@@ -265,7 +265,7 @@ class SinkChecker:
         bad = (self.dt_too_early + self.dt_in_future)[:MAX_EXAMPLES]
         if bad:
             detail += f" (예: {', '.join(bad)})"
-        return CheckResult(7, "dt 폴더", passed, detail)
+        return CheckResult(7, "날짜 폴더", passed, detail)
 
     def _offset_result(self) -> CheckResult:
         by_partition: dict[int, list[_FileInfo]] = defaultdict(list)

@@ -21,16 +21,16 @@ REGION_REFERENCE = "${env:AWS_REGION}"
 
 PATH_PREFIX = "bronze"
 TOPIC_PREFIX_PATH = f"{PATH_PREFIX}/{TOPIC}/"
-# bronze/<토픽>/dt=YYYY-MM-DD/<토픽>+<파티션>+<시작offset>.json (offset은 0으로 채운 숫자일 수 있다)
+# bronze/<토픽>/year=YYYY/month=MM/day=DD/<토픽>+<파티션>+<시작offset>.json (offset은 0으로 채운 숫자일 수 있다)
 KEY_PATTERN = (
-    rf"{PATH_PREFIX}/{TOPIC}/dt=(?P<dt>\d{{4}}-\d{{2}}-\d{{2}})/"
+    rf"{PATH_PREFIX}/{TOPIC}/year=(?P<year>\d{{4}})/month=(?P<month>\d{{2}})/day=(?P<day>\d{{2}})/"
     rf"{TOPIC}\+(?P<partition>\d+)\+(?P<offset>\d+)\.json"
 )
-PARTITION_FOLDER_PATTERN = r"dt=\d{4}-\d{2}-\d{2}"
+PARTITION_FOLDER_PATTERN = r"year=\d{4}/month=\d{2}/day=\d{2}"
 
 # 커넥터 설정 안전장치
 REQUIRED_PARTITIONER_SUFFIX = "TimeBasedPartitioner"
-REQUIRED_PATH_FORMAT = "'dt'=YYYY-MM-dd"
+REQUIRED_PATH_FORMAT = "'year'=YYYY/'month'=MM/'day'=dd"
 REQUIRED_TIMEZONE = "UTC"
 REQUIRED_FORMAT_SUFFIX = "format.json.JsonFormat"
 FORBIDDEN_CONFIG_KEYS = ("aws.access.key.id", "aws.secret.access.key", "aws.secret.key")
@@ -39,7 +39,7 @@ CREDENTIAL_PATTERN = r"AKIA[0-9A-Z]{16}"
 # verify
 QUIET_SECONDS = 30  # 마지막 파일 이후 이만큼 지나야 "다 썼다"고 본다
 SMALL_FILE_BYTES = 10_000  # 이보다 작은 파일이 절반을 넘으면 경고 (통과/실패 아님)
-FUTURE_DAYS_ALLOWED = 1  # dt가 오늘(UTC)보다 이만큼 넘게 앞서면 실패
+FUTURE_DAYS_ALLOWED = 1  # 날짜 폴더가 오늘(UTC)보다 이만큼 넘게 앞서면 실패
 
 SETUP_WAIT_SECONDS = 60
 S3_TIMEOUT_SECONDS = 15

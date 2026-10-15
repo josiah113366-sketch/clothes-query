@@ -177,7 +177,11 @@ def status() -> None:
     by_dt: dict[str, list] = defaultdict(list)
     for obj in objects:
         parsed = checks.parse_key(obj.key)
-        by_dt[f"dt={parsed.dt.isoformat()}" if parsed else "(형식 밖)"].append(obj)
+        by_dt[
+            f"year={parsed.dt:%Y}/month={parsed.dt:%m}/day={parsed.dt:%d}"
+            if parsed
+            else "(형식 밖)"
+        ].append(obj)
     typer.echo(f"S3 {params.TOPIC_PREFIX_PATH}")
     for folder, items in sorted(by_dt.items()):
         newest = max(item.last_modified for item in items).astimezone(UTC)
