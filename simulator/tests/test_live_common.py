@@ -95,8 +95,10 @@ def _source(tmp_path: Path) -> tuple[FileControlSource, list[str], Path]:
 
 def test_control_reads_valid_file(tmp_path: Path) -> None:
     source, warnings, path = _source(tmp_path)
-    path.write_text(json.dumps({"running": True, "mode": "surge"}))
-    assert source.read() == ControlState(running=True, mode="surge")
+    path.write_text(json.dumps({"running": True, "mode": "burst"}))
+    assert source.read() == ControlState(running=True, mode="burst")
+    path.write_text(json.dumps({"running": True, "mode": "medium"}))
+    assert source.read() == ControlState(running=True, mode="medium")
     path.write_text(json.dumps({"running": False, "mode": "normal"}))
     assert source.read() == ControlState(running=False, mode="normal")
     assert warnings == []
@@ -110,6 +112,7 @@ def test_control_reads_valid_file(tmp_path: Path) -> None:
         "[1, 2]",
         '{"running": "yes", "mode": "normal"}',
         '{"running": true, "mode": "turbo"}',
+        '{"running": true, "mode": "surge"}',  # 예전 모드 이름은 이제 잘못된 값이다
         '{"running": true}',
     ],
 )
