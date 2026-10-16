@@ -13,7 +13,7 @@
 | 대상 | 축소 값 |
 |---|---|
 | Kafka | broker/controller 겸용 1개, 1536 MiB, heap 512 MiB, CPU request 500m/limit 1 |
-| 저장·보관 | 새 볼륨 10 GiB, 24시간, Retain/deleteClaim=false |
+| 저장·보관 | 새 볼륨 20 GiB, 72시간, Retain/deleteClaim=false |
 | Connect | 1개, 1 GiB, heap 512 MiB, CPU request 250m/limit 1 |
 | 복제 | 업무/Connect 내부/offset/transaction 토픽 모두 RF 1·min ISR 1 |
 | 배치 | Kafka의 두 AZ minDomains 강제 조건을 제거. 단일 노드 장애 시 중단 허용 |
@@ -26,6 +26,8 @@ Kafka/Connect/운영자 합산은 memory request 3456 MiB, limit 3840 MiB다. Ku
 기존 RF=3 클러스터에 축소 프로필을 덮어쓰거나 이미 생성한 PVC 용량을 낮추지 않는다. 이번 후보는 아직 배포되지 않은 신규 개발 runtime용이다. 노드 수 자동 확장은 Kafka broker 수를 자동 변경하지 않는다.
 
 ## 정적 검증
+
+사용자 결정으로 단일 노드 프로필의 저장·보관을 20 GiB·72시간으로 변경했다. 업무 토픽은 runtime values에서 `retentionMs: 259200000`을 명시해야 한다. 정적 검증은 이 업무 토픽 설정과 broker의 72시간, 20 GiB PVC 렌더링을 확인하며 Connect 내부 토픽의 compact 정책은 보존한다. 아래 로컬 smoke 결과는 변경 전 실행이며 72시간 경과나 20 GiB 디스크 포화 실험을 수행한 결과는 아니다.
 
 Helm lint/render 및 고정 Strimzi 1.3.0 CRD schema 검증 통과. 기존 standard와 축소 profile 모두 검증한다. 업무·내부 토픽의 복제 계수 일치, 단일 노드 배치, 메모리 예산, TLS/ACL·PVC 보존 및 프로필 단독 비활성 상태를 확인한다. 잘못된 입력 25개를 거부한다.
 

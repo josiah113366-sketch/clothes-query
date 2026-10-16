@@ -4,12 +4,14 @@ profile: single-node
 kafka:
   enabled: false
   replicas: 1
-  storageGi: 10
-  retentionHours: 24
+  storageGi: 20
+  retentionHours: 72
   resources:
     requests: {cpu: "500m", memory: "1536Mi"}
     limits: {cpu: "1", memory: "1536Mi"}
   heapMi: 512
+# Set retentionMs: 259200000 on every business topic in runtime values.
+# Topic-level retention overrides retentionHours; topics remain unspecified here.
 connect:
   enabled: false
   replicas: 1

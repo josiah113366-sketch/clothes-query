@@ -115,6 +115,7 @@ def main():
         compact_profile = yaml.safe_load((ROOT / "single-node-values.yaml").read_text(encoding="utf-8"))
         compact.update(copy.deepcopy(compact_profile))
         compact["kafka"]["enabled"] = True
+        compact["topics"][0]["retentionMs"] = 259200000
         compact["connect"].update(enabled=True, image=full["connect"]["image"], produceTopics=["example-orders"])
         compact_docs = render(compact)
         compact_pool = next(d["spec"] for d in compact_docs if d["kind"] == "KafkaNodePool")
@@ -122,13 +123,19 @@ def main():
         compact_connect = next(d["spec"] for d in compact_docs if d["kind"] == "KafkaConnect")
         assert compact_pool["replicas"] == compact_connect["replicas"] == 1
         assert "topologySpreadConstraints" not in compact_pool["template"]["pod"]
-        assert compact_pool["storage"]["volumes"][0]["size"] == "10Gi"
+        assert compact_pool["storage"]["volumes"][0]["size"] == "20Gi"
+        assert compact_kafka["kafka"]["config"]["log.retention.hours"] == 72
         assert compact_pool["storage"]["volumes"][0]["deleteClaim"] is False
         for key in ("default.replication.factor", "min.insync.replicas", "offsets.topic.replication.factor",
                     "transaction.state.log.replication.factor", "transaction.state.log.min.isr"):
             assert compact_kafka["kafka"]["config"][key] == 1
         for topic in (d["spec"] for d in compact_docs if d["kind"] == "KafkaTopic"):
             assert topic["replicas"] == topic["config"]["min.insync.replicas"] == 1
+            if topic["config"]["cleanup.policy"] == "delete":
+                assert topic["config"]["retention.ms"] == 259200000
+            else:
+                assert topic["config"]["cleanup.policy"] == "compact"
+                assert "retention.ms" not in topic["config"]
         for key in ("config.storage.replication.factor", "offset.storage.replication.factor", "status.storage.replication.factor"):
             assert compact_connect["config"][key] == 1
         assert compact_kafka["kafka"]["listeners"][0]["tls"]

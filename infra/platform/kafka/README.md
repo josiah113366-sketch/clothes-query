@@ -1,6 +1,6 @@
 # EKS Kafka·Connect
 
-2026-10-16 단일 노드 후보: [single-node-values.yaml](single-node-values.yaml)에 Kafka/Connect 각 1개·RF 1·축소 메모리의 별도 비활성 프로필을 준비했다. 기본 standard 구성은 보존한다. [검증 범위와 결과](../../../docs/design/infra/kafka-single-node-validation-2026-10-16.md)를 읽고 신규 개발 runtime에서만 검토한다. 기존 클러스터의 복제 수나 PVC를 임의 축소하는 용도가 아니다.
+2026-10-16 단일 노드 후보: [single-node-values.yaml](single-node-values.yaml)에 Kafka/Connect 각 1개·RF 1·축소 메모리의 별도 비활성 프로필을 준비했다. 사용자 결정으로 이 프로필은 **broker당 20 GiB·보관 72시간**이다. 업무 토픽의 명시적 설정이 broker 기본값을 덮어쓰므로, 배포용 runtime values의 각 업무 토픽에도 `retentionMs: 259200000`을 지정해야 한다. 업무 토픽 계약은 아직 비어 있으며 기존 24시간 예시를 그대로 복사하지 않는다. 기본 standard 구성은 보존한다. [검증 범위와 결과](../../../docs/design/infra/kafka-single-node-validation-2026-10-16.md)를 읽고 신규 개발 runtime에서만 검토한다. 기존 클러스터의 복제 수나 PVC를 임의 축소하는 용도가 아니다.
 
 상태: 코드·로컬 검증 준비 / AWS·Kubernetes 미배포.
 
