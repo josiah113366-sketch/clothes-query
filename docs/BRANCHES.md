@@ -70,8 +70,9 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | PR #11 머지 대기 | |
-| `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | infra/ready에 통합, PR #11 머지 대기 | |
+| `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | 머지됨 (PR #11) | 2026-10-16 |
+| `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | 머지됨 (infra/ready에 통합) | 2026-10-16 |
+| `infra/deploy-result` | [infra-deploy-result.md](tasks/infra-deploy-result.md) | 머지됨 | 2026-10-16 |
 
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
