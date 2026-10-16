@@ -1,0 +1,5 @@
+# Copy to deployment.local.tfvars; supply expected_account_id and state_bucket privately.
+instance_types             = ["t3a.large"]
+node_pool_cpu_limit        = 6
+node_pool_memory_limit_gib = 24
+consolidate_after          = "10m"

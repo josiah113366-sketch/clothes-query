@@ -1,0 +1,113 @@
+{{- if and .Values.kafka.enabled .Values.connect.enabled }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ .Values.connect.name }}
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.name }}
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      {{- range $suffix := list "configs" "offsets" "status" }}
+      - resource: {type: topic, name: {{ printf "%s-%s" $.Values.connect.name $suffix | quote }}, patternType: literal}
+        operations: [Read, Write, Describe, DescribeConfigs]
+      {{- end }}
+      {{- range .Values.connect.produceTopics }}
+      - resource: {type: topic, name: {{ . | quote }}, patternType: literal}
+        operations: [Write, Describe]
+      {{- end }}
+      - resource: {type: group, name: {{ printf "%s-cluster" .Values.connect.name | quote }}, patternType: literal}
+        operations: [Read]
+      - resource: {type: cluster}
+        operations: [IdempotentWrite]
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnect
+metadata:
+  name: {{ .Values.connect.name }}
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: {{ .Values.kafka.version | quote }}
+  replicas: {{ .Values.connect.replicas }}
+  image: {{ .Values.connect.image | quote }}
+  {{- if .Values.metrics.enabled }}
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: {{ .Values.kafka.name }}-metrics
+        key: connect.yml
+  {{- end }}
+  bootstrapServers: {{ .Values.kafka.name }}-kafka-bootstrap:9093
+  groupId: {{ .Values.connect.name }}-cluster
+  configStorageTopic: {{ .Values.connect.name }}-configs
+  offsetStorageTopic: {{ .Values.connect.name }}-offsets
+  statusStorageTopic: {{ .Values.connect.name }}-status
+  tls:
+    trustedCertificates:
+      - secretName: {{ .Values.kafka.name }}-cluster-ca-cert
+        certificate: ca.crt
+  authentication:
+    type: tls
+    certificateAndKey:
+      secretName: {{ .Values.connect.name }}
+      certificate: user.crt
+      key: user.key
+  config:
+    config.storage.replication.factor: {{ include "cq.replicationFactor" . }}
+    offset.storage.replication.factor: {{ include "cq.replicationFactor" . }}
+    status.storage.replication.factor: {{ include "cq.replicationFactor" . }}
+    offset.storage.partitions: 1
+    status.storage.partitions: 1
+    connector.client.config.override.policy: None
+    topic.creation.enable: false
+    config.providers: directory
+    config.providers.directory.class: org.apache.kafka.common.config.provider.DirectoryConfigProvider
+    config.providers.directory.param.allowed.paths: /mnt/cdc-database
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: true
+    value.converter.schemas.enable: true
+  resources:
+    {{- toYaml .Values.connect.resources | nindent 4 }}
+  jvmOptions:
+    "-Xms": {{ printf "%vm" .Values.connect.heapMi | quote }}
+    "-Xmx": {{ printf "%vm" .Values.connect.heapMi | quote }}
+    javaSystemProperties:
+      - name: org.apache.kafka.disallowed.login.modules
+        value: com.sun.security.auth.module.JndiLoginModule,org.apache.kafka.common.security.kerberos.KerberosLoginModule
+  template:
+    pod:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: [{{ .Values.kafka.nodePool | quote }}]
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  strimzi.io/cluster: {{ .Values.connect.name }}
+                  strimzi.io/kind: KafkaConnect
+      volumes:
+        - name: cdc-database
+          secret:
+            secretName: {{ .Values.connect.databaseSecret }}
+        - name: rds-ca
+          secret:
+            secretName: {{ .Values.connect.rdsCaSecret }}
+    connectContainer:
+      volumeMounts:
+        - {name: cdc-database, mountPath: /mnt/cdc-database, readOnly: true}
+        - {name: rds-ca, mountPath: /mnt/rds-ca, readOnly: true}
+    podDisruptionBudget:
+      maxUnavailable: 1
+{{- end }}

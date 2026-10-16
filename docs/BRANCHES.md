@@ -67,5 +67,11 @@ gitGraph
 |---|---|---|---|
 | `docs/branch-rules` | - | 진행 중 | |
 
+### infra
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | PR #11 머지 대기 | |
+| `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | infra/ready에 통합, PR #11 머지 대기 | |
+
 ### 그 밖의 영역
-`infra`, `db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+`db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.

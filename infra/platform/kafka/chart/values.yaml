@@ -1,0 +1,51 @@
+# No resources until explicitly enabled. Namespace must be kafka.
+profile: standard
+kafka:
+  enabled: false
+  name: clothes-query-dev-kafka
+  version: "4.3.1"
+  image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+  # Combined broker/controller pool: 3 hosts, 2 AZs; not full AZ fault tolerance.
+  replicas: 3
+  storageClass: clothes-query-kafka-gp3
+  # Approved starting disk per broker; 3 brokers provision 60 GiB total.
+  storageGi: 20
+  # Approved starting retention: 24 hours. Topic-level retention can override this.
+  retentionHours: 24
+  nodePool: clothes-query-dev-compute
+  resources:
+    requests: {cpu: "500m", memory: "2Gi"}
+    limits: {cpu: "1", memory: "2Gi"}
+  heapMi: 1024
+  # Explicit namespace names allowed to reach client listener; mTLS/ACL still required.
+  clientNamespaces: []
+# Business contracts are not yet fixed. No invented six-topic mapping.
+# Each item: {name: literal-topic-name, partitions: positive-int, retentionMs: positive-int}
+# Add resourceName for Kafka names with underscores/uppercase (Kubernetes DNS name differs).
+topics: []
+# Each item: {name: user-name, produceTopics: [], consumeTopics: [], consumerGroups: []}
+# Users and generated TLS Secrets reside in kafka. No credentials in values.
+clients: []
+connect:
+  enabled: false
+  name: clothes-query-dev-connect
+  replicas: 2
+  # Custom image built with the pinned PostgreSQL plugin; must be repository@sha256:...
+  image: ""
+  produceTopics: []
+  databaseSecret: cdc-database
+  rdsCaSecret: rds-ca
+  resources:
+    requests: {cpu: "250m", memory: "1Gi"}
+    limits: {cpu: "1", memory: "1Gi"}
+  heapMi: 512
+# JMX exposure only; no collector/alerting installation.
+metrics:
+  enabled: false
+  lagExporter:
+    enabled: false
+    topicRegex: ""
+    groupRegex: ""
+    resources:
+      requests: {cpu: "100m", memory: "128Mi"}
+      limits: {cpu: "500m", memory: "256Mi"}

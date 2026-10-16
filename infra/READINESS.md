@@ -1,0 +1,47 @@
+> **최신 결정(2026-10-16):** compute를 t3a.large·6 vCPU/24GiB(세 대분 한도)로 축소했다. Kafka는 별도 single-node 프로필의 1 broker·1 Connect·20GiB·72시간을 사용한다. 제네레이터는 팀원이 ECS Fargate로 구성하며 WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다. 평소 한 대 배치·실제 AWS 연결 검증은 남아 있다. 아래 2026-10-14 표는 과거 설계 기록이며 현재 배포 기준은 [TOPOLOGY.md](TOPOLOGY.md)와 [연결 입력](../docs/design/infra/team-inputs.md)을 따른다.
+
+# 배포 준비 현황
+
+2026-10-16 후속 결과: RDS-first 범위로 NAT 없는 network와 EKS 의존성 없는 private RDS 생성 완료. DB available·암호화·백업/Secret 상태를 실제 확인했다. EKS·노드·Kafka는 생성하지 않았다. DB 접속·DDL/제네레이터 연결은 후속이며 [작업 기록](../docs/tasks/infra-rds-first.md)을 따른다. 아래 2026-10-14 내용은 당시 준비 현황이다.
+
+2026-10-14 기준. 실제 생성 테스트는 마지막에 수행한다. 코드 검증과 실환경 검증을 구분한다.
+
+## 확정 및 검증한 범위
+
+- 도쿄, 두 AZ, AZ별 NAT 1개, private app/DB subnet, PostgreSQL Single-AZ. 서비스 요구사항 때문에 두 AZ subnet은 유지한다.
+- EKS Auto Mode 1.36, custom NodePool 8 vCPU/32 GiB, On-Demand.
+- WEB 2개, WAS HPA 2~3개·CPU 70%·축소 안정화 300초. [조절 방법](SCALING.md).
+- ECR 두 저장소와 업무 S3 버킷을 사용자 승인으로 배포했다. 각각 S3 state 저장 및 후속 무변경 plan을 확인했다. network/EKS/RDS/Kafka 등은 미배포다.
+- network 최종 실제 plan(2026-10-14)은 NAT 2개 기준 23개 생성, 변경·삭제 없음이다. 이전 NAT 1개 plan은 폐기된 중간 검토이며 apply하지 않았다.
+- 로컬 검증은 실제 클러스터의 CRD, 지표 수집, 스케줄링, 통신 성공을 보장하지 않는다.
+- 최신 코드 전체 정적 검사: Terraform 10개 root 및 mock plan 44개 통과. Kafka Helm 검사도 20 GiB/24시간 기본값과 잘못된 입력 21개 거부를 검증했다.
+
+## 남은 입력과 결정
+
+| 단계 | 준비할 값 | 상태 |
+|---|---|---|
+| bootstrap | 최초 배포 PC의 local state 관리 위치·담당자 | 미확인. 기존 버킷을 다시 만들지 않는다 |
+| 공통 | expected_account_id, state_bucket 및 backend 입력 | 실제 값은 Git 제외 파일에만 보관 |
+| eks | 전용 관리자 역할, trust 대상, 접근할 공인 IPv4 CIDR | 코드 및 현재 사용자·현재 PC용 비공개 입력 준비 완료. 팀원은 추후 추가. 실제 생성·접속 검증은 마지막에 진행. [접속 준비](EKS_ACCESS.md) |
+| rds | PostgreSQL 16.15, 인스턴스 사양, 초기/최대 저장량 | db.t4g.small·Single-AZ·gp3 초기 20GiB / 자동 증가 최대 100GiB 결정·코드 반영. 실제 생성은 마지막 |
+| storage | 업무 데이터 버킷 | clothes-query-datalake를 도쿄에 생성 완료. 버저닝/AES256/퍼블릭 차단/TLS 강제 확인. 내부는 비어 있으며 경로 구조는 계속 보류. state 버킷과 별개 |
+| apps 기초 | 업무 S3 prefix, Metrics Server 호환 버전 | 데이터·앱 담당자의 구조가 완성된 뒤 실제 경로를 받아 IAM/Pod Identity에 연결. 현재 prefix 예시는 확정값이 아님. Metrics Server 버전은 최종 plan에서 검토 |
+| apps 서비스 | WEB/WAS 이미지 digest, 앱 전용 DB 계정 및 Secret | 사용자 요청으로 앱 준비 보류. 현재 저장소에 WEB/WAS 소스 없음. 실제 rollout·HPA 부하 검증은 앱 준비 이후 |
+| HTTPS | 도메인, 도쿄 ACM 인증서, ALB 허용 CIDR, DNS 담당 | 사용자 요청으로 도메인·HTTPS 결정 보류. 실제 인증서 요청·DNS 변경은 수행하지 않음 |
+| Kafka/CDC | 메시지 보관 기간, broker 디스크, 업무 토픽·ACL, CDC slot/WAL 예산 | 24시간 보관 및 [broker당 20Gi×3](../docs/design/infra/kafka-storage-sizing.md) 결정·코드 반영. 캡처 범위·업무 토픽은 팀원에게 받을 항목으로 보류. ACL·CDC 예산은 미정. Kafka/Connect는 기본 비활성 |
+| 부하 테스트 | 목표 RPS, p95, 오류율, DB 연결 예산 | 미정. 현재 DB 직접 쓰기 제네레이터로 WAS HPA를 검증할 수 없음 |
+
+RDS 사양은 고가용성 여부와 별개다. 작은 사양으로도 Multi-AZ를 선택할 수 있지만 처리량은 실측해야 한다. HPA가 늘리는 것은 WAS Pod이며 RDS 사양·저장량을 줄이는 기능은 없다. [시작 사양·비용 검토](../docs/design/infra/rds-sizing.md)를 참고한다.
+
+## 마지막 실행 순서
+
+현재 앱·도메인/HTTPS·S3 경로와 CDC 명세가 보류되어 있어 전체 서비스 배포 입력은 아직 완성되지 않았다. RDS 크기·저장량은 확정됐다. 남은 보류 항목을 예제 값으로 채우지 않는다. [팀원에게 받을 입력](../docs/design/infra/team-inputs.md)을 준비한 뒤 필요한 스택별 plan을 진행한다.
+
+1. 코드·실제 계정·state 소유권·기존 리소스를 대조하고 스택별 plan을 검토한다. 저장해 둔 이전 plan을 그대로 재사용하지 않는다.
+2. network → eks → compute 순서로 준비한다. storage는 독립적이며 rds는 network/eks 출력 이후 준비한다. 각 단계의 실제 output이 생긴 다음 종속 plan을 실행한다.
+3. apps 기초 배포에서 Namespace/Pod Identity/ConfigMap과 Metrics Server를 준비한다. 기존 Metrics Server 설치 여부와 관리 주체를 먼저 확인한다.
+4. 앱 전용 DB 계정·schema·Secret을 준비한다. DB master 자격증명을 앱에 전달하지 않는다. 비밀값을 Terraform state에 넣지 않는다.
+5. 이미지 digest·인증서·도메인 입력 후 apps 서비스 배포를 검토한다. WEB→WAS→DB/S3, HTTPS, DB TLS와 failover 재연결을 확인한다.
+6. Metrics Server와 HPA 상태, API 부하에 따른 WAS 2→3→2, 노드 변화, 후속 plan의 replica 비간섭을 확인한다.
+
+apply/import/state 변경은 이 문서 작성이나 정적 검사에 포함되지 않는다. 단계별 실제 결과가 나온 뒤 다음 단계로 진행한다. 상세 명령은 [실행 안내](IMPLEMENTATION.md)를 따른다.

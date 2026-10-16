@@ -1,0 +1,21 @@
+# Copy to deployment.local.tfvars (ignored by Git).
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+# Example CIDRs only: replace after confirming existing networks and AZ availability.
+vpc_cidr = "10.70.0.0/16"
+subnets = {
+ a = { az = "ap-northeast-1a", public_cidr = "10.70.0.0/24", app_cidr = "10.70.16.0/20", db_cidr = "10.70.64.0/24" }
+ c = { az = "ap-northeast-1c", public_cidr = "10.70.1.0/24", app_cidr = "10.70.32.0/20", db_cidr = "10.70.65.0/24" }
+}
+
+# Optional transport actions only after workload permissions are agreed.
+additional_s3_endpoint_actions = []
+# Example: ["s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
+# This does not grant these actions to any workload IAM role.
+
+# RDS-first deployment: explicitly disable paid NAT/EIP resources.
+# Enable NAT only when private workload internet egress is needed and its cost is approved.
+# enable_nat_gateways = false
+
+# Future private workload egress: share one NAT across the two AZs.
+# single_nat_gateway = true
+# Set false only after reviewing the cost of restoring one NAT per AZ.

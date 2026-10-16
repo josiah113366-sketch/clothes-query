@@ -1,0 +1,7 @@
+apiVersion: v2
+name: clothes-query-kafka
+description: Internal EKS Auto Mode Kafka and optional CDC Connect runtime
+type: application
+version: 0.1.0
+appVersion: "4.3.1"
+kubeVersion: ">=1.32.0-0 <1.38.0-0"

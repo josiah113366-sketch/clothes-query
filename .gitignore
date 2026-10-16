@@ -230,5 +230,12 @@ crash.*.log
 # Simulator
 simulator/.local/
 
+# Private Terraform deployment inputs (shared terraform.tfvars stays tracked)
+infra/**/*.local.tfvars
+infra/**/*.local.tfvars.json
+infra/**/*.backend.hcl
+infra/**/terraform.tfstate.d/
+infra/**/*.local.yaml
+
 # Review simulator: 시드(AI Hub 원문), 생성 리뷰, 벤치 결과는 커밋하지 않는다
 review-simulator/.local/

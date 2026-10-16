@@ -1,0 +1,22 @@
+# Rendering example: topics/partitions/client contracts are NOT approved.
+# Approved start: 20 GiB per broker (3 brokers) and 24-hour retention.
+# Copy to ignored runtime.local.yaml and replace all example contracts.
+kafka:
+  enabled: true
+  storageGi: 20
+  retentionHours: 24
+  clientNamespaces: [example-consumer]
+topics:
+  - name: example-orders
+    partitions: 3
+    # 24 hours for delete-policy business topics; confirm each real topic contract.
+    retentionMs: 86400000
+clients:
+  - name: example-consumer
+    produceTopics: []
+    consumeTopics: [example-orders]
+    consumerGroups: [example-consumer]
+connect:
+  enabled: false
+  image: ""
+  produceTopics: [example-orders]
