@@ -1,0 +1,8 @@
+.env
+.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+# .local/ 은 seeds.jsonl 만 이미지에 넣는다
+.local/*
+!.local/seeds.jsonl

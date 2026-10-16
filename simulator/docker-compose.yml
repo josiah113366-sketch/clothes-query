@@ -1,7 +1,13 @@
 services:
   postgres:
     image: postgres:16
-    command: ["postgres", "-c", "wal_level=logical"]
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      # 슬롯이 밀려도 WAL이 디스크를 다 먹지 않게 한다 (설계 4-5절, 로컬 값)
+      - -c
+      - max_slot_wal_keep_size=1GB
     ports:
       - "5432:5432"
     environment:
@@ -18,5 +24,96 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---- 아래는 프로필 cdc: `docker compose --profile cdc up -d` 일 때만 뜬다 ----
+  # 리스너를 둘로 나눈다. 컨테이너끼리는 kafka:9092, WSL(파이썬 CLI)에서는 localhost:29092.
+  kafka:
+    image: apache/kafka:3.9.2
+    profiles: ["cdc"]
+    ports:
+      - "127.0.0.1:29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # 노드가 하나라서 복제 계수는 모두 1 (기본값 3이면 시작하지 못한다)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  connect:
+    # Debezium 이미지에 S3 Sink 플러그인을 더한 이미지 (connect/Dockerfile)
+    build: ./connect
+    image: simulator-connect:3.7.0-s3sink-12.1.13
+    profiles: ["cdc"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      # Connect REST는 인증이 없으므로 로컬에서만 연다
+      - "127.0.0.1:8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: connect-local
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      # 커넥터 JSON에는 ${env:CDC_DB_PASSWORD}만 적는다 (비밀번호를 파일에 쓰지 않는 연습)
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:-sim}  # 로컬 전용 더미 값
+      # S3 Sink용. 값 없이 이름만 적어 simulator/.env에서 가져온다 (파일에 키를 쓰지 않는다)
+      AWS_ACCESS_KEY_ID:
+      AWS_SECRET_ACCESS_KEY:
+      AWS_REGION:
+      S3_BUCKET:
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/ > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # 토픽·커넥터를 눈으로 보는 화면. 설정은 환경 변수로만 고정한다.
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    profiles: ["cdc"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      connect:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+      DYNAMIC_CONFIG_ENABLED: "false"
+      JAVA_OPTS: -Xmx384m
+
 volumes:
   pgdata:
+  kafkadata:

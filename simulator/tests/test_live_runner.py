@@ -54,7 +54,7 @@ class FakeStore:
         self.connects = 0
         self.fail_connect = 0  # 앞으로 이만큼 연결 실패
         self.fail_insert_with: Exception | None = None
-        self.phone_conflicts = 0  # 앞으로 이만큼 member_phone_key 위반
+        self.phone_conflicts = 0  # 앞으로 이만큼 members_phone_key 위반
         self.connect_times: list[datetime] = []
         self.clock: SimClock | None = None
         self.on_insert = None
@@ -78,11 +78,11 @@ class FakeStore:
             raise error
         if self.phone_conflicts > 0:
             self.phone_conflicts -= 1
-            raise _Violation("member_phone_key")
+            raise _Violation("members_phone_key")
         if member.member_id in self.ids:
-            raise _Violation("member_pkey")
+            raise _Violation("members_pkey")
         if member.phone in self.phones or member.phone in self.preset_phones:
-            raise _Violation("member_phone_key")
+            raise _Violation("members_phone_key")
         self.ids.add(member.member_id)
         self.phones.add(member.phone)
         self.rows.append(member)
@@ -130,7 +130,7 @@ def test_normal_rate_over_ten_sim_days(regions) -> None:
     # 시뮬레이터 10일 = 실제 14,400초 (배속 60)
     runner, store, _, _ = make(regions, duration=14_400)
     summary = runner.run()
-    assert _within_5_sigma(summary.total, 15_000)
+    assert _within_5_sigma(summary.total, 10 * params.NORMAL_DAILY_SIGNUPS)
     assert len(store.rows) == summary.total
     assert summary.by_mode == Counter(normal=summary.total)
 
@@ -262,10 +262,10 @@ def test_phone_retry_changes_only_phone_and_gives_up_after_limit(regions) -> Non
 
 def test_other_constraint_violation_is_not_retried(regions) -> None:
     runner, store, _, _ = make(regions, max_signups=1)
-    store.fail_insert_with = _Violation("member_pkey")
+    store.fail_insert_with = _Violation("members_pkey")
     with pytest.raises(SafeDatabaseError) as info:
         runner.run()
-    assert "member_pkey" in str(info.value) and PII not in str(info.value)
+    assert "members_pkey" in str(info.value) and PII not in str(info.value)
     assert runner.summary.phone_retries == 0
 
 
@@ -335,10 +335,10 @@ def test_draw_phone_uses_baseline_format() -> None:
 
 
 def test_slow_insert_does_not_lower_the_arrival_rate(regions) -> None:
-    # 가입 하나에 INSERT가 20ms 걸려도 도착 속도는 설계(하루 1,500명)를 따라야 한다.
-    # 간격을 INSERT가 끝난 뒤부터 새로 재면 약 16.7건/초로 떨어진다 (기대 25건/초).
+    # 가입 하나에 INSERT가 5ms 걸려도 도착 속도는 설계(하루 5,000명)를 따라야 한다.
+    # 간격을 INSERT가 끝난 뒤부터 새로 재면 약 59건/초로 떨어진다 (기대 83건/초).
     runner, store, clock, _ = make(regions, speed=1440, duration=120)
-    store.on_insert = lambda s, m: clock.sleep(0.02)
+    store.on_insert = lambda s, m: clock.sleep(0.005)
     summary = runner.run()
     expected = 120 * 1440 * params.NORMAL_DAILY_SIGNUPS / params.SECONDS_PER_DAY
     assert _within_5_sigma(summary.total, expected)

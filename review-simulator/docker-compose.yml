@@ -1,0 +1,68 @@
+
+services:
+  # 1. Kafka Broker (Apache 공식 이미지 사용)
+  kafka:
+    image: apache/kafka:4.3.0
+    container_name: kafka-local
+    ports:
+      # 윈도우(호스트)에서 접속하는 포트. 시뮬레이터를 윈도우에서 직접 돌릴 때 localhost:9092 로 붙는다.
+      - "9092:9092"
+    environment:
+      # KRaft 모드 설정
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      # 리스너를 두 개로 나눈다.
+      #  - INTERNAL(29092): 같은 도커 네트워크 안의 컨테이너(kafka-ui, simulator)가 kafka:29092 로 접속
+      #  - EXTERNAL(9092) : 윈도우의 파이썬 등 호스트 프로그램이 localhost:9092 로 접속
+      # (기존 설정은 광고 주소가 kafka:9092 하나뿐이라, 호스트에서 접속하면
+      #  브로커가 'kafka' 라는 이름으로 다시 접속하라고 알려줘서 연결이 실패했다)
+      KAFKA_LISTENERS: 'INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka:29092,EXTERNAL://localhost:9092'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - kafka-net
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8081:8080"
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-cluster
+      # 컨테이너끼리는 내부 리스너로 접속
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - kafka-net
+
+  # 2. 리뷰 시뮬레이터 (선택 실행)
+  # profile 을 걸어 두어서 `docker compose up -d` 로는 kafka, kafka-ui 만 뜬다.
+  # 시뮬레이터까지 컨테이너로 돌리려면:  docker compose --profile sim up --build simulator
+  # (ECS Fargate 에 올리기 전 컨테이너 상태로 동작을 미리 확인하는 용도)
+  simulator:
+    build: .
+    profiles: ["sim"]
+    depends_on:
+      - kafka
+    env_file:
+      # .env 가 없어도 kafka 만 띄울 때 오류가 나지 않게 required: false
+      - path: .env
+        required: false
+    environment:
+      # 컨테이너 안에서는 localhost 가 아니라 내부 리스너로 접속
+      KAFKA_BOOTSTRAP: kafka:29092
+      # Bedrock 인증은 .env 의 AWS_BEARER_TOKEN_BEDROCK(API 키)로 한다. AWS 자격증명 폴더는 넣지 않는다.
+    networks:
+      - kafka-net
+
+networks:
+  kafka-net:
+    driver: bridge

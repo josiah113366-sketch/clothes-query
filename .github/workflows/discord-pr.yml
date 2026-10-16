@@ -1,0 +1,61 @@
+name: Discord PR Notification
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  discord-notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send PR notification to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+
+          REPOSITORY: ${{ github.repository }}
+
+        run: |
+          jq -n \
+            --arg repo "$REPOSITORY" \
+            --arg title "$PR_TITLE" \
+            --arg url "$PR_URL" \
+            --arg author "$PR_AUTHOR" \
+            --arg head "$PR_HEAD" \
+            --arg base "$PR_BASE" \
+            '{
+              username: "환승머지",
+              embeds: [
+                {
+                  title: "💌 당신의 PR은 당신을 선택했습니다.",
+                  url: $url,
+                  description: (
+                    "`" + $head + "` 님이 `" + $base + "` 님에게 마음을 표현했습니다.\n\n" +
+
+                    "### 「 " + $title + " 」\n\n" +
+
+                    "**보낸 사람**\n" +
+                    "`" + $author + "`\n\n" +
+
+                    "**Repository**\n" +
+                    "`" + $repo + "`\n\n" +
+
+                    "당신은 이 PR을 받아주시겠습니까?\n\n" +
+
+                    "[💌 마음 확인하기](" + $url + ")"
+                  )
+                }
+              ]
+            }' > payload.json
+
+          curl --fail-with-body \
+            -H "Content-Type: application/json" \
+            -d @payload.json \
+            "$DISCORD_WEBHOOK_URL"

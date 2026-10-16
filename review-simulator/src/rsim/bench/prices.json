@@ -1,0 +1,45 @@
+{
+  "_comment": "100만 토큰당 USD {input, output}. 키는 Bedrock 모델 ID (jp./apac./global. 접두사는 떼고 찾음). 아래는 형식 예시와 가정치이고 도쿄 실제 단가가 아니다. AWS Bedrock 가격표(도쿄)를 보고 비교할 모델 단가를 직접 넣을 것. 없는 모델은 비용이 None 으로 나온다.",
+  "anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "input": 1.0,
+    "output": 5.0
+  },
+  "amazon.nova-micro-v1:0": {
+    "input": 0.035,
+    "output": 0.14
+  },
+  "amazon.nova-lite-v1:0": {
+    "input": 0.06,
+    "output": 0.24,
+    "_src": "미국/일반 온디맨드 단가(2026-10-13 웹 검색, 도쿄 미확인)"
+  },
+  "amazon.nova-pro-v1:0": {
+    "input": 0.8,
+    "output": 3.2
+  },
+  "google.gemma-3-12b-it": {
+    "input": 0.11,
+    "output": 0.35,
+    "_src": "AWS Bedrock 가격표 도쿄 온디맨드(2026-10-13 검색 기준, 직접 재확인 권장)"
+  },
+  "qwen.qwen3-32b-v1:0": {
+    "input": 0.15,
+    "output": 0.6,
+    "_src": "미국/일반 온디맨드 단가(2026-10-13 웹 검색, 도쿄 미확인)"
+  },
+  "openai.gpt-oss-120b-1:0": {
+    "input": 0.15,
+    "output": 0.6,
+    "_src": "미국/일반 온디맨드 단가(2026-10-13 웹 검색, 도쿄 미확인)"
+  },
+  "deepseek.v3.2": {
+    "input": 0.62,
+    "output": 1.85,
+    "_src": "미국/일반 온디맨드 단가(2026-10-13 웹 검색, 도쿄 미확인)"
+  },
+  "mistral.ministral-3-14b-instruct": {
+    "input": 0.2,
+    "output": 0.2,
+    "_src": "미국/일반 온디맨드 단가(2026-10-13 웹 검색, 도쿄 미확인)"
+  }
+}

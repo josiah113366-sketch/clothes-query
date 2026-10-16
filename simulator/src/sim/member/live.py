@@ -28,12 +28,12 @@ from sim.member.schedule import next_interval
 
 CLOCK_TOLERANCE = 1e-6
 UNIQUE_VIOLATION = "23505"
-PHONE_CONSTRAINT = "member_phone_key"
-INSERT_SQL = sql.SQL("INSERT INTO member ({}) VALUES ({})").format(
+PHONE_CONSTRAINT = "members_phone_key"
+INSERT_SQL = sql.SQL("INSERT INTO members ({}) VALUES ({})").format(
     sql.SQL(", ").join(sql.Identifier(c) for c in COLUMNS),
     sql.SQL(", ").join(sql.Placeholder() for _ in COLUMNS),
 )
-COUNT_SQL = "SELECT count(*) FROM member WHERE signup_at >= %s"
+COUNT_SQL = "SELECT count(*) FROM members WHERE signup_at >= %s"
 
 
 class LiveError(RuntimeError):
