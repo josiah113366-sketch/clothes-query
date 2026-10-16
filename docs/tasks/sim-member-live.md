@@ -39,7 +39,7 @@
 | 시간 흐름 | **실시간(배속 1)이 기본.** 배속 옵션만 둔다 | `--speed` |
 | 제어 신호 전달 방식 | **미정.** 이번에는 받는 쪽 **인터페이스**와 로컬용 **파일 방식** 구현 하나만 만든다 | 실제 전달 수단(HTTP, 큐 등)은 컨트롤러 브랜치에서 `ControlSource`를 새로 구현 |
 | 컨테이너 수 | 1개 (실행기는 한 프로세스) | — |
-| 가입 속도(평상시) | **하루 평균 1,500명** (설계 제안 범위 1,000~2,000) | `--daily` |
+| 가입 속도(평상시) | **하루 평균 5,000명** (설계 제안 범위 1,000~2,000에서 사용자 결정으로 올림. 처음 값은 1,500명) | `--daily` |
 
 ## 동작
 
@@ -119,14 +119,14 @@ class ControlSource(Protocol):
 |---|---|
 | `schedule.py` | 도착 간격 뽑기. `rate_multiplier(시뮬레이터 시각)`(지금은 항상 1.0)과 모드 배율을 곱해 속도를 정하고 지수분포 간격을 돌려준다 |
 | `live.py` | 실행기: 시계 → 제어 신호 → 간격 대기 → 회원 생성 → INSERT 루프, 재시작 인덱스, 전화 재시도, 종료 처리, 재연결 |
-| `params.py` (수정) | `NORMAL_DAILY_SIGNUPS = 1500`, `SURGE_MULTIPLIER = 4.6`, `DEFAULT_SPEED = 1`, 제어 신호 확인 주기(1초), 전화 재시도 횟수(10), 재연결 대기 한계(30초) |
+| `params.py` (수정) | `NORMAL_DAILY_SIGNUPS = 5000`, `SURGE_MULTIPLIER = 4.6`, `DEFAULT_SPEED = 1`, 제어 신호 확인 주기(1초), 전화 재시도 횟수(10), 재연결 대기 한계(30초) |
 | `generate.py` (필요하면 추가만) | 번호 하나를 뽑는 순수 함수 `draw_phone(rng) -> str` (형식은 베이스라인의 전화번호 형식과 **같은 함수**를 쓴다). 기존 함수는 고치지 않는다 |
 | `cli.py` (수정) | `live` 명령 추가 |
 
 ### 3. CLI
 
 ```
-sim member live [--mode normal|surge] [--daily 1500] [--surge-multiplier 4.6]
+sim member live [--mode normal|surge] [--daily 5000] [--surge-multiplier 4.6]
                 [--speed 1] [--duration SECONDS] [--max-signups N]
                 [--control-file PATH] [--seed N]
 ```
@@ -134,7 +134,7 @@ sim member live [--mode normal|surge] [--daily 1500] [--surge-multiplier 4.6]
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 |
-| `--daily` | `SIM_LIVE_DAILY` | 1500 | 평상시 하루 평균 가입 수 |
+| `--daily` | `SIM_LIVE_DAILY` | 5000 | 평상시 하루 평균 가입 수 |
 | `--surge-multiplier` | `SIM_LIVE_SURGE_MULTIPLIER` | 4.6 | 폭주 배율 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | — | 없음(계속) | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
@@ -158,7 +158,7 @@ baseline 때와 같다. 이번 작업에서 특히 확인할 곳:
 
 **단위 테스트 (DB 없이, 가짜 시계 사용, 기본 `pytest`에 포함):**
 
-- **속도:** 평상시, 가짜 시계로 시뮬레이터 10일 → 건수가 15,000 ± 5σ 안 (푸아송, σ = √15,000)
+- **속도:** 평상시, 가짜 시계로 시뮬레이터 10일 → 건수가 50,000 ± 5σ 안 (푸아송, σ = √50,000)
 - **폭주:** `surge`로 시뮬레이터 1일 → 평상시의 4.6배 ± 5σ 안
 - **모드 전환:** 중간에 `normal → surge → normal`로 바꾸면 구간별 건수가 각 속도를 따른다
 - **멈춤·재개:** `running=false` 동안 건수가 늘지 않고, `true`로 돌아오면 다시 늘어난다

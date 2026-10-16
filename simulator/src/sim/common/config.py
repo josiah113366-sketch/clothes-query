@@ -25,6 +25,8 @@ class Config:
     region_file: Path = Path(DEFAULT_REGION_FILE)
     connect_url: str = DEFAULT_CONNECT_URL
     kafka_bootstrap: str = DEFAULT_KAFKA_BOOTSTRAP
+    s3_bucket: str = ""
+    aws_region: str = ""
 
     def __repr__(self) -> str:  # 접속 정보가 출력에 섞이지 않게 한다
         return f"Config(seed={self.seed}, region_file={self.region_file.name!r})"
@@ -60,4 +62,6 @@ def load_config(
         region_file=region_file,
         connect_url=env.get("CONNECT_URL", "").strip() or DEFAULT_CONNECT_URL,
         kafka_bootstrap=env.get("KAFKA_BOOTSTRAP", "").strip() or DEFAULT_KAFKA_BOOTSTRAP,
+        s3_bucket=env.get("S3_BUCKET", "").strip(),
+        aws_region=env.get("AWS_REGION", "").strip(),
     )

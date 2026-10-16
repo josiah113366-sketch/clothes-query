@@ -57,7 +57,9 @@ services:
       start_period: 20s
 
   connect:
-    image: quay.io/debezium/connect:3.7.0.Final
+    # Debezium 이미지에 S3 Sink 플러그인을 더한 이미지 (connect/Dockerfile)
+    build: ./connect
+    image: simulator-connect:3.7.0-s3sink-12.1.13
     profiles: ["cdc"]
     depends_on:
       kafka:
@@ -81,6 +83,11 @@ services:
       CONNECT_CONFIG_PROVIDERS: env
       CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
       CDC_DB_PASSWORD: ${CDC_DB_PASSWORD:-sim}  # 로컬 전용 더미 값
+      # S3 Sink용. 값 없이 이름만 적어 simulator/.env에서 가져온다 (파일에 키를 쓰지 않는다)
+      AWS_ACCESS_KEY_ID:
+      AWS_SECRET_ACCESS_KEY:
+      AWS_REGION:
+      S3_BUCKET:
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8083/ > /dev/null"]
       interval: 10s

@@ -14,6 +14,7 @@ simulator/
 ├── src/sim/
 │   ├── cli.py             # sim 명령 진입점
 │   ├── cdc/               # 로컬 CDC: 커넥터 등록·상태·초기화, 토픽 검증 (sim cdc)
+│   ├── sink/              # 로컬 S3 Sink: 커넥터 등록·상태·초기화, S3 파일 검증 (sim sink)
 │   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
@@ -82,7 +83,7 @@ pytest -m integration
 베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
-sim member live                                   # 평상시, 실시간, 하루 평균 1,500명
+sim member live                                   # 평상시, 실시간, 하루 평균 5,000명
 sim member live --speed 1440 --duration 30        # 시뮬레이터 하루 = 실제 1분으로 30초 실행
 sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만들고 종료
 ```
@@ -90,7 +91,7 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `surge`) |
-| `--daily` | `SIM_LIVE_DAILY` | 1500 | 평상시 하루 평균 가입 수 |
+| `--daily` | `SIM_LIVE_DAILY` | 5000 | 평상시 하루 평균 가입 수 |
 | `--surge-multiplier` | `SIM_LIVE_SURGE_MULTIPLIER` | 4.6 | 폭주 모드의 배율 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
@@ -121,7 +122,7 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 ## 로컬 CDC
 
-로컬 `members` 테이블을 Debezium이 읽어 Kafka 토픽 `members-events`로 흘리고, 그 결과가 설계대로인지(특히 PII가 한 글자도 안 나가는지) `sim cdc verify`로 확인한다. S3 Sink는 아직 없다. `verify`가 토픽을 직접 읽어 "Bronze에 들어갈 모양"을 검증한다. 커넥터 설정은 `connectors/`에 있다 (`connectors/README.md`).
+로컬 `members` 테이블을 Debezium이 읽어 Kafka 토픽 `members-events`로 흘리고, 그 결과가 설계대로인지(특히 PII가 한 글자도 안 나가는지) `sim cdc verify`로 확인한다. `verify`가 토픽을 직접 읽어 "Bronze에 들어갈 모양"을 검증한다. 커넥터 설정은 `connectors/`에 있다 (`connectors/README.md`).
 
 ```bash
 sim member baseline --yes                  # 1. 베이스라인 10만 명 (이미 있으면 생략)
@@ -146,6 +147,40 @@ sim cdc verify --live-expected 200         # 5. 13개 항목 확인, 하나라�
 - **주소가 둘이다:** 컨테이너끼리는 `kafka:9092`, WSL(파이썬 CLI)에서는 `localhost:29092`. 헷갈리면 컨테이너 안에서는 되는데 밖에서 접속이 안 된다(또는 그 반대). 환경 변수는 `CONNECT_URL`(기본 `http://localhost:8083`), `KAFKA_BOOTSTRAP`(기본 `localhost:29092`).
 - **Kafka UI:** `http://127.0.0.1:8080`. 토픽과 커넥터를 눈으로 본다 (`127.0.0.1`에만 열려 있다).
 - **메모리:** Kafka, Connect, Kafka UI 합쳐서 약 1.5GB를 쓴다 (힙 상한 512MB·512MB·384MB). 쓰지 않을 때는 `docker compose --profile cdc stop kafka connect kafka-ui`.
-- **자주 막히는 곳:** 토픽 파티션은 1개로 만들어진다 (`topic.creation.default.partitions=3`이 적용되지 않았다). 비밀번호는 커넥터 JSON이 아니라 Connect 컨테이너의 환경 변수 `CDC_DB_PASSWORD`로 준다.
+- **자주 막히는 곳:** 토픽 파티션은 3개다 (`topic.creation.default.partitions=3`). 처음 구성할 때 1개로 나온 적이 있어 원인은 확인하지 못했다. 비밀번호는 커넥터 JSON이 아니라 Connect 컨테이너의 환경 변수 `CDC_DB_PASSWORD`로 준다.
 - **Kafka 데이터 파일을 직접 grep할 때:** `.log` 파일만 대상으로 한다 (`.index`는 10MB씩 미리 잡힌 희소 파일이라 전체를 읽으면 오래 걸린다). 전화번호 정규식(`010-[0-9]{4}-[0-9]{4}`)은 member_id(UUID) 안에서 우연히 걸릴 수 있으니, 걸리면 UUID 모양을 지운 뒤에도 걸리는지 본다.
 - 이 구성은 로컬 전용이다. RDS, MSK는 인프라 작업에서 다룬다.
+
+## S3 Sink
+
+Kafka 토픽 `members-events`를 **S3의 `bronze/`에 JSON Lines 파일로 쌓는** Confluent S3 Sink 커넥터를 로컬 Connect에 붙이고, 쌓인 파일이 설계대로인지 `sim sink verify`로 확인한다. 커넥터 설정은 `connectors/member-s3-sink.json`이다 (값마다 이유와 IAM 정책 예시는 `connectors/README.md`).
+
+```
+시뮬레이터 → Postgres → Debezium → Kafka 토픽 → S3 Sink → S3
+                                                   └ bronze/members-events/year=YYYY/month=MM/day=DD/*.json
+```
+
+```bash
+# 1. simulator/.env에 키를 둔다 (S3_BUCKET, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY). 커밋하지 않는다
+docker compose --profile cdc build connect   # 2. Connect 이미지에 S3 Sink 플러그인을 넣는다 (처음 한 번)
+docker compose --profile cdc up -d           # 3. 켠다
+sim sink setup                               # 4. S3 접근 확인 → 커넥터 등록
+sim sink status                              # 5. S3에 파일이 생기는지 본다
+sim sink verify                              # 6. 11개 항목 확인, 하나라도 실패하면 종료 코드 1
+```
+
+| 명령 | 설명 |
+|---|---|
+| `sim sink setup [--config PATH]` | 안전장치 검사(토픽이 source와 같음, 자격 증명 키·문자열 없음, 버킷 이름이 `${env:S3_BUCKET}` 참조, UTC 일별 `year=/month=/day=` 파티션, JSON 형식)와 **S3 접근 확인**(버킷·`bronze/` 조회)을 통과해야 등록한다. 같은 이름의 커넥터가 있으면 **아무것도 바꾸지 않고** 상태만 보여 준다 |
+| `sim sink status` | 커넥터·task 상태, **소비자 그룹이 얼마나 밀렸는지**, 버킷 공개 차단 설정(조회 권한이 있을 때), `bronze/members-events/` 아래 날짜별 파일 수·크기·가장 최근 파일 시각 (읽기 전용. 객체 내용은 읽지 않는다) |
+| `sim sink verify` | S3 파일과 토픽을 대조해 11개 항목을 확인한다. 아직 쓰는 중(밀림 > 0, 또는 마지막 파일 이후 30초 미만. 파일을 15분마다 끊어서 방금 가입한 건은 최대 15분 뒤에 S3에 보인다)이면 실패가 아니라 **종료 코드 2**로 "잠시 뒤 다시"라고 알린다 |
+| `sim sink reset [--yes]` | 커넥터 정지 → 소비자 그룹 offset 삭제 → 커넥터 삭제. **S3 객체는 건드리지 않는다.** 지우는 `aws s3 rm` 명령을 출력만 한다 |
+
+- **경로 규칙:** `bronze/members-events/year=YYYY/month=MM/day=DD/members-events+<파티션>+<시작offset>.json`. **날짜 폴더는 Kafka 레코드 시각(수집 시각, UTC)이고 가입일이 아니다.** 가입일은 값의 `signup_at`에 있다.
+- **파일을 끊는 조건:** 15분마다(벽시계) 또는 파티션 파일 하나가 10,000건이 되면. 방금 만든 가입을 바로 확인하려면 `connectors/member-s3-sink.json`의 `rotate.schedule.interval.ms`를 임시로 `30000`으로 바꿔 등록한다 (확인이 끝나면 되돌린다).
+- **at-least-once다.** 재시작·오류 뒤에 같은 메시지가 파일에 두 번 들어갈 수 있다. Silver에서 `member_id` 기준으로 중복을 제거한다. `verify`는 겹친 구간과 초과 행을 "중복 N건"으로 보고만 한다.
+- **`reset` 뒤에 다시 `setup`하면 같은 데이터가 S3에 한 번 더 쌓인다.** 토픽을 처음부터 다시 읽기 때문이다. 먼저 S3 파일을 지울지 정한다.
+- **자격 증명을 파일에 쓰지 않는다.** 키와 버킷 이름은 `simulator/.env`(gitignore)에만 두고, compose는 `connect` 서비스에 환경 변수를 **이름만** 넘긴다. 커넥터 JSON에는 키도 버킷 이름도 없다. `docker compose config`와 `env` 출력에는 키 값이 나오니 화면 공유나 로그에 쓰지 않는다.
+- **`.env` 줄 이름:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`다 (`AWS_ACCESS_KEY` 같은 이름은 읽히지 않는다).
+- **S3 쓰기·삭제 코드는 없다.** `sim sink`의 S3 접근은 읽기 전용이다 (쓰는 것은 Connect의 S3 Sink 커넥터다).
+- **플러그인:** Confluent S3 Sink 12.1.13 (Confluent Community License, 로컬 사용). 버전과 체크섬은 `connect/Dockerfile`에 고정돼 있다.
