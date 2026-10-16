@@ -1,0 +1,14 @@
+# 큰 모델(LLM) 시험용 환경: EXAONE, Kanana, Mi:dm, Qwen 등을 프롬프트로 시험하거나 LoRA로 미세조정할 때.
+# 이 PC(Windows, CPU, RAM 32GB)와 Colab(GPU) 모두에서 쓸 수 있게 맞춘 목록이다.
+-r requirements.txt
+torch                       # 이 PC는 CPU 버전(pip 기본)이 설치된다. Colab은 기본 제공 CUDA 버전을 쓰므로 다시 설치하지 않는다.
+transformers>=4.51,<4.54    # EXAONE 3.5의 원격 코드가 4.54 이상에서 create_causal_mask 오류를 냈다(노트북 v2 로그). 4.53.3으로 맞춰 둠.
+accelerate
+sentencepiece
+protobuf
+safetensors
+peft                        # LoRA 미세조정용
+
+# 아래는 Linux/Colab(GPU)에서만 설치한다. Windows·CPU에서는 쓸 수 없다.
+# bitsandbytes              # 7B 이상 4비트 로딩
+# trl                       # (선택) SFT 학습 도우미

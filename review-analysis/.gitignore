@@ -1,0 +1,20 @@
+.venv/
+.venv-llm/
+__pycache__/
+.env
+*.pyc
+_nb_code/
+models/
+
+# 실제 후기를 받아 적은 내부 자료: 올리거나 공유하지 않는다
+private/
+
+# AI Hub 원본 데이터: 재배포 조건이 있어 올리지 않는다
+aihub_dataset/
+aihub_work/
+
+# Terraform 로컬 상태·플랜(계정 정보가 들어갈 수 있음)
+deploy/terraform/.terraform/
+deploy/terraform/*.tfstate*
+deploy/terraform/tfplan*
+deploy/terraform/*.tfvars

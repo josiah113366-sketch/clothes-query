@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>번역 리뷰 별점 비교</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.3/plotly.min.js"></script>
+<style>
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
+ --grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--s1:#2a78d6;--s2:#eb6834;
+ --good:#006300;--bad:#d03b3b;--hl:#cde2fb;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;
+ --ink:#ffffff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+ --s1:#3987e5;--s2:#d95926;--good:#0ca30c;--bad:#e66767;--hl:#184f95;}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#ffffff;--ink2:#c3c2b7;--muted:#898781;
+ --grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--good:#0ca30c;--bad:#e66767;--hl:#184f95;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+main{max-width:1200px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:16px;margin:0 0 4px}
+.sub{color:var(--ink2);margin:0 0 16px}
+.lead{font-size:16px;margin:0 0 20px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;min-width:0}
+.note{color:var(--ink2);font-size:12px;margin:4px 0 8px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px}
+@media (max-width:520px){.grid2{grid-template-columns:1fr}}
+.chart{width:100%;height:340px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+th{color:var(--ink2);font-weight:600;position:sticky;top:0;background:var(--surface)}
+td.l,th.l{text-align:left}
+td.best{font-weight:700;background:var(--hl)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px}
+.controls label{color:var(--ink2);font-size:13px}
+select,input[type=search]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--axis);border-radius:6px;padding:4px 8px}
+.seg button{font:inherit;color:var(--ink2);background:transparent;border:1px solid var(--axis);padding:4px 10px;cursor:pointer}
+.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button+button{border-left:none}
+.seg button[aria-pressed=true]{color:var(--ink);background:var(--hl);font-weight:600}
+.ok{color:var(--good);font-weight:600}.ng{color:var(--bad);font-weight:600}
+.txt{min-width:320px;max-width:520px;white-space:normal;text-align:left;color:var(--ink2)}
+.pred{height:520px;overflow:auto}
+</style></head><body><main>
+<h1>영어 원문 vs 한국어 번역: 별점 예측 모델 비교</h1>
+<p class="sub" id="meta"></p>
+<p class="lead" id="lead"></p>
+
+<section class="card"><h2>번역 모델 비교</h2>
+<p class="note" id="mtNote"></p>
+<div class="tablewrap"><table id="mtTable"></table></div></section>
+
+<section class="card"><h2>모델 요약</h2>
+<p class="note">테스트셋 기준. 열마다 가장 좋은 값을 강조했습니다. MAE는 작을수록 좋습니다.</p>
+<div class="tablewrap"><table id="summary"></table></div></section>
+
+<div class="grid2">
+<section class="card"><h2>모델별 지표</h2>
+<div class="controls seg" id="metricBtns" role="group" aria-label="지표 선택"></div>
+<div id="barChart" class="chart"></div></section>
+<section class="card"><h2>학습 전후 감성 정확도</h2>
+<p class="note">부정·중립·긍정 3분류 기준. 긍정/부정만 내는 모델은 학습 전에 중립을 맞힐 수 없습니다.</p>
+<div id="zsChart" class="chart"></div></section>
+</div>
+
+<div class="grid2">
+<section class="card"><h2>별점별 정확도</h2>
+<p class="note">실제 그 별점인 리뷰 중 정확히 맞힌 비율(%)</p>
+<div id="starHeat" class="chart"></div></section>
+<section class="card"><h2>카테고리별 정확도</h2>
+<p class="note">카테고리 안에서 별점을 정확히 맞힌 비율(%)</p>
+<div id="catHeat" class="chart"></div></section>
+</div>
+
+<section class="card"><h2>혼동행렬</h2>
+<div class="controls"><label for="cmModel">모델</label><select id="cmModel"></select>
+<span class="note">행 = 실제 별점, 열 = 예측 별점. 칸의 값은 실제 별점 기준 비율(%)이고, 마우스를 올리면 건수가 보입니다.</span></div>
+<div id="cmChart" class="chart" style="height:380px;max-width:560px"></div></section>
+
+<section class="card"><h2>원래값 / 예측값</h2>
+<div class="controls">
+<label for="fCat">카테고리</label><select id="fCat"></select>
+<label for="fStar">실제 별점</label><select id="fStar"></select>
+<label for="fModel">오답 기준 모델</label><select id="fModel"></select>
+<label><input type="checkbox" id="fWrong"> 오답만</label>
+<label><input type="checkbox" id="fSplit"> 모델끼리 예측이 갈린 리뷰만</label>
+<input type="search" id="fText" placeholder="번역문·원문 검색" aria-label="본문 검색">
+<span class="note" id="rowCount"></span></div>
+<div class="tablewrap pred"><table id="preds"></table></div>
+<p class="note" id="rowsNote"></p></section>
+</main>
+<script>
+const DATA = __DATA__;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const dark = () => css('--surface') === '#1a1a19';
+const fmt = v => (v === null || v === undefined) ? '-' : v.toFixed(1);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const models = DATA.models;
+
+// 공통 차트 레이아웃: 얇은 격자, 축 색, 표면색을 CSS 변수에서 읽음 (다크 모드 대응)
+function baseLayout(extra) {
+  const ax = {gridcolor: css('--grid'), linecolor: css('--axis'), zerolinecolor: css('--axis'),
+              tickfont: {color: css('--muted')}, title: {font: {color: css('--ink2')}}, automargin: true};
+  return Object.assign({paper_bgcolor: css('--surface'), plot_bgcolor: css('--surface'),
+    font: {color: css('--ink'), family: 'system-ui, -apple-system, "Segoe UI", sans-serif', size: 12},
+    margin: {l: 10, r: 10, t: 10, b: 10}, xaxis: Object.assign({}, ax), yaxis: Object.assign({}, ax),
+    hoverlabel: {bgcolor: css('--surface'), bordercolor: css('--axis'), font: {color: css('--ink')}},
+    barcornerradius: 4, showlegend: false}, extra || {});
+}
+const cfg = {displayModeBar: false, responsive: true};
+// 순차 색상(파랑 한 가지, 밝음→진함). 다크 모드에서는 낮은 값이 배경에 가깝게.
+const seqScale = () => dark()
+  ? [[0, '#1e2a3a'], [0.5, '#1c5cab'], [1, '#3987e5']]
+  : [[0, '#eef5fd'], [0.5, '#5598e7'], [1, '#104281']];
+
+// ── 헤더 ──
+document.getElementById('meta').textContent =
+  `기간 ${DATA.meta.period} · 카테고리 ${DATA.meta.categories.join(', ')} · 학습 ${DATA.meta.n_train.toLocaleString()} / 검증 ${DATA.meta.n_val.toLocaleString()} / 테스트 ${DATA.meta.n_test.toLocaleString()}건 · 생성 ${DATA.meta.generated}`;
+if (models.length) {
+  const b = models[0];   // 요약은 정확도 순으로 정렬되어 들어옴
+  document.getElementById('lead').innerHTML =
+    `가장 정확한 모델은 <b>${esc(b.name)}</b>입니다. 별점 정확도 ${fmt(b.accuracy)}%, ±1점 이내 ${fmt(b.within1)}%, 감성 3분류 ${fmt(b.sent_accuracy)}%.`;
+} else {
+  document.getElementById('lead').textContent = '완료된 모델 결과가 없습니다.';
+}
+
+// ── 요약 표 ──
+const COLS = [
+  ['name', '모델', 'l'], ['base', '기반', 'l'], ['params_m', '파라미터(M)'],
+  ['accuracy', '정확도(%)', '', 'max'], ['macro_f1', 'Macro-F1(%)', '', 'max'], ['within1', '±1점 정확도(%)', '', 'max'],
+  ['mae', 'MAE', '', 'min'], ['sent_accuracy', '감성 정확도(%)', '', 'max'],
+  ['zs_sent_accuracy', '학습 전 감성(%)', '', 'max'], ['best_epoch', '최적 에폭'],
+  ['train_minutes', '학습 시간(분)', '', 'min'], ['infer_per_sec', '예측 속도(건/초)', '', 'max'], ['license', '라이선스', 'l']];
+(function () {
+  const best = {};
+  COLS.forEach(([k, , , dir]) => { if (!dir) return;
+    const vals = models.map(m => m[k]).filter(v => v !== null && v !== undefined);
+    best[k] = dir === 'max' ? Math.max(...vals) : Math.min(...vals); });
+  let h = '<thead><tr>' + COLS.map(([, t, c]) => `<th class="${c || ''}">${t}</th>`).join('') + '</tr></thead><tbody>';
+  models.forEach(m => {
+    h += '<tr>' + COLS.map(([k, , c, dir]) => {
+      let v = m[k];
+      const isBest = dir && v === best[k] && models.length > 1;
+      if (typeof v === 'number') v = (k === 'mae') ? v.toFixed(3) : (k === 'params_m' || k === 'infer_per_sec' || k === 'best_epoch') ? Math.round(v).toLocaleString() : fmt(v);
+      return `<td class="${c || ''}${isBest ? ' best' : ''}">${isBest ? '▲ ' : ''}${esc(v ?? '-')}</td>`;
+    }).join('') + '</tr>';
+  });
+  document.getElementById('summary').innerHTML = h + '</tbody>';
+})();
+
+// ── 지표별 막대 차트 (지표 선택 버튼) ──
+const METRICS = [['accuracy', '정확도'], ['macro_f1', 'Macro-F1'], ['within1', '±1점 정확도'], ['sent_accuracy', '감성 정확도']];
+function drawBar(key) {
+  const label = METRICS.find(m => m[0] === key)[1];
+  const ms = [...models].sort((a, b) => (a[key] ?? 0) - (b[key] ?? 0));   // 아래→위로 커지게
+  Plotly.react('barChart', [{type: 'bar', orientation: 'h', x: ms.map(m => m[key]), y: ms.map(m => m.name),
+    marker: {color: css('--s1')}, width: 0.55,
+    text: ms.map(m => fmt(m[key]) + '%'), textposition: 'outside', textfont: {color: css('--ink2')}, cliponaxis: false,
+    hovertemplate: '%{y}<br>' + label + ' %{x:.1f}%<extra></extra>'}],
+    baseLayout({xaxis: Object.assign(baseLayout().xaxis, {range: [0, 105], ticksuffix: '%'}), margin: {l: 10, r: 40, t: 10, b: 10}}), cfg);
+  document.querySelectorAll('#metricBtns button').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === key));
+}
+METRICS.forEach(([k, t]) => {
+  const b = document.createElement('button'); b.textContent = t; b.dataset.k = k;
+  b.onclick = () => drawBar(k); document.getElementById('metricBtns').appendChild(b);
+});
+if (models.length) drawBar('accuracy');
+
+// ── 학습 전후 비교 (주황 = 학습 전, 파랑 = 학습 후) ──
+if (models.length) Plotly.react('zsChart', [
+  {type: 'bar', name: '학습 전(제로샷)', x: models.map(m => m.name), y: models.map(m => m.zs_sent_accuracy),
+   marker: {color: css('--s2'), line: {color: css('--surface'), width: 2}},
+   hovertemplate: '%{x}<br>학습 전 %{y:.1f}%<extra></extra>'},
+  {type: 'bar', name: '학습 후(파인튜닝)', x: models.map(m => m.name), y: models.map(m => m.sent_accuracy),
+   marker: {color: css('--s1'), line: {color: css('--surface'), width: 2}},
+   text: models.map(m => fmt(m.sent_accuracy) + '%'), textposition: 'outside', textfont: {color: css('--ink2')}, cliponaxis: false,
+   hovertemplate: '%{x}<br>학습 후 %{y:.1f}%<extra></extra>'}],
+  baseLayout({barmode: 'group', bargap: 0.35, bargroupgap: 0.08, showlegend: true,
+    legend: {orientation: 'h', y: 1.12, x: 0, font: {color: css('--ink2')}},
+    yaxis: Object.assign(baseLayout().yaxis, {range: [0, 108], ticksuffix: '%'}), margin: {l: 10, r: 10, t: 30, b: 10}}), cfg);
+
+// ── 히트맵 공통 함수 ──
+function heat(id, cols, getter, hoverName) {
+  const z = models.map(m => cols.map(c => getter(m, c)));
+  Plotly.react(id, [{type: 'heatmap', z: z, x: cols, y: models.map(m => m.name), zmin: 0, zmax: 100,
+    colorscale: seqScale(), xgap: 2, ygap: 2, texttemplate: '%{z:.1f}', showscale: true,
+    colorbar: {ticksuffix: '%', thickness: 10, outlinewidth: 0, tickfont: {color: css('--muted')}},
+    hovertemplate: '%{y}<br>' + hoverName + ' %{x}: %{z:.1f}%<extra></extra>'}],
+    baseLayout({yaxis: Object.assign(baseLayout().yaxis, {autorange: 'reversed'}), xaxis: Object.assign(baseLayout().xaxis, {side: 'top'})}), cfg);
+}
+if (models.length) {
+  heat('starHeat', ['1점', '2점', '3점', '4점', '5점'], (m, c) => m.per_star[c], '실제');
+  heat('catHeat', DATA.meta.categories, (m, c) => m.per_category[c], '');
+}
+
+// ── 혼동행렬 ──
+const cmSel = document.getElementById('cmModel');
+models.forEach(m => cmSel.add(new Option(m.name, m.name)));
+function drawCM() {
+  const m = models.find(x => x.name === cmSel.value); if (!m) return;
+  const cm = m.confusion, rowsum = cm.map(r => r.reduce((a, b) => a + b, 0) || 1);
+  const z = cm.map((r, i) => r.map(v => 100 * v / rowsum[i]));
+  const stars = ['1점', '2점', '3점', '4점', '5점'];
+  Plotly.react('cmChart', [{type: 'heatmap', z: z, x: stars, y: stars, customdata: cm, zmin: 0, zmax: 100,
+    colorscale: seqScale(), xgap: 2, ygap: 2, texttemplate: '%{z:.0f}', showscale: false,
+    hovertemplate: '실제 %{y} → 예측 %{x}<br>%{customdata}건 (%{z:.1f}%)<extra></extra>'}],
+    baseLayout({xaxis: Object.assign(baseLayout().xaxis, {title: {text: '예측 별점'}, side: 'top'}),
+                yaxis: Object.assign(baseLayout().yaxis, {title: {text: '실제 별점'}, autorange: 'reversed'})}), cfg);
+}
+cmSel.onchange = drawCM; drawCM();
+
+// ── 번역 모델 비교 표 ──
+(function () {
+  const mt = DATA.mt || [];
+  document.getElementById('mtNote').textContent = DATA.meta.mt_note || '';
+  if (!mt.length) { document.getElementById('mtTable').innerHTML = '<tbody><tr><td class="l">번역 비교 결과가 없습니다.</td></tr></tbody>'; return; }
+  const cols = Object.keys(mt[0]);
+  const higher = {'감성 유지 점수': 1, '감성 일치율(%)': 1, '강도 유지율(%)': 1, '분포 유사도(%)': 1, 'LLM 별점 일치율(%)': 1,
+    '번역문 감성 정확도(%)': 1, '역번역 chrF': 1, 'CometKiwi': 1, '속도(건/초)': 1, '종합 점수': 1,
+    '극성 반전율(%)': -1, 'LLM 별점 차이': -1, '실패율(%)': -1};
+  const best = {};
+  cols.forEach(c => { if (!higher[c]) return; const v = mt.map(r => r[c]).filter(x => x !== null && x !== undefined);
+    if (v.length) best[c] = higher[c] > 0 ? Math.max(...v) : Math.min(...v); });
+  let h = '<thead><tr>' + cols.map(c => `<th class="${typeof mt[0][c] === 'string' ? 'l' : ''}">${esc(c)}</th>`).join('') + '</tr></thead><tbody>';
+  mt.forEach(r => { const main = r['번역 모델'] === DATA.meta.main_mt;
+    h += '<tr>' + cols.map(c => { const v = r[c], isBest = best[c] !== undefined && v === best[c] && mt.length > 1;
+      const txt = (c === '번역 모델' && main) ? `${esc(v)} (사용)` : esc(v ?? '-');
+      return `<td class="${typeof v === 'string' ? 'l' : ''}${isBest ? ' best' : ''}">${isBest ? '▲ ' : ''}${txt}</td>`; }).join('') + '</tr>'; });
+  document.getElementById('mtTable').innerHTML = h + '</tbody>';
+})();
+
+// ── 원래값/예측값 표 ──
+const rows = DATA.rows, names = models.map(m => m.name);
+const fCat = document.getElementById('fCat'), fStar = document.getElementById('fStar'), fModel = document.getElementById('fModel');
+fCat.add(new Option('전체', '')); DATA.meta.categories.forEach(c => fCat.add(new Option(c, c)));
+fStar.add(new Option('전체', '')); [1, 2, 3, 4, 5].forEach(s => fStar.add(new Option(s + '점', s)));
+fModel.add(new Option('아무 모델이나', '')); names.forEach(n => fModel.add(new Option(n, n)));
+function renderRows() {
+  const q = document.getElementById('fText').value.trim().toLowerCase();
+  const wrong = document.getElementById('fWrong').checked, split = document.getElementById('fSplit').checked;
+  const list = rows.filter(r => {
+    if (fCat.value && r.category !== fCat.value) return false;
+    if (fStar.value && r.star !== +fStar.value) return false;
+    if (wrong) { const ms = fModel.value ? [fModel.value] : names; if (!ms.some(n => r.pred[n] !== r.star)) return false; }
+    if (split && new Set(names.map(n => r.pred[n])).size < 2) return false;
+    if (q && !((r.text + ' ' + (r.en || '')).toLowerCase().includes(q))) return false;
+    return true; });
+  const shown = list.slice(0, 500);
+  let h = '<thead><tr><th class="l">카테고리</th><th class="l">작성일</th><th>원래 별점</th>' +
+    names.map(n => `<th>${esc(n)}</th>`).join('') + '<th class="l">리뷰</th></tr></thead><tbody>';
+  shown.forEach(r => {
+    h += `<tr><td class="l">${esc(r.category)}</td><td class="l">${r.date}</td><td><b>${r.star}</b></td>` +
+      names.map(n => { const p = r.pred[n], ok = p === r.star;
+        return `<td class="${ok ? 'ok' : 'ng'}" title="확신도 ${(100 * r.conf[n]).toFixed(0)}%">${ok ? '✓' : '✗'} ${p}</td>`; }).join('') +
+      `<td class="txt"><span style="color:var(--ink)">${esc(r.text)}</span><br>${esc(r.en || '')}</td></tr>`; });
+  document.getElementById('preds').innerHTML = h + '</tbody>';
+  document.getElementById('rowCount').textContent = `${list.length.toLocaleString()}건 중 ${shown.length.toLocaleString()}건 표시`;
+}
+['fCat', 'fStar', 'fModel', 'fWrong', 'fSplit', 'fText'].forEach(id => document.getElementById(id).addEventListener('input', renderRows));
+document.getElementById('rowsNote').textContent = DATA.meta.rows_note;
+renderRows();
+</script></body></html>
