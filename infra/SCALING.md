@@ -1,4 +1,14 @@
-> **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
+> **최신 결정(2026-10-16):** 프라이빗 EKS Auto Mode의 `t3a.large`와 단일 노드 Kafka 프로필을 사용한다. 용량 한도는 6 vCPU/24GiB(세 대분), 평소 한 대 배치가 목표다. NAT는 향후 1개 공유이며 현재 0개다. 제네레이터는 팀원이 ECS Fargate로 구성한다. WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다.
+
+## 최소 구성의 노드 확장
+
+NodePool은 replicas/minimum을 예약하지 않는다. Pod requests와 배치 제약 때문에 기존 노드에 배치할 수 없는 Pod가 생기면 Auto Mode가 용량 한도 안에서 노드를 추가한다. 실제 CPU 사용률이나 Kafka lag만으로 broker/Connect replica가 늘어나는 구조는 아니다. `WhenEmptyOrUnderutilized`와 `consolidateAfter=10m`을 유지하며 PDB·배치·교체 조건에 따라 축소가 지연될 수 있다.
+
+Kafka/Connect/운영자의 메모리 request 3456Mi와 별도 시스템 자원을 t3a.large 한 대에서 수용하는 것이 목표이며 실제 EKS 검증은 남아 있다. Fargate 제네레이터 자원은 이 풀과 별개다. 두 AZ는 배치 가능한 범위이지 노드를 각 AZ에 하나씩 강제하는 설정이 아니다. 단일 Kafka PVC의 AZ와 시스템 Pod의 배치 조건 때문에 추가 노드가 필요할 수 있다. 기본 standard Kafka나 WEB/WAS 배치를 활성화하면 한 대 목표가 성립하지 않는다.
+
+6 vCPU/24GiB는 세 대분의 용량 한도이며 동시 provisioning 중 일시 초과할 수 있어 엄격한 노드 수/비용 상한은 아니다. t3a는 CPU credit 잔고·사용량·추가 과금 또는 throttling도 관측해야 한다. [AWS Auto Mode 지원 타입](https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html), [NodePool limits](https://karpenter.sh/docs/concepts/nodepools/#speclimits).
+
+아래 WEB/WAS HPA 내용은 추후 앱을 배포할 때 사용하는 별도 설계다. 현재 최소 실행의 활성화 기준이 아니다.
 
 # Generator 부하에 따른 확장·축소
 
@@ -11,7 +21,7 @@
 | CPU 목표 | requests 대비 70% | target_cpu_utilization |
 | 축소 안정화 | 300초 | scale_down_stabilization_seconds |
 | Pod 기본 자원 | CPU 요청 100m/한도 500m, 메모리 요청 128Mi/한도 512Mi | workload_settings |
-| 노드 풀 한도 | 8 vCPU/32 GiB, m6i.large/m7i.large | compute node_pool_cpu_limit/node_pool_memory_limit_gib |
+| 노드 풀 한도 | 현재 6 vCPU/24 GiB, t3a.large. 앱 활성화 전 재산정 | compute node_pool_cpu_limit/node_pool_memory_limit_gib |
 | 노드 정리 대기 | 10분 | compute consolidate_after |
 
 HPA는 WAS Pod 수를, Auto Mode는 노드 용량을 조절한다. WEB replica는 Terraform이 관리한다. WAS Deployment는 spec[0].replicas 변경을 무시하여 HPA와 충돌하지 않는다. WAS 수는 workload_settings.was.replicas 대신 아래 HPA 입력으로 바꾼다.

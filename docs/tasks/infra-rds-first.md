@@ -48,3 +48,15 @@
 실제 단일 NAT 활성화 preview plan: NAT/EIP 각 1개 추가·양쪽 app route table 2개 변경, 삭제/교체 없음. 현재 NAT 비활성 입력으로 별도 plan을 다시 실행해 변경 없음을 확인했다. preview plan은 적용하지 않았다.
 
 후속 검증: Terraform fmt/10개 root init·validate, 10개 suite/48개 mock plan 통과. 단일 NAT의 양쪽 app route table 연결, 기존 AZ별 NAT 모드, NAT 비활성 모드를 함께 확인했다.
+
+## 후속 결정: 최소 EKS compute와 Fargate 제네레이터
+
+2026-10-16 사용자가 실제 코드 수정을 요청했고 제네레이터는 팀원이 ECS Fargate로 구성한다고 확정했다. compute module/stack 기본값과 공개 terraform.tfvars를 t3a.large On-Demand·6 vCPU/24GiB(세 대분)로 통일한다. Auto Mode·private NodeClass·두 AZ 선택·10분 consolidation은 유지한다. 평소 한 대는 배치 목표이며 고정 replicas나 최소 수를 예약하지 않는다. 동시 provisioning 중 용량 한도를 일시 초과할 수 있어 엄격한 노드 수/비용 상한은 아니다.
+
+기존 단가 기준 t3a.large 한 대는 EC2+Auto Mode 약 $80/월(730시간), 기존 m6i/m7i.large보다 약 $21~26 저렴하다. 노드 추가 시 노드 비용이 증가하며 EKS 제어 영역·NAT·RDS·EBS·로그·전송·CPU credit·세금은 별도다. 이번 변경은 배포나 요금 발생을 시작하지 않는다.
+
+최소 Kafka는 별도 single-node 프로필로 1 broker·1 Connect·20GiB·72시간이며 standard의 3 broker 설정은 보존한다. WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다. Fargate의 Task 정의·ECR/이미지·실행 역할·Task 역할·실행 주기는 팀원 담당이고 인프라는 실제 task SG·DB 계정·S3 prefix를 받아 연결한다. 공개 문서에는 실제 접속 값이나 Secret을 넣지 않는다. [연결 입력](../design/infra/team-inputs.md).
+
+검증 결과는 아래 후속 기록에 추가한다. 실제 EKS scheduling·RDS/CDC/Fargate 연결은 미검증이며 원격 push·PR 변경·AWS apply는 이번 작업에 포함하지 않는다.
+
+후속 검증 완료: Terraform fmt 및 10개 root의 backend 없는 init/validate, 10개 suite/48개 mock plan 통과. compute 검사는 t3a.large 허용·6 vCPU/24GiB 한도·private NodeClass·두 AZ 선택·고정 replicas 없음·교체 여유 입력을 확인했다. 공개 배포 입력과 예시 파일의 용량 값 일치 및 git diff --check도 통과했다. 초기 실행에서 Registry 네트워크 제한으로 init이 실패하여, 승인된 네트워크 실행으로 재검증했다. 실제 AWS state나 리소스는 변경하지 않았다.

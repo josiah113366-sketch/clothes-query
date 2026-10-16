@@ -12,8 +12,20 @@ run "bounded_on_demand_pool" {
   command = plan
   module { source = "../modules/compute" }
   assert {
-    condition     = kubernetes_manifest.node_pool.manifest.spec.limits.cpu == "8" && kubernetes_manifest.node_pool.manifest.spec.limits.memory == "32Gi"
-    error_message = "The initial pool must be bounded to 8 vCPU and 32 GiB."
+    condition     = kubernetes_manifest.node_pool.manifest.spec.limits.cpu == "6" && kubernetes_manifest.node_pool.manifest.spec.limits.memory == "24Gi"
+    error_message = "The compact pool must have a nominal three-node budget of 6 vCPU and 24 GiB."
+  }
+  assert {
+    condition     = contains([for r in kubernetes_manifest.node_pool.manifest.spec.template.spec.requirements : jsonencode(r)], jsonencode({ key = "node.kubernetes.io/instance-type", operator = "In", values = ["t3a.large"] }))
+    error_message = "The compact pool must use only t3a.large instances."
+  }
+  assert {
+    condition     = kubernetes_manifest.node_class.manifest.spec.advancedNetworking.associatePublicIPAddress == false && contains([for r in kubernetes_manifest.node_pool.manifest.spec.template.spec.requirements : jsonencode(r)], jsonencode({ key = "topology.kubernetes.io/zone", operator = "In", values = ["ap-northeast-1a", "ap-northeast-1c"] }))
+    error_message = "Cost reduction must preserve private nodes and both eligible AZs."
+  }
+  assert {
+    condition     = !contains(keys(kubernetes_manifest.node_pool.manifest.spec), "replicas")
+    error_message = "The pool must remain demand-driven instead of reserving three nodes."
   }
   assert {
     condition     = contains([for r in kubernetes_manifest.node_pool.manifest.spec.template.spec.requirements : jsonencode(r)], jsonencode({ key = "karpenter.sh/capacity-type", operator = "In", values = ["on-demand"] }))
@@ -44,15 +56,15 @@ run "reduce_capacity_with_replacement_headroom" {
   command = plan
   module { source = "../modules/compute" }
   variables {
-    node_pool_cpu_limit        = 6
-    node_pool_memory_limit_gib = 24
+    node_pool_cpu_limit        = 4
+    node_pool_memory_limit_gib = 16
   }
   assert {
-    condition     = output.capacity_limits.cpu == 6 && output.capacity_limits.memory_gib == 24
+    condition     = output.capacity_limits.cpu == 4 && output.capacity_limits.memory_gib == 16
     error_message = "The lower capacity setting must remain configurable."
   }
 }
-run "reject_single_node_budget" {
+run "reject_budget_without_replacement_headroom" {
   command = plan
   module { source = "../modules/compute" }
   variables { node_pool_cpu_limit = 2 }

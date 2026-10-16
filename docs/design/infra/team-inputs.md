@@ -1,8 +1,24 @@
 # 팀원에게 받을 연결 입력
 
-상태: 입력 대기 · 2026-10-14. 사용자가 DB→Kafka 캡처 범위와 업무 토픽은 팀원에게 받을 항목으로 보류했다. 이 목록은 전달용 초안이며 메시지를 전송하거나 임의 명세를 구현하지 않았다.
+상태: 입력 대기 · 2026-10-16 갱신. 제네레이터는 팀원이 ECS Fargate로 구성하기로 결정했다. DB→Kafka 캡처 범위와 업무 토픽은 팀원에게 받을 항목이다. 이 문서는 연결 계약이며 메시지를 전송하거나 ECS 리소스를 생성하지 않았다.
 
-현재 인프라는 도쿄·EKS 두 AZ·RDS PostgreSQL 16.15 Single-AZ다. Kafka는 broker/controller 3개, RF=3/min ISR=2, broker당 gp3 20 GiB, 초기 업무 이벤트 보관 24시간을 기준으로 코드만 준비했다. EKS/Kafka/RDS는 아직 생성하지 않았다.
+현재 도쿄의 두 AZ VPC·private RDS PostgreSQL 16.15 Single-AZ·업무 S3는 생성 완료했다. NAT는 0개이며 향후 1개 공유한다. EKS Auto Mode는 t3a.large, 용량 한도 6 vCPU/24GiB로 코드만 준비했다. 최소 Kafka는 single-node 프로필의 broker/controller 1개·Connect 1개·RF 1/min ISR 1·gp3 20GiB·72시간이다. EKS/Kafka는 미배포다.
+
+## ECS Fargate 제네레이터 담당
+
+Fargate cluster/task definition·실행/스케줄·이미지 배포는 팀원 담당이며 이번 EKS compute 변경에서 생성하지 않는다. EKS와 ECS는 같은 VPC의 private RDS·S3를 공유할 수 있다. AWS 계정 ID·리소스 ID·접속 주소·Secret 값은 공개 문서에 적지 않고 비공개 채널로 전달한다.
+
+| 연결 항목 | 역할과 받을 입력 |
+|---|---|
+| VPC·subnet·통신 경로 | 인프라가 실제 VPC/subnet·route 정보를 비공개 전달. 팀원이 Fargate subnet·public IP 여부를 확정. private 구성에서는 활성 NAT 또는 필요한 Endpoint가 있어야 이미지·Secret·로그에 접근 가능 |
+| Task 보안 그룹 | 팀원이 Task ENI의 SG ID를 전달. 인프라는 RDS `database_clients`에 해당 SG만 5432로 허용하는 plan 검토. EKS 클러스터 SG와 Fargate task SG는 별개 |
+| RDS 계정·schema·TLS | 제네레이터 전용 최소 권한 DB 계정·사용할 schema와 Secret 참조를 합의. master 계정은 전달하지 않음. 로컬 DB만 허용하는 현재 코드와 RDS TLS/CA 설정은 담당자가 수정·검증 |
+| ECR·이미지 | 팀원이 사용할 repository·이미지 digest·빌드/배포 주체를 확정. 기존 WEB/WAS용 repository를 자동 재사용하지 않음 |
+| IAM 역할 | Task Execution Role은 ECR pull·로그·태스크 주입 Secret 등 실행에 필요한 권한. Task Role은 제네레이터 코드가 사용하는 S3 등 AWS API 권한. 실행 시 코드에서 Secret을 읽으면 Task Role에도 해당 권한 필요 |
+| S3 prefix | 실제 읽기/쓰기 prefix와 역할 ARN을 받아 최소 권한 정책·필요 시 버킷 정책을 검토. 같은 계정에서는 Task Role 정책으로 허용 가능하며 역할 ARN만으로 자동 권한이 생기지 않음 |
+| 실행량·중단 | Task CPU/memory·동시 실행 수·실행 주기·RDS 연결 수·예상 일일 데이터량을 팀원이 전달. EKS 자동 확장과 Fargate task 확장은 별도 |
+
+연결 검증은 이미지 pull → Task 실행 → TLS로 RDS insert → 필요한 S3 prefix 업로드 순서로 수행한다. 이어서 CDC → Kafka → S3 Sink 전달을 별도로 검증한다. 현재 Fargate SG 허용·DB 계정/DDL·IAM 연결은 수행하지 않았다.
 
 ## DB / CDC 담당
 
@@ -21,7 +37,7 @@
 |---|---|
 | 실제 토픽 이름, 메시지 key와 schema | CDC가 발행하는 이름과 사전 생성 토픽·Consumer 입력 일치 |
 | partition 수, 평균/피크 bytes/s·메시지 크기 | 병렬 처리·디스크·네트워크 예산 검토 |
-| 토픽별 24시간 보관 예외와 추가 heartbeat/transaction 토픽 | 명시적 보관 및 ACL 준비 |
+| 토픽별 72시간 보관 예외와 추가 heartbeat/transaction 토픽 | 업무 토픽 retentionMs=259200000 명시 및 ACL 준비. Connect 내부 compact 토픽은 별도 |
 | Producer/Consumer namespace·ServiceAccount·group 이름 | TLS 인증과 토픽/group 권한 연결 |
 | Consumer 이미지 digest/명령·환경변수·health·자원 요구 | 런타임 배포 준비 |
 | commit/재처리/중복 처리 계약과 checkpoint 필요 여부 | 재시작·장애 시 전달·적재 검증 |

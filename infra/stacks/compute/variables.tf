@@ -19,7 +19,7 @@ variable "state_region" {
 variable "instance_types" {
   description = "Allowed Auto Mode instance types; verify availability and size before changing."
   type        = set(string)
-  default     = ["m6i.large", "m7i.large"]
+  default     = ["t3a.large"]
   validation {
     condition     = length(var.instance_types) > 0
     error_message = "At least one approved instance type is required."
@@ -28,18 +28,18 @@ variable "instance_types" {
 variable "node_pool_cpu_limit" {
   description = "Total NodePool vCPU budget, not desired replicas or a currency ceiling."
   type        = number
-  default     = 8
+  default     = 6
   validation {
     condition     = var.node_pool_cpu_limit >= 4 && floor(var.node_pool_cpu_limit) == var.node_pool_cpu_limit
-    error_message = "Keep at least 4 vCPUs for two baseline nodes; add replacement headroom."
+    error_message = "Keep at least 4 vCPUs for one baseline node plus replacement headroom."
   }
 }
 variable "node_pool_memory_limit_gib" {
   type    = number
-  default = 32
+  default = 24
   validation {
     condition     = var.node_pool_memory_limit_gib >= 16 && floor(var.node_pool_memory_limit_gib) == var.node_pool_memory_limit_gib
-    error_message = "Keep at least 16 GiB for two baseline nodes; add replacement headroom."
+    error_message = "Keep at least 16 GiB for one baseline node plus replacement headroom."
   }
 }
 variable "consolidate_after" {

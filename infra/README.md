@@ -4,7 +4,9 @@
 
 후속 NAT 결정: 미래 활성화 시 `single_nat_gateway=true`로 한 개를 두 AZ에서 공유한다. 현재 RDS-first의 NAT 비활성 설정은 유지하며 실제 NAT는 0개다.
 
-현재 통합 브랜치는 `infra/ready`다. `infra/analysis`와 `infra/local-ready`의 이력을 포함하며 [업로드·정리 기록](../docs/tasks/infra-ready.md)을 따른다.
+2026-10-16 최소 운영 결정: compute는 `t3a.large` On-Demand, 6 vCPU/24GiB(세 대분 한도)로 축소했다. 평소 한 대 목표이며 고정 노드 수나 엄격한 비용 상한이 아니다. Kafka는 별도 `single-node-values.yaml`로 broker/Connect 각 1개·RF 1·20GiB·72시간을 선택한다. 제네레이터는 팀원이 별도 ECS Fargate로 구성한다. WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다. EKS·노드·Kafka·Fargate는 미배포이며 [연결 입력](../docs/design/infra/team-inputs.md)을 따른다.
+
+기존 통합 PR의 브랜치는 `infra/ready`다. RDS-first 및 후속 축소 코드는 `infra/rds-first` 로컬 브랜치에 있으며 아직 해당 PR에 반영하지 않았다. 기존 이력은 [업로드·정리 기록](../docs/tasks/infra-ready.md)을 따른다.
 
 배치 기준: **두 AZ subnet, RDS Single-AZ, 현재 NAT 0개·향후 활성화 시 1개 공유**. EKS는 미배포다. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
 

@@ -1,4 +1,4 @@
-> **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
+> **최신 결정(2026-10-16):** compute를 t3a.large·6 vCPU/24GiB(세 대분 한도)로 축소했다. Kafka는 별도 single-node 프로필의 1 broker·1 Connect·20GiB·72시간을 사용한다. 제네레이터는 팀원이 ECS Fargate로 구성하며 WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다. 평소 한 대 배치·실제 AWS 연결 검증은 남아 있다. 아래 2026-10-14 표는 과거 설계 기록이며 현재 배포 기준은 [TOPOLOGY.md](TOPOLOGY.md)와 [연결 입력](../docs/design/infra/team-inputs.md)을 따른다.
 
 # 배포 준비 현황
 
