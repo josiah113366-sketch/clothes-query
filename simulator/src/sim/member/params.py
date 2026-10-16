@@ -1,9 +1,8 @@
 """회원 베이스라인에 쓰는 설계 수치. 값은 이 파일 한 곳에만 둔다."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-# 고정 오프셋 (+09:00). zoneinfo는 slim 이미지에 tzdata가 없을 수 있어 쓰지 않는다.
-KST = timezone(timedelta(hours=9))
+from sim.common.timezone import KST
 
 # 가입 시각 구간: [시작, 끝). 구간 전체에서 초 단위로 균등 추출한다.
 SIGNUP_START = datetime(2026, 8, 1, 0, 0, 0, tzinfo=KST)

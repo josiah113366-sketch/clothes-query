@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from sim.member.params import KST
+from sim.common.timezone import KST
 
 
 def _real_now() -> datetime:
