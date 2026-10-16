@@ -1,5 +1,7 @@
 # network stack
 
+RDS-first: `enable_nat_gateways=false`를 비공개 tfvars에 명시하면 NAT/EIP와 app 기본 인터넷 경로를 생성하지 않는다. 두 AZ subnet·route table·S3 Gateway Endpoint는 유지한다. 기본값 true는 기존 AZ별 NAT 구성을 보존한다. 이후 private workload의 이미지 다운로드·AWS API/외부 통신 경로는 별도 준비해야 한다.
+
 2개 AZ의 public/app/db subnet, AZ별 NAT, S3 Gateway Endpoint.
 
 - 선행: 기존 bootstrap.

@@ -56,11 +56,11 @@ resource "aws_subnet" "db" {
   tags                    = { Name = "${var.name}-db-${each.key}" }
 }
 resource "aws_eip" "nat" {
-  for_each = var.subnets
+  for_each = var.enable_nat_gateways ? var.subnets : {}
   domain   = "vpc"
 }
 resource "aws_nat_gateway" "this" {
-  for_each      = var.subnets
+  for_each      = var.enable_nat_gateways ? var.subnets : {}
   allocation_id = aws_eip.nat[each.key].id
   subnet_id     = aws_subnet.public[each.key].id
   depends_on    = [aws_internet_gateway.this]
@@ -80,9 +80,12 @@ resource "aws_route_table_association" "public" {
 resource "aws_route_table" "app" {
   for_each = var.subnets
   vpc_id   = aws_vpc.this.id
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this[each.key].id
+  dynamic "route" {
+    for_each = var.enable_nat_gateways ? [each.key] : []
+    content {
+      cidr_block     = "0.0.0.0/0"
+      nat_gateway_id = aws_nat_gateway.this[route.value].id
+    }
   }
 }
 resource "aws_route_table_association" "app" {

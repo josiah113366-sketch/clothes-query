@@ -8,6 +8,12 @@ allocated_storage = 20
 max_allocated_storage = 100
 database_name = "clothes"
 
+# RDS-first deployment: do not read EKS state; keep DB ingress closed initially.
+# use_eks_security_group = false
+# database_clients = {}
+# Later, allow only an approved same-VPC generator security group:
+# database_clients = { generator = "REPLACE_WITH_APPROVED_SECURITY_GROUP_ID" }
+
 # Optional: enable only after DB/CDC budgets and reboot timing are approved.
 # Test fixture sizes are not production or measured sizing defaults.
 # logical_replication = {

@@ -22,6 +22,16 @@ variable "state_region" {
   default = "ap-northeast-1"
 }
 variable "engine_version" { type = string }
+variable "use_eks_security_group" {
+  description = "Read EKS state and allow EKS workloads. Set false for standalone RDS deployment."
+  type        = bool
+  default     = true
+}
+variable "database_clients" {
+  description = "Named client security groups; empty admits no additional DB clients."
+  type        = map(string)
+  default     = {}
+}
 variable "logical_replication" {
   description = "Opt-in CDC budgets. Leave null until the DB/CDC owner approves explicit values."
   type = object({

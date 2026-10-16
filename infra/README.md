@@ -1,5 +1,7 @@
 # infra
 
+2026-10-16 RDS 선행 배포 완료: 기존 두 AZ 기반을 유지하며 network의 `enable_nat_gateways=false`, rds의 `use_eks_security_group=false`로 NAT·EKS 없이 private RDS를 생성했다. 기본 운영 구성은 보존하며 실제 실행 시 비공개 입력을 반드시 지정한다. [작업 지시서](../docs/tasks/infra-rds-first.md). 제네레이터는 추후 같은 VPC의 명시적 보안 그룹으로 연결한다.
+
 현재 통합 브랜치는 `infra/ready`다. `infra/analysis`와 `infra/local-ready`의 이력을 포함하며 [업로드·정리 기록](../docs/tasks/infra-ready.md)을 따른다.
 
 현재 배치: **VPC·EKS 두 AZ, NAT 2개, RDS만 Single-AZ**. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
@@ -16,10 +18,10 @@ bootstrap → network → eks → compute → apps
 | 스택 | 위치 | 내용 | 의존 | 상태 |
 |---|---|---|---|---|
 | `bootstrap` | `bootstrap/` | state 저장용 S3 버킷 (버저닝, 암호화, 퍼블릭 차단) | 없음 | 코드 작성됨 |
-| `network` | `stacks/network/` | 2 AZ VPC, public/app/db subnet, AZ별 NAT, S3 endpoint | bootstrap | 코드 작성·정적 검증 |
+| `network` | `stacks/network/` | 2 AZ VPC, public/app/db subnet, 선택적 AZ별 NAT, S3 endpoint | bootstrap | RDS-first NAT 비활성 배포·후속 무변경 plan 확인 |
 | `eks` | `stacks/eks/` | EKS Auto Mode, IAM, access entry | network | 코드 작성·정적 검증 |
 | `compute` | `stacks/compute/` | custom NodeClass/NodePool, 타입·증설 한도·자동 축소 | network, eks | 코드 작성·정적 검증 |
-| `rds` | `stacks/rds/` | private Single-AZ PostgreSQL | network, eks | 코드 작성·정적 검증 |
+| `rds` | `stacks/rds/` | private Single-AZ PostgreSQL | network, 선택 eks | RDS-first 생성·AWS available 확인, DB 클라이언트 연결은 후속 |
 | `storage` | `stacks/storage/` | 데이터 S3, 버저닝·암호화·보호 | bootstrap | 사용자 승인 배포·후속 무변경 plan 확인 |
 | `ecr` | `stacks/ecr/` | WEB/WAS 및 선택적 Connect 이미지 저장소 | bootstrap | WEB/WAS 기존 배포 기록, Connect 코드·mock 준비 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
@@ -52,7 +54,7 @@ Kafka 후속 준비는 선택적 Connect ECR, [로컬 CDC 전달 검사](platfor
 
 노드 및 WEB/WAS 용량은 변수로 조정한다. [Generator 부하에 따른 증설·축소 가이드](SCALING.md)를 참고한다.
 
-사용자 요청으로 ECR과 업무 S3만 실환경 plan/apply 및 state 저장을 검증했다. 다른 스택은 미배포다. 기존 bootstrap은 보존하며 재생성하지 않는다. 삭제 시에는 앱/ALB 등 종속 리소스를 먼저 검토하고 RDS·S3 삭제 보호를 자동 해제하지 않는다.
+사용자 요청으로 ECR과 업무 S3, 후속 RDS-first의 NAT 없는 network와 RDS를 생성하고 S3 backend state에 저장했다. EKS·compute·apps·Kafka 등은 미배포다. 기존 bootstrap은 보존하며 재생성하지 않는다. 삭제 시에는 종속 리소스를 먼저 검토하고 RDS·S3 삭제 보호를 자동 해제하지 않는다.
 
 ## 데이터 경로의 실측 전 준비
 

@@ -11,3 +11,7 @@ subnets = {
 additional_s3_endpoint_actions = []
 # Example: ["s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
 # This does not grant these actions to any workload IAM role.
+
+# RDS-first deployment: explicitly disable paid NAT/EIP resources.
+# Omit this override only when the original two-NAT design is approved for execution.
+# enable_nat_gateways = false

@@ -1,7 +1,20 @@
 variable "name" { type = string }
 variable "vpc_id" { type = string }
 variable "db_subnet_ids" { type = list(string) }
-variable "workload_security_group_id" { type = string }
+variable "workload_security_group_id" {
+  description = "Optional legacy EKS client security group; null creates no EKS ingress."
+  type        = string
+  default     = null
+}
+variable "database_clients" {
+  description = "Explicit named EC2/ECS/other client security groups allowed PostgreSQL access."
+  type        = map(string)
+  default     = {}
+  validation {
+    condition     = alltrue([for sg in values(var.database_clients) : can(regex("^sg-[0-9a-f]+$", sg))])
+    error_message = "Each client must reference an explicit security group ID."
+  }
+}
 variable "engine_version" { type = string }
 variable "logical_replication" {
   description = "Explicit CDC budgets; null keeps the existing default parameter-group behavior."

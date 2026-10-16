@@ -8,6 +8,7 @@ data "terraform_remote_state" "network" {
 }
 
 data "terraform_remote_state" "eks" {
+  count   = var.use_eks_security_group ? 1 : 0
   backend = "s3"
   config = {
     bucket = var.state_bucket
@@ -20,7 +21,8 @@ module "rds" {
   name                       = "clothes-query-dev-rds"
   vpc_id                     = data.terraform_remote_state.network.outputs.vpc_id
   db_subnet_ids              = data.terraform_remote_state.network.outputs.db_subnet_ids
-  workload_security_group_id = data.terraform_remote_state.eks.outputs.cluster_security_group_id
+  workload_security_group_id = var.use_eks_security_group ? data.terraform_remote_state.eks[0].outputs.cluster_security_group_id : null
+  database_clients           = var.database_clients
   engine_version             = var.engine_version
   instance_class             = var.instance_class
   allocated_storage          = var.allocated_storage

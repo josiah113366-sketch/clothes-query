@@ -94,7 +94,7 @@ run "rds_single_az_and_preservation" {
     error_message = "RDS deletion protection and backups must be preserved."
   }
   assert {
-    condition     = aws_vpc_security_group_ingress_rule.postgres.from_port == 5432 && aws_vpc_security_group_ingress_rule.postgres.referenced_security_group_id == "sg-test"
+    condition     = aws_vpc_security_group_ingress_rule.postgres[0].from_port == 5432 && aws_vpc_security_group_ingress_rule.postgres[0].referenced_security_group_id == "sg-test"
     error_message = "PostgreSQL must only admit the workload security group."
   }
 }

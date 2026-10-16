@@ -7,7 +7,7 @@
 ## 입력과 출력
 
 - 배포 사양: `engine_version`, `instance_class`, `allocated_storage`, `max_allocated_storage`, 선택 `database_name`(clothes). Single-AZ 지원 조합을 배포 전 조회한다.
-- 연결 입력: `name`, `vpc_id`, `db_subnet_ids`, `workload_security_group_id`. [호출 스택](../../stacks/rds/main.tf)에서 연결한다.
+- 연결 입력: `name`, `vpc_id`, `db_subnet_ids`, 선택 `workload_security_group_id`(기존 EKS, 기본 null), `database_clients`(이름별 클라이언트 SG, 기본 빈 map). [호출 스택](../../stacks/rds/main.tf)에서 연결한다. 두 클라이언트 입력이 비어 있으면 DB ingress를 만들지 않는다. 기존 EKS ingress는 moved 블록으로 인덱스 주소를 보존한다.
 - 출력: `address`, `port`, `database_name`, `master_secret_arn`.
 - 선택 CDC 입력: `logical_replication`에 slot/sender/유한 WAL 예산을 명시. 기본 null이며 이때 custom parameter group은 만들지 않는다. engine major에 맞는 family를 사용한다.
 - 추가 출력: `logical_replication_enabled`(설정 요청 여부), `cdc_parameter_group_name`. 실제 DB 적용 상태를 조회한 출력이 아니다.

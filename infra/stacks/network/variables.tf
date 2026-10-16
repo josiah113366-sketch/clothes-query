@@ -6,6 +6,10 @@ variable "additional_s3_endpoint_actions" {
   type    = set(string)
   default = []
 }
+variable "enable_nat_gateways" {
+  type    = bool
+  default = true
+}
 variable "expected_account_id" {
   description = "Supply privately via TF_VAR_expected_account_id; prevents use of the wrong AWS account."
   type        = string

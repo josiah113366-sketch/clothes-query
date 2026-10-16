@@ -24,6 +24,11 @@ variable "subnets" {
   }
 }
 variable "region" { type = string }
+variable "enable_nat_gateways" {
+  description = "Create one NAT per AZ. Disable for RDS-only operation without private-subnet internet egress."
+  type        = bool
+  default     = true
+}
 variable "additional_s3_endpoint_actions" {
   description = "Explicit optional transport actions; workload IAM remains separately scoped."
   type        = set(string)

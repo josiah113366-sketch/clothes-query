@@ -2,9 +2,11 @@
 
 # rds stack
 
+RDS-first 실행에서는 `use_eks_security_group=false`를 비공개 tfvars에 명시한다. 이 경우 EKS remote state를 읽지 않으며 network state만 선행한다. `database_clients={}`이면 DB ingress는 없고, 나중에 같은 VPC의 클라이언트 보안 그룹을 이름별로 추가한다. private/TLS 및 앱 전용 계정을 유지하고 public 접속은 활성화하지 않는다. 기본 true는 기존 EKS 연동을 보존한다.
+
 암호화된 private Single-AZ PostgreSQL과 SG 및 subnet group.
 
-현재 승인값은 PostgreSQL 16.15, db.t4g.small(2 vCPU/2 GiB), gp3 초기 20 GiB / 자동 증가 최대 100 GiB다. `terraform.tfvars`에 반영했으며 실제 생성은 마지막에 진행한다. 사양과 비용 근거는 [RDS 검토](../../../docs/design/infra/rds-sizing.md)를 따른다.
+현재 승인값은 PostgreSQL 16.15, db.t4g.small(2 vCPU/2 GiB), gp3 초기 20 GiB / 자동 증가 최대 100 GiB다. 2026-10-16 RDS-first로 실제 생성했고 AWS available 상태를 확인했다. 사양과 비용 근거는 [RDS 검토](../../../docs/design/infra/rds-sizing.md)를 따른다.
 
 - 선행: 기존 bootstrap 및 network, eks.
 - backend key: `clothes-query/dev/rds/terraform.tfstate`.
