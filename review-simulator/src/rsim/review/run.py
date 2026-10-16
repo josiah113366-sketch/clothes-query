@@ -41,7 +41,7 @@ from rsim.common.config import load_settings
 from rsim.common.rng import derive_seed, make_rng, resolve_seed, seeded_uuid
 
 from .catalog import Catalog
-from .generator import PROMPT_VERSION, FakeGenerator, make_generator
+from .generator import EXAMPLES_VERSION, PROMPT_VERSION, FakeGenerator, make_generator
 from .options import pick_options
 from .orders import (
     JsonlOrderSource,
@@ -145,6 +145,8 @@ def build_events(
         "generator": {
             "model_id": model_id,
             "prompt_version": PROMPT_VERSION,
+            # 프롬프트 예시 블록 버전 (p5.8, generator.EXAMPLES_VERSION). 예시 버전별 성능 비교용
+            "examples_version": EXAMPLES_VERSION,
             "style": spec.style,
             "length": spec.length,
         },
