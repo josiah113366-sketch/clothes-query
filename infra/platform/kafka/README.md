@@ -2,7 +2,9 @@
 
 2026-10-16 단일 노드 후보: [single-node-values.yaml](single-node-values.yaml)에 Kafka/Connect 각 1개·RF 1·축소 메모리의 별도 비활성 프로필을 준비했다. 사용자 결정으로 이 프로필은 **broker당 20 GiB·보관 72시간**이다. 업무 토픽의 명시적 설정이 broker 기본값을 덮어쓰므로, 배포용 runtime values의 각 업무 토픽에도 `retentionMs: 259200000`을 지정해야 한다. 업무 토픽 계약은 아직 비어 있으며 기존 24시간 예시를 그대로 복사하지 않는다. 기본 standard 구성은 보존한다. [검증 범위와 결과](../../../docs/design/infra/kafka-single-node-validation-2026-10-16.md)를 읽고 신규 개발 runtime에서만 검토한다. 기존 클러스터의 복제 수나 PVC를 임의 축소하는 용도가 아니다.
 
-상태: 코드·로컬 검증 준비 / AWS·Kubernetes 미배포.
+상태: 최소 측정 환경 AWS/EKS 배포·TLS 메시지·EBS·JMX 검증 완료 · 2026-10-16. Connect·업무 CDC/S3 Sink는 비활성/후속.
+
+실제 t3a.large 한 대에서 broker·entity operator·cluster operator·exporter가 Ready이고 암호화 gp3 20GiB PVC는 Bound/Retain이다. infra-probe의 synthetic TLS 생산/소비와 JMX HTTP 지표를 확인했고 임시 client/복사 Secret은 정리했다. 기본 chart는 계속 비활성이며 배포한 release에만 아래 측정 values를 명시했다. [실행 결과와 범위](../../../docs/tasks/infra-deploy-result.md).
 
 2026-10-16 실제 측정 준비: 사용자 배포 요청에 따라 [measurement-values.yaml](measurement-values.yaml)을 별도 준비했다. `single-node-values.yaml` 뒤에 병합해 1 broker·20GiB·72시간과 synthetic `infra-smoke` 토픽·클라이언트·JMX/lag 지표를 활성화한다. Connect는 DB/CDC 입력을 받을 때까지 비활성이고 실제 업무 토픽 계약을 대신하지 않는다. 측정용 접근은 infra-probe namespace에만 허용한다. 동료 권한과 Airflow 설치는 후속이다.
 

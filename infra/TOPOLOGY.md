@@ -1,21 +1,22 @@
 # 현재 배치 구성
 
-2026-10-16 실행 결과: 비용 절감을 위해 RDS와 필요한 네트워크만 생성 완료. 비공개 입력에서 NAT를 비활성화하고 EKS state 참조를 끈다. EKS·compute·Kafka는 미배포다. [RDS-first](../docs/tasks/infra-rds-first.md).
+2026-10-16 실행 결과: RDS 선행 배포에 이어 PR #11 머지 후 NAT/EKS/compute/Kafka 최소 측정 환경을 생성했다. [실제 배포 결과](../docs/tasks/infra-deploy-result.md).
 
-2026-10-16 후속 변경: 향후 NAT 활성화 시 2개 대신 **한 개 공유**를 기본으로 사용한다. 두 AZ subnet은 유지한다. 현재 실제 NAT는 계속 0개다.
+NAT는 두 개 대신 **한 개 공유**로 생성 완료했다. 두 AZ subnet은 유지하며 현재 t3a.large 노드/Kafka는 ap-northeast-1a에 있다.
 
 상태: 결정 · 2026-10-16 최소 운영 반영. **두 AZ subnet을 유지하지만 단일 노드 Kafka의 AZ 장애 시 중단을 허용한다.**
 
 | 구성 | 현재 설정 |
 |---|---|
 | 리전 / AZ | 도쿄 / ap-northeast-1a, ap-northeast-1c |
-| network | 두 AZ 각각 public/app/db subnet, 현재 NAT/EIP 0개·향후 활성화 시 각각 1개 공유 |
-| app 기본 경로 | 현재 인터넷 기본 경로 없음. 향후 NAT 공유, S3 Gateway Endpoint는 유지 |
-| EKS compute | 두 private app subnet에 배치 가능, t3a.large, On-Demand, Auto Mode 유지 |
-| 노드 풀 상한 | 6 vCPU / 24 GiB(세 대분), 평소 한 대 배치 목표·실환경 미검증 |
+| network | 두 AZ 각각 public/app/db subnet, NAT/EIP 각 1개 공유 |
+| app 기본 경로 | 두 app subnet에서 동일 NAT 사용. S3 Gateway Endpoint 유지. DB subnet은 외부 기본 경로 없음 |
+| EKS compute | 1.36 Auto Mode ACTIVE, private t3a.large On-Demand 1대 Ready, ap-northeast-1a |
+| 노드 풀 상한 | 6 vCPU / 24 GiB(세 대분), Kafka 측정 구성 한 대 배치 확인·전체 플랫폼 수용 미검증 |
 | EKS 관리자 | 전용 역할, 현재 사용자·현재 PC /32부터 시작, 팀원은 추후 추가 |
 | WEB / WAS / ALB / Spark | 이번 최소 배포에서 제외. 기존 앱 기본값은 별도 보존 |
-| Kafka | 기본 비활성. 최소 배포 시 single-node 프로필로 broker/controller 1개·Connect 1개·RF 1·gp3 20 GiB·72시간, 업무 토픽 retentionMs=259200000 명시 |
+| Kafka | single-node+measurement 프로필 배포: broker/controller 1개·RF 1·암호화 gp3 20GiB·72시간, synthetic 토픽·TLS·JMX/lag. Connect 비활성 |
+| Airflow | namespace만 생성, runtime·동료 권한은 후속 |
 | 제네레이터 | 팀원이 별도 ECS Fargate로 구성 예정. 같은 VPC에서 RDS·S3에 접근 |
 | RDS | PostgreSQL 16.15, db.t4g.small, Single-AZ, 기본 배치 ap-northeast-1a, gp3 초기 20 GiB / 자동 증가 최대 100 GiB |
 

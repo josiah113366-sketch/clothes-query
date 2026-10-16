@@ -14,7 +14,7 @@ EKS Auto Mode의 노드 타입, 증설 한도 및 자동 정리 설정을 관리
 
 [전체 안내](../../IMPLEMENTATION.md)를 먼저 읽는다. `terraform.tfvars`는 승인된 초기값이고 비공개/변경 입력은 `deployment.local.tfvars`로 덮어쓴다. `terraform init -backend=false -lockfile=readonly`와 `terraform validate`는 클러스터 생성 없이 실행할 수 있다. 실제 plan은 network/eks 및 Auto Mode CRD가 준비된 뒤 수행한다.
 
-최소 실행의 순서는 `network(NAT 1개 활성화) → eks → compute → Kafka 운영자 → Kafka/Connect(single-node profile)`다. RDS와 storage는 이미 선행 배포했다. WEB/WAS·ALB·Spark는 이번 최소 배포에 포함하지 않는다. standard Kafka의 3 broker 배치와 앱의 두 AZ/anti-affinity 조건을 활성화하면 한 대 운영이 불가능하므로 축소 프로필을 명시적으로 선택한다. 실제 생성은 아직 수행하지 않았으며 최종 plan과 비용 검토 후 배포한다.
+최소 실행의 순서는 `network(NAT 1개 활성화) → eks → compute → Kafka 운영자 → Kafka(single-node+measurement profile)`다. 2026-10-16 실제 배포와 private t3a.large 1대·Kafka TLS 생산/소비·후속 무변경 plan을 확인했다. RDS와 storage는 선행 배포했다. Connect·Airflow runtime·WEB/WAS·ALB·Spark는 이번 최소 배포에 포함하지 않는다. standard Kafka의 3 broker 배치와 앱의 두 AZ/anti-affinity 조건을 활성화하면 한 대 운영이 불가능하므로 축소 프로필을 명시적으로 선택한다.
 
 ## 삭제와 용량 변경
 
