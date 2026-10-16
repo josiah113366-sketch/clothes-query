@@ -118,6 +118,25 @@ LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze)�
 - 필요한 권한: 그 접두사에 대한 `s3:PutObject`. 같은 날짜를 다시 돌리면 같은 키로 덮어쓴다.
 - S3 저장 테스트는 가짜 S3(`moto`)로 돈다. 실제 AWS 를 부르지 않는다.
 
+## 직접 작성한 리뷰 넣기 (`rsim inject`)
+
+특정 문장·상황을 일부러 넣어 파이프라인(감성분석 → 이상탐지)을 시험할 때 쓴다. LLM 을 부르지 않는다(0원).
+형식은 `data/manual_reviews.example.csv` 를 복사해서 `.local/manual/` 아래에 만든다(커밋 금지 폴더).
+
+```powershell
+rsim inject --file .local\manual\size_spike_1008.csv --dry-run   # 형식 검사만
+rsim inject --file .local\manual\size_spike_1008.csv             # LAKE_ROOT 에 쓰기
+#   → <LAKE_ROOT>/reviews/year=2026/month=10/day=08/part-manual-size_spike_1008.jsonl
+```
+
+- 필수 칸: `text`, `rating`(1~5), `product_id`. 나머지(review_id, member_id, 옵션 등)는 비우면 채운다.
+- `created_at` 이 없으면 지금 시각, 시간대가 없으면 KST 로 본다. `aspects`(예: `사이즈·핏:부정|배송:긍정`)를 적으면 정답(`reviews_truth/`)에도 쓴다.
+- 매일 도는 `part-00000.jsonl` 과 다른 파일이라 서로 지우지 않는다. 같은 입력 파일을 다시 넣으면 그 파일만 덮어쓴다.
+- 구별: `review_id` 가 `M-` 로 시작하고 `source` 가 `manual`. 지울 때는 `part-manual-*` 파일을 지운다.
+- 한 줄이라도 틀리면 아무것도 쓰지 않고 줄 번호별 오류를 보여 준다.
+- **직접 지어낸 문장만 넣는다.** 실제 쇼핑몰 리뷰를 옮겨 적은 자료는 S3 에 올리지 않는다(경로에 `private` 가 있으면 거부).
+- ECS 에서는 입력 파일을 S3 에 올리고 `rsim inject --file s3://<버킷>/sim-input/manual/xxx.csv` 로 RunTask 를 한 번 실행한다(같은 태스크 정의, 명령만 바꿈). 필요한 권한: 입력 키 `s3:GetObject`, 레이크 접두사 `s3:PutObject`.
+
 ## 자주 바꿀 곳
 
 | 바꾸고 싶은 것 | 위치 |

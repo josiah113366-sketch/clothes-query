@@ -50,7 +50,7 @@
 | rating | int 1~5 | 2 | ✅ | |
 | text | string | … | ✅ | Bedrock 생성 본문 |
 | has_photo | bool | true | ✅ | 포토 리뷰 여부. 이미지는 만들지 않고 표시만, 약 30% (2026-10-14 확정) |
-| source | string | simulator | ✅ | 실제 데이터와 구분 |
+| source | string | simulator | ✅ | 실제 데이터와 구분. `rsim inject` 로 직접 넣은 리뷰는 `manual`(review_id 도 `M-` 로 시작, 2026-10-16) |
 
 ## 6. 정답 (레이크 `reviews_truth/`, Kafka `reviews.truth`. 실제 데이터에는 없음, 학습·채점용)
 
