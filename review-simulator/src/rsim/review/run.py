@@ -20,7 +20,7 @@ rsim run --sink kafka --count 0 --max-rps 0.5
 주문 기반 실행 (--source orders, 2026-10-14 결정: 결제 후 1~14일 뒤 리뷰 → S3 에 날짜별로 저장)
 -------------------------------------------------------------------------------------------
 # 6) 가짜 주문 14일치(하루 1000건)를 만들고, 10월 8일(UTC) 하루에 리뷰 시각이 떨어지는 주문에 리뷰를 단다
-#    → .local/lake/reviews/dt=2026-10-08/part-00000.jsonl (정답은 reviews_truth/)
+#    → .local/lake/reviews/year=2026/month=10/day=08/part-00000.jsonl (정답은 reviews_truth/)
 rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
 rsim run --source orders --llm fake --sink lake --date 2026-10-08
 
@@ -184,7 +184,7 @@ def _order_specs(
         if limit and len(todo) >= limit:
             break
     log.info(
-        "주문 %d건 중 dt=%s(UTC)에 리뷰 시각이 있는 주문 %d건, 이번에 만들 %d건",
+        "주문 %d건 중 %s(UTC)에 리뷰 시각이 있는 주문 %d건, 이번에 만들 %d건",
         len(orders),
         day.isoformat(),
         len(due),

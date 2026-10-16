@@ -87,7 +87,7 @@ RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있�
 - 주문마다 리뷰를 쓸지(`REVIEW_RATE`), 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`), review_id, 구매 옵션은
   **order_id 로만** 정해진다. RANDOM_SEED 가 바뀌어도 같은 주문이면 같은 값이다.
 - `rsim run --source orders --date D` 는 리뷰 시각이 **D 하루(UTC)** 안에 떨어지는 주문만 만든다. `--date` 를 빼면 어제(UTC)다.
-- `--sink lake` 는 `<LAKE_ROOT>/reviews/dt=D/part-00000.jsonl`(리뷰)과 `reviews_truth/dt=D/`(정답)에 쓰고,
+- `--sink lake` 는 `<LAKE_ROOT>/reviews/year=YYYY/month=MM/day=DD/part-00000.jsonl`(리뷰)과 `reviews_truth/year=.../`(정답)에 쓰고,
   **그 날짜 파티션을 통째로 덮어쓴다.** 그래서 "이미 리뷰가 있는 주문"을 조회할 필요 없이, 같은 날짜를 다시 돌려도 주문당 리뷰는 하나다.
 - dt 는 UTC 날짜다(팀 규칙: Bronze 는 UTC, Silver 부터 KST). 하루 배치는 UTC 0시(KST 오전 9시) 이후에 전날을 돌린다.
 - 생성이 실패해서 버린 리뷰는 그 파티션에서 빠진다. 다시 채우려면 그 날짜를 다시 돌린다(그날 리뷰 문장은 새로 만들어진다).
@@ -98,7 +98,7 @@ RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있�
 rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
 
 # 10월 8일(UTC)에 리뷰 시각이 있는 주문에 리뷰 (가짜 문장, 0원)
-#   → .local\lake\reviews\dt=2026-10-08\part-00000.jsonl, .local\lake\reviews_truth\dt=2026-10-08\...
+#   → .local\lake\reviews\year=2026\month=10\day=08\part-00000.jsonl, .local\lake\reviews_truth\year=2026\...
 rsim run --source orders --llm fake --sink lake --date 2026-10-08
 
 # 다음 날
@@ -110,7 +110,7 @@ rsim run --source orders --llm fake --sink lake --date 2026-10-09
 `.env` 에 레이크 경로를 넣으면 같은 명령이 S3 에 쓴다(버킷 이름은 공개 저장소에 넣지 않고 `.env` 에만 둔다).
 
 ```
-LAKE_ROOT=s3://<버킷이름>/bronze          # → s3://<버킷이름>/bronze/reviews/dt=YYYY-MM-DD/part-00000.jsonl
+LAKE_ROOT=s3://<버킷이름>/bronze          # → s3://<버킷이름>/bronze/reviews/year=YYYY/month=MM/day=DD/part-00000.jsonl
 LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze)에 섞지 않는다. S3 에 두려면 bronze 밖의 경로
 ```
 
@@ -143,7 +143,7 @@ LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze)�
 - `reviews.truth` (키 `review_id`, 스키마 `review_truth.v2`): 본문 + 정답 라벨(`aspects`, 각 원소의 `source` 가
   `spec` 또는 `verifier`) + `spec_aspects` + `incident_id` + 생성 조건. `KAFKA_TRUTH_TOPIC=none` 이면 보내지 않는다
 - `--sink jsonl` 이면 `reviews.jsonl` / `reviews_truth.jsonl` 두 파일로 저장한다
-- `--sink lake` 이면 `<LAKE_ROOT>/reviews/dt=YYYY-MM-DD/`, `<LAKE_ROOT>/reviews_truth/dt=YYYY-MM-DD/` 에 날짜별로 저장한다(위 주문 기반 실행 참고)
+- `--sink lake` 이면 `<LAKE_ROOT>/reviews/year=YYYY/month=MM/day=DD/`, `<LAKE_ROOT>/reviews_truth/year=YYYY/month=MM/day=DD/` 에 날짜별로 저장한다(위 주문 기반 실행 참고)
 
 product_id, product_name, category, member_id, age_group 은 임시 값이다. 나중에 order·member 테이블에서 가져온다.
 주문 모드(`--source orders`)에서는 `order_id`, `member_id`, `product_id` 가 주문 파일 값이고, 무작위 모드에서는 `order_id` 가 null 이다.

@@ -50,8 +50,8 @@ RDS 에는 넣지 않는다(조인은 레이크에서). 한때 로컬 Postgres `
 - `src/rsim/review/orders.py`: 주문 읽기(`JsonlOrderSource`, 나중에 S3 결제 데이터용으로 교체), 주문별 리뷰 여부·텀(`ReviewTiming`),
   날짜 하루에 떨어지는 주문 고르기(`due_orders`), 가짜 주문(`fake_orders`). 리뷰 여부·텀·review_id·옵션은 order_id 로만 정한다.
 - `rsim orders-fake`: 가짜 주문 파일 `.local/orders.jsonl`
-- `rsim run --source orders --date D --sink lake`: 리뷰 시각이 D(UTC) 하루인 주문만 만들어 `<LAKE_ROOT>/reviews/dt=D/`,
-  `reviews_truth/dt=D/` 에 덮어쓴다. 같은 날짜를 다시 돌려도 주문당 리뷰 하나(기록 조회 없음). 경로는 날짜별(제품별 아님, lemin 확인).
+- `rsim run --source orders --date D --sink lake`: 리뷰 시각이 D(UTC) 하루인 주문만 만들어 `<LAKE_ROOT>/reviews/year=YYYY/month=MM/day=DD/`,
+  `reviews_truth/year=.../` 에 덮어쓴다. 같은 날짜를 다시 돌려도 주문당 리뷰 하나(기록 조회 없음). 경로는 날짜별(제품별 아님, lemin 확인). 2026-10-16 `dt=` 를 Hive 형식 year/month/day 로 변경.
 - 설정: `ORDERS_PATH`, `LAKE_ROOT`(기본 `.local/lake`, s3:// 는 아직 미지원), `REVIEW_RATE`(기본 1.0), `REVIEW_DELAY_MIN_DAYS`/`MAX_DAYS`(1/14)
 
 ### 5. 확정 컬럼 추가 (2026-10-14 lemin: 제안 컬럼 모두 확정)

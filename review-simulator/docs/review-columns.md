@@ -75,7 +75,7 @@
 - 작성 채널(platform: 앱/웹) → 넣지 않음
 - age_group → 넣음. 임시 값으로 채우고, 나중에 member 테이블에서 member_id 와 같이 가져옴
 - (2026-10-14) order_id 추가, emitted_at·option_size·option_color·purchased_at·has_photo 확정 → review.v2 / review_truth.v2(order_id)
-- (2026-10-14) 리뷰 저장: S3 날짜별 경로(`reviews/dt=YYYY-MM-DD/`, UTC). RDS 에는 넣지 않음
+- (2026-10-14) 리뷰 저장: S3 날짜별 경로(`reviews/year=YYYY/month=MM/day=DD/`, UTC. 2026-10-16 `dt=` 에서 변경). RDS 에는 넣지 않음
 
 ## 남은 결정
 

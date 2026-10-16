@@ -61,13 +61,15 @@ class JsonlSink:
 
 
 class LakeSink:
-    """S3 레이크 경로 구조로 저장한다. 날짜(dt) 파티션 하나 = 파일 하나.
+    """S3 레이크 경로 구조로 저장한다. 날짜 파티션(year/month/day) 하나 = 파일 하나.
 
-      <root>/reviews/dt=2026-10-08/part-00000.jsonl              리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
-      <truth_root>/reviews_truth/dt=2026-10-08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
+      <root>/reviews/year=2026/month=10/day=08/part-00000.jsonl              리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
+      <truth_root>/reviews_truth/year=2026/month=10/day=08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
 
     예) LAKE_ROOT=s3://<버킷>/bronze
-        → s3://<버킷>/bronze/reviews/dt=2026-10-08/part-00000.jsonl (2026-10-14 lemin 결정, 버킷 이름은 .env 에만)
+        → s3://<버킷>/bronze/reviews/year=2026/month=10/day=08/part-00000.jsonl (버킷 이름은 .env 에만)
+        파티션 이름은 Hive 형식 year=YYYY/month=MM/day=DD (2026-10-16 lemin 결정, 이전 dt=YYYY-MM-DD 대체).
+        Glue 크롤러·Athena 가 year, month, day 를 파티션 컬럼으로 바로 인식한다. 월·일은 두 자리(01~12, 01~31).
         LAKE_TRUTH_ROOT 기본값은 로컬 .local/lake 다. 정답 라벨은 실제 운영 데이터에 없는 값이라
         운영 레이크(bronze)에 섞지 않는다. 정답도 S3 에 두려면 bronze 가 아닌 별도 경로를 준다.
 
@@ -99,10 +101,19 @@ class LakeSink:
             t = t.replace(tzinfo=UTC)
         return t.astimezone(UTC).date().isoformat()
 
+    @staticmethod
+    def partition(dt: str) -> str:
+        """UTC 날짜(2026-10-08) → 파티션 폴더 이름(year=2026/month=10/day=08).
+
+        파티션 모양을 바꾸려면 이 함수만 고치면 된다(경로·로그·테스트가 모두 이 함수를 쓴다).
+        """
+        y, m, d = dt.split("-")
+        return f"year={y}/month={m}/day={d}"
+
     def path(self, table: str, dt: str) -> str:
         """파티션 파일 위치 (로컬 경로 또는 s3:// URI)."""
         root = self.truth_root if table == "reviews_truth" else self.root
-        return f"{root}/{table}/dt={dt}/{self.FILE_NAME}"
+        return f"{root}/{table}/{self.partition(dt)}/{self.FILE_NAME}"
 
     def send(self, review: dict, truth: dict) -> None:
         reviews, truths = self.parts.setdefault(self.dt_of(review), ([], []))
@@ -113,7 +124,7 @@ class LakeSink:
         for dt, (reviews, truths) in sorted(self.parts.items()):
             for table, lines in (("reviews", reviews), ("reviews_truth", truths)):
                 self._write(self.path(table, dt), "\n".join(lines) + "\n")
-            log.info("저장: dt=%s 리뷰 %d건 → %s", dt, len(reviews), self.path("reviews", dt))
+            log.info("저장: %s(UTC) 리뷰 %d건 → %s", dt, len(reviews), self.path("reviews", dt))
 
     def _write(self, target: str, body: str) -> None:
         if target.startswith("s3://"):
