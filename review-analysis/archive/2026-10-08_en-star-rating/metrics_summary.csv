@@ -1,0 +1,5 @@
+﻿모델,HF 모델,기반,라이선스,파라미터(M),정확도(%),Macro-F1(%),±1점 정확도(%),MAE,감성 정확도(%),학습 전 감성 정확도(%),학습 전 별점 정확도(%),최적 에폭,학습 시간(분),예측 속도(건/초)
+nlptown-mBERT,nlptown/bert-base-multilingual-uncased-sentiment,mBERT,MIT,167,58.1,57.8,94.5,0.48,76.5,75.8,56.4,2,6.8,334
+cardiff-XLMR,cardiffnlp/twitter-xlm-roberta-base-sentiment,XLM-R,미표기,278,55.5,55.7,93.5,0.517,74.7,69.1,32.3,1,5.3,404
+tabularisai-DistilBERT,tabularisai/multilingual-sentiment-analysis,DistilBERT,CC-BY-NC-4.0,135,53.9,53.9,92.9,0.541,73.7,65.8,36.8,2,3.9,780
+lxyuan-DistilBERT,lxyuan/distilbert-base-multilingual-cased-sentiments-student,DistilBERT,Apache-2.0,135,52.9,52.7,91.9,0.562,73.0,62.6,30.3,3,3.9,783

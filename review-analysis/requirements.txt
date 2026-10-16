@@ -1,0 +1,9 @@
+# 로컬(CPU)에서 가능한 작업: 샘플링, 분할, 평가, 대시보드, Gemini 번역
+pandas
+pyarrow
+scikit-learn
+sacrebleu
+google-genai
+tqdm
+python-dotenv
+requests
