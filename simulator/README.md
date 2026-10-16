@@ -13,6 +13,7 @@ simulator/
 ├── data/                  # 지역 목록 CSV 등 (필요한 브랜치에서 추가)
 ├── src/sim/
 │   ├── cli.py             # sim 명령 진입점
+│   ├── cdc/               # 로컬 CDC: 커넥터 등록·상태·초기화, 토픽 검증 (sim cdc)
 │   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
@@ -45,7 +46,7 @@ docker compose exec postgres psql -U sim -d clothes
 
 ## 회원 베이스라인
 
-가상 회원 10만 명을 만들어 로컬 `member` 테이블에 한 번에 적재하고, 결과를 확인한다. 이 명령은 로컬 DB용이다 (RDS 접속은 이후 작업).
+가상 회원 10만 명을 만들어 로컬 `members` 테이블에 한 번에 적재하고, 결과를 확인한다. 이 명령은 로컬 DB용이다 (RDS 접속은 이후 작업).
 
 ```bash
 docker compose up -d
@@ -62,9 +63,9 @@ sim member verify                      # 12개 항목 확인, 하나라도 실�
 | `baseline --dry-run` | | DB에 접속하지 않고 생성만 한다 |
 | `verify --expected` | 100000 | 기대하는 행 수 |
 
-- `member` 테이블에 행이 하나라도 있으면 아무것도 넣지 않고 멈춘다. 로컬에서 다시 하려면 `docker compose down -v` 후 `up -d`.
+- `members` 테이블에 행이 하나라도 있으면 아무것도 넣지 않고 멈춘다. 로컬에서 다시 하려면 `docker compose down -v` 후 `up -d`.
 - 적재가 끝나면 PII 없는 집계값 요약을 출력하고 `.local/baseline_run.json`에 쓴다.
-- 직접 확인: `docker compose exec postgres psql -U sim -d clothes -c "SELECT count(*), count(DISTINCT email), count(DISTINCT phone) FROM member;"`
+- 직접 확인: `docker compose exec postgres psql -U sim -d clothes -c "SELECT count(*), count(DISTINCT email), count(DISTINCT phone) FROM members;"`
 - **재현성 해시**는 생성한 모든 행의 SHA-256 앞 12자리다. 시드·인원·지역 파일이 같으면 배치 크기와 상관없이 같다. 다르면 다른 조건으로 만든 데이터다.
 - **지역 파일** `data/region_weights_202609.csv`의 이름에 기준월(2026-09)이 들어 있다. 파일을 바꾸면 같은 시드라도 결과(해시)가 달라지므로, 어느 파일로 만들었는지 요약에 남긴다. 다른 파일은 `SIM_REGION_FILE`로 지정한다.
 - 환경 변수: `DATABASE_URL`(필수), `SIM_SEED`, `SIM_REGION_FILE`. 상대 경로와 `.env`는 현재 작업 폴더(`simulator/`) 기준이다.
@@ -78,7 +79,7 @@ pytest -m integration
 
 ## 신규 가입 (live)
 
-베이스라인 뒤에 신규 가입을 계속 만들어 `member`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
+베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
 sim member live                                   # 평상시, 실시간, 하루 평균 1,500명
@@ -111,9 +112,40 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
   모드가 바뀌면 `mode: normal → surge` 한 줄이 출력되고 새 속도로 간격을 다시 뽑는다. 파일이 없거나 깨졌거나 값이 잘못되면 마지막 상태를 유지하고 경고를 한 번만 낸다. 제어 파일은 시작 상태(`--mode`)를 이후에 덮어쓴다.
 - **제어 신호 전달 수단은 아직 정해지지 않았다.** 파일 방식은 로컬 개발용이고, 실제 수단은 컨트롤러 작업에서 `ControlSource`를 새로 구현해 붙인다.
 - **배속과 시각:** `signup_at`은 시뮬레이터 시각(KST)이고 `created_at`은 DB가 기록한 실제 시각이다. 배속 1이면 거의 같고, 배속이 크면 어긋난다. 정상이다.
-- **껐다 켜도 이어진다:** k번째 신규 회원은 `derive_seed(시드, "live", k)`로 난수를 다시 심어 만들어 값이 시드와 k만으로 정해진다. 시작할 때 k는 `member`에서 `signup_at >= 2026-10-01 00:00 KST`인 행 수로 센다(탈퇴는 행을 지우지 않으므로 줄지 않는다). 그래서 껐다 켜도 같은 순서로 이어지고 `member_id`가 겹치지 않는다. 시뮬레이터 시각이 10/1 KST보다 이르면 이 기준이 깨지므로 오류로 멈춘다.
+- **껐다 켜도 이어진다:** k번째 신규 회원은 `derive_seed(시드, "live", k)`로 난수를 다시 심어 만들어 값이 시드와 k만으로 정해진다. 시작할 때 k는 `members`에서 `signup_at >= 2026-10-01 00:00 KST`인 행 수로 센다(탈퇴는 행을 지우지 않으므로 줄지 않는다). 그래서 껐다 켜도 같은 순서로 이어지고 `member_id`가 겹치지 않는다. 시뮬레이터 시각이 10/1 KST보다 이르면 이 기준이 깨지므로 오류로 멈춘다.
 - **전화번호:** 무작위로 뽑아 넣고, `member_phone_key` 위반이면 같은 난수 줄기에서 새 번호로 최대 10번 다시 시도한다(전화번호만 바뀐다). 다른 제약 위반은 재시도하지 않고 오류로 처리한다. 번호를 확인하려고 DB에서 읽어 오지 않는다.
 - **종료:** `Ctrl+C`(SIGINT)나 SIGTERM이면 하던 INSERT를 끝내고 요약을 출력한 뒤 종료 코드 0으로 끝난다. DB 연결이 끊기면 1, 2, 4, … 최대 30초 간격으로 다시 연결한다.
 - 실제 시간 10초마다 진행 한 줄(모드, 구간 건수와 초당 건수, 누적, 시뮬레이터 시각)을 출력한다. 회원 값(PII)은 출력하지 않는다.
 - 이 명령으로 `member`에 신규 가입이 섞이면 `sim member verify`의 가입 기간·일별·시간대별 항목은 베이스라인 기준이라 실패할 수 있다.
-- 확인 후 로컬에서 신규 가입만 지우려면: `DELETE FROM member WHERE signup_at >= '2026-10-01 00:00:00+09';`
+- 확인 후 로컬에서 신규 가입만 지우려면: `DELETE FROM members WHERE signup_at >= '2026-10-01 00:00:00+09';`
+
+## 로컬 CDC
+
+로컬 `members` 테이블을 Debezium이 읽어 Kafka 토픽 `members-events`로 흘리고, 그 결과가 설계대로인지(특히 PII가 한 글자도 안 나가는지) `sim cdc verify`로 확인한다. S3 Sink는 아직 없다. `verify`가 토픽을 직접 읽어 "Bronze에 들어갈 모양"을 검증한다. 커넥터 설정은 `connectors/`에 있다 (`connectors/README.md`).
+
+```bash
+sim member baseline --yes                  # 1. 베이스라인 10만 명 (이미 있으면 생략)
+docker compose --profile cdc up -d         # 2. Kafka, Connect(Debezium), Kafka UI를 추가로 켬
+sim cdc setup                              # 3. 커넥터 등록 → 10만 명이 스냅샷(op=r)으로 흐름
+sim member live --mode normal --max-signups 200 --speed 1440   # 4. 신규 가입 → op=c
+sim cdc verify --live-expected 200         # 5. 13개 항목 확인, 하나라도 실패하면 종료 코드 1
+```
+
+`docker compose up -d`만 하면 Postgres만 뜬다 (Kafka 쪽은 프로필 `cdc`).
+
+| 명령 | 설명 |
+|---|---|
+| `sim cdc setup [--config PATH]` | 안전장치 검사(`column.include.list`가 정확히 10컬럼, `exclude.list` 없음, 테이블 하나, 비밀번호는 `${env:...}`)를 통과해야 등록한다. `members`가 0행이면 멈춘다. 같은 이름의 커넥터가 이미 있으면 **아무것도 바꾸지 않고** 상태만 보여 준다 |
+| `sim cdc status` | 커넥터·task 상태, 복제 슬롯(활성 여부, **밀린 WAL 크기**), publication의 테이블, `members-events` 파티션별 건수 (읽기 전용) |
+| `sim cdc verify [--snapshot-expected 100000] [--live-expected N]` | 토픽을 처음부터 읽어(읽어도 offset을 남기지 않는다) 13개 항목을 확인한다. 실패해도 회원 값은 출력하지 않고 필드 이름, 건수, 최대 5개의 `member_id`만 보여 준다 |
+| `sim cdc reset [--yes]` | **로컬 전용.** 커넥터 정지 → offset 삭제 → 커넥터 삭제 → 슬롯·publication 삭제 → 토픽 삭제. `members` 행은 건드리지 않는다 |
+
+- **`reset`이 필요한 경우:** 스냅샷을 다시 하고 싶을 때, 설정을 잘못 넣었을 때. **커넥터 offset을 지우지 않으면 같은 이름으로 다시 만들어도 "이미 스냅샷함"으로 보고 스냅샷을 건너뛴다.** `reset`이 offset까지 지우는 이유다. 컬럼을 바꿀 때도 `reset` 후 `setup`을 한다.
+- **`members` 행을 지울 때는 커넥터를 먼저 `reset`한다.** 켜 둔 채 지우면 삭제(`d`) 이벤트가 토픽에 생긴다.
+- **메시지 모양:** Debezium 봉투를 벗기고 `after`의 값을 펼친 한 행이다. 컬럼 10개 + 관리 컬럼 3개 `__op`(`r`/`c`/`u`), `__source_ts_ms`(epoch 밀리초), `__source_snapshot`(스냅샷 행은 `first`/`true`/`last`, 스냅샷이 아닌 이벤트는 `null`). 시각은 UTC(`...Z`)다. 키는 `member_id`.
+- **주소가 둘이다:** 컨테이너끼리는 `kafka:9092`, WSL(파이썬 CLI)에서는 `localhost:29092`. 헷갈리면 컨테이너 안에서는 되는데 밖에서 접속이 안 된다(또는 그 반대). 환경 변수는 `CONNECT_URL`(기본 `http://localhost:8083`), `KAFKA_BOOTSTRAP`(기본 `localhost:29092`).
+- **Kafka UI:** `http://127.0.0.1:8080`. 토픽과 커넥터를 눈으로 본다 (`127.0.0.1`에만 열려 있다).
+- **메모리:** Kafka, Connect, Kafka UI 합쳐서 약 1.5GB를 쓴다 (힙 상한 512MB·512MB·384MB). 쓰지 않을 때는 `docker compose --profile cdc stop kafka connect kafka-ui`.
+- **자주 막히는 곳:** 토픽 파티션은 1개로 만들어진다 (`topic.creation.default.partitions=3`이 적용되지 않았다). 비밀번호는 커넥터 JSON이 아니라 Connect 컨테이너의 환경 변수 `CDC_DB_PASSWORD`로 준다.
+- **Kafka 데이터 파일을 직접 grep할 때:** `.log` 파일만 대상으로 한다 (`.index`는 10MB씩 미리 잡힌 희소 파일이라 전체를 읽으면 오래 걸린다). 전화번호 정규식(`010-[0-9]{4}-[0-9]{4}`)은 member_id(UUID) 안에서 우연히 걸릴 수 있으니, 걸리면 UUID 모양을 지운 뒤에도 걸리는지 본다.
+- 이 구성은 로컬 전용이다. RDS, MSK는 인프라 작업에서 다룬다.

@@ -1,4 +1,4 @@
-CREATE TABLE member (
+CREATE TABLE members (
     member_id         uuid        PRIMARY KEY,
     name              text,
     email             text        UNIQUE,
@@ -15,11 +15,11 @@ CREATE TABLE member (
     region_sigungu    text        NOT NULL,
     age_band          text        NOT NULL
         CHECK (age_band IN ('~19', '20s', '30s', '40s', '50s', '60s', '70+')),
-    CONSTRAINT member_status_withdrawn_at_check CHECK (
+    CONSTRAINT members_status_withdrawn_at_check CHECK (
         (status = 'ACTIVE' AND withdrawn_at IS NULL)
         OR (status = 'WITHDRAWN' AND withdrawn_at IS NOT NULL)
     ),
-    CONSTRAINT member_withdrawn_after_signup_check CHECK (
+    CONSTRAINT members_withdrawn_after_signup_check CHECK (
         withdrawn_at IS NULL OR withdrawn_at >= signup_at
     )
 );

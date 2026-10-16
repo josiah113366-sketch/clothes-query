@@ -6,12 +6,12 @@
 
 | 파일 | 내용 |
 |---|---|
-| `schema/001_member.sql` | `member` 테이블 |
-| `schema/002_member_archive.sql` | `member_archive` 테이블 (`member` 참조) |
+| `schema/001_member.sql` | `members` 테이블 |
+| `schema/002_member_archive.sql` | `members_archive` 테이블 (`members` 참조) |
 
 파일 이름 순서대로 적용한다. 주문 테이블, 복제 슬롯·publication·Debezium 계정, 인덱스는 이후 브랜치에서 추가한다.
 
-## `member`
+## `members`
 
 | 컬럼 | 타입 | 제약 |
 |---|---|---|
@@ -37,11 +37,11 @@
 
 탈퇴하면 `name`, `email`, `phone`, `birth_date`, `password_hash`가 NULL이 되므로 이 컬럼들은 NULL을 허용한다. PostgreSQL의 UNIQUE는 NULL 여러 개를 허용한다.
 
-## `member_archive`
+## `members_archive`
 
 | 컬럼 | 타입 | 제약 |
 |---|---|---|
-| `member_id` | `uuid` | PK, `member(member_id)` 참조 |
+| `member_id` | `uuid` | PK, `members(member_id)` 참조 |
 | `name` | `text` | NOT NULL |
 | `email` | `text` | NOT NULL |
 | `phone` | `text` | NOT NULL |
@@ -54,7 +54,7 @@
 ```bash
 cd simulator
 docker compose up -d
-docker compose exec postgres psql -U sim -d clothes -c '\d member'
+docker compose exec postgres psql -U sim -d clothes -c '\d members'
 ```
 
 DDL을 고쳐 다시 적용하려면 볼륨을 지우고 다시 띄운다: `docker compose down -v && docker compose up -d`

@@ -51,13 +51,13 @@ def _grouped(conn: psycopg.Connection, query: str, args: tuple = ()) -> dict[str
 def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) -> list[CheckResult]:
     results: list[CheckResult] = []
     with safe_db_errors():
-        total = _scalar(conn, "SELECT count(*) FROM member")
+        total = _scalar(conn, "SELECT count(*) FROM members")
         results.append(CheckResult(1, "행 수", total == expected, f"{total:,} / 기대 {expected:,}"))
         if total == 0:
             return results
 
-        dup_email = _scalar(conn, "SELECT count(*) - count(DISTINCT email) FROM member")
-        dup_phone = _scalar(conn, "SELECT count(*) - count(DISTINCT phone) FROM member")
+        dup_email = _scalar(conn, "SELECT count(*) - count(DISTINCT email) FROM members")
+        dup_phone = _scalar(conn, "SELECT count(*) - count(DISTINCT phone) FROM members")
         results.append(
             CheckResult(
                 2,
@@ -69,14 +69,14 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
 
         nulls = _scalar(
             conn,
-            "SELECT count(*) FROM member WHERE name IS NULL OR email IS NULL OR phone IS NULL"
+            "SELECT count(*) FROM members WHERE name IS NULL OR email IS NULL OR phone IS NULL"
             " OR birth_date IS NULL OR password_hash IS NULL",
         )
         results.append(CheckResult(3, "필수 PII 채워짐", nulls == 0, f"NULL 행 {nulls}건"))
 
         bad_status = _scalar(
             conn,
-            "SELECT count(*) FROM member WHERE status <> 'ACTIVE' OR withdrawn_at IS NOT NULL",
+            "SELECT count(*) FROM members WHERE status <> 'ACTIVE' OR withdrawn_at IS NOT NULL",
         )
         results.append(
             CheckResult(4, "상태", bad_status == 0, f"ACTIVE 아님/탈퇴 시각 있음 {bad_status}건")
@@ -84,14 +84,14 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
 
         out_of_range = _scalar(
             conn,
-            "SELECT count(*) FROM member WHERE signup_at < %s OR signup_at >= %s",
+            "SELECT count(*) FROM members WHERE signup_at < %s OR signup_at >= %s",
             (params.SIGNUP_START, params.SIGNUP_END),
         )
         results.append(
             CheckResult(5, "signup_at 범위", out_of_range == 0, f"범위 밖 {out_of_range}건")
         )
 
-        daily = _grouped(conn, f"SELECT ({KST_SQL})::date, count(*) FROM member GROUP BY 1")
+        daily = _grouped(conn, f"SELECT ({KST_SQL})::date, count(*) FROM members GROUP BY 1")
         p_day = 1 / params.SIGNUP_DAYS
         sigma_day = sqrt(total * p_day * (1 - p_day))
         bad_days = sum(
@@ -110,7 +110,7 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
         )
 
         hourly = _grouped(
-            conn, f"SELECT extract(hour FROM {KST_SQL})::int, count(*) FROM member GROUP BY 1"
+            conn, f"SELECT extract(hour FROM {KST_SQL})::int, count(*) FROM members GROUP BY 1"
         )
         results.append(
             _ratio_check(7, "시간대별 비율", hourly, {str(h): 1 / 24 for h in range(24)})
@@ -122,7 +122,7 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
             _ratio_check(
                 8,
                 "나이대 비율",
-                _grouped(conn, "SELECT age_band, count(*) FROM member GROUP BY 1"),
+                _grouped(conn, "SELECT age_band, count(*) FROM members GROUP BY 1"),
                 {band: weights[band] / weight_total for band in params.AGE_BANDS},
             )
         )
@@ -130,7 +130,7 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
         age_rows = conn.execute(
             "SELECT age_band,"
             f" extract(year FROM {KST_SQL})::int - extract(year FROM birth_date)::int AS age,"
-            " count(*) FROM member GROUP BY 1, 2"
+            " count(*) FROM members GROUP BY 1, 2"
         ).fetchall()
         mismatched = 0
         min_age = min(int(age) for _, age, _ in age_rows)
@@ -152,7 +152,7 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
 
         unknown_regions = _scalar(
             conn,
-            "SELECT count(*) FROM member WHERE region_sigungu <> ALL(%s)",
+            "SELECT count(*) FROM members WHERE region_sigungu <> ALL(%s)",
             (list(regions.names),),
         )
         results.append(
@@ -167,7 +167,7 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
                 "시도별 비율",
                 _grouped(
                     conn,
-                    "SELECT split_part(region_sigungu, ' ', 1), count(*) FROM member GROUP BY 1",
+                    "SELECT split_part(region_sigungu, ' ', 1), count(*) FROM members GROUP BY 1",
                 ),
                 regions.sido_weights(),
             )
@@ -176,7 +176,7 @@ def run_verify(conn: psycopg.Connection, regions: RegionTable, expected: int) ->
         flags = conn.execute(
             "SELECT count(*) FILTER (WHERE gender = 'F'),"
             " count(*) FILTER (WHERE signup_channel = 'app'),"
-            " count(*) FILTER (WHERE marketing_consent) FROM member"
+            " count(*) FILTER (WHERE marketing_consent) FROM members"
         ).fetchone()
         assert flags is not None
         female, app, consent = (int(v) for v in flags)

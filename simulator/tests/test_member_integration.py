@@ -50,4 +50,4 @@ def test_refuses_non_empty_table(conn, regions) -> None:
     run_baseline(regions, 1000, 42, 1000, conn)
     with pytest.raises(TableNotEmptyError):
         run_baseline(regions, 1000, 42, 1000, conn)
-    assert conn.execute("SELECT count(*) FROM member").fetchone()[0] == 1000
+    assert conn.execute("SELECT count(*) FROM members").fetchone()[0] == 1000

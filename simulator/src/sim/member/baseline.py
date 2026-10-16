@@ -33,7 +33,7 @@ COLUMNS: tuple[str, ...] = (
     "region_sigungu",
     "age_band",
 )
-COPY_SQL = f"COPY member ({', '.join(COLUMNS)}) FROM STDIN"
+COPY_SQL = f"COPY members ({', '.join(COLUMNS)}) FROM STDIN"
 
 
 class TableNotEmptyError(RuntimeError):
@@ -105,7 +105,7 @@ class RunSummary:
 
 def table_is_empty(conn: psycopg.Connection) -> bool:
     with safe_db_errors():
-        row = conn.execute("SELECT EXISTS (SELECT 1 FROM member)").fetchone()
+        row = conn.execute("SELECT EXISTS (SELECT 1 FROM members)").fetchone()
     return not (row and row[0])
 
 
@@ -120,7 +120,7 @@ def run_baseline(
     """conn이 None이면 생성만 한다 (--dry-run). 아니면 배치마다 COPY하고 커밋한다."""
     if conn is not None and not table_is_empty(conn):
         raise TableNotEmptyError(
-            "member 테이블이 비어 있지 않아 아무것도 넣지 않았습니다. "
+            "members 테이블이 비어 있지 않아 아무것도 넣지 않았습니다. "
             "로컬이면 `docker compose down -v` 후 다시 실행하세요."
         )
 

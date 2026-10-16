@@ -1,5 +1,5 @@
-CREATE TABLE member_archive (
-    member_id   uuid        PRIMARY KEY REFERENCES member (member_id),
+CREATE TABLE members_archive (
+    member_id   uuid        PRIMARY KEY REFERENCES members (member_id),
     name        text        NOT NULL,
     email       text        NOT NULL,
     phone       text        NOT NULL,

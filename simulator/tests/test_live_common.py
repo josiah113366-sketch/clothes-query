@@ -136,7 +136,7 @@ def test_control_warns_again_after_recovery(tmp_path: Path) -> None:
 
 
 class _PiiDiag:
-    constraint_name = "member_phone_key"
+    constraint_name = "members_phone_key"
 
     @property
     def message_detail(self) -> str:
@@ -157,7 +157,7 @@ class _PiiError(psycopg.errors.UniqueViolation):
 def test_db_error_info_returns_only_constraint_and_sqlstate() -> None:
     error = _PiiError(f"Key (phone)=({PII}) already exists.")
     info = db_error_info(error)
-    assert info == DbErrorInfo(sqlstate="23505", constraint="member_phone_key")
+    assert info == DbErrorInfo(sqlstate="23505", constraint="members_phone_key")
     assert PII not in repr(info)
 
 

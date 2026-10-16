@@ -69,11 +69,11 @@ def test_live_200_after_baseline(env, regions) -> None:
         f"SELECT count(*) FILTER (WHERE {SINCE}), "
         f"count(*) FILTER (WHERE {SINCE} AND status = 'ACTIVE'), "
         f"count(*) FILTER (WHERE {SINCE} AND signup_at < '2026-10-13 09:00:00+09'), "
-        "count(*) - count(DISTINCT email), count(*) - count(DISTINCT phone) FROM member"
+        "count(*) - count(DISTINCT email), count(*) - count(DISTINCT phone) FROM members"
     ).fetchone()
     assert (total, active, late) == (200, 200, 0)
     assert (emails, phones) == (0, 0)
-    assert conn.execute("SELECT count(*) FROM member").fetchone()[0] == 2200
+    assert conn.execute("SELECT count(*) FROM members").fetchone()[0] == 2200
 
 
 def test_restart_continues_from_index(env, regions) -> None:
@@ -84,11 +84,11 @@ def test_restart_continues_from_index(env, regions) -> None:
     assert second.summary.start_index == 100
     total, ids, phones = conn.execute(
         f"SELECT count(*), count(DISTINCT member_id), count(DISTINCT phone) "
-        f"FROM member WHERE {SINCE}"
+        f"FROM members WHERE {SINCE}"
     ).fetchone()
     assert total == ids == phones == 200
     assert (
-        conn.execute("SELECT count(*) - count(DISTINCT member_id) FROM member").fetchone()[0] == 0
+        conn.execute("SELECT count(*) - count(DISTINCT member_id) FROM members").fetchone()[0] == 0
     )
 
 
@@ -97,6 +97,6 @@ def test_one_transaction_per_signup(env, regions) -> None:
     run_baseline(regions, 2000, 42, 1000, conn)
     _live(make_store(), regions, 100)
     rows, xids = conn.execute(
-        f"SELECT count(*), count(DISTINCT xmin::text) FROM member WHERE {SINCE}"
+        f"SELECT count(*), count(DISTINCT xmin::text) FROM members WHERE {SINCE}"
     ).fetchone()
     assert rows == xids == 100
