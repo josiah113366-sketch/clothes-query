@@ -66,14 +66,6 @@ RDS 에는 넣지 않는다(조인은 레이크에서). 한때 로컬 Postgres `
 - 입력은 로컬 또는 `s3://`. ECS 에서는 입력을 S3 에 올리고 같은 태스크 정의로 RunTask 1회(명령만 바꿈).
 - 직접 지어낸 문장만 넣는다. 경로에 `private` 가 들어가면 거부.
 
-### 7. 상품 정보로 리뷰 만들기 준비 (2026-10-16 lemin 결정)
-나중에 실제 상품 정보가 들어오면 그 상품에 맞는 리뷰를 쓰게 미리 준비한다.
-- `catalog.py`: `Product.info`(상품 정보), `ProductSource`/`CsvProductSource`, `PRODUCT_INFO_FIELDS`, H&M 컬럼 별칭 `COLUMN_ALIASES`. 상품 정보 없으면 예전과 같음.
-- `generator.py`: 상품 정보가 있는 명세에만 `product_info` 를 붙이고 규칙 13 추가 → `PROMPT_VERSION` p5.7. `docs/prompt-sample.md` 다시 뽑음.
-- `options.py`: 상품 색상이 있으면 `option_color` 를 그 색으로(난수 순서는 그대로). 리뷰 컬럼(review.v2)은 늘리지 않음.
-- category 는 받지 않는다(2026-10-16 lemin: 상품 정보만 있으면 리뷰 서술에 문제없음). 없으면 리뷰 `category` 는 null, 명세에서도 빼고, 사이즈는 `product_type` 으로 추정, 말투 예시는 전체 카테고리에서 고른다.
-- 미정: S3 상품 테이블 경로. Bedrock 으로 p5.7 문장 확인(사용자 승인 후).
-
 ## 완료 확인
 
 - [x] `ruff check . && ruff format --check .`
