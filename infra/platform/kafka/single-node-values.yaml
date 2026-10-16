@@ -1,0 +1,19 @@
+# Opt-in disposable/development profile. No runtime is enabled by this file alone.
+# Do not switch an existing RF=3 cluster to this profile or shrink an existing PVC.
+profile: single-node
+kafka:
+  enabled: false
+  replicas: 1
+  storageGi: 10
+  retentionHours: 24
+  resources:
+    requests: {cpu: "500m", memory: "1536Mi"}
+    limits: {cpu: "1", memory: "1536Mi"}
+  heapMi: 512
+connect:
+  enabled: false
+  replicas: 1
+  resources:
+    requests: {cpu: "250m", memory: "1Gi"}
+    limits: {cpu: "1", memory: "1Gi"}
+  heapMi: 512

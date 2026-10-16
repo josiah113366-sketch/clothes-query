@@ -1,4 +1,5 @@
 # No resources until explicitly enabled. Namespace must be kafka.
+profile: standard
 kafka:
   enabled: false
   name: clothes-query-dev-kafka

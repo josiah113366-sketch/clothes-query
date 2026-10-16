@@ -10,9 +10,9 @@ metadata:
 spec:
   topicName: {{ .name | quote }}
   partitions: {{ .partitions }}
-  replicas: 3
+  replicas: {{ include "cq.replicationFactor" $ }}
   config:
-    min.insync.replicas: 2
+    min.insync.replicas: {{ include "cq.minIsr" $ }}
     retention.ms: {{ .retentionMs }}
     cleanup.policy: delete
 {{- end }}
@@ -28,9 +28,9 @@ metadata:
 spec:
   topicName: {{ printf "%s-%s" $.Values.connect.name $suffix | quote }}
   partitions: 1
-  replicas: 3
+  replicas: {{ include "cq.replicationFactor" $ }}
   config:
-    min.insync.replicas: 2
+    min.insync.replicas: {{ include "cq.minIsr" $ }}
     cleanup.policy: compact
 {{- end }}
 {{- end }}

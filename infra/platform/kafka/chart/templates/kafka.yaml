@@ -41,6 +41,7 @@ spec:
                 matchLabels:
                   strimzi.io/cluster: {{ .Values.kafka.name }}
                   strimzi.io/pool-name: combined
+      {{- if eq .Values.profile "standard" }}
       topologySpreadConstraints:
         - maxSkew: 1
           minDomains: 2
@@ -50,6 +51,7 @@ spec:
             matchLabels:
               strimzi.io/cluster: {{ .Values.kafka.name }}
               strimzi.io/pool-name: combined
+      {{- end }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
@@ -91,11 +93,11 @@ spec:
     authorization:
       type: simple
     config:
-      default.replication.factor: 3
-      min.insync.replicas: 2
-      offsets.topic.replication.factor: 3
-      transaction.state.log.replication.factor: 3
-      transaction.state.log.min.isr: 2
+      default.replication.factor: {{ include "cq.replicationFactor" . }}
+      min.insync.replicas: {{ include "cq.minIsr" . }}
+      offsets.topic.replication.factor: {{ include "cq.replicationFactor" . }}
+      transaction.state.log.replication.factor: {{ include "cq.replicationFactor" . }}
+      transaction.state.log.min.isr: {{ include "cq.minIsr" . }}
       auto.create.topics.enable: false
       unclean.leader.election.enable: false
       log.retention.hours: {{ .Values.kafka.retentionHours }}
@@ -105,8 +107,20 @@ spec:
   entityOperator:
     topicOperator:
       image: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+      {{- if eq .Values.profile "single-node" }}
+      resources:
+        requests: {cpu: "100m", memory: "256Mi"}
+        limits: {cpu: "500m", memory: "384Mi"}
+      jvmOptions: {"-Xms": "128m", "-Xmx": "128m"}
+      {{- end }}
     userOperator:
       image: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+      {{- if eq .Values.profile "single-node" }}
+      resources:
+        requests: {cpu: "100m", memory: "256Mi"}
+        limits: {cpu: "500m", memory: "384Mi"}
+      jvmOptions: {"-Xms": "128m", "-Xmx": "128m"}
+      {{- end }}
   {{- if .Values.metrics.lagExporter.enabled }}
   kafkaExporter:
     image: {{ .Values.kafka.image | quote }}

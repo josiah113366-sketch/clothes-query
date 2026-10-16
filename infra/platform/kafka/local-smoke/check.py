@@ -1,4 +1,5 @@
 """Run a disposable local-only CDC smoke test; never uses AWS, host ports or business data."""
+import argparse
 import json
 import os
 import re
@@ -7,12 +8,16 @@ import secrets
 import subprocess
 import tempfile
 import time
+import threading
 
 ROOT = Path(__file__).resolve().parent
 TOPIC = "smoke.public.cdc_probe"
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compact", action="store_true", help="Use single-node memory limits and 1-vCPU quotas for Kafka and Connect; fixtures run separately")
+    options = parser.parse_args()
     # Reject remote Docker contexts before any mutations or cleanup.
     clean_env = {k: v for k, v in os.environ.items() if not k.startswith(("AWS_", "TF_", "KUBE"))}
     if clean_env.get("DOCKER_HOST") or clean_env.get("DOCKER_CONTEXT"):
@@ -61,12 +66,20 @@ def main():
         clean_env.update(SMOKE_ADMIN_PASSWORD=admin_password, SMOKE_CONNECT_IMAGE=image,
                          SMOKE_SECRET_DIR=str(database_dir), SMOKE_TLS_DIR=str(tls_dir),
                          SMOKE_WORKER_CONFIG=str(worker_path))
+        extra_compose = []
+        if options.compact:
+            override = directory / "compact.json"
+            override.write_text(json.dumps({"services": {
+                "kafka": {"cpus": 1.0, "mem_limit": "1536m"},
+                "connect": {"cpus": 1.0, "mem_limit": "1024m"}
+            }}), encoding="utf-8")
+            extra_compose = ["--file", override]
 
         def compose(*args, **kwargs):
             # Kafka CLI JVMs must not bind the broker's already active javaagent port.
             if args[:3] == ("exec", "-T", "kafka") and str(args[3]).startswith("/opt/kafka/bin/"):
                 args = args[:3] + ("env", "KAFKA_OPTS=",) + args[3:]
-            return docker("compose", "--project-name", project, "--file", ROOT / "compose.yaml", *args, **kwargs)
+            return docker("compose", "--project-name", project, "--file", ROOT / "compose.yaml", *extra_compose, *args, **kwargs)
 
         def sql(statement):
             return compose("exec", "-T", "postgres", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
@@ -106,7 +119,8 @@ def main():
             result = compose("exec", "-T", "client", "/opt/kafka/bin/kafka-console-consumer.sh",
                              "--bootstrap-server", "kafka:9093", "--consumer.config", "/mnt/tls/reader.properties",
                              "--topic", TOPIC, "--from-beginning",
-                             "--partition", "0", "--timeout-ms", "3000", timeout=20, check=False)
+                             "--partition", "0", "--timeout-ms", "10000" if options.compact else "3000",
+                             timeout=60 if options.compact else 20, check=False)
             parsed = []
             for line in result.stdout.splitlines():
                 try:
@@ -157,6 +171,19 @@ def main():
                     values.append(float(match[2]))
             return values
 
+        samples = []
+        stop_samples = threading.Event()
+        def sample_resources():
+            while not stop_samples.is_set():
+                try:
+                    ids = compose("ps", "--quiet", timeout=10, check=False).stdout.split()
+                    if ids:
+                        result = docker("stats", "--no-stream", "--format", "{{json .}}", *ids, timeout=10, check=False)
+                        samples.extend(json.loads(line) for line in result.stdout.splitlines() if line.startswith("{"))
+                except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError):
+                    pass
+                stop_samples.wait(2)
+        sampler = threading.Thread(target=sample_resources, daemon=True)
         cleanup_error = None
         try:
             print("Building pinned Connect image for isolated local test...", flush=True)
@@ -168,6 +195,8 @@ def main():
             compose("config", "--quiet")
             compose("run", "--rm", "--no-deps", "kafka-data-init")
             compose("up", "--detach", "postgres", "kafka", timeout=300)
+            if options.compact:
+                sampler.start()
             until("PostgreSQL ready", lambda: compose("exec", "-T", "postgres", "pg_isready", "-U", "postgres").returncode == 0)
             until("Kafka ready", lambda: compose("exec", "-T", "kafka", "/opt/kafka/bin/kafka-topics.sh",
                                                 "--bootstrap-server", "kafka:9092", "--list", timeout=15).returncode == 0)
@@ -248,6 +277,14 @@ def main():
                 return all(has(data, *expected) for expected in [("c", 2, 20), ("u", 1, 11), ("d", 2, 20)])
             until("Insert/update/delete delivered", changes_received)
             print("PASS: snapshot and insert/update/delete delivered; dedicated non-superuser and mounted credentials", flush=True)
+            if options.compact:
+                started = time.monotonic()
+                sql("INSERT INTO public.cdc_probe SELECT i, i FROM generate_series(1000,1999) AS i;")
+                def bulk_received():
+                    ids = {e["after"]["id"] for e in events() if e.get("op") == "c" and e.get("after") and 1000 <= e["after"]["id"] <= 1999}
+                    return len(ids) == 1000
+                until("Compact 1000-row burst", bulk_received, timeout=180)
+                print(f"PASS: compact 1000-row CDC burst delivered in {time.monotonic() - started:.1f}s (includes polling/consumer startup)", flush=True)
             compose("stop", "--timeout", "20", "connect")
             assert sql("SELECT NOT active FROM pg_replication_slots WHERE slot_name='smoke_slot';") == "t"
             sql("INSERT INTO public.cdc_probe VALUES (3,30);")
@@ -300,7 +337,36 @@ def main():
                 return bool(values) and all(v > 0 for v in values)
             until("Consumer lag metric", lag_ready)
             print("PASS: Kafka replication/controller, Connect task/CDC connection and positive consumer lag metrics served", flush=True)
+            if options.compact:
+                ids = compose("ps", "--quiet").stdout.split()
+                inspected = json.loads(docker("inspect", *ids).stdout)
+                health = [{"service": c["Config"]["Labels"]["com.docker.compose.service"],
+                           "oomKilled": c["State"]["OOMKilled"], "restartCount": c["RestartCount"],
+                           "memoryLimit": c["HostConfig"]["Memory"], "nanoCpus": c["HostConfig"]["NanoCpus"]} for c in inspected]
+                assert not any(c["oomKilled"] or c["restartCount"] for c in health)
+                assert sum(c["nanoCpus"] for c in health if c["service"] in {"kafka", "connect"}) == 2_000_000_000
+                assert sum(c["memoryLimit"] for c in health) < 8 * 1024**3
+                report = ROOT.parents[3] / ".cache" / "kafka-compact-report.json"
+                report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text(json.dumps({"project": project, "health": health, "samples": samples,
+                                              "scope": "Kafka/Connect CPU quotas total 2 vCPU; test fixtures outside that CPU budget; local CDC only; no Strimzi operator, Kubernetes, EKS, EBS, RDS TLS, S3 sink or Spark"}, indent=2), encoding="utf-8")
+                print("PASS: Kafka/Connect quota sum 2 vCPU; test fixtures outside CPU budget; memory limits below 8Gi; no OOM/restarts; report=" + str(report), flush=True)
+        except Exception as error:
+            if options.compact:
+                failure = {"project": project, "error": redact(str(error)), "samples": samples}
+                for service in ("kafka", "connect", "client"):
+                    try:
+                        failure[service + "Logs"] = redact(compose("logs", "--no-color", "--tail", "100", service, timeout=20, check=False).stdout)
+                    except (RuntimeError, subprocess.TimeoutExpired):
+                        pass
+                report = ROOT.parents[3] / ".cache" / "kafka-compact-failure.json"
+                report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text(json.dumps(failure, indent=2), encoding="utf-8")
+            raise
         finally:
+            stop_samples.set()
+            if sampler.is_alive():
+                sampler.join(timeout=25)
             # Only resources in this invocation's random Compose project are removed.
             result = compose("down", "--volumes", "--remove-orphans", "--timeout", "20", timeout=120, check=False)
             if result.returncode:

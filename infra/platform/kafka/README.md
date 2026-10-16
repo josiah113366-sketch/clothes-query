@@ -1,5 +1,7 @@
 # EKS Kafka·Connect
 
+2026-10-16 단일 노드 후보: [single-node-values.yaml](single-node-values.yaml)에 Kafka/Connect 각 1개·RF 1·축소 메모리의 별도 비활성 프로필을 준비했다. 기본 standard 구성은 보존한다. [검증 범위와 결과](../../../docs/design/infra/kafka-single-node-validation-2026-10-16.md)를 읽고 신규 개발 runtime에서만 검토한다. 기존 클러스터의 복제 수나 PVC를 임의 축소하는 용도가 아니다.
+
 상태: 코드·로컬 검증 준비 / AWS·Kubernetes 미배포.
 
 로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 18개 거부, Connect Linux/amd64 이미지 빌드 및 플러그인 발견 검사 통과. 임시 PostgreSQL→Kafka snapshot/insert/update/delete, Connect 중단 후 재전달, JMX/consumer lag 지표 노출도 확인했다. Terraform 10개 root/38 mock 통과. 실제 RDS/EKS 전달·AZ/디스크 장애 복구는 아직 확인하지 않았다.

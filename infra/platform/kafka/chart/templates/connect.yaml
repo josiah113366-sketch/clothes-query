@@ -58,9 +58,9 @@ spec:
       certificate: user.crt
       key: user.key
   config:
-    config.storage.replication.factor: 3
-    offset.storage.replication.factor: 3
-    status.storage.replication.factor: 3
+    config.storage.replication.factor: {{ include "cq.replicationFactor" . }}
+    offset.storage.replication.factor: {{ include "cq.replicationFactor" . }}
+    status.storage.replication.factor: {{ include "cq.replicationFactor" . }}
     offset.storage.partitions: 1
     status.storage.partitions: 1
     connector.client.config.override.policy: None

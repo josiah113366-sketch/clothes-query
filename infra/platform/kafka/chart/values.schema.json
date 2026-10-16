@@ -23,7 +23,11 @@
           "pattern": "^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$"
         },
         "replicas": {
-          "const": 3
+          "type": "integer",
+          "enum": [
+            1,
+            3
+          ]
         },
         "storageClass": {
           "const": "clothes-query-kafka-gp3"
@@ -228,7 +232,7 @@
         },
         "replicas": {
           "type": "integer",
-          "minimum": 2,
+          "minimum": 1,
           "maximum": 10
         },
         "image": {
@@ -406,6 +410,13 @@
           }
         }
       }
+    },
+    "profile": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "single-node"
+      ]
     }
   },
   "required": [
@@ -413,6 +424,57 @@
     "topics",
     "clients",
     "connect",
-    "metrics"
+    "metrics",
+    "profile"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "profile": {
+            "const": "single-node"
+          }
+        },
+        "required": [
+          "profile"
+        ]
+      },
+      "then": {
+        "properties": {
+          "kafka": {
+            "properties": {
+              "replicas": {
+                "const": 1
+              }
+            }
+          },
+          "connect": {
+            "properties": {
+              "replicas": {
+                "const": 1
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "kafka": {
+            "properties": {
+              "replicas": {
+                "const": 3
+              }
+            }
+          },
+          "connect": {
+            "properties": {
+              "replicas": {
+                "minimum": 2
+              }
+            }
+          }
+        }
+      }
+    }
   ]
 }

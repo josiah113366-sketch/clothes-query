@@ -1,4 +1,5 @@
 {{- define "cq.check" -}}
+{{- if and (eq .Values.profile "single-node") (or (ne (int .Values.kafka.replicas) 1) (ne (int .Values.connect.replicas) 1)) }}{{ fail "single-node profile requires one Kafka and one Connect replica" }}{{ end -}}
 {{- if ne .Release.Namespace "kafka" }}{{ fail "Install in namespace kafka; operator is scoped to this namespace" }}{{ end -}}
 {{- if and .Values.connect.enabled (not .Values.kafka.enabled) }}{{ fail "connect requires kafka.enabled" }}{{ end -}}
 {{- if and .Values.metrics.enabled (not .Values.kafka.enabled) }}{{ fail "metrics requires kafka.enabled" }}{{ end -}}
@@ -44,3 +45,6 @@
 {{- if or (gt (len .Values.topics) 0) (gt (len .Values.clients) 0) }}{{ fail "topics/clients require kafka.enabled" }}{{ end -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "cq.replicationFactor" -}}{{- if eq .Values.profile "single-node" -}}1{{- else -}}3{{- end -}}{{- end -}}
+{{- define "cq.minIsr" -}}{{- if eq .Values.profile "single-node" -}}1{{- else -}}2{{- end -}}{{- end -}}

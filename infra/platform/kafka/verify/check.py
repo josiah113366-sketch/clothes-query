@@ -111,6 +111,43 @@ def main():
         docs = render(full)
         assert not any(d["kind"] == "ConfigMap" for d in docs)
         assert all("metricsConfig" not in d["spec"] for d in docs if d["kind"] == "KafkaConnect")
+        compact = copy.deepcopy(full)
+        compact_profile = yaml.safe_load((ROOT / "single-node-values.yaml").read_text(encoding="utf-8"))
+        compact.update(copy.deepcopy(compact_profile))
+        compact["kafka"]["enabled"] = True
+        compact["connect"].update(enabled=True, image=full["connect"]["image"], produceTopics=["example-orders"])
+        compact_docs = render(compact)
+        compact_pool = next(d["spec"] for d in compact_docs if d["kind"] == "KafkaNodePool")
+        compact_kafka = next(d["spec"] for d in compact_docs if d["kind"] == "Kafka")
+        compact_connect = next(d["spec"] for d in compact_docs if d["kind"] == "KafkaConnect")
+        assert compact_pool["replicas"] == compact_connect["replicas"] == 1
+        assert "topologySpreadConstraints" not in compact_pool["template"]["pod"]
+        assert compact_pool["storage"]["volumes"][0]["size"] == "10Gi"
+        assert compact_pool["storage"]["volumes"][0]["deleteClaim"] is False
+        for key in ("default.replication.factor", "min.insync.replicas", "offsets.topic.replication.factor",
+                    "transaction.state.log.replication.factor", "transaction.state.log.min.isr"):
+            assert compact_kafka["kafka"]["config"][key] == 1
+        for topic in (d["spec"] for d in compact_docs if d["kind"] == "KafkaTopic"):
+            assert topic["replicas"] == topic["config"]["min.insync.replicas"] == 1
+        for key in ("config.storage.replication.factor", "offset.storage.replication.factor", "status.storage.replication.factor"):
+            assert compact_connect["config"][key] == 1
+        assert compact_kafka["kafka"]["listeners"][0]["tls"]
+        assert compact_kafka["kafka"]["authorization"]["type"] == "simple"
+        assert render(compact_profile) == []  # Profile alone must not deploy anything.
+        budget = [compact_pool["resources"], compact_connect["resources"],
+                  compact_kafka["entityOperator"]["topicOperator"]["resources"],
+                  compact_kafka["entityOperator"]["userOperator"]["resources"],
+                  yaml.safe_load((ROOT / "operator-values.yaml").read_text())["resources"]]
+        def memory_mib(value):
+            return int(value[:-2]) * (1024 if value.endswith("Gi") else 1)
+        assert sum(memory_mib(r["requests"]["memory"]) for r in budget) == 3456
+        assert sum(memory_mib(r["limits"]["memory"]) for r in budget) == 3840
+        bad_compact = copy.deepcopy(compact); bad_compact["kafka"]["replicas"] = 3
+        render(bad_compact, error="replicas")
+        bad_compact = copy.deepcopy(compact); bad_compact["connect"]["replicas"] = 2
+        render(bad_compact, error="replicas")
+        render({"connect": {"replicas": 1}}, error="replicas")
+        render({"profile": "unknown"}, error="profile")
         monitored = copy.deepcopy(full)
         monitored["metrics"] = {"enabled": True, "lagExporter": {
             "enabled": True, "topicRegex": "^example-orders$", "groupRegex": "^example-reader$"}}
@@ -236,7 +273,8 @@ def main():
                 assert bool(selected(labels)) == (index == other)
                 assert not selected({**labels, "__meta_kubernetes_pod_container_port_name": "rest-api"})
                 assert not selected({**labels, "__meta_kubernetes_pod_phase": "Pending"})
-    print(f"PASS: lint, Kafka/Connect/CDC/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 21 rejected inputs, operator/storage checks")
+    print(f"PASS: lint, standard/single-node/CDC/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 25 rejected inputs, operator/storage checks")
+    print("Single-node Kafka/Connect/operator budget: requests 3456Mi, limits 3840Mi; excludes Kubernetes/CSI/app/Spark resources.")
     print("No Kubernetes/AWS connection, apply, push or runtime claim.")
 
 
