@@ -30,3 +30,11 @@
 `infra/ready@d9b0a76`를 업로드해 원격 tip 일치를 확인했다. `infra/analysis@7cdd4d5`와 `infra/local-ready@84080d8`가 HEAD의 ancestor이며 원격 tip이 점검 당시 그대로임을 재확인한 후, atomic push와 각 ref의 force-with-lease로 두 원격 이름만 삭제했다. 로컬 `infra/analysis@088ee05`도 통합 이력이 포함된 상태에서 `git branch -d`로 정리했다. 현재 로컬 인프라 브랜치 이름은 `infra/ready` 하나다. `main`, `infra/bootstrap`, 팀원 브랜치는 삭제하거나 수정하지 않았다.
 
 이 완료 기록은 위 업로드 이후 문서만 보완한 것이다. 최종 원격 HEAD는 마지막 문서 커밋 업로드 후 다시 확인한다. 소스 브랜치 이름을 삭제했으므로 과거 지시서의 해당 branch checkout/diff 예시는 당시 기록으로만 읽고, 현재 소스와 상태는 `infra/ready`에서 확인한다. 새 GitHub Actions의 실행 결과는 별도로 확인한다.
+
+## 작업 결과
+
+2026-10-16 PR #11의 최종 범위는 RDS-first 및 최소 EKS/Kafka 기반을 포함한다. NAT 1개 공유·t3a.large/6 vCPU/24GiB·단일 Kafka 20GiB/72시간과 synthetic 측정 입력을 준비했고 Airflow는 로컬 API/실제 5분 예약 검증까지만 포함한다. WEB/WAS·ALB·Spark·Fargate 및 업무 연결은 별도다. 후속 상세 실행은 [infra-rds-first.md](infra-rds-first.md)를 따른다. 위 2026-10-14의 NAT 2개·기본 대형 노드 내용은 당시 기록이다.
+
+비용 절감과 팀원에게 실행 기반을 제공하기 위한 변경이다. Terraform 10 roots·48개 mock plan, Kafka Helm/CRD/25개 거부 검사, 로컬 compact CDC/복구, Airflow API·5분 예약 검증을 통과했다. PR CI도 Terraform·Helm·Kafka 전달/복구·report-only 이미지 검사에 성공했다. 최신 main의 팀원 코드와 브랜치 규칙을 충돌 없이 반영했다. 실제 network plan 2개 추가/2개 변경·EKS plan 17개 추가이며 삭제/교체가 없다.
+
+사용자 요청대로 PR 머지 후 최소 인프라를 배포·검증한다. 실제 결과는 실행 후 기록한다. 업무 CDC·S3 Sink·Airflow 설치·동료 권한·Athena/정답표 IAM은 담당자와 실제 입력을 맞춘 뒤 진행한다. 계정·접속 정보·Secret은 공개 Git에 넣지 않는다.

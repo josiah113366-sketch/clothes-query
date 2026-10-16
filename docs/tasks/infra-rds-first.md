@@ -80,3 +80,9 @@ AWS 사전 확인: 계정 guard·관리자 trust·현재 IP 입력 일치, RDS a
 실제 network plan은 NAT/EIP 1개씩 추가와 app route table 2개 변경, EKS plan은 17개 생성이며 모두 삭제/교체가 없다. Terraform provider는 빈 기본 node_pools를 JSON null로 표현하며 소스의 명시적 빈 목록과 생성 후 실제 설정을 함께 확인한다. 계정/endpoint/plan 상세는 Git 제외 파일에만 둔다.
 
 synthetic 측정용 Kafka values는 single-node 프로필 뒤에 병합하며 1 broker·20GiB·72시간·infra-smoke 토픽/클라이언트·JMX/lag를 선택한다. Connect는 비활성이다. 실제 생성과 접속/Pod/PVC/TLS/메시지·metrics 결과는 실행 후 기록한다. 이번 명시적 배포 요청은 일반적인 apply 담당 규칙을 영구 변경하지 않는다.
+
+## 작업 결과
+
+RDS와 필수 네트워크의 선행 배포·무변경 plan 확인을 완료했다. 후속 비용 절감을 위해 NAT 공유 옵션, t3a.large 및 6 vCPU/24GiB, 단일 Kafka/Connect 프로필 20GiB/72시간을 준비했고 로컬 CDC/복구와 Airflow API/5분 예약을 검증했다. 위 각 절에 목적·검증 결과와 미완료 경계를 기록했다.
+
+최신 main을 반영해 infra/ready PR #11에 통합했고, 사용자의 배포 요청에 따라 실제 NAT/EKS plan을 검토했다. CI 통과 후 머지·실제 생성·접속/스토리지/TLS/메시지·지표 확인을 진행한다. Airflow는 동료 설치 공간까지만 준비하며 동료 IAM 정보는 입력 대기다. 업무 CDC/S3 Sink/Fargate/권한 분리와 실제 Athena 판정은 다음 연결 작업이다.
