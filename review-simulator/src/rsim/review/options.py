@@ -2,6 +2,9 @@
 
 2026-10-14 lemin 확정 컬럼: option_size, option_color, has_photo (+ emitted_at, purchased_at 는 run.py).
 [임시] 사이즈·색상은 원래 주문 시 고른 옵션이라 나중에 주문 데이터에서 가져온다. 그 전까지 여기서 만든다.
+[추후] 사이즈는 order 테이블에 포함되어 관리될 예정이다(2026-10-16 lemin). 주문 데이터에 사이즈가 생기면
+      Order 에 size 를 받아 option_size 로 그대로 쓰고, 아래 사이즈 분포(SIZE_OPTIONS, SIZE_GROUPS)와
+      상품 종류로 사이즈를 추정하는 size_group_of 는 주문에 사이즈가 없을 때만 쓰는 대체값으로 남긴다.
 지금은 프롬프트에 넣지 않는다(리뷰 문장은 옵션과 무관). 문장에 반영하려면 generator.py 프롬프트를 바꾸고
 PROMPT_VERSION 을 올려야 한다.
 
