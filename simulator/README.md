@@ -15,6 +15,7 @@ simulator/
 │   ├── cli.py             # sim 명령 진입점
 │   ├── cdc/               # 로컬 CDC: 커넥터 등록·상태·초기화, 토픽 검증 (sim cdc)
 │   ├── sink/              # 로컬 S3 Sink: 커넥터 등록·상태·초기화, S3 파일 검증 (sim sink)
+│   ├── product/           # 상품 시드(Parquet)를 DB에 옮기고 확인 (sim product)
 │   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
@@ -184,3 +185,47 @@ sim sink verify                              # 6. 11개 항목 확인, 하나라
 - **`.env` 줄 이름:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`다 (`AWS_ACCESS_KEY` 같은 이름은 읽히지 않는다).
 - **S3 쓰기·삭제 코드는 없다.** `sim sink`의 S3 접근은 읽기 전용이다 (쓰는 것은 Connect의 S3 Sink 커넥터다).
 - **플러그인:** Confluent S3 Sink 12.1.13 (Confluent Community License, 로컬 사용). 버전과 체크섬은 `connect/Dockerfile`에 고정돼 있다.
+
+## 상품 적재
+
+팀이 EDA로 정리한 **상품 시드 Parquet 2개**를 로컬 PostgreSQL의 `product_design`, `product_variant`에 **그대로 옮기고**, 옮겨진 것이 원본과 같은지 확인한다. 회원과 달리 **새로 만들지 않는다.** 값을 고치거나 걸러내지 않고, 랜덤도 시드도 없다.
+
+```
+simulator/.local/seed_v2/product_design.parquet   ┐
+simulator/.local/seed_v2/product_variant.parquet  ┴→ sim product load → Postgres (product_design, product_variant)
+```
+
+**원본:** S3 `hm-ecommerce-data`(도쿄)의 `seed_v2/product_design/product_design.parquet`, `seed_v2/product_variant/product_variant.parquet`가 기준이다. 레포에는 커밋하지 않는다. 로컬 파일이 기본 입력이고, 받는 것은 사용자가 한다 (명령이 자동으로 받지 않는다).
+
+```bash
+mkdir -p .local/seed_v2        # simulator/ 에서 (.local/은 gitignore)
+aws s3 cp s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet   .local/seed_v2/
+aws s3 cp s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet .local/seed_v2/
+```
+
+**테이블 만들기:** DDL은 `db/schema/003_product.sql`이다. `docker-entrypoint-initdb.d`에 마운트돼 있지만 **이미 만들어진 볼륨에서는 다시 실행되지 않는다.** 그래서 이미 쓰던 DB에는 직접 적용한다 (회원 테이블은 건드리지 않고 새 테이블 2개만 추가한다). 새 볼륨에서는 자동으로 적용된다.
+
+```bash
+docker compose exec -T postgres psql -U sim -d clothes < ../db/schema/003_product.sql
+```
+
+```bash
+sim product load --dry-run     # DB에 접속하지 않고 두 파일의 컬럼·행 수만 본다
+sim product load --yes         # 한 트랜잭션에 적재 (design 먼저, variant 나중)
+sim product verify             # 원본과 DB를 둘 다 읽어 8개 항목 확인, 하나라도 실패하면 종료 코드 1
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--source` | 원본 디렉터리 또는 `s3://버킷/seed_v2` (기본: `SEED_DIR`, 없으면 `.local/seed_v2`). 디렉터리는 `<디렉터리>/<테이블>.parquet`, S3는 `<접두사>/<테이블>/<테이블>.parquet`를 읽는다 |
+| `--dry-run` | (`load`) DB에 접속하지 않고 스키마와 행 수만 보여 준다 |
+| `--yes` | (`load`) 확인 질문을 건너뛴다 |
+| `--batch-size` | (`load`) COPY 배치 크기 (기본 5,000) |
+
+- **스키마 확인:** `load`와 `verify`는 먼저 Parquet의 컬럼·타입이 DDL과 같은지 본다. 다르면(컬럼 추가·누락·타입 다름, 설명문·이미지·현지화 계열 컬럼, 정해 두지 않은 타입) 어떤 컬럼인지 알리고 아무것도 넣지 않는다. 타입은 `int64→BIGINT`, `string→TEXT`만 정해 두었다 (`double`, `bool`, 시간대 있는 `timestamp`는 코드에 매핑이 있고, 시간대 없는 `timestamp`와 그 밖의 타입은 오류다).
+- **빈 테이블 규칙:** 두 테이블 중 하나라도 행이 있으면 아무것도 넣지 않고 멈춘다. 삭제·`TRUNCATE` 옵션은 없다. 로컬을 처음부터 다시 하려면 `docker compose down -v`인데, **회원 데이터도 함께 지워지니 주의한다.**
+- **롤백:** 두 테이블은 한 트랜잭션이다. 중간에 실패하면 둘 다 비어 있다.
+- **`verify` 항목:** ① 행 수 ② 키 중복·NULL ③ 참조 무결성(variant 없는 design 수는 보고만) ④ `article_id` 형식(숫자, 같은 길이, 앞자리 0 보존) ⑤ `*_name`에 `Unknown` 없음 ⑥ 가격 규칙(`design_price`는 5,900 이상, **500원 단위** → 끝자리 900 또는 400) ⑦ 컬럼별 집계가 원본과 같음 ⑧ 무작위(시드 고정) 1,000행씩 전 컬럼 대조.
+- **출력:** 상품 값은 출력하지 않는다. 컬럼 이름, 건수, 최대 5개의 키(`product_code`/`article_id`)만 보여 준다.
+- **S3에서 읽기:** `--source s3://hm-ecommerce-data/seed_v2`는 읽기 전용이다 (쓰기·삭제 코드 없음). 자격 증명은 `.env`나 환경 변수의 기존 AWS 설정을 쓰고, 그 계정에 읽기 권한이 있어야 한다.
+- **이번 범위 밖:** 상품 데이터 생성·가공, 가격 변동·재고, 주문·결제, CDC 대상에 상품 테이블 추가, RDS 접속.
