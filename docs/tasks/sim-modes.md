@@ -1,6 +1,6 @@
 # 작업 지시서: sim/modes
 
-> 상태: 진행 전 · 브랜치: `sim/modes` · 이전 작업: `sim/member-live` · 다음 작업: `sim/behavior-core`
+> 상태: 완료 · 브랜치: `sim/modes` · 이전 작업: `sim/member-live` · 다음 작업: `sim/behavior-core`
 
 ## 목표
 
@@ -191,4 +191,43 @@ def rate_factor(mode: str, sim_time: datetime) -> float: ...
 
 ## 작업 결과
 
-(머지 전에 Claude Code가 채운다: 무엇을 만들었나, 왜, 확인한 결과(완료 확인 실행 결과), 다음 할 일. 다음 작업은 `sim/behavior-core`.)
+### 만든 것
+
+- `common/timezone.py`: `KST`를 `member/params.py`에서 옮겼다. `common/clock.py`가 더 이상 `member`를 import하지 않는다 (`member.params.KST`는 그대로 쓸 수 있다).
+- `common/curve.py`: 요일 비율, 시간대 비율, `MODE_PEAK_MULTIPLE`, 표에서 계산한 `PEAK_HOUR_FACTOR`(1.8), `weekday_factor`·`hour_factor`·`rate_factor`. 순수 함수이고, 모듈을 불러올 때 `validate()`로 비율 합과 구간 덮음을 확인한다.
+- `common/control.py`: `MODES = ("normal", "medium", "burst")`. `surge`는 이제 잘못된 값이다.
+- `member`: `schedule.py`가 `rate_factor`를 쓰고 `rate_multiplier`, `mode_multiplier`, `--surge-multiplier`(`SIM_LIVE_SURGE_MULTIPLIER`), `SURGE_MULTIPLIER`를 지웠다. 재시작 인덱스, 전화 재시도, 재연결, 종료 동작은 바꾸지 않았다.
+- 테스트: `tests/test_curve.py`(새로 만듦), `test_live_schedule.py`(14일 70,000, burst/medium 1시간, 시간대 비율), `test_live_runner.py`(월요일 시작 14일, 고정 모드 1시간, `normal → burst → normal` 구간), `test_live_cli.py`, `test_live_common.py`(`surge`는 잘못된 값).
+- 문서: `simulator/README.md`의 `신규 가입 (live)` 절과 코드 구조 줄, `simulator/CLAUDE.md`의 `common/` 줄.
+
+### 지시서와 다르게 한 것
+
+- `test_live_runner.py`의 모드 전환 테스트는 배속 10으로 돌렸다(normal 하루 → burst 1시간 → normal 23시간). 배속 60이면 제어 확인 지연(실제 1초 = 시뮬레이터 60초)이 burst 1시간 구간에서 5σ에 가까운 오차를 만든다.
+- `test_slow_insert_does_not_lower_the_arrival_rate`의 기대값을 곡선으로 계산한 값(목·금 2일)으로 바꿨다. 이 테스트는 지시서 목록에 없지만 균등 속도를 전제하고 있었다.
+- 시간대 비율 테스트는 실행기 대신 `test_live_schedule.py`에서 간격 함수로 7일을 돌려 확인했다.
+- 시작할 때 `sim/modes`가 최신 `main`보다 2커밋 뒤라 fast-forward했다. 그 과정에서 줄바꿈만 다른 파일 10개를 git 기준으로 되돌렸다(내용 변경 없음).
+
+### 완료 확인 실행 결과 (2026-10-16, 로컬)
+
+| 확인 | 결과 |
+|---|---|
+| `ruff check .`, `ruff format --check .` | 통과 |
+| `pytest` (단위) | 201 passed |
+| `pytest -m integration` | 13 passed |
+| baseline 재현성 | `test_seed_reproducible`, `test_hash_independent_of_batch_size` 통과. `sim member baseline --dry-run`의 해시 `18747731b7c4`가 기존 적재 기록과 같다 |
+| `grep -rn "surge"` | `tests/`에만 5곳 남음. 모두 "예전 이름 `surge`는 거부된다"를 확인하는 테스트다 |
+| `rate_factor` (월요일 20시 / medium / burst) | 1.6128 (= 0.896 × 1.8) / 5.4 / 18.0 |
+| `live --mode burst --speed 60 --duration 30` | 1,893건 (기대 1,875 ± 216) |
+| 제어 파일 `medium`으로 같은 조건 | 547건 (기대 563 ± 119), `mode: burst → medium` |
+| 실행 중 `medium → normal` | 약 19.7건/초 → 약 7~8건/초 (금요일 18시대 기대 6.5건/초), `mode: medium → normal` 출력 |
+| 제어 파일에 `"surge"` | 경고 한 번, normal 유지 |
+| 신규 가입 삭제 | `DELETE 5729` (이번 실행 3,137건 + 예전 테스트 2,592건, 사용자 승인) → `SELECT count(*)` 100000 |
+| 출력에 `example.com`, `010-` | 없음 |
+| `git status` | `.env`, `simulator/.local/` 없음. push와 PR은 하지 않았다 |
+
+로컬 Kafka Connect가 켜진 상태에서 실행해서(사용자 결정), 이번 가입과 삭제가 CDC를 거쳐 `members-events` 토픽과 S3 Sink 쪽으로 갔을 수 있다.
+
+### 다음 할 일
+
+- `sim/behavior-core`: 방문 속도에 `rate_factor(mode, t)`를 `visits_daily`로 쓴다.
+- `controller`: medium 60분·burst 15분 자동 복귀, 모드 전환 이력, 제어 신호 전달 수단.
