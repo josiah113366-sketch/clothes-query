@@ -15,7 +15,7 @@ LLM 을 부르지 않으므로 비용이 들지 않는다.
     없으면 지금 시각(UTC). 시간대가 없으면 한국 시각(+09:00)으로 본다(사람이 직접 쓰는 값이라서).
     날짜만 쓰면(2026-10-08) 그날 한국 시각 정오로 본다. 자정으로 두면 UTC 로 바꿀 때 전날 파티션에 들어가기 때문이다.
 - product_id 가 상품 목록(catalog.py)에 있으면 product_name·category 를 거기서 채운다.
-  목록에 없는 상품이면 product_name·category 를 직접 적어야 한다(category 는 taxonomy.CATEGORIES 중 하나).
+  목록에 없는 상품이면 product_name 을 직접 적어야 한다. category 는 선택(적으면 taxonomy.CATEGORIES 중 하나).
 - aspects (정답 라벨, 선택)
     CSV  : "사이즈·핏:부정|배송:긍정"  (속성:감성 을 | 로 이어 쓴다. 속성 11개·감성 3개는 taxonomy.py)
     JSONL: 위 문자열 또는 [{"aspect": "사이즈·핏", "sentiment": "부정"}, ...]
@@ -196,11 +196,11 @@ def build_manual_events(
     if product:
         product_name = product_name or product.product_name
         category = category or product.category
-    if not product_name or not category:
+    if not product_name:
         raise ValueError(
-            f"상품 목록에 없는 product_id({product_id}) 는 product_name·category 를 적어야 합니다"
+            f"상품 목록에 없는 product_id({product_id}) 는 product_name 을 적어야 합니다"
         )
-    if category not in CATEGORIES:
+    if category is not None and category not in CATEGORIES:
         raise ValueError(f"모르는 category {category!r} (가능: {', '.join(CATEGORIES)})")
 
     created_at = parse_created_at(row.get("created_at"), now)
@@ -211,7 +211,9 @@ def build_manual_events(
     review_id = f"M-{seeded_uuid(rng).hex[:12]}"
     event_id = str(seeded_uuid(rng))
     member_id = row.get("member_id") or f"C-{seeded_uuid(rng).hex[:10]}"
-    opts = pick_options(category, rng)  # 비어 있는 옵션만 아래에서 이 값으로 채운다
+    # 비어 있는 옵션만 아래에서 이 값으로 채운다. 상품 목록에 색상이 있으면 그 색이 기본값
+    info = product.info if product else {}
+    opts = pick_options(category, rng, info.get("color"), info.get("product_type"))
     if not _blank(row.get("option_size")):
         opts["option_size"] = str(row["option_size"]).strip()
     if not _blank(row.get("option_color")):

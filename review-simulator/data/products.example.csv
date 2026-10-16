@@ -1,0 +1,5 @@
+product_id,product_name,product_type,material,color,pattern,fit,season,description
+P-0001,가상 린넨 셔츠,셔츠,린넨 100%,화이트,무지,루즈핏,여름,얇고 통기성이 좋은 린넨 셔츠
+P-0002,가상 울 니트,니트,울 70% 나일론 30%,Dark Blue,무지,레귤러핏,겨울,
+P-0003,가상 러닝화,운동화,메쉬,블랙,,,,
+P-0004,가상 캔버스 백,가방,,,,,,

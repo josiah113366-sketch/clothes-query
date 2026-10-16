@@ -103,11 +103,16 @@ def build_events(
         # 결제 데이터와 리뷰를 레이크에서 조인할 때 쓴다.
         "order_id": order_id,
         # [임시] 아래 3개는 나중에 order·상품 테이블에서 가져온다 (주문 모드에서는 product_id 가 주문 값)
+        # category 는 실제 상품 데이터에서 받지 않으면 null 이다(2026-10-16, catalog.py)
         "product_id": p.product_id,
         "product_name": p.product_name,
         "category": p.category,
         # [임시] 구매 옵션 사이즈·색상, 포토 리뷰 여부 (options.py, 2026-10-14 확정). 나중에 주문 데이터에서
-        **pick_options(p.category, attr_rng or rng),
+        # 상품 정보에 색상이 있으면 option_color 는 그 색 (catalog.py, 2026-10-16)
+        # category 가 없는 상품은 상품 종류로 사이즈 묶음을 고른다
+        **pick_options(
+            p.category, attr_rng or rng, p.info.get("color"), p.info.get("product_type")
+        ),
         "member_id": spec.member_id,  # 주문 모드에서는 주문의 member_id
         # 구매(결제) 시각. 주문 모드에서만 값이 있다 (2026-10-14 확정)
         "purchased_at": order.paid_at.isoformat() if order else None,

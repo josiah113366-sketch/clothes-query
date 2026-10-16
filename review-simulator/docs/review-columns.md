@@ -30,7 +30,7 @@
 |---|---|---|---|---|
 | product_id | string | W-0006 | ✅🕒 | Kafka 메시지 키. 임시 값, 추후 order 테이블에서 |
 | product_name | string | OO 니트 | ✅🕒 | 임시 값(AI Hub 상품명), 추후 order 테이블에서 |
-| category | string | 여성의류 | ✅🕒 | 임시: 여성의류/남성의류/패션슈즈/잡화, 추후 order 테이블에서 |
+| category | string | 여성의류 | ✅🕒 | 임시: 여성의류/남성의류/패션슈즈/잡화. 실제 상품 데이터에서는 받지 않으므로 null(2026-10-16, 상품 분류는 상품 테이블 조인으로) |
 | option_size | string | M | ✅🕒 | 구매 옵션 사이즈. 의류 XS~XXL, 신발 225~280(mm), 잡화 FREE. 임시 값, 추후 주문 데이터에서 (2026-10-14 확정) |
 | option_color | string | 블랙 | ✅🕒 | 구매 옵션 색상. 임시 값, 추후 주문 데이터에서 (2026-10-14 확정) |
 

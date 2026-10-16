@@ -118,6 +118,20 @@ LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze)�
 - 필요한 권한: 그 접두사에 대한 `s3:PutObject`. 같은 날짜를 다시 돌리면 같은 키로 덮어쓴다.
 - S3 저장 테스트는 가짜 S3(`moto`)로 돈다. 실제 AWS 를 부르지 않는다.
 
+## 상품 정보로 리뷰 만들기 (준비, 2026-10-16)
+
+`data/products.csv` 가 있으면 상품 목록을 그 파일에서 읽고, 상품 정보 칸이 있으면 리뷰 생성 프롬프트에 함께 넣는다(p5.7).
+형식은 `data/products.example.csv`(가상 상품) 참고. 실제 상품 데이터가 들어오면 이 파일을 만들거나, 나중에 S3 상품 테이블을 읽는 `ProductSource` 를 추가한다.
+
+- 필수: `product_id`, `product_name`. **`category` 는 받지 않는다**(상품 정보만으로 리뷰를 쓴다, 2026-10-16). 이때 리뷰의 `category` 칸은 null, 사이즈 옵션은 `product_type` 으로 고른다(운동화·구두 → mm, 가방·모자 → FREE, 나머지 → 의류 사이즈. `options.SIZE_GROUP_KEYWORDS`).
+- 선택: `product_type`, `material`, `color`, `pattern`, `fit`, `season`, `description` (`catalog.PRODUCT_INFO_FIELDS`). 빈 칸은 프롬프트에 안 넣는다.
+- H&M 컬럼 이름(`article_id`, `prod_name`, `product_type_name`, `colour_group_name`, `graphical_appearance_name`, `detail_desc`)도 그대로 읽는다. 분류 컬럼(`index_group_name` 등)은 쓰지 않는다.
+- **리뷰 컬럼(review.v2)은 그대로다.** 상품 정보는 프롬프트에만 쓰고, 같이 보려면 레이크에서 `product_id` 로 조인한다.
+  상품에 색상이 있으면 `option_color` 만 그 색으로 맞춘다(영어 색상은 `options.COLOR_ALIASES` 로 바꿈).
+- 상품 정보는 참고용이라 명세에 없는 속성은 계속 평가하지 않는다(프롬프트 규칙 13, 정답 라벨 보호).
+- `data/products.csv` 를 새로 두면 상품 ID 목록이 바뀐다. 기존 가짜 주문(`.local/orders.jsonl`)은 `rsim orders-fake` 로 다시 만든다.
+- 실제 문장 품질은 Bedrock 으로 확인해야 한다(비용 발생, 승인 후 `rsim bench`).
+
 ## 직접 작성한 리뷰 넣기 (`rsim inject`)
 
 특정 문장·상황을 일부러 넣어 파이프라인(감성분석 → 이상탐지)을 시험할 때 쓴다. LLM 을 부르지 않는다(0원).
@@ -152,6 +166,8 @@ rsim inject --file .local\manual\size_spike_1008.csv             # LAKE_ROOT 에
 | 주문 중 리뷰 비율, 결제 후 리뷰까지 기간 | `.env` 의 `REVIEW_RATE`, `REVIEW_DELAY_MIN_DAYS`, `REVIEW_DELAY_MAX_DAYS` |
 | 사이즈·색상 분포, 포토 리뷰 비율 | `src/rsim/review/options.py` 상단 상수 |
 | 레이크 저장 위치 (로컬 또는 S3) | `.env` 의 `LAKE_ROOT`, `LAKE_TRUTH_ROOT` |
+| 프롬프트에 넣는 상품 정보 칸, 원본 컬럼 이름 | `src/rsim/review/catalog.py` 의 `PRODUCT_INFO_FIELDS`, `COLUMN_ALIASES` |
+| 영어 색상 → 옵션 색상 이름 | `src/rsim/review/options.py` 의 `COLOR_ALIASES` |
 
 ## Kafka 메시지 (토픽 2개)
 

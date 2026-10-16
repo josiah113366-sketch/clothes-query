@@ -22,6 +22,7 @@ import unicodedata
 from typing import ClassVar, Protocol
 
 from .bedrock import converse, response_text, response_usage
+from .catalog import PRODUCT_INFO_FIELDS
 from .scenario import ReviewSpec
 from .seeds import SeedPool
 from .taxonomy import ASPECTS
@@ -54,7 +55,10 @@ log = logging.getLogger(__name__)
 # p5.5: 2026-10-14 속성 11개(라벨 가이드 v3, 활용성·사용감 추가)
 # p5.6: 2026-10-14 evidence(근거 문구) 출력 제거(규칙 13, JSON 형식). 검수 루프가 본문만 보고 판단하므로
 #       근거 문구는 쓰이지 않았고 출력 토큰만 늘렸다.
-PROMPT_VERSION = "p5.6"
+# p5.7: 2026-10-16 lemin 결정. 상품 정보(소재·색상·핏·설명 등, catalog.PRODUCT_INFO_FIELDS)가 있는 상품은
+#       명세에 product_info 를 붙여 그 상품에 어울리는 리뷰를 쓰게 한다(규칙 13). 상품 정보가 없으면 명세는 예전과 같다.
+#       product_info 는 상품을 떠올리는 참고일 뿐 평가 대상이 아니다(aspects 밖 속성은 계속 금지 → 정답 라벨 보호).
+PROMPT_VERSION = "p5.7"
 
 LENGTH_GUIDE = {
     "short": "한 문장, 40자 이내",
@@ -111,6 +115,10 @@ SYSTEM_PROMPT = f"""너는 한국 온라인 패션 쇼핑몰의 상품 리뷰를
     max_sentences 가 1 이면 aspects 가 여러 개여도 문장 하나에 짧게 이어 쓴다.
     (예: "배송 빠르고 핏도 딱 맞아요 ㅎㅎ", "색은 예쁜데 사이즈가 좀 작아요ㅠㅠ")
     쓰고 나서 문장 수와 글자수를 세어 보고, 넘치면 덜 중요한 말을 지운다.
+13. 명세에 product_info(상품 정보)가 있으면 그 상품을 실제로 받아 본 사람처럼 쓴다.
+    aspects 의 속성을 평가할 때 상품 정보와 맞는 구체적인 내용을 쓴다. (예: 소재가 얇은 린넨이고 재질·촉감이 부정이면 "생각보다 많이 비쳐요")
+    상품 정보는 참고일 뿐 평가 대상이 아니다. aspects 에 없는 속성은 상품 정보에 있어도 평가하지 않는다(규칙 1 이 우선).
+    상품 정보가 영어여도 본문은 한국어로 쓰고, 상품 설명 문장을 그대로 옮기거나 번역해 넣지 않는다.
 
 
 속성 목록 (라벨 기준, 11개)
@@ -242,6 +250,15 @@ def generate_checked(gen, specs: list[ReviewSpec]) -> dict[str, dict]:
     return final
 
 
+def product_info(spec: ReviewSpec) -> dict[str, str]:
+    """명세에 붙일 상품 정보. 키는 프롬프트용 한국어 이름(catalog.PRODUCT_INFO_FIELDS), 값이 있는 칸만."""
+    return {
+        label: spec.product.info[key]
+        for key, label in PRODUCT_INFO_FIELDS.items()
+        if spec.product.info.get(key)
+    }
+
+
 def build_user_prompt(
     specs: list[ReviewSpec], examples: list[dict], feedback: dict[str, str] | None = None
 ) -> str:
@@ -257,7 +274,8 @@ def build_user_prompt(
     spec_payload = [
         {
             "spec_id": s.spec_id,
-            "category": s.product.category,
+            # category 가 없는 상품(실제 상품 데이터)은 빼고 product_info 로 상품을 알려 준다(2026-10-16)
+            **({"category": s.product.category} if s.product.category else {}),
             "product_name": s.product.product_name,
             "rating": s.rating,
             "aspects": s.aspects,
@@ -268,6 +286,8 @@ def build_user_prompt(
             **LENGTH_LIMITS_FOR_PROMPT[s.length],
             # p5.1: 명세에 없는 속성 = 언급 금지 목록 (덧붙이면 정답 라벨이 틀어짐)
             "do_not_mention": [a for a in ASPECTS if a not in {x["aspect"] for x in s.aspects}],
+            # p5.7: 상품 정보가 있는 상품만 들어감 (프롬프트용, 리뷰 이벤트 컬럼에는 넣지 않음)
+            **({"product_info": product_info(s)} if s.product.info else {}),
             # p5.3: 재생성일 때만 들어감. 지난 시도에서 검수 모델이 찾은 문제
             **({"fix_previous": feedback[s.spec_id]} if s.spec_id in feedback else {}),
         }
