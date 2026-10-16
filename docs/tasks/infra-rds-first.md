@@ -66,3 +66,7 @@
 2026-10-16 사용자가 Airflow를 로컬에서 먼저 테스트하도록 요청했다. 운영 버전/Executor/인증 방식 확정이나 AWS 배포 없이 공식 Airflow 3.3.2·LocalExecutor와 일회성 PostgreSQL·synthetic DAG로 API 인증/재처리·5분 예약·동시 실행·자원을 검사한다. 실제 Athena/S3·업무 DAG·승인 화면·EKS Pod scheduling은 범위 밖이다. Kafka compact smoke도 같은 Docker 엔진에서 일부 시간 겹쳐 실행한다. 테스트 project의 자원만 정리하며 이미지 캐시는 보존한다. [검증 보고서](../design/infra/airflow-local-validation-2026-10-16.md).
 
 로컬 검증 완료: API 인증/권한 거부, 재처리 두 건 비중첩, 동일 run ID 중복 거부, 활성화 이후 5분 예약 시각 두 건 성공, OOM/재시작 없음 및 project 정리 통과. Airflow+테스트 DB 동시 메모리 관측 최고 967.8MiB. Kafka compact도 전체 CDC/복구/지표 검사를 통과했으며 일부 구간에서 Airflow와 동시 실행을 관측했다. 처음의 임시 인증 파일 read-only 설정과 정상 HTTP 201 기대값 오류는 수정하고 기록했다. 시작 직후 과거 예약을 제외하도록 검사 기준을 보강해 재검증했다. 실제 Athena·S3 Sink·Strimzi·EKS 노드 전체 배치와 운영용 DAG별 권한은 별도다. Python 구문 및 diff 검사 통과. AWS 상태와 원격 브랜치는 변경하지 않았다.
+
+## 후속 팀원 계약: 정답표 격리와 재판정
+
+2026-10-16 사용자 전달 메시지의 결정 반영: 정답표 `[버킷]/ground_truth/incident_log/`·JSON, 접근 분리 대상 `ground_truth/` 전체, 조사 에이전트 읽기 대상 `gold_b/`만. 재처리 후 판정을 직접 호출하지 않고 5분 판정 작업에서 `reprocess_events` 새 교체 완료 기록을 Athena로 읽어 재판정한다. 이력 조회를 실측 범위에 추가한다. 운영 Airflow 버전/Auth Manager와 일정은 여전히 미정이며 임의 날짜/접속 정보를 만들지 않는다. 실제 역할·버킷·Athena source/결과 경로와 코드 입력을 받은 뒤 IAM을 연결한다. 이번에는 연결 문서만 갱신했으며 AWS 권한을 적용하거나 팀원에게 메시지를 보내지 않았다.
