@@ -31,7 +31,8 @@ bootstrap → network → eks → compute → apps
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
-| Spark / Airflow | 미구현 | 정제·오케스트레이션 runtime | 실행 방식·서비스 입력 | 예정 |
+| Spark | 미구현 | 정제 runtime | 실행 방식·서비스 입력 | 예정 |
+| Airflow | [로컬 실행 후보](platform/airflow/README.md) | API 재처리·5분 예약 | 운영 배포 방식·메타데이터 DB·인증/IAM | AWS 미배포 |
 
 Kafka 후속 준비는 선택적 Connect ECR, [로컬 CDC 전달 검사](platform/kafka/local-smoke/README.md), [JMX/consumer lag 지표 노출](platform/kafka/metrics/README.md)까지 포함한다. 실제 AWS 생성·수집 서버·알림은 미배포다.
 
@@ -41,7 +42,7 @@ Kafka 후속 준비는 선택적 Connect ECR, [로컬 CDC 전달 검사](platfor
 
 - apply: bootstrap 상태 확인 후 network → eks → compute 순서. rds/storage/ecr 준비 후 apps, platform은 후속이다. 생성 테스트는 사용자 요청으로 마지막 단계에 진행한다.
 - workload-access는 network/eks/storage 이후 서비스별 namespace/ServiceAccount·prefix/action 합의 시 준비한다. runtime 배포는 각 서비스 담당자의 별도 작업이다.
-- Kafka는 EKS 자체 운영으로 결정했다. Terraform 기반 준비 후 공식 운영자/CRD·StorageClass → runtime 순서이며, [Kafka 안내](platform/kafka/README.md)의 2 AZ 한계·노드 예산·비용 영향을 확인한다. Spark/Airflow와 CDC 커넥터 설정은 포함하지 않았다.
+- Kafka는 EKS 자체 운영으로 결정했다. Terraform 기반 준비 후 공식 운영자/CRD·StorageClass → runtime 순서이며, [Kafka 안내](platform/kafka/README.md)의 2 AZ 한계·노드 예산·비용 영향을 확인한다. Airflow는 별도 로컬 후보 검사만 준비했다. Spark/Airflow의 AWS 배포와 CDC 커넥터 설정은 포함하지 않았다.
 - destroy: apps/platform → compute → eks → network 순서로 종속성을 검토한다. RDS·S3 삭제 보호는 자동 해제하지 않는다. bootstrap은 state 보존 대상이다.
 
 ## state

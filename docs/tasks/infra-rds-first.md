@@ -60,3 +60,9 @@
 검증 결과는 아래 후속 기록에 추가한다. 실제 EKS scheduling·RDS/CDC/Fargate 연결은 미검증이며 원격 push·PR 변경·AWS apply는 이번 작업에 포함하지 않는다.
 
 후속 검증 완료: Terraform fmt 및 10개 root의 backend 없는 init/validate, 10개 suite/48개 mock plan 통과. compute 검사는 t3a.large 허용·6 vCPU/24GiB 한도·private NodeClass·두 AZ 선택·고정 replicas 없음·교체 여유 입력을 확인했다. 공개 배포 입력과 예시 파일의 용량 값 일치 및 git diff --check도 통과했다. 초기 실행에서 Registry 네트워크 제한으로 init이 실패하여, 승인된 네트워크 실행으로 재검증했다. 실제 AWS state나 리소스는 변경하지 않았다.
+
+## 후속 요청: Airflow 로컬 검증
+
+2026-10-16 사용자가 Airflow를 로컬에서 먼저 테스트하도록 요청했다. 운영 버전/Executor/인증 방식 확정이나 AWS 배포 없이 공식 Airflow 3.3.2·LocalExecutor와 일회성 PostgreSQL·synthetic DAG로 API 인증/재처리·5분 예약·동시 실행·자원을 검사한다. 실제 Athena/S3·업무 DAG·승인 화면·EKS Pod scheduling은 범위 밖이다. Kafka compact smoke도 같은 Docker 엔진에서 일부 시간 겹쳐 실행한다. 테스트 project의 자원만 정리하며 이미지 캐시는 보존한다. [검증 보고서](../design/infra/airflow-local-validation-2026-10-16.md).
+
+로컬 검증 완료: API 인증/권한 거부, 재처리 두 건 비중첩, 동일 run ID 중복 거부, 활성화 이후 5분 예약 시각 두 건 성공, OOM/재시작 없음 및 project 정리 통과. Airflow+테스트 DB 동시 메모리 관측 최고 967.8MiB. Kafka compact도 전체 CDC/복구/지표 검사를 통과했으며 일부 구간에서 Airflow와 동시 실행을 관측했다. 처음의 임시 인증 파일 read-only 설정과 정상 HTTP 201 기대값 오류는 수정하고 기록했다. 시작 직후 과거 예약을 제외하도록 검사 기준을 보강해 재검증했다. 실제 Athena·S3 Sink·Strimzi·EKS 노드 전체 배치와 운영용 DAG별 권한은 별도다. Python 구문 및 diff 검사 통과. AWS 상태와 원격 브랜치는 변경하지 않았다.
