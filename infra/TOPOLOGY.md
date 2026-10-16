@@ -2,13 +2,15 @@
 
 2026-10-16 실행 결과: 비용 절감을 위해 RDS와 필요한 네트워크만 생성 완료. 비공개 입력에서 NAT를 비활성화하고 EKS state 참조를 끈다. 아래 두 AZ·NAT 2개·EKS 구성은 후속 운영 설계로 보존하며 현재 실행 범위가 아니다. [RDS-first](../docs/tasks/infra-rds-first.md).
 
+2026-10-16 후속 변경: 향후 NAT 활성화 시 2개 대신 **한 개 공유**를 기본으로 사용한다. 두 AZ subnet은 유지한다. 현재 실제 NAT는 계속 0개다.
+
 상태: 결정 · 2026-10-14 사용자 정정 반영. **RDS만 Single-AZ이며 VPC·EKS는 기존 두 AZ 구성을 유지한다.**
 
 | 구성 | 현재 설정 |
 |---|---|
 | 리전 / AZ | 도쿄 / ap-northeast-1a, ap-northeast-1c |
-| network | 두 AZ 각각 public/app/db subnet, NAT/EIP 각각 2개 |
-| app 기본 경로 | 각 AZ의 NAT 사용, S3 Gateway Endpoint 공유 |
+| network | 두 AZ 각각 public/app/db subnet, 현재 NAT/EIP 0개·향후 활성화 시 각각 1개 공유 |
+| app 기본 경로 | 현재 인터넷 기본 경로 없음. 향후 NAT 공유, S3 Gateway Endpoint는 유지 |
 | EKS compute | 두 app subnet에 배치 가능, m6i.large/m7i.large, On-Demand |
 | 노드 풀 상한 | 8 vCPU / 32 GiB 유지 |
 | EKS 관리자 | 전용 역할, 현재 사용자·현재 PC /32부터 시작, 팀원은 추후 추가 |

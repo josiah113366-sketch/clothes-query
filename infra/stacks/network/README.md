@@ -1,8 +1,8 @@
 # network stack
 
-RDS-first: `enable_nat_gateways=false`를 비공개 tfvars에 명시하면 NAT/EIP와 app 기본 인터넷 경로를 생성하지 않는다. 두 AZ subnet·route table·S3 Gateway Endpoint는 유지한다. 기본값 true는 기존 AZ별 NAT 구성을 보존한다. 이후 private workload의 이미지 다운로드·AWS API/외부 통신 경로는 별도 준비해야 한다.
+RDS-first: `enable_nat_gateways=false`를 비공개 tfvars에 명시하면 NAT/EIP와 app 기본 인터넷 경로를 생성하지 않는다. 두 AZ subnet·route table·S3 Gateway Endpoint는 유지한다. NAT 활성화 시 이 stack의 `single_nat_gateway=true` 기본값은 첫 subnet key(a)의 NAT 한 개를 두 AZ가 공유한다. AZ별 NAT를 복원하려면 false를 명시하고 비용을 검토한다. 공유 NAT AZ 장애 시 양쪽 app subnet이 인터넷 접근을 잃고 AZ 간 전송료가 추가될 수 있다. 이후 private workload의 이미지 다운로드·AWS API/외부 통신 경로는 별도 준비해야 한다.
 
-2개 AZ의 public/app/db subnet, AZ별 NAT, S3 Gateway Endpoint.
+2개 AZ의 public/app/db subnet, 선택적 공유/AZ별 NAT, S3 Gateway Endpoint.
 
 - 선행: 기존 bootstrap.
 - backend key: `clothes-query/dev/network/terraform.tfstate`.

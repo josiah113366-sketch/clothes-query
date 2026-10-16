@@ -13,5 +13,9 @@ additional_s3_endpoint_actions = []
 # This does not grant these actions to any workload IAM role.
 
 # RDS-first deployment: explicitly disable paid NAT/EIP resources.
-# Omit this override only when the original two-NAT design is approved for execution.
+# Enable NAT only when private workload internet egress is needed and its cost is approved.
 # enable_nat_gateways = false
+
+# Future private workload egress: share one NAT across the two AZs.
+# single_nat_gateway = true
+# Set false only after reviewing the cost of restoring one NAT per AZ.

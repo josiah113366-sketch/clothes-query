@@ -10,6 +10,11 @@ variable "enable_nat_gateways" {
   type    = bool
   default = true
 }
+variable "single_nat_gateway" {
+  description = "Approved cost-saving default for future NAT activation; two-AZ subnets remain."
+  type        = bool
+  default     = true
+}
 variable "expected_account_id" {
   description = "Supply privately via TF_VAR_expected_account_id; prevents use of the wrong AWS account."
   type        = string

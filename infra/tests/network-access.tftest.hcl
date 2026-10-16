@@ -30,3 +30,21 @@ run "reject_wildcard_transport_action" {
   variables { additional_s3_endpoint_actions = ["s3:*"] }
   expect_failures = [var.additional_s3_endpoint_actions]
 }
+run "single_nat_shared_across_two_azs" {
+  command = plan
+  module { source = "../modules/network" }
+  variables { single_nat_gateway = true }
+  override_resource {
+    target          = aws_nat_gateway.this["a"]
+    values          = { id = "nat-shared-test-a" }
+    override_during = plan
+  }
+  assert {
+    condition     = length(aws_nat_gateway.this) == 1 && length(aws_eip.nat) == 1 && contains(keys(aws_nat_gateway.this), "a") && length(aws_subnet.app) == 2 && length(aws_subnet.db) == 2
+    error_message = "Single NAT mode must preserve both AZs and the first AZ resource key."
+  }
+  assert {
+    condition     = alltrue([for rt in aws_route_table.app : one(rt.route).nat_gateway_id == "nat-shared-test-a"])
+    error_message = "Both app route tables must route to the same NAT gateway."
+  }
+}

@@ -38,3 +38,13 @@
 - DB 보안 그룹 ingress 0개, 활성 NAT 0개, private route table 3개에서 기본 인터넷 경로 0개를 확인했다. 제네레이터 연결 시 이름별 보안 그룹을 추가해야 한다.
 - 테이블 초기화·앱 전용 계정 생성·SQL 접속·제네레이터 연결은 미실행. RDS 생성 완료가 데이터 파이프라인 연결 완료를 의미하지 않는다.
 - 기존 S3/ECR 및 PR #11 브랜치는 변경하지 않았다. 후속 코드는 infra/rds-first 로컬 브랜치에 보존하며 push/새 PR/머지는 수행하지 않는다.
+
+## 후속 결정: NAT 한 개 공유
+
+2026-10-16 사용자가 NAT 2개 대신 1개 사용을 요청했다. 현재 배포 NAT는 0개이며 RDS-first의 enable_nat_gateways=false를 유지한다. 앞으로 NAT가 필요한 실행 환경을 붙일 때 network stack 기본 single_nat_gateway=true로 첫 subnet key(a)의 public subnet에 NAT/EIP 한 개를 만들고 양쪽 app route table에서 공유한다. VPC·app/DB subnet의 두 AZ는 유지한다. 모듈의 single_nat_gateway=false는 기존 AZ별 NAT 선택지로 보존한다.
+
+한 개 NAT의 AZ 장애 시 양쪽 private app subnet의 인터넷 출구가 함께 중단되며 다른 AZ에서 공유 NAT로 가는 트래픽에는 AZ 간 전송료가 추가될 수 있다. DB 내부 접속과 S3 Gateway Endpoint 경로는 NAT에 의존하지 않는다. 고정 NAT/EIP 요금은 기존 확인 단가 기준 730시간에 $97.82에서 $48.91로 줄지만 현재 NAT 0개와 비교하면 활성화 시 $48.91가 추가된다. 실제 생성은 이번 변경 범위가 아니다.
+
+실제 단일 NAT 활성화 preview plan: NAT/EIP 각 1개 추가·양쪽 app route table 2개 변경, 삭제/교체 없음. 현재 NAT 비활성 입력으로 별도 plan을 다시 실행해 변경 없음을 확인했다. preview plan은 적용하지 않았다.
+
+후속 검증: Terraform fmt/10개 root init·validate, 10개 suite/48개 mock plan 통과. 단일 NAT의 양쪽 app route table 연결, 기존 AZ별 NAT 모드, NAT 비활성 모드를 함께 확인했다.

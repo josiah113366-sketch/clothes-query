@@ -11,6 +11,7 @@ run "network_without_nat" {
     name                = "test-rds-first"
     region              = "ap-northeast-1"
     enable_nat_gateways = false
+    single_nat_gateway  = true
     vpc_cidr            = "10.70.0.0/16"
     subnets = {
       a = { az = "ap-northeast-1a", public_cidr = "10.70.0.0/24", app_cidr = "10.70.16.0/20", db_cidr = "10.70.64.0/24" }

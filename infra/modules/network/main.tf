@@ -2,6 +2,11 @@ data "aws_availability_zones" "available" { state = "available" }
 
 # Compare inclusive IPv4 intervals to reject overlaps before AWS creates subnets.
 locals {
+  # Keep the first AZ's resource key stable when sharing one NAT across both AZs.
+  shared_nat_key = sort(keys(var.subnets))[0]
+  nat_subnets = !var.enable_nat_gateways ? {} : (
+    var.single_nat_gateway ? { for key, subnet in var.subnets : key => subnet if key == local.shared_nat_key } : var.subnets
+  )
   subnet_cidrs = flatten([for s in values(var.subnets) : [s.public_cidr, s.app_cidr, s.db_cidr]])
   subnet_ranges = [for c in local.subnet_cidrs : {
     first = sum([for i, octet in split(".", cidrhost(c, 0)) : tonumber(octet) * pow(256, 3 - i)])
@@ -56,11 +61,11 @@ resource "aws_subnet" "db" {
   tags                    = { Name = "${var.name}-db-${each.key}" }
 }
 resource "aws_eip" "nat" {
-  for_each = var.enable_nat_gateways ? var.subnets : {}
+  for_each = local.nat_subnets
   domain   = "vpc"
 }
 resource "aws_nat_gateway" "this" {
-  for_each      = var.enable_nat_gateways ? var.subnets : {}
+  for_each      = local.nat_subnets
   allocation_id = aws_eip.nat[each.key].id
   subnet_id     = aws_subnet.public[each.key].id
   depends_on    = [aws_internet_gateway.this]
@@ -84,7 +89,7 @@ resource "aws_route_table" "app" {
     for_each = var.enable_nat_gateways ? [each.key] : []
     content {
       cidr_block     = "0.0.0.0/0"
-      nat_gateway_id = aws_nat_gateway.this[route.value].id
+      nat_gateway_id = aws_nat_gateway.this[var.single_nat_gateway ? local.shared_nat_key : route.value].id
     }
   }
 }

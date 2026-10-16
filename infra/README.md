@@ -2,9 +2,11 @@
 
 2026-10-16 RDS 선행 배포 완료: 기존 두 AZ 기반을 유지하며 network의 `enable_nat_gateways=false`, rds의 `use_eks_security_group=false`로 NAT·EKS 없이 private RDS를 생성했다. 기본 운영 구성은 보존하며 실제 실행 시 비공개 입력을 반드시 지정한다. [작업 지시서](../docs/tasks/infra-rds-first.md). 제네레이터는 추후 같은 VPC의 명시적 보안 그룹으로 연결한다.
 
+후속 NAT 결정: 미래 활성화 시 `single_nat_gateway=true`로 한 개를 두 AZ에서 공유한다. 현재 RDS-first의 NAT 비활성 설정은 유지하며 실제 NAT는 0개다.
+
 현재 통합 브랜치는 `infra/ready`다. `infra/analysis`와 `infra/local-ready`의 이력을 포함하며 [업로드·정리 기록](../docs/tasks/infra-ready.md)을 따른다.
 
-현재 배치: **VPC·EKS 두 AZ, NAT 2개, RDS만 Single-AZ**. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
+배치 기준: **두 AZ subnet, RDS Single-AZ, 현재 NAT 0개·향후 활성화 시 1개 공유**. EKS는 미배포다. [현재 구성](TOPOLOGY.md)과 [통합 작업 기록](../docs/tasks/infra-integration-single-az.md)을 따른다.
 
 clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별도 Helm release로 준비한다. 리전은 `ap-northeast-1`(도쿄).
 
