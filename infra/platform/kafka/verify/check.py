@@ -141,6 +141,21 @@ def main():
         assert compact_kafka["kafka"]["listeners"][0]["tls"]
         assert compact_kafka["kafka"]["authorization"]["type"] == "simple"
         assert render(compact_profile) == []  # Profile alone must not deploy anything.
+        measurement = copy.deepcopy(compact_profile)
+        for key, value in yaml.safe_load((ROOT / "measurement-values.yaml").read_text(encoding="utf-8")).items():
+            if isinstance(value, dict):
+                measurement.setdefault(key, {}).update(value)
+            else:
+                measurement[key] = value
+        measurement_docs = render(measurement)
+        assert not any(d["kind"] == "KafkaConnect" for d in measurement_docs)
+        measurement_kafka = next(d["spec"] for d in measurement_docs if d["kind"] == "Kafka")
+        measurement_pool = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaNodePool")
+        assert measurement_kafka["kafka"]["config"]["log.retention.hours"] == 72
+        assert measurement_pool["replicas"] == 1 and measurement_pool["storage"]["volumes"][0]["size"] == "20Gi"
+        assert measurement_pool["resources"]["requests"]["memory"] == "1536Mi"
+        measurement_topic = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaTopic")
+        assert measurement_topic["topicName"] == "infra-smoke" and measurement_topic["config"]["retention.ms"] == 259200000
         budget = [compact_pool["resources"], compact_connect["resources"],
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],

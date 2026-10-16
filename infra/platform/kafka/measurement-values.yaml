@@ -1,0 +1,22 @@
+# Synthetic deployment probe only; no business topic contract or CDC credentials.
+# Merge AFTER single-node-values.yaml. Never use this as a production topic map.
+kafka:
+  enabled: true
+  clientNamespaces: [infra-probe]
+topics:
+  - name: infra-smoke
+    partitions: 1
+    retentionMs: 259200000
+clients:
+  - name: infra-smoke-client
+    produceTopics: [infra-smoke]
+    consumeTopics: [infra-smoke]
+    consumerGroups: [infra-smoke-group]
+connect:
+  enabled: false
+metrics:
+  enabled: true
+  lagExporter:
+    enabled: true
+    topicRegex: "^infra-smoke$"
+    groupRegex: "^infra-smoke-group$"

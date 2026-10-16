@@ -70,3 +70,13 @@
 ## 후속 팀원 계약: 정답표 격리와 재판정
 
 2026-10-16 사용자 전달 메시지의 결정 반영: 정답표 `[버킷]/ground_truth/incident_log/`·JSON, 접근 분리 대상 `ground_truth/` 전체, 조사 에이전트 읽기 대상 `gold_b/`만. 재처리 후 판정을 직접 호출하지 않고 5분 판정 작업에서 `reprocess_events` 새 교체 완료 기록을 Athena로 읽어 재판정한다. 이력 조회를 실측 범위에 추가한다. 운영 Airflow 버전/Auth Manager와 일정은 여전히 미정이며 임의 날짜/접속 정보를 만들지 않는다. 실제 역할·버킷·Athena source/결과 경로와 코드 입력을 받은 뒤 IAM을 연결한다. 이번에는 연결 문서만 갱신했으며 AWS 권한을 적용하거나 팀원에게 메시지를 보내지 않았다.
+
+## 사용자 배포 요청: 최소 EKS/Kafka 기반
+
+2026-10-16 사용자가 배포를 요청했다. 이전의 PR 머지 후 배포 순서를 유지한다. 최신 origin/main(09fd33b)을 충돌 없이 병합했고 기존 PR #11에 축소 변경을 반영했다. 동료 IAM 역할/IP는 아직 없다는 답을 받아 현재 본인 접속만 유지하고 airflow namespace를 준비한다. Airflow/업무 DAG·Fargate·CDC·S3 Sink·업무 IAM은 입력/담당자 작업 이후 연결한다.
+
+AWS 사전 확인: 계정 guard·관리자 trust·현재 IP 입력 일치, RDS available/private, EKS 없음·NAT 0개. EKS 1.36 표준 지원 확인. 현재 계정의 t3a.large 제공 AZ는 ap-northeast-1a만 확인됐으며 네트워크 두 AZ는 유지한다. EC2 vCPU quota 조회는 AccessDenied로 실제 생성 시 수용 여부를 확인해야 한다. 지원 범위를 넓히기 위해 승인되지 않은 비싼 타입을 추가하지 않는다.
+
+실제 network plan은 NAT/EIP 1개씩 추가와 app route table 2개 변경, EKS plan은 17개 생성이며 모두 삭제/교체가 없다. Terraform provider는 빈 기본 node_pools를 JSON null로 표현하며 소스의 명시적 빈 목록과 생성 후 실제 설정을 함께 확인한다. 계정/endpoint/plan 상세는 Git 제외 파일에만 둔다.
+
+synthetic 측정용 Kafka values는 single-node 프로필 뒤에 병합하며 1 broker·20GiB·72시간·infra-smoke 토픽/클라이언트·JMX/lag를 선택한다. Connect는 비활성이다. 실제 생성과 접속/Pod/PVC/TLS/메시지·metrics 결과는 실행 후 기록한다. 이번 명시적 배포 요청은 일반적인 apply 담당 규칙을 영구 변경하지 않는다.

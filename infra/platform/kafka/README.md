@@ -4,6 +4,12 @@
 
 상태: 코드·로컬 검증 준비 / AWS·Kubernetes 미배포.
 
+2026-10-16 실제 측정 준비: 사용자 배포 요청에 따라 [measurement-values.yaml](measurement-values.yaml)을 별도 준비했다. `single-node-values.yaml` 뒤에 병합해 1 broker·20GiB·72시간과 synthetic `infra-smoke` 토픽·클라이언트·JMX/lag 지표를 활성화한다. Connect는 DB/CDC 입력을 받을 때까지 비활성이고 실제 업무 토픽 계약을 대신하지 않는다. 측정용 접근은 infra-probe namespace에만 허용한다. 동료 권한과 Airflow 설치는 후속이다.
+
+```powershell
+helm template cq-kafka infra/platform/kafka/chart --namespace kafka --values infra/platform/kafka/single-node-values.yaml --values infra/platform/kafka/measurement-values.yaml
+```
+
 로컬 검증 결과: Helm/공식 CRD 검사, 잘못된 입력 18개 거부, Connect Linux/amd64 이미지 빌드 및 플러그인 발견 검사 통과. 임시 PostgreSQL→Kafka snapshot/insert/update/delete, Connect 중단 후 재전달, JMX/consumer lag 지표 노출도 확인했다. Terraform 10개 root/38 mock 통과. 실제 RDS/EKS 전달·AZ/디스크 장애 복구는 아직 확인하지 않았다.
 
 후속으로 로컬 mTLS/hostname·ACL 허용/거부와 Kafka 컨테이너 재생성 후 메시지/Connect offset 보존·CDC 이어받기를 확인했다. [통합 검사](local-smoke/README.md), [자동 검사 코드](../../../.github/workflows/infra-checks.yml)를 준비했다. 원격 CI 실행 결과는 [통합 작업 기록](../../../docs/tasks/infra-local-ready.md)에서 확인한다. Connect 이미지 조치 후 [재검사](../../../docs/design/infra/connect-image-remediation-2026-10-14.md)는 Critical 0/High 35이며 잔여 취약점과 별도 broker/exporter 이미지 검토가 필요하다.
