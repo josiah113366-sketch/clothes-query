@@ -1,8 +1,12 @@
 """행 오류 격리, 충돌 그룹, 연결 대기와 기존 정상 결과를 확인한다."""
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
-from pipelines.silver.transactions import build_silver
+import pytest
+
+from pipelines.silver.transactions import build_silver, run
 
 
 def order(identifier="O-1", **changes):
@@ -109,3 +113,57 @@ def test_history_item_totals_and_invalid_shapes():
     assert summary(result, "orders")["status"] == "PASS"
     assert summary(result, "payments")["status"] == "INCOMPLETE"
     assert build_silver([], [], [])["quarantined_records"] == []
+
+
+def test_local_files_reexecution_and_failed_publish_preserve_previous_result(tmp_path, monkeypatch):
+    inputs = tmp_path / "input"
+    inputs.mkdir()
+    orders = inputs / "orders.jsonl"
+    items = inputs / "items.jsonl"
+    payments = inputs / "payments.jsonl"
+    orders.write_text(json.dumps(order()) + "\n", encoding="utf-8")
+    items.write_text("", encoding="utf-8")
+    # 정상 결제 재수신과 깨진 JSON이 함께 있어도 원본 위치와 불완전 상태를 남긴다.
+    payments.write_text((json.dumps(payment()) + "\n") * 2 + "broken-json\n", encoding="utf-8")
+    output = tmp_path / "output"
+    args = (str(orders), str(items), str(payments), str(output))
+    first = run(*args)
+    assert first["status"] == "INCOMPLETE"
+    assert first["output_counts"]["payment_attempts"] == 1
+    issues = [json.loads(line) for line in Path(first["outputs"]["quarantined_records"]).read_text(encoding="utf-8").splitlines()]
+    assert (issues[0]["source_file"], issues[0]["source_line"], issues[0]["error_code"]) == (
+        str(payments.resolve()), 3, "PARSE_ERROR",
+    )
+    second = run(*args)
+    assert first["output_counts"] == second["output_counts"]
+    for name in first["outputs"]:
+        assert Path(first["outputs"][name]).read_bytes() == Path(second["outputs"][name]).read_bytes()
+    manifest = Path(second["manifest_path"])
+    previous = manifest.read_bytes()
+    with pytest.raises(FileNotFoundError):
+        run(str(inputs / "missing.jsonl"), *args[1:])
+    assert manifest.read_bytes() == previous
+
+    write_text = Path.write_text
+
+    def fail_payment_write(path, *args, **kwargs):
+        if path.name == "payment_attempts.jsonl":
+            raise OSError("simulated storage failure")
+        return write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_payment_write)
+    with pytest.raises(OSError):
+        run(*args)
+    assert manifest.read_bytes() == previous
+    assert len(list((output / "silver" / "transactions" / "runs").iterdir())) == 2
+
+
+def test_document_input_does_not_silently_interpret_cdc_or_overwrite_source(tmp_path):
+    source = tmp_path / "source.jsonl"
+    source.write_text(json.dumps({"op": "c", "after": order()}) + "\n", encoding="utf-8")
+    output = tmp_path / "output"
+    with pytest.raises(ValueError, match="CDC"):
+        run(str(source), str(source), str(source), str(output))
+    assert not output.exists()
+    with pytest.raises(ValueError, match="겹치지"):
+        run(str(source), str(source), str(source), str(tmp_path))

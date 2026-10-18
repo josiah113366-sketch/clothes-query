@@ -30,3 +30,18 @@
 - **검증:** `python -m pytest pipelines/silver/tests -q -p no:cacheprovider --basetemp pipelines/silver/.local/pytest-transaction-quality`: 7개 통과. `gold-a/metrics`의 기존 거래 연결 테스트를 메모리에서 새 Silver 함수로 실행: 1개 통과. `git diff --check` 통과.
 - **한계:** 실제 파일 저장과 이전 실행의 충돌 확인, 영구 원본 위치·실행 이력, 규칙 YAML 실행 연결은 다음 입력 연결 작업 범위다. 후속 집계/저장 코드는 정상 상세만 쓰지 말고 모든 품질 결과의 영향 범위를 확인해야 한다.
 - **범위:** 거래 코드·Silver README·기존 작업 지시서 수정과 거래 테스트 파일 1개 추가. 회원·리뷰 코드, Gold A 코드와 공통 계약 PR은 수정하지 않음.
+
+## 승인된 추가 작업: 문서 기준 로컬 거래 입출력
+
+- 실제 거래 Bronze가 아직 없어 문서 컬럼의 JSONL로 진행하라는 사용자 지시에 따른다. 실제 CDC 포맷이나 S3 경로를 임의 확정하지 않는다.
+- 기존 `transactions.py`에 명시적 세 입력 경로, JSONL 읽기, 원본 파일·행 번호, CLI, 결과 묶음 저장을 추가한다.
+- 결과 6개 저장 완료 후 current.json만 교체해 읽기·쓰기 실패 시 이전 대표 결과를 보존한다. 지정 입력 전체를 처리하며 날짜·상품 부분 교체는 포함하지 않는다.
+- 기존 거래 테스트 파일에서 반복 실행, 파싱 오류 원본 추적, 입력 없음·저장 실패 시 이전 결과 보존을 확인한다.
+- 완료 확인: Silver 테스트, 합성 입력으로 CLI 실행, `git diff --check`.
+
+### 작업 결과: 문서 기준 로컬 거래 입출력
+
+- **변경:** 명시적 JSONL 파일/폴더 읽기, 파싱 오류 격리와 원본 파일·줄 추적, CLI, 결과 6개와 대표 결과 manifest 저장. 문서가 정한 업무 컬럼을 사용하며 CDC 봉투는 조용히 오해하지 않고 실행 오류로 알린다.
+- **검증:** Silver 테스트 9개 통과. 정상·중복·실패 코드 누락을 포함한 합성 입력 CLI 실행 결과는 주문 현재 상태 2행, 상태 이력 2행, 주문상품 1행, 정상 결제 1행, 격리 1행, 품질 요약 3행. 반복 실행 후 같은 결과 건수 확인. 읽기·저장 실패 시 이전 current.json 보존 테스트 통과. `git diff --check` 통과.
+- **로컬 확인 위치:** `pipelines/silver/.local/transactions-md-demo/output/silver/transactions/current.json`. 합성 입력·출력은 커밋하지 않는다.
+- **한계:** 실제 S3 거래 Bronze·CDC 연결, 날짜·상품 부분 재처리, 공통 YAML 검사기, Gold A 파일 연동은 포함하지 않는다. 대표 manifest가 가리키는 결과만 읽어야 하며 과거 runs 전체를 합치지 않는다.

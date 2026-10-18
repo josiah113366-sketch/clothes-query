@@ -74,4 +74,24 @@ python -m pipelines.silver.reviews --input-root review-simulator/.local/lake --o
 - 오류·대기 정보가 있는 데이터셋은 INCOMPLETE다. 후속 Gold A/저장 코드는 **모든 dq_results를 확인**해 영향 범위를 완전한 결과로 표시하지 않아야 한다. 정상 출력이 존재한다는 것만으로 전체 처리 완료로 판단하지 않는다.
 - `check_version=transactions.v1`은 이 계산 코드의 검사 버전이다. 공통 YAML 규칙 버전을 적용했다고 표시하지 않는다. 원본 파일/Kafka 위치·실행 ID는 실제 입력 연결 단계에서 추가한다. 현재 행 번호는 지속적인 원본 식별 키가 아니다.
 
-이 함수는 제공된 입력 안에서만 중복·충돌을 확인한다. 이전 실행에서 이미 저장한 결제와의 충돌, 저장 결과 교체·대상 외 결과 보존, Gold A의 품질 상태 사용은 실제 입출력 연결 작업에서 구현한다.
+이 함수는 제공된 입력 안에서만 중복·충돌을 확인한다. 이전 실행에서 이미 저장한 결제와의 충돌, 날짜·상품 부분 병합, Gold A의 품질 상태 사용은 후속 연결 작업에서 다룬다. 아래 로컬 실행기는 제공한 입력 전체의 결과 묶음을 저장한다.
+
+### 문서 기준 거래 JSONL 실행
+
+문서의 업무 컬럼으로 만든 로컬 JSONL을 읽어 결과를 저장한다. 입력은 CDC 봉투나 실제 S3 경로를 추측한 것이 아니다. 세 입력 모두 파일 또는 폴더를 직접 지정한다. 폴더는 하위 `.json`/`.jsonl` 전체를 읽으며, 파일은 한 줄에 업무 객체 하나다. 시각은 시간대가 있는 ISO 문자열을 사용한다.
+
+```powershell
+python -m pipelines.silver.transactions --orders-input <주문-JSONL-경로> --order-items-input <주문상품-JSONL-경로> --payments-input <결제-JSONL-경로> --output-root pipelines/silver/.local/transactions-output
+```
+
+- `orders`: `order_id`, `member_id`, `session_id`, `status`, `status_reason`, `total_amount`, `ordered_at`, `updated_at`.
+- `order_items`: `order_item_id`, `order_id`, `article_id`, `quantity`, `unit_price`.
+- `payments`: `payment_id`, `order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, `requested_at`, `completed_at`.
+
+정상 결과 4개와 격리·품질 결과 2개를 `<output-root>/silver/transactions/runs/run-.../`에 JSONL로 쓴다. 여섯 파일이 모두 저장된 뒤 `<output-root>/silver/transactions/current.json`을 교체한다. current.json에는 원본 파일 목록, 입력·출력 건수, PASS/INCOMPLETE 상태, 실제 결과 파일 경로가 있다. 오류 행에는 원본 파일과 줄 번호도 남긴다.
+
+**후속 조회는 current.json이 가리키는 결과만 읽는다.** runs/ 전체를 합치면 과거 실행을 중복 집계하게 된다. 같은 입력을 다시 실행하면 새 결과 묶음을 만들지만 대표 결과는 한 묶음만 가리킨다. 이전 묶음은 보존한다. 이번 변경은 지정 입력 전체의 스냅샷 저장이며, 날짜·상품 부분 재처리와 기존 저장 데이터 병합은 포함하지 않는다.
+
+잘못된 JSON 행은 원문을 복사하지 않고 PARSE_ERROR로 격리한다. 파일 없음·파일 읽기/인코딩 실패, CDC 봉투 입력, 결과 저장 실패는 실행 실패로 전달하고 기존 current.json을 유지한다. 명시적으로 비어 있는 파일은 정상 0건 입력이다. 출력과 입력 경로의 겹침은 금지한다.
+
+실제 거래 Bronze가 생기면 CDC 변경 종류·시각 직렬화·메타데이터를 확인해 이 입력 앞의 변환을 연결한다. 이번 검증은 문서 기반 합성 데이터이며 실제 거래 Bronze 검증이 아니다. 공통 YAML 검사는 아직 실행하지 않는다.
