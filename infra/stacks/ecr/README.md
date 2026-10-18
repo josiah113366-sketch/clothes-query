@@ -2,6 +2,8 @@
 
 WEB/WAS용 ECR 두 개와 선택적 Connect 저장소, immutable tag·scan on push.
 
+2026-10-18 사용자 승인으로 Connect 저장소를 추가하고 PostgreSQL CDC/S3 Sink 플러그인 이미지의 실제 push·EKS pull을 확인했다. 현재 저장소3개이며 비공개 실배포 입력의 enable_connect_repository=true를 유지한다. 시험 데이터가 들어 있지 않은 이미지는 재사용을 위해 남겼다. 시험 Connect 런타임은 제거했다. [시험 결과](../../../docs/tasks/infra-pipeline-smoke.md).
+
 - 선행: 기존 bootstrap.
 - backend key: `clothes-query/dev/ecr/terraform.tfstate`.
 - 입력: 추가 앱별 필수 입력 없음. 이름은 clothes-query-dev/web 및 clothes-query-dev/was다.
@@ -23,4 +25,4 @@ Connect 활성 후 false로 되돌리면 해당 저장소 삭제 계획이므로
 
 같은 계정 EKS 노드에는 기존 `AmazonEC2ContainerRegistryPullOnly`가 연결되어 있으므로 Connect Pod에 publisher IAM/Pod Identity를 추가하지 않는다. 노드의 image pull과 Pod의 데이터 접근 권한은 서로 다르다. 다른 계정/네트워크의 pull은 별도 검토 대상이다.
 
-배포 환경에서 저장소 생성과 별도 승인된 push 이후 반환된 레지스트리 digest를 Kafka chart의 `connect.image`에 넣는다. 로컬 이미지 ID를 대신 사용하지 않는다. 실제 로그인·push는 이번 로컬 작업에서 수행하지 않는다. 이미지를 올리면 저장 공간·전송 및 스캔 구성에 따른 비용이 발생할 수 있다.
+배포 환경에서 저장소 생성과 승인된 push 이후 반환된 레지스트리 digest를 Kafka chart의 `connect.image`에 넣는다. 로컬 이미지 ID를 대신 사용하지 않는다. 2026-10-18 시험은 실제 로그인·push/digest 고정·EKS pull을 수행했고 전용 임시 Docker 로그인 토큰은 제거했다. 이미지를 보관하면 저장 공간 비용이 발생한다.

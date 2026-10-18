@@ -37,9 +37,10 @@
 {{- if .Values.connect.enabled -}}
 {{- if not .Values.connect.image }}{{ fail "connect.image digest is required" }}{{ end -}}
 {{- if eq (len .Values.connect.produceTopics) 0 }}{{ fail "connect.produceTopics requires explicit business topics" }}{{ end -}}
-{{- range .Values.connect.produceTopics -}}
+{{- range concat .Values.connect.produceTopics .Values.connect.consumeTopics -}}
 {{- if not (hasKey $names .) }}{{ fail "Connect ACL references an undefined business topic" }}{{ end -}}
 {{- end -}}
+{{- if and (gt (len .Values.connect.consumeTopics) 0) (eq (len .Values.connect.consumerGroups) 0) }}{{ fail "Connect consumers require explicit consumerGroups" }}{{ end -}}
 {{- end -}}
 {{- else -}}
 {{- if or (gt (len .Values.topics) 0) (gt (len .Values.clients) 0) }}{{ fail "topics/clients require kafka.enabled" }}{{ end -}}

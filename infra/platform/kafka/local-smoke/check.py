@@ -17,6 +17,7 @@ TOPIC = "smoke.public.cdc_probe"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compact", action="store_true", help="Use single-node memory limits and 1-vCPU quotas for Kafka and Connect; fixtures run separately")
+    parser.add_argument("--s3", action="store_true", help="Also test the S3 Sink against an isolated local Moto S3 fixture; never AWS")
     options = parser.parse_args()
     # Reject remote Docker contexts before any mutations or cleanup.
     clean_env = {k: v for k, v in os.environ.items() if not k.startswith(("AWS_", "TF_", "KUBE"))}
@@ -31,6 +32,7 @@ def main():
     project = "cq-cdc-" + secrets.token_hex(5)
     print("Local test project: " + project, flush=True)
     image = project + "-connect:local"
+    base_image = project + "-cdc-base:local" if options.s3 else image
     admin_password, cdc_password = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
 
     def redact(value):
@@ -67,13 +69,15 @@ def main():
                          SMOKE_SECRET_DIR=str(database_dir), SMOKE_TLS_DIR=str(tls_dir),
                          SMOKE_WORKER_CONFIG=str(worker_path))
         extra_compose = []
+        if options.s3:
+            extra_compose += ["--file", ROOT / "s3/compose.yaml"]
         if options.compact:
             override = directory / "compact.json"
             override.write_text(json.dumps({"services": {
                 "kafka": {"cpus": 1.0, "mem_limit": "1536m"},
                 "connect": {"cpus": 1.0, "mem_limit": "1024m"}
             }}), encoding="utf-8")
-            extra_compose = ["--file", override]
+            extra_compose += ["--file", override]
 
         def compose(*args, **kwargs):
             # Kafka CLI JVMs must not bind the broker's already active javaagent port.
@@ -187,8 +191,11 @@ def main():
         cleanup_error = None
         try:
             print("Building pinned Connect image for isolated local test...", flush=True)
-            docker("build", "--platform", "linux/amd64", "--tag", image,
+            docker("build", "--platform", "linux/amd64", "--tag", base_image,
                    ROOT.parent / "connect-image", timeout=300)
+            if options.s3:
+                docker("build", "--platform", "linux/amd64", "--build-arg", "BASE_IMAGE=" + base_image,
+                       "--tag", image, ROOT / "s3", timeout=300)
             generator_uid = os.getuid() if hasattr(os, "getuid") else 1001
             docker("run", "--interactive", "--rm", "--user", f"{generator_uid}:0", "--network", "none", "--mount", f"type=bind,source={tls_dir},target=/work",
                    "--entrypoint", "/bin/bash", image, "-s", stdin=(ROOT / "make-tls.sh").read_text(), timeout=60)
@@ -337,6 +344,50 @@ def main():
                 return bool(values) and all(v > 0 for v in values)
             until("Consumer lag metric", lag_ready)
             print("PASS: Kafka replication/controller, Connect task/CDC connection and positive consumer lag metrics served", flush=True)
+            if options.s3:
+                print("Testing CDC events through the S3 Sink into local-only object storage...", flush=True)
+                compose("up", "--detach", "s3", timeout=180)
+                probe_code = (ROOT / "s3/probe.py").read_text(encoding="utf-8")
+                def s3_probe(mode, check=True):
+                    return compose("exec", "-T", "s3", "python", "-", mode,
+                                   stdin=probe_code, timeout=60, check=check)
+                until("Local S3 fixture ready", lambda: s3_probe("init").returncode == 0)
+                assert any(p["class"] == "io.confluent.connect.s3.S3SinkConnector" for p in plugins)
+                acl("smoke-connect", "--topic", TOPIC, ["Read"])
+                acl("smoke-connect", "--group", "connect-smoke-s3", ["Read"])
+                rest("/connectors", {"name": "smoke-s3", "config": {
+                    "connector.class": "io.confluent.connect.s3.S3SinkConnector", "tasks.max": "1",
+                    "topics": TOPIC, "s3.bucket.name": "cq-pipeline-smoke", "s3.region": "us-east-1",
+                    "store.url": "http://s3:5000", "s3.path.style.access.enabled": "true",
+                    "topics.dir": "infra-smoke", "flush.size": "1",
+                    "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+                    "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
+                    "partitioner.class": "io.confluent.connect.storage.partitioner.DefaultPartitioner",
+                    "schema.compatibility": "NONE", "behavior.on.null.values": "ignore",
+                    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+                    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+                    "key.converter.schemas.enable": "true", "value.converter.schemas.enable": "true"
+                }})
+                def sink_running():
+                    status = rest("/connectors/smoke-s3/status")
+                    return (status["connector"]["state"] == "RUNNING" and bool(status["tasks"])
+                            and all(t["state"] == "RUNNING" for t in status["tasks"]))
+                until("S3 Sink RUNNING", sink_running)
+                until("Snapshot/create/update/delete JSON in local S3", lambda: s3_probe("initial").returncode == 0)
+                compose("stop", "--timeout", "20", "connect")
+                sql("INSERT INTO public.cdc_probe VALUES (5,50);")
+                compose("start", "connect")
+                until("CDC restarted with Sink", running)
+                until("Sink restarted with persisted config", sink_running)
+                until("Change during outage reached local S3", lambda: s3_probe("resumed").returncode == 0)
+                result = json.loads(s3_probe("resumed").stdout)
+                pipeline_report = {"scope": "local PostgreSQL -> mTLS Kafka -> Confluent S3 Sink -> Moto S3; not AWS",
+                                   "snapshot_create_update_delete": True, "resumed_after_connect_outage": True,
+                                   "objects": result["objects"], "records": result["records"],
+                                   "duplicates_allowed": True, "aws_iam_verified": False}
+                report = ROOT.parents[3] / ".cache/kafka-pipeline-report.json"
+                report.write_text(json.dumps(pipeline_report, indent=2), encoding="utf-8")
+                print("PASS: snapshot/create/update/delete stored as JSON; restart replay reached isolated prefix; report=" + str(report), flush=True)
             if options.compact:
                 ids = compose("ps", "--quiet").stdout.split()
                 inspected = json.loads(docker("inspect", *ids).stdout)
@@ -349,7 +400,7 @@ def main():
                 report = ROOT.parents[3] / ".cache" / "kafka-compact-report.json"
                 report.parent.mkdir(parents=True, exist_ok=True)
                 report.write_text(json.dumps({"project": project, "health": health, "samples": samples,
-                                              "scope": "Kafka/Connect CPU quotas total 2 vCPU; test fixtures outside that CPU budget; local CDC only; no Strimzi operator, Kubernetes, EKS, EBS, RDS TLS, S3 sink or Spark"}, indent=2), encoding="utf-8")
+                                              "scope": "Kafka/Connect CPU quotas total 2 vCPU; fixtures outside budget; local CDC" + (" and local Moto S3 Sink" if options.s3 else "") + "; no Strimzi operator, Kubernetes, EKS, EBS, RDS TLS, AWS S3/IAM or Spark"}, indent=2), encoding="utf-8")
                 print("PASS: Kafka/Connect quota sum 2 vCPU; test fixtures outside CPU budget; memory limits below 8Gi; no OOM/restarts; report=" + str(report), flush=True)
         except Exception as error:
             if options.compact:
@@ -372,6 +423,8 @@ def main():
             if result.returncode:
                 cleanup_error = redact(result.stderr[-2000:])
             docker("image", "rm", image, timeout=30, check=False)
+            if base_image != image:
+                docker("image", "rm", base_image, timeout=30, check=False)
             if cleanup_error:
                 raise RuntimeError("Local test cleanup failed for " + project + ": " + cleanup_error)
             print("Cleaned this test's containers/network/volume/image tag.", flush=True)

@@ -1,0 +1,8 @@
+# Overlay the existing private RDS inputs; don't replace them with this file.
+# Trial budget proposal, not the team's final CDC sizing. Requires review/reboot.
+use_eks_security_group = true
+logical_replication = {
+  max_replication_slots     = 5
+  max_wal_senders           = 10
+  max_slot_wal_keep_size_mb = 256
+}

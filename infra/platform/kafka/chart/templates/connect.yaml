@@ -19,6 +19,14 @@ spec:
       - resource: {type: topic, name: {{ . | quote }}, patternType: literal}
         operations: [Write, Describe]
       {{- end }}
+      {{- range .Values.connect.consumeTopics }}
+      - resource: {type: topic, name: {{ . | quote }}, patternType: literal}
+        operations: [Read, Describe]
+      {{- end }}
+      {{- range .Values.connect.consumerGroups }}
+      - resource: {type: group, name: {{ . | quote }}, patternType: literal}
+        operations: [Read]
+      {{- end }}
       - resource: {type: group, name: {{ printf "%s-cluster" .Values.connect.name | quote }}, patternType: literal}
         operations: [Read]
       - resource: {type: cluster}

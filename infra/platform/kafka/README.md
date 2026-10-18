@@ -1,5 +1,7 @@
 # EKS Kafka·Connect
 
+2026-10-18 업무 계약과 분리한 [시험 데이터 경로](pipeline-smoke/README.md)의 실제 RDS → Kafka → S3 JSON6개 전달과 중단 후 이어받기를 확인했다. 더미 DB/slot·Kafka/Connect·S3 모든 버전8개·시험 권한을 정리했고 현재 Connect는 비활성이다. RDS 복제 설정과 데이터 없는 ECR 이미지는 남았다. 로컬 전체 경로는 `local-smoke/check.py --compact --s3`, AWS overlay는 별도 비활성 예시다. Connect의 선택적 consumeTopics/consumerGroups는 Sink에 필요한 literal 읽기 ACL만 추가하며 기존 source-only 기본 권한은 유지한다.
+
 2026-10-16 단일 노드 후보: [single-node-values.yaml](single-node-values.yaml)에 Kafka/Connect 각 1개·RF 1·축소 메모리의 별도 비활성 프로필을 준비했다. 사용자 결정으로 이 프로필은 **broker당 20 GiB·보관 72시간**이다. 업무 토픽의 명시적 설정이 broker 기본값을 덮어쓰므로, 배포용 runtime values의 각 업무 토픽에도 `retentionMs: 259200000`을 지정해야 한다. 업무 토픽 계약은 아직 비어 있으며 기존 24시간 예시를 그대로 복사하지 않는다. 기본 standard 구성은 보존한다. [검증 범위와 결과](../../../docs/design/infra/kafka-single-node-validation-2026-10-16.md)를 읽고 신규 개발 runtime에서만 검토한다. 기존 클러스터의 복제 수나 PVC를 임의 축소하는 용도가 아니다.
 
 상태: 최소 측정 환경 AWS/EKS 배포·TLS 메시지·EBS·JMX 검증 완료 · 2026-10-16. Connect·업무 CDC/S3 Sink는 비활성/후속.
