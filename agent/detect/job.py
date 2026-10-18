@@ -1,0 +1,142 @@
+"""판정 잡 틀: 5분마다 한 번 실행되는 "순찰" 한 바퀴.
+
+한 바퀴(run_once)가 하는 일
+  1. 지금 시각을 5분 단위로 내려 순찰 번호(run_id)를 정한다. 이미 돈 번호면 건너뛴다.
+  2. 원장·뷰를 읽어 규칙 R1·R3·R4로 판정한다.
+  3. 이상 줄을 gold_b.anomaly 에 **새 줄로 쌓는다**(지우거나 덮지 않는다). 순찰 기록(detection_runs)도 남긴다.
+  4. 재처리 기록(reprocess_events)에 "교체 끝났는데 아직 재판정 안 한" 줄이 있으면 그 시간대를 다시 판정하고
+     REDETECTED, VERIFIED 줄을 남긴다. (Airflow가 재처리 뒤에 이 잡을 바로 이어 붙이기 전까지의 임시 방식)
+
+바깥 세상과는 두 개의 함수로만 만난다 (그래서 가짜 데이터로 시험할 수 있다)
+  query(sql) -> 줄 목록(dict),  write(표 이름, 줄 목록) -> 새 줄 추가
+"""
+import json
+from datetime import datetime, timedelta
+
+from rules import Config, r1_pg_failures, r3_bronze_lag, r4_malformed
+
+STEP_MIN = 5     # 판정 주기 (제안)
+ACTOR = "detect_job"
+
+
+def floor_tick(now: datetime) -> datetime:
+    return now.replace(minute=now.minute - now.minute % STEP_MIN, second=0, microsecond=0)
+
+
+def _ts(dt, cfg):
+    text = dt.strftime("%Y-%m-%d %H:%M:%S")
+    return f"TIMESTAMP '{text}'" if cfg.dialect == "athena" else f"'{text}'"
+
+
+def _in(col, a, b, cfg):
+    return f"{col} >= {_ts(a, cfg)} AND {col} < {_ts(b, cfg)}"
+
+
+def _seen(as_of, cfg):
+    """판정 시점에 이미 쌓여 있던 줄만 본다(그때 본 숫자를 재현). 재판정은 교체된 새 줄을 봐야 해서 걸지 않는다."""
+    return f" AND loaded_at <= {_ts(as_of, cfg)}" if as_of else ""
+
+
+def judge(query, cfg: Config, tick: datetime, run_id: str, now: datetime, as_of=None):
+    """tick 시점의 원장을 읽어 이상 줄 목록을 돌려준다 (쓰지는 않는다)."""
+    wait = timedelta(minutes=cfg.ratio_wait_min)
+    out = []
+    # R1: 비율 조건이 있어 끝난 지 3분 지난 구간만 본다
+    w1 = (tick - wait - timedelta(minutes=cfg.r1_win_min), tick - wait)
+    per_pg = query(f"""SELECT pg, COUNT(*) AS attempts,
+       SUM(CASE WHEN failure_cause = 'PG' THEN 1 ELSE 0 END) AS pg_cause_failures
+FROM gold_b.payment_attempts
+WHERE {_in('completed_at', *w1, cfg)}{_seen(as_of, cfg)}
+GROUP BY pg""")
+    out += r1_pg_failures(cfg, run_id, now, w1, per_pg)
+    # R3: 최근 5분의 지연 측정, 측정 줄이 연속으로 없는지, 증거로 붙일 유입량(R2)
+    w3 = (tick - timedelta(minutes=STEP_MIN), tick)
+    lag_rows = query(f"""SELECT topic, MAX(lag_sec) AS max_lag_sec FROM gold_b.bronze_lag_snapshots
+WHERE {_in('collected_at', tick - timedelta(minutes=2), tick, cfg)} GROUP BY topic""")
+    snap_rows = query(f"""SELECT topic, COUNT(*) AS snapshots FROM gold_b.bronze_lag_snapshots
+WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)} GROUP BY topic""")
+    vol_now = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w3, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+    vol_prev = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', w3[0] - timedelta(minutes=STEP_MIN), w3[0], cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+    ingest = {t: (next((r["n"] for r in vol_now if r["topic"] == t), 0), next((r["n"] for r in vol_prev if r["topic"] == t), 0)) for t in cfg.topics}
+    out += r3_bronze_lag(cfg, run_id, now, w3, {r["topic"]: r["max_lag_sec"] for r in lag_rows},
+                         {r["topic"]: r["snapshots"] for r in snap_rows}, ingest)
+    # R4: 현재 형식 검사 규칙 버전의 깨진 메시지만 센다. 비율 조건이 있어 3분 대기
+    w4 = (tick - wait - timedelta(minutes=cfg.r4_win_min), tick - wait)
+    broken = query(f"""SELECT topic, COUNT(*) AS n FROM gold_b.malformed_messages
+WHERE {_in('kafka_timestamp', *w4, cfg)} AND rule_version = '{cfg.format_rule_version}'{_seen(as_of, cfg)} GROUP BY topic""")
+    total = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w4, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+    out += r4_malformed(cfg, run_id, now, w4, {r["topic"]: r["n"] for r in broken}, {r["topic"]: r["n"] for r in total})
+    return out
+
+
+def _run_record(run_id, kind, request_id, start, end, now, count):
+    f = "%Y-%m-%d %H:%M:%S"
+    return {"run_id": run_id, "kind": kind, "request_id": request_id, "judged_from": start.strftime(f),
+            "judged_to": end.strftime(f), "started_at": now.strftime(f), "anomaly_count": count}
+
+
+def regular_run(query, write, cfg: Config, now: datetime):
+    tick = floor_tick(now)
+    run_id = tick.strftime("%Y%m%dT%H%MZ")
+    if query(f"SELECT run_id FROM gold_b.detection_runs WHERE run_id = '{run_id}'"):
+        return {"run_id": run_id, "skipped": True}          # 같은 번호를 두 번 돌리지 않는다
+    rows = judge(query, cfg, tick, run_id, now, as_of=tick)
+    if rows:
+        write("anomaly", rows)
+    write("detection_runs", [_run_record(run_id, "REGULAR", None, tick - timedelta(minutes=STEP_MIN), tick, now, len(rows))])
+    return {"run_id": run_id, "anomalies": len(rows)}
+
+
+def _event(request_id, step, now, ws, we, detail, cfg):
+    f = "%Y-%m-%d %H:%M:%S"
+    return {"request_id": request_id, "step": step, "at": now.strftime(f), "actor": ACTOR, "reason": None,
+            "window_start": ws, "window_end": we, "rule_version": cfg.rule_version, "source": None,
+            "attempt": None, "parent_request_id": None, "detail": detail}
+
+
+def pending_replacements(query):
+    """LEDGER_REPLACED 줄 중, 같은 요청·같은 시간대의 REDETECTED가 아직 없는 것."""
+    return query("""SELECT l.request_id, l.window_start, l.window_end
+FROM gold_b.reprocess_events l
+WHERE l.step = 'LEDGER_REPLACED'
+  AND NOT EXISTS (SELECT 1 FROM gold_b.reprocess_events r
+                  WHERE r.request_id = l.request_id AND r.step = 'REDETECTED'
+                    AND r.window_start = l.window_start AND r.window_end = l.window_end)
+ORDER BY l.window_start""")
+
+
+def redetect(query, write, cfg: Config, now: datetime, item):
+    """교체된 시간대를 5분 간격으로 다시 훑어 판정하고, 이전 판정과 비교해 해결 여부를 기록한다."""
+    rid, ws, we = item["request_id"], item["window_start"], item["window_end"]
+    start, end = datetime.fromisoformat(str(ws)), datetime.fromisoformat(str(we))
+    run_id = f"{floor_tick(now):%Y%m%dT%H%MZ}-RD-{rid}-{start:%H%M}"
+    prior = query(f"""SELECT DISTINCT anomaly_id FROM gold_b.anomaly
+WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)}""")   # 교체된 시간대와 겹치는 옛 판정
+    prior_ids = {r["anomaly_id"] for r in prior}
+    rows, tick = [], start + timedelta(minutes=STEP_MIN)
+    while tick <= end + timedelta(minutes=cfg.ratio_wait_min):   # 정규 순찰과 같은 5분 시각으로 훑는다
+        rows += judge(query, cfg, tick, run_id, now, as_of=None)
+        tick += timedelta(minutes=STEP_MIN)
+    seen, unique = set(), []
+    for r in rows:                                            # 겹치는 판정 구간의 같은 이상은 한 줄만
+        if r["anomaly_id"] not in seen:
+            seen.add(r["anomaly_id"]); unique.append(r)
+    new_ids = {r["anomaly_id"] for r in unique}
+    if unique:
+        write("anomaly", unique)
+    write("detection_runs", [_run_record(run_id, "REDETECT", rid, start, end, now, len(unique))])
+    remaining = prior_ids & new_ids
+    result = "NO_ANOMALY_BEFORE" if not prior_ids else ("RESOLVED" if not remaining else "STILL_OPEN")
+    detail = json.dumps({"before": len(prior_ids), "after": len(new_ids), "still_open": len(remaining), "result": result})
+    write("reprocess_events", [_event(rid, "REDETECTED", now, str(ws), str(we), f"run_id={run_id}", cfg),
+                               _event(rid, "VERIFIED", now, str(ws), str(we), detail, cfg)])
+    return {"request_id": rid, "run_id": run_id, "result": result}
+
+
+def run_once(query, write, cfg: Config = None, now: datetime = None):
+    cfg = cfg or Config()
+    now = now or datetime.utcnow()
+    summary = {"regular": regular_run(query, write, cfg, now), "redetected": []}
+    for item in pending_replacements(query):
+        summary["redetected"].append(redetect(query, write, cfg, now, item))
+    return summary

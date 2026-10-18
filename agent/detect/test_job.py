@@ -1,0 +1,143 @@
+"""판정 잡 틀 시험. sqlite 가짜 원장으로 순찰 한 바퀴를 직접 돌려 본다 (Athena는 아직 안 돌려봤다).
+
+실행: python3 test_job.py
+"""
+import sqlite3
+from datetime import datetime, timedelta
+
+from job import floor_tick, pending_replacements, regular_run, run_once
+from rules import Config, anomaly_id
+
+ok = True
+
+
+def check(name, got, want):
+    global ok
+    good = got == want
+    ok = ok and good
+    print(("통과 " if good else "실패 ") + name + ("" if good else f" | 결과: {got!r} | 기대: {want!r}"))
+
+
+CFG = Config(dialect="sqlite")
+F = "%Y-%m-%d %H:%M:%S"
+D0 = datetime(2026, 10, 20, 14, 0)
+
+
+def at(h, m=0):
+    return datetime(2026, 10, 20, h, m)
+
+
+def build():
+    con = sqlite3.connect(":memory:")
+    con.row_factory = sqlite3.Row
+    con.execute("ATTACH DATABASE ':memory:' AS gold_b")
+    con.executescript("""
+    CREATE TABLE gold_b.payment_attempts (payment_id, order_id, attempt_no, pg, status, failure_code, failure_cause, completed_at, loaded_at);
+    CREATE TABLE gold_b.topic_messages (topic, kafka_partition, kafka_offset, kafka_timestamp, loaded_at);
+    CREATE TABLE gold_b.bronze_lag_snapshots (collected_at, topic, "partition", end_offset, committed_offset, lag_msgs, lag_sec, connector_state);
+    CREATE TABLE gold_b.malformed_messages (topic, kafka_partition, kafka_offset, rule_version, kafka_timestamp, error_count, reason, loaded_at);
+    CREATE TABLE gold_b.reprocess_events (request_id, step, at, actor, reason, window_start, window_end, rule_version, source, attempt, parent_request_id, detail);
+    CREATE TABLE gold_b.anomaly (run_id, anomaly_id, rule_id, rule_version, anomaly_type, source_table, window_start, window_end, scope_type, scope_key,
+                                 metric, observed_value, baseline_value, baseline_kind, sample_size, episode_start, episode_end, evidence_ref, status, detected_at);
+    CREATE TABLE gold_b.detection_runs (run_id, kind, request_id, judged_from, judged_to, started_at, anomaly_count);
+    """)
+    pay, msg, lag = [], [], []
+    n = 0
+    for k in range(180):                                   # 14:00 ~ 16:59, 1분마다
+        t = D0 + timedelta(minutes=k)
+        loaded = (t + timedelta(minutes=1)).strftime(F)
+        outage = at(15, 0) <= t < at(15, 30)
+        for pg in ("PG_A", "PG_B"):
+            for i in range(3):
+                n += 1
+                fail = outage and pg == "PG_A"
+                pay.append((f"p{n}", f"o{n}", 1, pg, "FAILED" if fail else "SUCCESS", "PG_TIMEOUT" if fail else None,
+                            "PG" if fail else None, t.strftime(F), loaded))
+        for topic in CFG.topics:
+            for i in range(10):
+                msg.append((topic, 0, k * 10 + i, t.strftime(F), loaded))
+            slow = topic == "orders" and at(16, 20) <= t < at(16, 30)
+            gone = topic == "payments" and at(16, 40) <= t < at(16, 50)
+            if not gone:
+                lag.append((t.strftime(F), topic, 0, 0, 0, 0, 200.0 if slow else 5.0, "RUNNING"))
+    con.executemany("INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)", pay)
+    con.executemany("INSERT INTO gold_b.topic_messages VALUES (?,?,?,?,?)", msg)
+    con.executemany("INSERT INTO gold_b.bronze_lag_snapshots VALUES (?,?,?,?,?,?,?,?)", lag)
+    bad = [("clickstream", 0, 7000 + i, "v1.0", at(16, 3 + i % 4).strftime(F), 1, "MISSING_FIELD", at(16, 8).strftime(F)) for i in range(10)]
+    bad += [("orders", 0, 8000 + i, "v0.9", at(16, 3 + i % 4).strftime(F), 1, "MISSING_FIELD", at(16, 8).strftime(F)) for i in range(12)]   # 옛 규칙 버전
+    con.executemany("INSERT INTO gold_b.malformed_messages VALUES (?,?,?,?,?,?,?,?)", bad)
+    return con
+
+
+con = build()
+
+
+def query(sql):
+    return [dict(r) for r in con.execute(sql).fetchall()]
+
+
+def write(table, rows):
+    for r in rows:
+        cols = ",".join(r)
+        con.execute(f"INSERT INTO gold_b.{table} ({cols}) VALUES ({','.join('?' * len(r))})", list(r.values()))
+
+
+def anomalies(where=""):
+    return query(f"SELECT * FROM gold_b.anomaly {where} ORDER BY run_id, anomaly_id")
+
+
+# --- 순찰 번호 ---
+check("5분 단위로 내린다", floor_tick(datetime(2026, 10, 20, 15, 12, 41)), datetime(2026, 10, 20, 15, 10))
+
+# --- 장애 전에는 이상 없음 ---
+r = regular_run(query, write, CFG, datetime(2026, 10, 20, 14, 30, 5))
+check("14:30 순찰: 이상 없음, 순찰 기록은 남음", (r["anomalies"], len(query("SELECT * FROM gold_b.detection_runs"))), (0, 1))
+check("같은 순찰 번호는 다시 안 돎", regular_run(query, write, CFG, datetime(2026, 10, 20, 14, 31, 0)).get("skipped"), True)
+
+# --- 3분 대기: 장애가 막 시작한 직후에는 비율이 낮아 아직 안 잡힌다 ---
+regular_run(query, write, CFG, at(15, 5))
+check("15:05 순찰: 아직 안 잡힘 (최근 3분 데이터는 안 봄, 비율 13%)", len(anomalies("WHERE rule_id = 'R1_PG_FAILURES'")), 0)
+regular_run(query, write, CFG, at(15, 10))
+r1 = anomalies("WHERE rule_id = 'R1_PG_FAILURES'")
+check("15:10 순찰: PG_A만 잡힘 (실패 21건, 비율 47%)", [(x["scope_key"], x["observed_value"], x["sample_size"]) for x in r1], [("PG_A", 21, 45)])
+check("anomaly_id 규칙: 같은 입력이면 같은 id", r1[0]["anomaly_id"], anomaly_id("R1_PG_FAILURES", "v0.1", "PG_A", r1[0]["window_start"]))
+check("회차 번호가 줄에 찍힘", r1[0]["run_id"], "20261020T1510Z")
+
+# --- R3, R4 ---
+regular_run(query, write, CFG, at(16, 25))
+r3 = anomalies("WHERE rule_id = 'R3_BRONZE_LAG'")
+check("16:25 순찰: orders 지연 200초가 잡힘, 유입은 평소대로(증거)", [(x["scope_key"], x["observed_value"], '"ingest_last_window": 50' in x["evidence_ref"]) for x in r3], [("orders", 200.0, True)])
+regular_run(query, write, CFG, at(16, 45))
+r3 = anomalies("WHERE rule_id = 'R3_BRONZE_LAG' AND run_id = '20261020T1645Z'")
+check("16:45 순찰: payments 측정 줄이 없어서 잡힘", [(x["scope_key"], '"no_snapshots": true' in x["evidence_ref"]) for x in r3], [("payments", True)])
+regular_run(query, write, CFG, at(16, 10))
+r4 = anomalies("WHERE rule_id = 'R4_MALFORMED'")
+check("16:10 순찰: clickstream 깨진 메시지 10개만 (옛 규칙 v0.9의 orders 12개는 안 셈)", [(x["scope_key"], x["observed_value"]) for x in r4], [("clickstream", 10)])
+
+# --- 재처리 뒤 재판정 ---
+before = len(anomalies())
+def event(rid, step, ws, we):
+    write("reprocess_events", [{"request_id": rid, "step": step, "at": at(16, 15).strftime(F), "actor": "reprocess_job", "reason": None,
+                                 "window_start": ws.strftime(F), "window_end": we.strftime(F), "rule_version": "v1.0", "source": "KAFKA",
+                                 "attempt": 1, "parent_request_id": None, "detail": None}])
+for tick_min in range(15, 60, 5):                          # 15시대를 정규 순찰로 먼저 훑어 이상 이력을 만들어 둔다
+    regular_run(query, write, CFG, at(15, tick_min) + timedelta(minutes=15))
+check("재처리 전에 PG_A 이상이 기록되어 있음", len(anomalies("WHERE rule_id = 'R1_PG_FAILURES'")) > 1, True)
+
+event("rq-0", "LEDGER_REPLACED", at(15, 0), at(16, 0))     # 교체는 했는데 데이터는 그대로 (장애가 진짜였던 경우)
+check("교체 끝났는데 아직 재판정 안 한 줄을 찾음", [(x["request_id"], x["window_start"]) for x in pending_replacements(query)], [("rq-0", "2026-10-20 15:00:00")])
+s = run_once(query, write, CFG, at(16, 20))
+check("재판정 결과: 장애가 진짜라 이상이 그대로 남음 (STILL_OPEN)", [x["result"] for x in s["redetected"]], ["STILL_OPEN"])
+check("REDETECTED, VERIFIED 줄이 남음", [x["step"] for x in query("SELECT step FROM gold_b.reprocess_events WHERE actor = 'detect_job' AND request_id = 'rq-0' ORDER BY step")], ["REDETECTED", "VERIFIED"])
+check("같은 교체를 두 번 재판정하지 않음", len(run_once(query, write, CFG, at(16, 25))["redetected"]), 0)
+
+con.execute("UPDATE gold_b.payment_attempts SET status='SUCCESS', failure_code=NULL, failure_cause=NULL, loaded_at=? WHERE completed_at >= ? AND completed_at < ?",
+            (at(16, 28).strftime(F), at(15, 0).strftime(F), at(16, 0).strftime(F)))   # 재처리로 원장이 바뀐 것을 흉내
+event("rq-1", "LEDGER_REPLACED", at(15, 0), at(16, 0))
+s = run_once(query, write, CFG, at(16, 30))
+check("재처리로 원장이 바뀐 뒤 재판정: 이상이 사라짐 (RESOLVED)", [x["result"] for x in s["redetected"]], ["RESOLVED"])
+check("옛 이상 줄은 지워지지 않음 (쌓기만 함)", len(anomalies()) >= before, True)
+check("재판정 순찰 기록 2건(REDETECT)", len(query("SELECT * FROM gold_b.detection_runs WHERE kind = 'REDETECT'")), 2)
+check("VERIFIED 내용에 해결 결과가 들어감", '"result": "RESOLVED"' in query("SELECT detail FROM gold_b.reprocess_events WHERE request_id='rq-1' AND step='VERIFIED'")[0]["detail"], True)
+print("전체:", "모두 통과" if ok else "실패 있음")
+raise SystemExit(0 if ok else 1)
