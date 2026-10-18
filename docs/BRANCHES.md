@@ -93,4 +93,4 @@ gitGraph
 ### silver
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `silver/pipelines` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 준비 | |
+| `silver/pipelines` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
