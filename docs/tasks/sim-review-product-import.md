@@ -1,6 +1,6 @@
 # 작업 지시서: sim/review-product-import
 
-> 상태: 진행 중 · 브랜치: `sim/review-product-import` · 다음 작업: `(미정)`
+> 상태: 진행 중 · 브랜치: `sim/review-product-import` · 다음 작업: `sim/review-ecs`
 
 ## 목표
 
