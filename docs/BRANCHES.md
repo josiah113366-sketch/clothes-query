@@ -76,6 +76,7 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `docs/branch-rules` | - | 진행 중 | |
+| `docs/data-contracts` | [docs-data-contracts.md](tasks/docs-data-contracts.md) | 검토 대기 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

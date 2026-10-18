@@ -1,0 +1,114 @@
+# 검토용 규칙 초안. 운영 검사기에 아직 연결하지 않는다.
+# source_rules는 db/schema/004_orders.sql의 정규화된 업무 행 규칙이다.
+# proposed_changes는 합의 후 반영할 안이며 실행 규칙으로 자동 합치지 않는다.
+version: "0.1.0-draft"
+status: proposed
+runtime_connected: false
+input_stage: normalized_business_row
+source:
+  path: db/schema/004_orders.sql
+  revision: "9bbc29f731949e6de7d6258d87d20bf9df2008d3"
+
+# 자체 초안 형식: fields와 checks를 해석할 검사기는 별도 구현한다.
+# required는 필드 존재 여부, nullable은 값의 null 허용 여부다.
+# timestamp는 시간대가 있는 시각, integer는 bool을 제외한 정수다.
+# FK, UNIQUE, 여러 메시지의 중복/충돌 검사는 README의 처리 계약을 따른다.
+source_rules:
+  orders:
+    fields:
+      order_id: {type: uuid, required: true, nullable: false}
+      member_id: {type: uuid, required: true, nullable: false}
+      session_id: {type: uuid, required: true, nullable: false}
+      status:
+        type: string
+        required: true
+        nullable: false
+        enum: [PLACED, PAID, SHIPPED, DELIVERED, PAYMENT_FAILED, CANCELLED, REFUNDED]
+      status_reason: {type: string, required: false, nullable: true}
+      total_amount: {type: integer, required: true, nullable: false, minimum: 1}
+      ordered_at: {type: timestamp, required: true, nullable: false}
+      updated_at: {type: timestamp, required: true, nullable: false}
+    checks:
+      - id: orders_updated_after_ordered
+        rule: greater_than_or_equal_field
+        field: updated_at
+        other_field: ordered_at
+      - id: orders_cancel_reason
+        when: {field: status, equals: CANCELLED}
+        rule: equals_value
+        field: status_reason
+        value: USER_REQUEST
+      - id: orders_refund_reason
+        when: {field: status, equals: REFUNDED}
+        rule: equals_value
+        field: status_reason
+        value: RETURN
+      - id: orders_other_reason_null
+        when: {field: status, not_in: [CANCELLED, REFUNDED]}
+        rule: is_null
+        field: status_reason
+
+  order_items:
+    fields:
+      order_item_id: {type: uuid, required: true, nullable: false}
+      order_id: {type: uuid, required: true, nullable: false}
+      article_id: {type: string, required: true, nullable: false}
+      quantity: {type: integer, required: true, nullable: false, minimum: 1}
+      unit_price: {type: integer, required: true, nullable: false, minimum: 1}
+    checks: []
+
+  payments:
+    fields:
+      payment_id: {type: uuid, required: true, nullable: false}
+      order_id: {type: uuid, required: true, nullable: false}
+      attempt_no: {type: integer, required: true, nullable: false, minimum: 1}
+      method:
+        type: string
+        required: true
+        nullable: false
+        enum: [CARD, SIMPLE_PAY, BANK_TRANSFER]
+      pg:
+        type: string
+        required: true
+        nullable: false
+        enum: [PG_A, PG_B]
+      amount: {type: integer, required: true, nullable: false, minimum: 1}
+      status:
+        type: string
+        required: true
+        nullable: false
+        enum: [SUCCESS, FAILED]
+      failure_code:
+        type: string
+        required: false
+        nullable: true
+        enum: [INSUFFICIENT_BALANCE, CARD_LIMIT_EXCEEDED, CARD_DECLINED, PG_TIMEOUT, PG_ERROR]
+      requested_at: {type: timestamp, required: true, nullable: false}
+      completed_at: {type: timestamp, required: true, nullable: false}
+    checks:
+      - id: payments_completed_after_requested
+        rule: greater_than_or_equal_field
+        field: completed_at
+        other_field: requested_at
+      - id: payments_failed_requires_code
+        when: {field: status, equals: FAILED}
+        rule: required_non_null
+        field: failure_code
+      - id: payments_success_code_null
+        when: {field: status, equals: SUCCESS}
+        rule: is_null
+        field: failure_code
+
+# 원천 규칙을 임의로 바꾸지 않고, 합의 대기 중인 변경안을 따로 표시한다.
+proposed_changes:
+  - id: payment_order_id_in_gold_b
+    status: proposed
+    description: "Gold B 원장과 뷰에서도 order_id를 필수로 보존한다."
+  - id: payment_failure_code_forward_compatibility
+    status: proposed
+    description: "실패 코드가 없으면 형식 오류. 비어 있지 않은 미등록 코드는 통과시키고 Gold B 뷰에서 UNKNOWN 분류."
+    target: payments.failure_code
+    change_after_agreement: "소비 검사에서 enum 제한을 제거하고 FAILED의 빈 문자열도 거부하도록 정의. 원천 DDL 변경 여부는 별도 확인."
+  - id: payment_content_conflict
+    status: proposed
+    description: "동일 payment_id의 업무 내용이 다르면 정상 중복으로 넘기지 않고 오류 기록. 비교 필드와 기존 집계 처리는 합의 후 구현."
