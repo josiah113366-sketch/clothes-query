@@ -1,0 +1,30 @@
+[
+  {
+    "run_id": "20261020T1510Z",
+    "kind": "REGULAR"
+  },
+  {
+    "run_id": "20261020T1515Z",
+    "kind": "REGULAR"
+  },
+  {
+    "run_id": "20261020T1610Z",
+    "kind": "REGULAR"
+  },
+  {
+    "run_id": "20261020T1714Z",
+    "kind": "REGULAR"
+  },
+  {
+    "run_id": "20261020T1200Z",
+    "kind": "REGULAR"
+  },
+  {
+    "run_id": "20261020T1205Z",
+    "kind": "REGULAR"
+  },
+  {
+    "run_id": "20261020T1620Z-RD-rq-1-1500",
+    "kind": "REDETECT"
+  }
+]

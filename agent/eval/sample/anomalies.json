@@ -1,0 +1,72 @@
+[
+  {
+    "run_id": "20261020T1510Z",
+    "anomaly_id": "a-r1-1",
+    "anomaly_type": "PG_FAILURE_SPIKE",
+    "scope_type": "pg",
+    "scope_key": "PG_A",
+    "window_start": "2026-10-20 14:52:00",
+    "window_end": "2026-10-20 15:07:00",
+    "detected_at": "2026-10-20 15:10:00"
+  },
+  {
+    "run_id": "20261020T1515Z",
+    "anomaly_id": "a-r1-2",
+    "anomaly_type": "PG_FAILURE_SPIKE",
+    "scope_type": "pg",
+    "scope_key": "PG_A",
+    "window_start": "2026-10-20 14:57:00",
+    "window_end": "2026-10-20 15:12:00",
+    "detected_at": "2026-10-20 15:15:00"
+  },
+  {
+    "run_id": "20261020T1610Z",
+    "anomaly_id": "a-r3-1",
+    "anomaly_type": "BRONZE_LAG_SPIKE",
+    "scope_type": "topic",
+    "scope_key": "orders",
+    "window_start": "2026-10-20 16:05:00",
+    "window_end": "2026-10-20 16:10:00",
+    "detected_at": "2026-10-20 16:10:00"
+  },
+  {
+    "run_id": "20261020T1714Z",
+    "anomaly_id": "a-r4-1",
+    "anomaly_type": "MALFORMED_SPIKE",
+    "scope_type": "topic",
+    "scope_key": "clickstream",
+    "window_start": "2026-10-20 17:09:00",
+    "window_end": "2026-10-20 17:14:00",
+    "detected_at": "2026-10-20 17:14:00"
+  },
+  {
+    "run_id": "20261020T1200Z",
+    "anomaly_id": "a-fa-1",
+    "anomaly_type": "PG_FAILURE_SPIKE",
+    "scope_type": "pg",
+    "scope_key": "PG_B",
+    "window_start": "2026-10-20 11:42:00",
+    "window_end": "2026-10-20 11:57:00",
+    "detected_at": "2026-10-20 12:00:00"
+  },
+  {
+    "run_id": "20261020T1205Z",
+    "anomaly_id": "a-fa-2",
+    "anomaly_type": "PG_FAILURE_SPIKE",
+    "scope_type": "pg",
+    "scope_key": "PG_B",
+    "window_start": "2026-10-20 11:47:00",
+    "window_end": "2026-10-20 12:02:00",
+    "detected_at": "2026-10-20 12:05:00"
+  },
+  {
+    "run_id": "20261020T1620Z-RD-rq-1-1500",
+    "anomaly_id": "a-r1-1",
+    "anomaly_type": "PG_FAILURE_SPIKE",
+    "scope_type": "pg",
+    "scope_key": "PG_A",
+    "window_start": "2026-10-20 14:52:00",
+    "window_end": "2026-10-20 15:07:00",
+    "detected_at": "2026-10-20 16:20:00"
+  }
+]

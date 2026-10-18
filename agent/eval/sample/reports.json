@@ -1,0 +1,66 @@
+[
+  {
+    "report_id": "rep-1",
+    "anomaly_id": "a-r1-1",
+    "cause_layer": "PAYMENT",
+    "conclusion": "PG_A 결제 대행사 장애로 보입니다. 데이터 파이프라인 문제는 아닙니다.",
+    "claims": [
+      {
+        "text": "PG_A의 PG 원인 실패가 21건",
+        "evidence": [
+          {
+            "tool": "payment_summary"
+          }
+        ]
+      },
+      {
+        "text": "실패 코드가 PG_TIMEOUT으로 쏠림",
+        "evidence": [
+          {
+            "tool": "payment_failure_codes"
+          }
+        ]
+      },
+      {
+        "text": "다른 PG는 정상",
+        "evidence": []
+      }
+    ]
+  },
+  {
+    "report_id": "rep-2",
+    "anomaly_id": "a-r3-1",
+    "cause_layer": "INGEST",
+    "conclusion": "유입이 늘어 Bronze 적재가 밀립니다.",
+    "claims": [
+      {
+        "text": "orders 지연 200초",
+        "evidence": [
+          {
+            "tool": "bronze_lag"
+          }
+        ]
+      },
+      {
+        "text": "유입량 증가",
+        "evidence": [
+          {
+            "tool": "ingest_volume"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "report_id": "rep-3",
+    "anomaly_id": "a-r4-1",
+    "cause_layer": "INGEST",
+    "conclusion": "적재 지연으로 보입니다.",
+    "claims": [
+      {
+        "text": "clickstream 지연",
+        "evidence": []
+      }
+    ]
+  }
+]

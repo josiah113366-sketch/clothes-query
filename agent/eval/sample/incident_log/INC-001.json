@@ -1,0 +1,10 @@
+{
+  "incident_id": "INC-001",
+  "scenario": "PG_OUTAGE",
+  "injected_start": "2026-10-20T15:00:00Z",
+  "injected_end": "2026-10-20T15:30:00Z",
+  "scope_key": "pg=PG_A",
+  "expected_signal": "pg_cause_failures",
+  "expected_layer": "PAYMENT",
+  "expected_evidence": "PG_A의 failure_code가 PG_TIMEOUT으로 쏠림"
+}

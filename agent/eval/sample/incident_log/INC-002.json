@@ -1,0 +1,10 @@
+{
+  "incident_id": "INC-002",
+  "scenario": "INGEST_LAG",
+  "injected_start": "2026-10-20T16:00:00Z",
+  "injected_end": "2026-10-20T16:30:00Z",
+  "scope_key": "topic=orders",
+  "expected_signal": "bronze_lag_sec",
+  "expected_layer": "INGEST",
+  "expected_evidence": "orders의 Bronze 지연이 커지고 유입량도 늘어남 (폭주 10배)"
+}
