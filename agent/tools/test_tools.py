@@ -116,7 +116,7 @@ mf = {(r["field"], r["reason"]): (r["errors"], r["earliest_offset"]) for r in ru
 check("깨진 필드: session_id 2건(가장 이른 offset 10), article_id 1건", mf, {("session_id", "MISSING_FIELD"): (2, 10), ("article_id", "TYPE_MISMATCH"): (1, 10)})
 rel = run("ledger_reliability", **W)
 check("신뢰성: orders 파티션 0에서 2칸 누락", [(g["topic"], g["missing_count"]) for g in rel["missing_messages"]], [("orders", 2)])
-check("신뢰성: 메시지 중복 1, 결제 중복 1", (rel["duplicate_messages"], rel["duplicate_payments"]), (1, 1))
+check("신뢰성: 메시지 중복 1, 결제 중복(참고값) 1", (rel["duplicate_messages"], rel["payment_duplicate_rows_info"]), (1, 1))
 check("신뢰성: 적재 잡은 1분 전까지 썼으므로 OK, 수집기도 1분 전이라 OK", (rel["ledger_writer"]["status"], rel["lag_collector"]["status"]), ("OK", "OK"))
 late = run_tool("ledger_reliability", W, execute, dialect="sqlite", now=datetime(2026, 10, 20, 15, 14, 0))
 check("신뢰성: 4분 동안 안 쓰면 STOPPED", (late["ledger_writer"]["status"], late["lag_collector"]["status"]), ("STOPPED", "STOPPED"))

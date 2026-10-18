@@ -212,10 +212,10 @@ def _judge_reliability(results, now):
     return {
         "missing_messages": results["gaps"],
         "duplicate_messages": (results["duplicate_messages"] or [{}])[0].get("duplicate_rows", 0),
-        "duplicate_payments": (results["duplicate_payments"] or [{}])[0].get("duplicate_rows", 0),
+        "payment_duplicate_rows_info": (results["duplicate_payments"] or [{}])[0].get("duplicate_rows", 0),
         "ledger_writer": status(last_loaded),
         "lag_collector": status(last_collected),
-        "note": "STOPPED는 데이터 이상이 아니라 관제(적재 잡·수집기) 고장일 수 있다. 원인 결론과 섞지 않는다.",
+        "note": "적재 문제는 missing_messages와 duplicate_messages(topic_messages 기준)로만 판단한다. payment_duplicate_rows_info는 참고값이며 같은 payment_id 중복은 정상이다(뷰가 걸러 줌). STOPPED는 데이터 이상이 아니라 관제(적재 잡·수집기) 고장일 수 있어 원인 결론과 섞지 않는다.",
     }
 
 
