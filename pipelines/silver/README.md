@@ -55,3 +55,23 @@ python -m pipelines.silver.reviews --input-root review-simulator/.local/lake --o
 `transactions.py`의 `build_silver(orders, order_items, payments)`를 사용한다.
 
 입력은 CDC의 변경 후 비즈니스 행 목록이다. 주문 상태 변경은 `updated_at` 순서로 복원한다. 결과는 `orders_current`, `order_status_history`, `silver_order_items`, `payment_attempts`다. 시각은 UTC와 KST를 함께 남긴다. 실제 CDC 변경 순서·삭제·재전송 처리와 Bronze 경로 연결은 원본 샘플 확인 후 추가한다.
+
+### 거래 오류 처리와 반환값
+
+`build_silver()`는 정상 상세 4개에 `quarantined_records`와 `dq_results`를 더한 딕셔너리를 반환한다. 아직 파일을 저장하거나 이전 실행의 격리 상태를 갱신하지 않는다.
+
+| 결과 | 내용 |
+|---|---|
+| `quarantined_records` | 데이터셋, 입력 목록의 행 번호(1부터), 업무 키, 주문 키, 오류 필드·사유·구분, `check_version` |
+| `dq_results` | 원천 데이터셋별 입력·정상 채택·격리·중복·충돌·대기 건수, 출력별 행 수, 영향 주문·입력 행, PASS/INCOMPLETE |
+
+- 잘못된 행은 분리하고 다른 정상 행을 처리한다. 일반 프로그램 오류까지 잡아서 숨기지 않는다.
+- 같은 결제·주문상품 키에 다른 업무 내용이 있으면 그 키의 모든 행을 분리한다. 같은 키의 한 행이 형식 오류인 경우도 다른 행만 임의로 채택하지 않는다.
+- 주문의 일부 변경에 오류·동시각 충돌이 있으면 해당 주문 전체를 보류해 이전 상태를 최신 상태로 잘못 내보내지 않는다. 관련 주문상품·결제는 `DEPENDENCY_BLOCKED`로 남긴다.
+- 현재 입력에 주문이 없는 항목은 `PENDING_REFERENCE`다. 잘못된 결제라고 확정하거나 실제 주문 저장소를 자동 조회하지 않는다. 주문을 포함한 입력으로 재실행해야 한다.
+- 실패 코드 누락·성공 결제의 실패 코드, 0 이하 금액·단가를 분리한다. 현재 DB의 필수 정보·양수 제약을 반영했다. 미등록 실패 코드의 분류나 YAML의 전체 검사기는 이 함수에서 실행하지 않는다.
+- `input_count = accepted_count + duplicate_count + quarantined_count`다. accepted_count는 중복 제거 후 채택한 입력 기록 수이며 주문 현재 상태 출력 수와 다를 수 있다. 오류는 행당 첫 사유를 기록하고, conflict_count/pending_count는 격리 행 수의 부분집합이다.
+- 오류·대기 정보가 있는 데이터셋은 INCOMPLETE다. 후속 Gold A/저장 코드는 **모든 dq_results를 확인**해 영향 범위를 완전한 결과로 표시하지 않아야 한다. 정상 출력이 존재한다는 것만으로 전체 처리 완료로 판단하지 않는다.
+- `check_version=transactions.v1`은 이 계산 코드의 검사 버전이다. 공통 YAML 규칙 버전을 적용했다고 표시하지 않는다. 원본 파일/Kafka 위치·실행 ID는 실제 입력 연결 단계에서 추가한다. 현재 행 번호는 지속적인 원본 식별 키가 아니다.
+
+이 함수는 제공된 입력 안에서만 중복·충돌을 확인한다. 이전 실행에서 이미 저장한 결제와의 충돌, 저장 결과 교체·대상 외 결과 보존, Gold A의 품질 상태 사용은 실제 입출력 연결 작업에서 구현한다.
