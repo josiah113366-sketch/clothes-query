@@ -204,10 +204,9 @@ def test_pg_extra_fail_reaches_attempts(member_ids, catalog) -> None:
     runner, orders, _, _ = make(
         member_ids,
         catalog,
-        steps=[(0, BURST)],
+        steps=[(0, ControlState(True, "burst", {"PG_A": 1.0}))],  # 제어 신호가 기준이다
         mode="burst",
         visits_daily=3_000,
-        pg_extra_fail={"PG_A": 1.0},
     )
     runner.run_until(MONDAY + timedelta(minutes=40))
     runner.drain()
@@ -215,6 +214,31 @@ def test_pg_extra_fail_reaches_attempts(member_ids, catalog) -> None:
     pg_a = [p for p in payments if p.pg == "PG_A"]
     assert pg_a and all(p.failure_code in ("PG_TIMEOUT", "PG_ERROR") for p in pg_a)
     assert any(p.status == "SUCCESS" for p in payments if p.pg == "PG_B")
+
+
+def test_pg_extra_fail_from_control_affects_only_later_attempts(member_ids, catalog) -> None:
+    outage = ControlState(True, "burst", {"PG_A": 1.0, "PG_X": 0.5})  # PG_X는 모르는 이름
+    steps = [(0, BURST), (30, outage), (60, BURST)]  # 배속 60: 실제 30초 = 시뮬레이터 30분
+    runner, orders, _, lines = make(
+        member_ids, catalog, steps=steps, mode="burst", visits_daily=3_000
+    )
+    runner.run_until(MONDAY + timedelta(minutes=90))
+    payments = [c[1] for c in orders.calls if c[0] == "add_payment"]
+    start = MONDAY + timedelta(minutes=30, seconds=2)  # 제어 확인 주기(실제 1초 = 1분) 여유
+    end = MONDAY + timedelta(minutes=60)
+
+    def pg_a(lo, hi):
+        return [p for p in payments if p.pg == "PG_A" and lo <= p.requested_at < hi]
+
+    before, during = pg_a(MONDAY, MONDAY + timedelta(minutes=29)), pg_a(start, end)
+    after = pg_a(end + timedelta(minutes=2), MONDAY + timedelta(minutes=90))
+    assert before and during and after
+    assert any(p.status == "SUCCESS" for p in before)
+    assert all(p.failure_code in ("PG_TIMEOUT", "PG_ERROR") for p in during)
+    assert any(p.status == "SUCCESS" for p in after)
+    changes = [line for line in lines if line.startswith("pg_extra_fail:")]
+    assert changes == ['pg_extra_fail: {} → {"PG_A": 1.0}', 'pg_extra_fail: {"PG_A": 1.0} → {}']
+    assert not any(line.startswith("mode:") for line in lines)  # 모드는 그대로다
 
 
 # --- 제어 파일 ---
