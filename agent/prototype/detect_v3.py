@@ -4,21 +4,23 @@ from ledger_v3 import prefix, MIN
 from sample_data import PGS, TOPICS, DAY
 from datetime import timedelta
 
-DEFAULT = dict(r1_win=15, r1_k=3, lag_sec=60, miss_min=3, r4_win=5, mal_min=5, mal_ratio=0.05, visible_delay=1, step=1)
+DEFAULT = dict(r1_win=15, r1_k=3, r1_rate=0.0, lag_sec=60, miss_min=3, r4_win=5, mal_min=5, mal_ratio=0.05, visible_delay=1, step=1)
 
 def run(pay, msg, mal, lag, **kw):
     p = {**DEFAULT, **kw}
     d = p["visible_delay"]            # 원장에 보이기까지 1분 (1분마다 쌓음)
     fires = []                         # (분, rule, scope)
     pf = {pg: prefix(pay[pg]["pg_fail"]) for pg in PGS}
+    pa = {pg: prefix(pay[pg]["attempts"]) for pg in PGS}
     mp = {t: prefix(msg[t]) for t in TOPICS}
     ml = {t: prefix(mal[t]) for t in TOPICS}
     for T in range(0, MIN, p["step"]):               # 탐지가 1분마다 돈다. T분 시점에는 T-d분까지의 원장이 보인다.
         v = T - d
         if v < 0: continue
-        for pg in PGS:                 # R1: 최근 r1_win분 PG 원인 실패 합
-            a = max(0, v - p["r1_win"] + 1)
-            if pf[pg][v+1] - pf[pg][a] >= p["r1_k"]:
+        for pg in PGS:                 # R1: 최근 r1_win분 PG 원인 실패 합이 r1_k건 이상이고,
+            a = max(0, v - p["r1_win"] + 1)   # 그 PG 결제 시도 중 PG 원인 실패 비율이 r1_rate 이상 (주문량이 많을 때 평소 실패로 울리지 않게)
+            fails, tries = pf[pg][v+1] - pf[pg][a], pa[pg][v+1] - pa[pg][a]
+            if fails >= p["r1_k"] and tries and fails / tries >= p["r1_rate"]:
                 fires.append((T, "R1", f"pg={pg}"))
         for t in TOPICS:
             cur = lag[t][v]            # R3: 최신 지연 스냅샷, 또는 스냅샷이 연속으로 없음
