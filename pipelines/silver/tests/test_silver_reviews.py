@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from pipelines.silver.reviews import _input_uris, run
+from pipelines.silver import reviews
 
 
 def _review(
@@ -49,7 +50,8 @@ def _write_input(root: Path, utc_day: str, rows: list[dict[str, object]]) -> Non
 
 def _output(root: Path, kst_day: str) -> list[dict[str, object]]:
     day = date.fromisoformat(kst_day)
-    path = root / "silver" / "reviews" / f"year={day:%Y}" / f"month={day:%m}" / f"day={day:%d}" / "part-00000.jsonl"
+    manifest = json.loads((root / "silver/reviews/scopes" / f"{kst_day}_{kst_day}" / "current.json").read_text(encoding="utf-8"))
+    path = Path(manifest["outputs"][f"year={day:%Y}/month={day:%m}/day={day:%d}/part-00000.jsonl"])
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
@@ -122,3 +124,48 @@ def test_missing_input_preserves_output_but_explicit_empty_file_clears_day(tmp_p
     assert _output(target, "2026-10-16") == previous
     _write_input(source, "2026-10-15", [])
     assert run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16)) == {"2026-10-16": 0}
+
+
+def test_review_errors_conflicts_and_incomplete_scope(tmp_path):
+    source, target = tmp_path / "source", tmp_path / "output"
+    bad = _review("bad", "2026-10-15T23:30:00Z")
+    conflict = _review("conflict", "2026-10-15T23:30:00Z")
+    good = _review("good", "2026-10-15T23:30:00Z")
+    outside = _review("outside", "2026-10-15T00:30:00Z")
+    _write_input(source, "2026-10-15", [bad, dict(bad, rating=7), conflict,
+                 dict(conflict, text="different"), dict(conflict, emitted_at="2026-10-17T00:00:00Z"), good, dict(good), outside,
+                 dict(_review("unknown-date", "invalid"))])
+    counts = run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16))
+    assert counts == {"2026-10-16": 1}
+    assert _output(target, "2026-10-16")[0]["review_id"] == "good"
+    pointer = target / "silver/reviews/scopes/2026-10-16_2026-10-16/current.json"
+    manifest = json.loads(pointer.read_text(encoding="utf-8"))
+    dq = json.loads(Path(manifest["outputs"]["dq_results.jsonl"]).read_text(encoding="utf-8"))
+    assert manifest["status"] == "INCOMPLETE"
+    assert dq["affected_scope"] == "REQUESTED_RANGE"
+    assert dq["outside_range_count"] == 1
+    assert dq["conflict_count"] == 2
+    assert dq["input_count"] == dq["accepted_count"] + dq["duplicate_count"] + dq["quarantined_count"]
+    issues = Path(manifest["outputs"]["quarantined_records.jsonl"]).read_text(encoding="utf-8")
+    assert "source_line" in issues and '"text"' not in issues and "C-test-only" not in issues
+
+
+def test_review_range_publish_failure_keeps_previous_bundle(tmp_path, monkeypatch):
+    source, target = tmp_path / "source", tmp_path / "output"
+    _write_input(source, "2026-10-15", [_review("R-1", "2026-10-15T23:30:00Z")])
+    _write_input(source, "2026-10-16", [_review("R-2", "2026-10-16T23:30:00Z")])
+    start, end = date(2026, 10, 16), date(2026, 10, 17)
+    run(str(source), str(target), start, end)
+    pointer = target / "silver/reviews/scopes/2026-10-16_2026-10-17/current.json"
+    previous = pointer.read_bytes()
+    write = reviews._write_text
+    def fail_second_day(uri, body):
+        if "/day=17/" in uri.replace("\\", "/"):
+            raise OSError("simulated storage failure")
+        write(uri, body)
+    monkeypatch.setattr(reviews, "_write_text", fail_second_day)
+    with pytest.raises(OSError):
+        run(str(source), str(target), start, end)
+    assert pointer.read_bytes() == previous
+    manifest = json.loads(previous)
+    assert all(Path(path).exists() for path in manifest["outputs"].values())

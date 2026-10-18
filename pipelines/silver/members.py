@@ -12,6 +12,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from .common import RowError, collect_latest, decode_record, publish_bundle
+
 KST = ZoneInfo("Asia/Seoul")
 PARTITION = re.compile(
     r"(?:^|/)year=(\d{4})/month=(\d{2})/day=(\d{2})/"
@@ -81,13 +83,13 @@ def _lines(uri: str):
 
 def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
-        raise ValueError(f"{field}는 시간대가 있는 ISO 시각이어야 합니다")
+        raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
         result = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(f"{field}는 시간대가 있는 ISO 시각이어야 합니다") from exc
+        raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if result.tzinfo is None or result.utcoffset() is None:
-        raise ValueError(f"{field}에 시간대가 없습니다")
+        raise RowError(field, "INVALID_VALUE", "시간대가 없습니다")
     return result
 
 
@@ -95,18 +97,18 @@ def _normalize(raw: dict[str, object]) -> tuple[str, int, dict[str, object]]:
     for field in FIELDS:
         value = raw.get(field)
         if value is None or (isinstance(value, str) and not value.strip()):
-            raise ValueError(f"{field}가 비어 있습니다")
+            raise RowError(field, "MISSING_FIELD", "필수 정보가 없습니다")
     if not isinstance(raw["member_id"], str):
-        raise ValueError("member_id는 문자열이어야 합니다")
+        raise RowError("member_id", "TYPE_MISMATCH", "member_id는 문자열이어야 합니다")
     if not isinstance(raw["marketing_consent"], bool):
-        raise ValueError("marketing_consent는 boolean이어야 합니다")
+        raise RowError("marketing_consent", "TYPE_MISMATCH", "marketing_consent는 boolean이어야 합니다")
     if raw["status"] not in ("ACTIVE", "WITHDRAWN"):
-        raise ValueError("지원하지 않는 회원 상태입니다")
+        raise RowError("status", "INVALID_VALUE", "지원하지 않는 회원 상태입니다")
     if raw.get("__op") not in ("r", "c", "u"):
-        raise ValueError("지원하지 않는 CDC 변경 종류입니다")
+        raise RowError("__op", "INVALID_VALUE", "지원하지 않는 CDC 변경 종류입니다")
     source_ts = raw.get("__source_ts_ms")
     if isinstance(source_ts, bool) or not isinstance(source_ts, int) or source_ts < 0:
-        raise ValueError("__source_ts_ms는 0 이상의 정수여야 합니다")
+        raise RowError("__source_ts_ms", "INVALID_VALUE", "__source_ts_ms는 0 이상의 정수여야 합니다")
     signup = _timestamp(raw.get("signup_at"), "signup_at")
     created = _timestamp(raw.get("created_at"), "created_at")
     withdrawn_value = raw.get("withdrawn_at")
@@ -114,7 +116,7 @@ def _normalize(raw: dict[str, object]) -> tuple[str, int, dict[str, object]]:
         None if withdrawn_value is None else _timestamp(withdrawn_value, "withdrawn_at")
     )
     if (raw["status"] == "WITHDRAWN") != (withdrawn is not None):
-        raise ValueError("status와 withdrawn_at이 일치하지 않습니다")
+        raise RowError("withdrawn_at", "INVALID_VALUE", "status와 withdrawn_at이 일치하지 않습니다")
     row = {
         "member_id": raw["member_id"],
         "age_band": raw["age_band"],
@@ -132,51 +134,52 @@ def _normalize(raw: dict[str, object]) -> tuple[str, int, dict[str, object]]:
     return str(raw["member_id"]), source_ts, row
 
 
-def build_current(input_root: str, through: date) -> tuple[list[dict[str, object]], int]:
+def build_quality(input_root: str, through: date) -> tuple[dict, list[str]]:
     files = _input_files(input_root, through)
     if not files:
         raise FileNotFoundError("지정 날짜까지의 회원 Bronze 파일이 없습니다")
-    current: dict[str, tuple[int, dict[str, object]]] = {}
-    for uri in files:
-        for line_no, line in enumerate(_lines(uri), 1):
-            if not line.strip():
-                continue
-            try:
-                raw = json.loads(line)
-                if not isinstance(raw, dict):
-                    raise ValueError("JSON 객체가 아닙니다")
-                member_id, source_ts, row = _normalize(raw)
-            except (json.JSONDecodeError, ValueError) as exc:
-                # 원본에는 회원 데이터가 있으므로 오류에 행 내용은 넣지 않는다.
-                raise ValueError(f"Bronze 파일 {uri}의 {line_no}번째 행: {exc}") from exc
-            previous = current.get(member_id)
-            if previous is None or source_ts > previous[0]:
-                current[member_id] = (source_ts, row)
-            elif source_ts == previous[0] and row != previous[1]:
-                raise ValueError("같은 회원의 동일 원천 시각에 서로 다른 상태가 있습니다")
-    return [current[member_id][1] for member_id in sorted(current)], len(files)
+    inputs = [decode_record(line, uri, number)
+              for uri in files for number, line in enumerate(_lines(uri), 1) if line.strip()]
+    rows, issues, summary = collect_latest(
+        inputs, "members", "member_id", lambda raw: _normalize(raw)[2], "source_ts_ms", "members.v1")
+    summary["through_date_utc"] = through.isoformat()
+    return {"members_current": rows, "quarantined_records": issues, "dq_results": [summary]}, files
+
+
+def build_current(input_root: str, through: date) -> tuple[list[dict[str, object]], int]:
+    # 기존 계산 호출은 유지한다. 후속 집계는 품질 결과까지 담긴 manifest를 읽어야 한다.
+    result, files = build_quality(input_root, through)
+    return result["members_current"], len(files)
+
+
+def _write_text(uri: str, body: str) -> None:
+    path = Path(uri)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=".members-", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        temporary.write_text(body, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def run(input_root: str, output_root: str, through: date) -> tuple[int, int, str]:
     if output_root.startswith("s3://"):
         raise ValueError("첫 버전은 로컬 Silver 출력만 지원합니다")
-    if input_root.rstrip("/\\") == output_root.rstrip("/\\"):
-        raise ValueError("입력과 출력 경로는 달라야 합니다")
-    rows, file_count = build_current(input_root, through)
-    path = Path(output_root) / "silver" / "members_current" / f"as_of={through}" / OUTPUT_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # 재실행 때 추가하지 않고 해당 시점의 전체 결과를 교체한다.
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, prefix=".members-", delete=False
-    ) as handle:
-        temporary = Path(handle.name)
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-    try:
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return len(rows), file_count, str(path)
+    if not input_root.startswith("s3://"):
+        source, target = Path(input_root).resolve(), Path(output_root).resolve()
+        if source == target or source in target.parents or target in source.parents:
+            raise ValueError("입력과 출력 경로는 서로 겹치지 않아야 합니다")
+    result, files = build_quality(input_root, through)
+    base = str(Path(output_root).resolve() / "silver" / "members_current" / f"as_of={through}")
+    manifest = publish_bundle(base, {name + ".jsonl": rows for name, rows in result.items()}, {
+        "status": result["dq_results"][0]["status"], "check_version": "members.v1",
+        "through_date_utc": through.isoformat(), "input_files": files,
+        "input_count": result["dq_results"][0]["input_count"],
+    }, _write_text)
+    return len(result["members_current"]), len(files), manifest["outputs"]["members_current.jsonl"]
 
 
 def main() -> None:
@@ -187,6 +190,7 @@ def main() -> None:
     args = parser.parse_args()
     count, files, path = run(args.input_root, args.output_root, args.through_date)
     print(f"회원 Bronze {files}개 파일 → Silver 현재 회원 {count}행: {path}")
+    print(f"품질·완료 상태 확인: {Path(args.output_root).resolve() / 'silver/members_current' / f'as_of={args.through_date}' / 'current.json'}")
 
 
 if __name__ == "__main__":

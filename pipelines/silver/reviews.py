@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from .common import RowError, collect_latest, decode_record, publish_bundle
+
 KST = ZoneInfo("Asia/Seoul")
 OUTPUT_FILE = "part-00000.jsonl"
 
@@ -84,26 +86,26 @@ def _write_text(uri: str, body: str) -> None:
 
 def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
-        raise ValueError(f"{field}는 시간대가 있는 ISO 시각이어야 합니다")
+        raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(f"{field}는 시간대가 있는 ISO 시각이어야 합니다") from exc
+        raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError(f"{field}에 시간대가 없습니다")
+        raise RowError(field, "INVALID_VALUE", "시간대가 없습니다")
     return parsed
 
 
 def normalize_review(raw: dict[str, object]) -> dict[str, object]:
     """현재 확정된 review.v2 작성 이벤트를 운영용 Silver 모양으로 바꾼다."""
     if raw.get("schema_version") != "review.v2" or raw.get("event_type") != "review_created":
-        raise ValueError("지원하지 않는 리뷰 스키마 또는 이벤트 종류입니다")
+        raise RowError("schema_version/event_type", "INVALID_VALUE", "지원하지 않는 리뷰 스키마 또는 이벤트 종류입니다")
     for field in ("review_id", "event_id", "product_id", "text"):
         if not isinstance(raw.get(field), str) or not str(raw[field]).strip():
-            raise ValueError(f"{field}가 비어 있습니다")
+            raise RowError(field, "INVALID_VALUE", "비어 있지 않은 문자열이어야 합니다")
     rating = raw.get("rating")
     if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
-        raise ValueError("rating은 1~5의 정수여야 합니다")
+        raise RowError("rating", "INVALID_VALUE", "rating은 1~5의 정수여야 합니다")
     created = _timestamp(raw.get("created_at"), "created_at")
     emitted = _timestamp(raw.get("emitted_at"), "emitted_at")
     kst = created.astimezone(KST)
@@ -129,69 +131,68 @@ def normalize_review(raw: dict[str, object]) -> dict[str, object]:
     }
 
 
-def build_reviews(input_root: str, start: date, end: date) -> dict[str, list[dict[str, object]]]:
-    """KST 날짜 범위에 속한 리뷰만 남기고 review_id별 최신 재생성 1건을 선택한다."""
+def build_quality(input_root: str, start: date, end: date) -> tuple[dict, list[str]]:
+    """읽은 범위에서 키의 오류를 확인한 뒤 KST 대상 날짜를 선택한다."""
     if end < start:
         raise ValueError("end-date가 start-date보다 빠릅니다")
-    selected: dict[str, dict[str, object]] = {}
-    found_input = False
-    # KST 하루의 앞부분은 전날 UTC 폴더에 있으므로 시작일 하루 전부터 읽는다.
+    files = []
     utc_day = start - timedelta(days=1)
     while utc_day <= end:
-        for uri in _input_uris(input_root, utc_day):
-            found_input = True
-            for line_no, line in enumerate(_read_text(uri).splitlines(), 1):
-                if not line.strip():
-                    continue
-                try:
-                    raw = json.loads(line)
-                    if not isinstance(raw, dict):
-                        raise ValueError("JSON 객체가 아닙니다")
-                    row = normalize_review(raw)
-                except (json.JSONDecodeError, ValueError) as exc:
-                    # 원문·회원값을 오류 메시지에 싣지 않는다.
-                    raise ValueError(f"{uri}:{line_no}: {exc}") from exc
-                day = date.fromisoformat(str(row["review_date_kst"]))
-                if not start <= day <= end:
-                    continue
-                review_id = str(row["review_id"])
-                previous = selected.get(review_id)
-                # 같은 리뷰가 재전송·재생성됐으면 emitted_at이 가장 늦은 1건만 남긴다.
-                if previous is None or str(row["emitted_at_utc"]) > str(previous["emitted_at_utc"]):
-                    selected[review_id] = row
-                elif str(row["emitted_at_utc"]) == str(previous["emitted_at_utc"]) and row != previous:
-                    raise ValueError(f"review_id {review_id}: 같은 전송 시각에 서로 다른 내용이 있습니다")
+        files.extend(_input_uris(input_root, utc_day))
         utc_day += timedelta(days=1)
-
-    if not found_input:
+    if not files:
         raise FileNotFoundError("대상 UTC 날짜 범위에 운영 리뷰 JSONL 파일이 없습니다")
-
-    by_day: dict[str, list[dict[str, object]]] = {}
+    inputs = [decode_record(line, uri, number)
+              for uri in files for number, line in enumerate(_read_text(uri).splitlines(), 1) if line.strip()]
+    rows, issues, summary = collect_latest(
+        inputs, "reviews", "review_id", normalize_review, "emitted_at_utc", "reviews.v1")
+    by_day = {}
     day = start
     while day <= end:
-        # 원본이 0건인 날짜도 빈 결과를 써야 과거 집계가 남지 않는다.
         by_day[day.isoformat()] = []
         day += timedelta(days=1)
-    for row in selected.values():
-        by_day[str(row["review_date_kst"])].append(row)
-    for rows in by_day.values():
-        rows.sort(key=lambda row: (str(row["created_at_utc"]), str(row["review_id"])))
-    return by_day
+    for row in rows:
+        if row["review_date_kst"] in by_day:
+            by_day[row["review_date_kst"]].append(row)
+    for selected in by_day.values():
+        selected.sort(key=lambda row: (row["created_at_utc"], row["review_id"]))
+    summary.update(start_date_kst=start.isoformat(), end_date_kst=end.isoformat(),
+                   output_count=sum(map(len, by_day.values())),
+                   outside_range_count=len(rows) - sum(map(len, by_day.values())),
+                   affected_scope="REQUESTED_RANGE" if issues else None)
+    # 날짜·상품을 알 수 없는 오류도 있으므로 오류가 하나라도 있으면 요청 범위를 불완전 표시한다.
+    return {"by_day": by_day, "quarantined_records": issues, "dq_results": [summary]}, files
+
+
+def build_reviews(input_root: str, start: date, end: date) -> dict[str, list[dict[str, object]]]:
+    result, _ = build_quality(input_root, start, end)
+    return result["by_day"]
 
 
 def run(input_root: str, output_root: str, start: date, end: date) -> dict[str, int]:
-    if input_root.rstrip("/") == output_root.rstrip("/"):
-        raise ValueError("입력과 출력 루트는 서로 달라야 합니다")
-    by_day = build_reviews(input_root, start, end)
-    counts: dict[str, int] = {}
-    for day, rows in by_day.items():
-        body = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows)
-        # 재처리: 지정 날짜의 기존 파일을 새 결과로 교체하며 뒤에 덧붙이지 않는다.
-        kst_day = date.fromisoformat(day)
-        _write_text(_uri(output_root, "silver", "reviews", f"year={kst_day:%Y}",
-                         f"month={kst_day:%m}", f"day={kst_day:%d}", OUTPUT_FILE), body)
-        counts[day] = len(rows)
-    return counts
+    if input_root.startswith("s3://") and output_root.startswith("s3://"):
+        source, target = input_root.rstrip("/"), output_root.rstrip("/")
+        if source == target or source.startswith(target + "/") or target.startswith(source + "/"):
+            raise ValueError("입력과 출력 경로는 서로 겹치지 않아야 합니다")
+    elif not input_root.startswith("s3://") and not output_root.startswith("s3://"):
+        source, target = Path(input_root).resolve(), Path(output_root).resolve()
+        if source == target or source in target.parents or target in source.parents:
+            raise ValueError("입력과 출력 경로는 서로 겹치지 않아야 합니다")
+    result, files = build_quality(input_root, start, end)
+    root = output_root if output_root.startswith("s3://") else str(Path(output_root).resolve())
+    # 날짜 범위별 manifest 한 개가 정상·격리·품질 파일 전체를 함께 공개한다.
+    base = _uri(root, "silver", "reviews", "scopes", f"{start}_{end}")
+    payloads = {"quarantined_records.jsonl": result["quarantined_records"],
+                "dq_results.jsonl": result["dq_results"]}
+    for day, rows in result["by_day"].items():
+        at = date.fromisoformat(day)
+        payloads[f"year={at:%Y}/month={at:%m}/day={at:%d}/{OUTPUT_FILE}"] = rows
+    publish_bundle(base, payloads, {
+        "status": result["dq_results"][0]["status"], "check_version": "reviews.v1",
+        "start_date_kst": start.isoformat(), "end_date_kst": end.isoformat(), "input_files": files,
+        "input_count": result["dq_results"][0]["input_count"],
+    }, _write_text)
+    return {day: len(rows) for day, rows in result["by_day"].items()}
 
 
 def main() -> None:
@@ -203,6 +204,8 @@ def main() -> None:
     args = parser.parse_args()
     for day, count in run(args.input_root, args.output_root, args.start_date, args.end_date).items():
         print(f"{day}: Silver 리뷰 {count}건")
+    print("품질·완료 상태 확인: " + _uri(args.output_root, "silver", "reviews", "scopes",
+          f"{args.start_date}_{args.end_date}", "current.json"))
 
 
 if __name__ == "__main__":

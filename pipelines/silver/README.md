@@ -5,10 +5,10 @@
 | 항목 | 기준 |
 |---|---|
 | 입력 | `bronze/members-events/year=YYYY/month=MM/day=DD/*.json` 전체 이력. 폴더 날짜는 UTC Kafka 수집일 |
-| 출력 | 로컬 `silver/members_current/as_of=YYYY-MM-DD/part-00000.jsonl` |
+| 출력 | 로컬 `silver/members_current/as_of=YYYY-MM-DD/current.json`이 가리키는 정상·격리·품질 결과 묶음 |
 | 한 행의 기준 | 해당 UTC 수집일까지의 `member_id`당 최신 상태 1행 |
-| 중복·순서 | 같은 회원의 동일 내용·원천 시각은 한 번만 반영. 더 큰 `__source_ts_ms` 선택. 같은 시각에 내용이 다르면 오류 |
-| 재처리 | 지정 날짜까지의 전체 이력을 다시 읽어 해당 `as_of` 결과 파일 교체 |
+| 중복·순서 | 동일 내용·원천 시각은 중복 제거. 오류 없는 회원만 더 큰 `__source_ts_ms` 선택. 오류·동시각 충돌이 있는 회원은 전체 보류 |
+| 재처리 | 지정 날짜까지 전체 이력을 다시 읽어 결과 묶음 저장 후 해당 `as_of`의 current.json 교체 |
 | 제외 | 이름·이메일·전화번호 등 PII. Source 커넥터가 입수에서 제외하며 Silver도 필요한 필드만 선택 |
 
 ```powershell
@@ -22,10 +22,10 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 | 항목 | 기준 |
 |---|---|
 | 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/year=YYYY/month=MM/day=DD/*.jsonl` (UTC 작성일) |
-| 출력 | `silver/reviews/year=YYYY/month=MM/day=DD/part-00000.jsonl` (KST 작성일) |
+| 출력 | `silver/reviews/scopes/<시작일>_<종료일>/current.json`이 가리키는 정상·격리·품질 묶음. 정상 파일은 실행 폴더 안의 `year/month/day/part-00000.jsonl` (KST 작성일) |
 | 한 행의 기준 | `review_id`당 현재 `review_created` 1건 |
-| 재처리 | 지정한 KST 날짜별 결과 파일 교체. 같은 범위를 두 번 실행해도 행 수 증가 없음 |
-| 중복 | 같은 `review_id`의 재전송/재생성은 `emitted_at`이 가장 늦은 행을 선택. 동시간 충돌은 실패 |
+| 재처리 | 같은 KST 요청 범위를 다시 계산해 해당 범위의 current.json 교체. 과거 실행을 합치지 않음 |
+| 중복 | 오류 없는 review_id만 최신 emitted_at 선택. 오류·동시간 충돌은 해당 리뷰 전체 보류 |
 | 보존 | 원문, 별점, 원천 `product_id`, `order_id`, 작성 시각, 전송 시각 |
 | 제외 | `member_id`와 `reviews_truth/` 평가 라벨은 운영 분석 출력에 넣지 않음 |
 
@@ -52,7 +52,7 @@ python -m pipelines.silver.reviews --input-root review-simulator/.local/lake --o
 
 입력과 출력의 날짜 폴더 모양을 year/month/day로 통일한다. Bronze는 UTC 작성일, Silver는 KST 작성일 기준이다. KST 시작일의 전날 UTC부터 종료일 UTC까지 검색하고 KST 작성일로 행을 선택한 뒤 review_id로 중복 처리한다. 검색 범위에서 운영 JSONL 파일을 하나도 찾지 못하면 기존 출력을 덮어쓰지 않고 실패한다. 명시적으로 비어 있는 입력 파일이나 읽은 파일 중 대상 KST 리뷰가 없는 경우는 정상 0건 결과로 처리한다.
 
-Gold A 리뷰 읽기 코드도 이 Silver 출력 경로로 변경한 뒤 연결해야 한다. 기존 Gold A의 dt 입력과는 바로 연결되지 않는다. 이번 Silver 변경에는 Gold A 코드 수정이나 이전 테스트 결과 파일의 이동을 포함하지 않는다.
+Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 파일 경로를 함께 사용하도록 수정해야 한다. 기존 dt 입력이나 고정 날짜 파일 경로와는 바로 연결되지 않는다. Gold A 수정과 기존 결과 파일 이동은 이번 범위에 포함하지 않는다.
 
 ## 결정: 거래 Silver 계산 규칙
 
@@ -133,3 +133,29 @@ python -m pipelines.silver.products --designs-input <디자인-JSONL-경로> --v
 `common.py`에서 JSONL 읽기·기본 타입 검사·클릭/상품 중복 검사·결과 묶음 저장을 공유한다. 거래도 동일한 읽기·저장 함수를 사용하며 기존 CLI 옵션과 출력 경로는 유지한다. 각 검사는 코드 버전(`transactions.v1`, `clicks.v1`, `products.v1`)으로 기록하고 공통 YAML 적용 버전으로 표시하지 않는다.
 
 모든 로컬 결과는 지정 입력 전체의 스냅샷이다. current.json이 가리키는 결과만 읽고, 과거 runs 전체를 합치지 않는다. 파일/저장 실패 시 이전 대표 결과를 보존하며 날짜·상품 부분 병합과 상시 실행 연결은 이번 범위에 포함하지 않는다.
+
+
+## 회원·리뷰 오류 분리와 완료 결과 읽기 (최신 기준)
+
+위 두 처리의 기존 고정 파일 직접 읽기는 다음 manifest 방식으로 대체한다. CLI 입력 옵션·반환 건수와 정상 행 컬럼은 유지하지만 **결과를 읽는 위치는 변경**된다. 예전 결과는 삭제하지 않는다.
+
+| 대상 | 대표 결과 위치 | 결과 파일 |
+|---|---|---|
+| 회원 | `<output-root>/silver/members_current/as_of=YYYY-MM-DD/current.json` | members_current.jsonl, quarantined_records.jsonl, dq_results.jsonl |
+| 리뷰 | `<output-root>/silver/reviews/scopes/YYYY-MM-DD_YYYY-MM-DD/current.json` | quarantined_records.jsonl, dq_results.jsonl, 실행 폴더 안의 KST year/month/day/part-00000.jsonl |
+
+1. 필요한 as_of 또는 정확한 리뷰 요청 범위의 current.json을 읽는다.
+2. status와 outputs의 dq_results.jsonl을 확인한다. PASS는 읽은 입력의 검사 통과이며 원천 입수의 완전성을 증명하지 않는다.
+3. outputs가 가리키는 정상 파일만 읽는다. runs/ 또는 scopes/ 전체를 합치면 과거 실행·중첩 날짜가 중복된다.
+4. INCOMPLETE이면 정상 데이터는 존재할 수 있지만 해당 범위를 완전한 결과로 표시하지 않는다. Gold A의 실제 차단·표시 처리는 후속 구현이다.
+
+- 회원·리뷰의 필드 오류·JSON 파싱 오류를 행별로 격리한다. 키를 아는 오류는 같은 키의 모든 입력을 보류한다. 같은 원천/발행 시각 충돌은 과거 버전에서도 검사한다.
+- 회원은 오류가 있는 회원의 과거 ACTIVE 상태를 최신으로 대체 출력하지 않는다. 리뷰도 오류 있는 최신 리뷰 대신 과거 리뷰를 조용히 선택하지 않는다.
+- 식별 키를 읽을 수 없는 오류는 unknown_key_error_count로 남긴다. 파일·줄 번호로 원본을 찾으며 원문이나 회원 개인정보를 격리 결과에 복사하지 않는다.
+- dq_results: input_count = accepted_count + duplicate_count + quarantined_count. accepted_count는 중복 제외 후 채택한 정상 버전 수이며 최신 상태 출력 수와 다르다. superseded_count는 최신이 아닌 정상 버전 수다.
+- 리뷰는 읽은 모든 UTC 폴더에서 키를 검사한 뒤 KST 범위를 선택한다. outside_range_count는 범위 밖의 정상 최신 리뷰 수다. 날짜를 모르는 오류도 있으므로 오류가 있으면 요청 범위 전체를 affected_scope=REQUESTED_RANGE로 표시한다.
+- 파일 없음·읽기/인코딩 실패·예상하지 못한 프로그램 오류는 계속 실행 실패다. 정상적인 빈 입력과 구분한다.
+- 모든 결과 파일 저장 후 current.json 한 개를 교체한다. 로컬은 원자 교체, 리뷰 S3 출력은 단일 객체 PUT이다. 중간 실패 때 이전 manifest를 유지하며 미공개 파일은 소비하지 않는다.
+- 동시 실행 잠금·과거 실행 정리·서로 다른 리뷰 범위 간 결과 병합·날짜/상품 부분 재처리는 제공하지 않는다. 서로 겹치는 범위를 여러 개 읽지 말고 소비할 범위를 명시한다.
+- 회원 S3 출력은 기존처럼 지원하지 않는다. 리뷰 S3 입출력은 유지하지만 이번 검증에서 실제 AWS 요청은 실행하지 않는다.
+- 검사 버전은 members.v1/reviews.v1이며 공통 format_rules.yaml 실행 연결은 포함하지 않는다.
