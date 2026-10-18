@@ -156,6 +156,21 @@ def main():
         assert measurement_pool["resources"]["requests"]["memory"] == "1536Mi"
         measurement_topic = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaTopic")
         assert measurement_topic["topicName"] == "infra-smoke" and measurement_topic["config"]["retention.ms"] == 259200000
+        pipeline = copy.deepcopy(measurement)
+        for key, value in yaml.safe_load((ROOT / "pipeline-smoke/runtime-values.yaml.example").read_text(encoding="utf-8")).items():
+            if isinstance(value, dict):
+                pipeline.setdefault(key, {}).update(value)
+            else:
+                pipeline[key] = value
+        pipeline_docs = render(pipeline)
+        assert not any(d["kind"] == "KafkaConnect" for d in pipeline_docs)
+        assert {d["spec"]["topicName"] for d in pipeline_docs if d["kind"] == "KafkaTopic"} == {"infra-smoke", "infra-smoke.infra_smoke.events"}
+        pipeline["connect"].update(enabled=True, image=full["connect"]["image"])
+        pipeline_docs = render(pipeline)
+        assert next(d["spec"]["replicas"] for d in pipeline_docs if d["kind"] == "KafkaConnect") == 1
+        for doc in yaml.safe_load_all((ROOT / "pipeline-smoke/connectors.yaml.example").read_text(encoding="utf-8")):
+            jsonschema.Draft7Validator(schemas["KafkaConnector"]).validate(doc)
+            assert doc["metadata"]["labels"]["strimzi.io/cluster"] == pipeline["connect"]["name"]
         budget = [compact_pool["resources"], compact_connect["resources"],
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],
@@ -194,6 +209,21 @@ def main():
         cdc_docs = render(cdc)
         assert any(d["kind"] == "KafkaTopic" and d["metadata"]["name"] == "smoke-public-cdc-probe"
                    and d["spec"]["topicName"] == "smoke.public.cdc_probe" for d in cdc_docs)
+        sink = copy.deepcopy(cdc)
+        sink["connect"].update(consumeTopics=["smoke.public.cdc_probe"], consumerGroups=["connect-smoke-s3"])
+        sink_docs = render(sink)
+        sink_user = next(d for d in sink_docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "clothes-query-dev-connect")
+        acls = sink_user["spec"]["authorization"]["acls"]
+        assert any(a["resource"] == {"type": "topic", "name": "smoke.public.cdc_probe", "patternType": "literal"}
+                   and a["operations"] == ["Read", "Describe"] for a in acls)
+        assert any(a["resource"] == {"type": "group", "name": "connect-smoke-s3", "patternType": "literal"}
+                   and a["operations"] == ["Read"] for a in acls)
+        bad_sink = copy.deepcopy(sink); bad_sink["connect"]["consumeTopics"] = ["unknown"]
+        render(bad_sink, error="Connect ACL references an undefined")
+        bad_sink = copy.deepcopy(sink); bad_sink["connect"]["consumerGroups"] = []
+        render(bad_sink, error="Connect consumers require explicit consumerGroups")
+        bad_sink = copy.deepcopy(sink); bad_sink["connect"]["consumerGroups"] = ["*"]
+        render(bad_sink, error="consumerGroups")
         kafka = next(d["spec"]["kafka"] for d in docs if d["kind"] == "Kafka")
         listener = kafka["listeners"][0]
         assert listener["type"] == "internal" and listener["tls"]
@@ -295,7 +325,7 @@ def main():
                 assert bool(selected(labels)) == (index == other)
                 assert not selected({**labels, "__meta_kubernetes_pod_container_port_name": "rest-api"})
                 assert not selected({**labels, "__meta_kubernetes_pod_phase": "Pending"})
-    print(f"PASS: lint, standard/single-node/CDC/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 25 rejected inputs, operator/storage checks")
+    print(f"PASS: lint, standard/single-node/CDC/Sink/pipeline/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 28 rejected inputs, operator/storage checks")
     print("Single-node Kafka/Connect/operator budget: requests 3456Mi, limits 3840Mi; excludes Kubernetes/CSI/app/Spark resources.")
     print("No Kubernetes/AWS connection, apply, push or runtime claim.")
 

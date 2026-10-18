@@ -255,6 +255,16 @@
           },
           "uniqueItems": true
         },
+        "consumeTopics": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,248}$", "maxLength": 249},
+          "uniqueItems": true
+        },
+        "consumerGroups": {
+          "type": "array",
+          "items": {"type": "string", "maxLength": 63, "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"},
+          "uniqueItems": true
+        },
         "databaseSecret": {
           "type": "string",
           "maxLength": 63,

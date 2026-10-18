@@ -33,6 +33,9 @@ connect:
   # Custom image built with the pinned PostgreSQL plugin; must be repository@sha256:...
   image: ""
   produceTopics: []
+  # Optional Sink access, literal names only; empty preserves source-only permissions.
+  consumeTopics: []
+  consumerGroups: []
   databaseSecret: cdc-database
   rdsCaSecret: rds-ca
   resources:

@@ -1,0 +1,54 @@
+# Register only after DB, KafkaConnect, topics and Pod Identity are verified.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: infra-smoke-postgres
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: infra-smoke-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    database.hostname: "${directory:/mnt/cdc-database:hostname}"
+    database.port: "5432"
+    database.dbname: "${directory:/mnt/cdc-database:database}"
+    database.user: "${directory:/mnt/cdc-database:username}"
+    database.password: "${directory:/mnt/cdc-database:password}"
+    database.sslmode: verify-full
+    database.sslrootcert: /mnt/rds-ca/bundle.pem
+    plugin.name: pgoutput
+    topic.prefix: infra-smoke
+    table.include.list: 'infra_smoke\.events'
+    publication.name: infra_smoke_publication
+    publication.autocreate.mode: disabled
+    slot.name: infra_smoke_slot
+    snapshot.mode: initial
+    slot.drop.on.stop: "false"
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: infra-smoke-s3
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: infra-smoke-connect
+spec:
+  class: io.confluent.connect.s3.S3SinkConnector
+  tasksMax: 1
+  config:
+    topics: infra-smoke.infra_smoke.events
+    s3.bucket.name: clothes-query-datalake
+    s3.region: ap-northeast-1
+    topics.dir: infra-smoke
+    storage.class: io.confluent.connect.s3.storage.S3Storage
+    format.class: io.confluent.connect.s3.format.json.JsonFormat
+    partitioner.class: io.confluent.connect.storage.partitioner.DefaultPartitioner
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: "true"
+    value.converter.schemas.enable: "true"
+    schema.compatibility: NONE
+    behavior.on.null.values: ignore
+    # One record per file for connectivity only. Not a business ingestion default.
+    flush.size: "1"

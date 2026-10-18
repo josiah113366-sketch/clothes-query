@@ -1,0 +1,20 @@
+# Merge after single-node-values.yaml AND measurement-values.yaml.
+# Disabled until private image digest, Secrets, DB and IAM prerequisites are ready.
+topics:
+  # Preserve the topic already managed by the runtime release: Helm replaces arrays.
+  - name: infra-smoke
+    partitions: 1
+    retentionMs: 259200000
+  - name: infra-smoke.infra_smoke.events
+    resourceName: infra-smoke-cdc-events
+    partitions: 1
+    retentionMs: 259200000
+connect:
+  enabled: false
+  name: infra-smoke-connect
+  image: ""
+  produceTopics: [infra-smoke.infra_smoke.events]
+  consumeTopics: [infra-smoke.infra_smoke.events]
+  consumerGroups: [connect-infra-smoke-s3]
+  databaseSecret: infra-smoke-database
+  rdsCaSecret: infra-smoke-rds-ca
