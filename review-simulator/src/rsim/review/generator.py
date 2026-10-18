@@ -23,6 +23,7 @@ from typing import ClassVar, Protocol
 
 from .bedrock import converse, response_text, response_usage
 from .catalog import PRODUCT_INFO_FIELDS
+from .examples import load_example_set
 from .scenario import ReviewSpec
 from .seeds import SeedPool
 from .taxonomy import ASPECTS
@@ -59,7 +60,7 @@ log = logging.getLogger(__name__)
 #       명세에 product_info 를 붙여 그 상품에 어울리는 리뷰를 쓰게 한다(규칙 13). 상품 정보가 없으면 명세는 예전과 같다.
 #       product_info 는 상품을 떠올리는 참고일 뿐 평가 대상이 아니다(aspects 밖 속성은 계속 금지 → 정답 라벨 보호).
 # p5.8: 2026-10-16 지시사항 다이어트(브랜치 sim/review-product-import, 지시서 1단계).
-#       규칙 13개 → 우선순위 한 줄 + 묶음 4개(A 속성·감성, B 길이, C 말투, D 상품·상황) + 예시 블록(EXAMPLE_LINES).
+#       규칙 13개 → 우선순위 한 줄 + 묶음 4개(A 속성·감성, B 길이, C 말투, D 상품·상황) + 예시 블록(지금은 data/examples/ex-vN.md).
 #       우선순위 충돌(예전 12번 "길이 먼저" vs 13번 "규칙 1 우선")을 "속성 → 길이 → 말투"로 통일,
 #       이모티콘은 "쓸 때만", 오타는 오타 말투일 때만, "재구매"는 평가 금지어에서 뺌(재구매 말투 약 30%, taxonomy).
 #       자세한 근거: review-simulator/docs/prompt-diet-p5.8.md
@@ -85,24 +86,12 @@ class Generator(Protocol):
     def generate(self, specs: list[ReviewSpec]) -> dict[str, dict]: ...
 
 
-# ---------------------------------------------------------------- 시스템 프롬프트 예시 블록
-# p5.8: 규칙 안에 섞여 있던 예시를 여기로 모았다. 지시서 2단계에서 사람이 직접 쓴 예시(버전 ex-v1)로 바꾼다.
-# 예시를 바꾸면 EXAMPLES_VERSION 을 올린다(정답 이벤트 generator.examples_version 으로 남는다).
-EXAMPLES_VERSION = "ex-v0"
-EXAMPLES: list[str] = [
-    '- 중립: 색상·디자인 "색은 무난해요" / 배송 "배송은 보통이었어요" / 사이즈·핏 "그냥 정사이즈예요"',
-    '        재질·촉감 "원단은 평범해요" / 가격·가성비 "가격은 적당한 편이에요" / 포장 "포장은 그냥 기본이에요"',
-    '- 1문장, 속성 2개: "배송 빠르고 핏도 딱 맞아요 ㅎㅎ" / "색은 예쁜데 사이즈가 좀 작아요ㅠㅠ"',
-    '- 상품 정보 활용: 소재가 얇은 린넨, 재질·촉감 부정 → "생각보다 많이 비쳐요"',
-]
-EXAMPLE_LINES = "\n".join(EXAMPLES)
-
 # ---------------------------------------------------------------- 시스템 프롬프트
 # 매 호출마다 똑같이 들어가는 고정 지시문. (자주 바꾸지 않는 내용만 둔다)
 # 속성 설명은 taxonomy.ASPECTS 에서 자동으로 만들어서 라벨 가이드와 어긋나지 않게 한다.
 _ASPECT_LINES = "\n".join(f"- {name}: {desc}" for name, (_, desc) in ASPECTS.items())
 
-SYSTEM_PROMPT = f"""너는 한국 온라인 패션 쇼핑몰의 상품 리뷰를 쓰는 다양한 실제 구매자들을 흉내 낸다.
+SYSTEM_TEMPLATE = f"""너는 한국 온라인 패션 쇼핑몰의 상품 리뷰를 쓰는 다양한 실제 구매자들을 흉내 낸다.
 요청마다 리뷰 명세 목록이 주어지고, 명세 하나당 리뷰 하나를 쓴다.
 규칙이 부딪히면 ① 속성·감성 ② 길이 ③ 말투 순서로 지킨다.
 
@@ -129,12 +118,23 @@ D. 상품·상황
   상품 정보는 참고일 뿐 평가 대상이 아니고, 설명 문장을 옮기거나 번역해 넣지 않는다.
 
 예시 (참고만, 그대로 쓰지 않는다)
-{EXAMPLE_LINES}
+{{examples}}
 
 속성 목록 (라벨 기준, 11개)
 {_ASPECT_LINES}
 
 출력: reviews 배열에 명세마다 {{spec_id, text}} 를 넣는다. 제목 없이 본문만 쓴다."""
+
+
+def build_system_prompt(example_lines: str) -> str:
+    """시스템 프롬프트 = 규칙(SYSTEM_TEMPLATE) + 예시 칸.
+
+    예시 칸은 data/examples/ex-vN.md 에서 읽는다(examples.py, 2026-10-16 지시서 2단계).
+    규칙을 바꾸면 PROMPT_VERSION, 예시만 바꾸면 예시 파일 버전(EXAMPLES_VERSION)을 올린다.
+    """
+    # 출력 형식 줄의 {spec_id, text} 를 format 이 자리표시로 읽지 않도록 replace 로 넣는다
+    return SYSTEM_TEMPLATE.replace("{examples}", example_lines)
+
 
 # 출력 형식 지시. Converse API 에는 모델 공통 structured output 이 없어서 프롬프트로 JSON 을 요구하고
 # parse_reviews() 로 직접 꺼낸다. (bench/bench.py 도 같은 문구를 쓴다)
@@ -337,7 +337,11 @@ class ConverseGenerator:
         self.temperature = settings.bedrock_temperature
         self.max_retries = settings.bedrock_max_retries
         self.few_shot_k = settings.few_shot_k
-        self.seeds = seeds
+        # 예시 세트(ex-vN): 시스템 프롬프트 예시 칸 + 말투 예시 출처 제한 (examples.py)
+        self.example_set = load_example_set(settings.examples_dir, settings.examples_version)
+        self.system_prompt = build_system_prompt(self.example_set.lines)
+        self.examples_version = self.example_set.version
+        self.seeds = seeds.only(self.example_set.seed_sources)
         # 누적 토큰 사용량 (비용 확인용, run.py 가 마지막에 출력). 검수 호출은 따로 센다.
         self.usage = {
             "input_tokens": 0,
@@ -380,7 +384,7 @@ class ConverseGenerator:
             api_key=self.api_key,
             region=self.region,
             model_id=self.model_id,
-            system=SYSTEM_PROMPT,
+            system=self.system_prompt,
             user=build_user_prompt(specs, examples, feedback) + JSON_INSTRUCTION,
             # 리뷰 1건 ≈ 최대 300 토큰. 배치 크기에 여유를 두고 잡는다(모자라면 응답이 잘림)
             max_tokens=1000 + 500 * len(specs),

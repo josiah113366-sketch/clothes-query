@@ -27,24 +27,27 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 
 | 경로 | 설명 |
 |---|---|
-| `src/rsim/cli.py` | `rsim` 명령 (run, seeds, bench, verify-eval, version) |
+| `src/rsim/cli.py` | `rsim` 명령 (run, orders-fake, inject, seeds, bench, scorecard, verify-eval, version) |
 | `src/rsim/common/config.py` | 모든 설정(환경변수)과 설명 |
 | `src/rsim/common/rng.py` | 시드 고정 난수, 시드 기반 UUID |
 | `src/rsim/review/taxonomy.py` | 속성 11개(라벨 가이드 v3)·감성·말투 목록, AI Hub 속성 매핑 |
 | `src/rsim/review/scenario.py` | 리뷰 명세, 별점·속성 분포, 이상 상황 주입, 가상 시계 |
 | `src/rsim/review/seeds.py`, `catalog.py` | 말투 예시 뽑기, 상품 목록 |
 | `src/rsim/review/generator.py` | 생성 프롬프트(`PROMPT_VERSION`), 검수 루프, 가짜 생성기 |
+| `src/rsim/review/examples.py` | 생성 프롬프트 예시 세트(`data/examples/ex-vN.md`) 읽기 |
 | `src/rsim/review/verifier.py` | 검수 프롬프트(`VERIFIER_PROMPT_VERSION`), 명세 비교, 정답 라벨 합치기 |
 | `src/rsim/review/bedrock.py` | Bedrock Converse 호출 (표준 라이브러리, SDK 없음) |
 | `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~14일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
 | `src/rsim/review/options.py` | 구매 옵션(사이즈·색상)과 포토 리뷰 여부 |
 | `src/rsim/review/sinks.py`, `run.py` | Kafka / 콘솔 / 파일 전송, 실행 흐름 |
-| `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 검수 모델 정확도 측정 |
+| `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 예시 세트 점검표, 검수 모델 정확도 측정 |
 | `src/rsim/seeds_prep.py` | 말투 예시 파일 `.local/seeds.jsonl` 만들기 |
 | `data/incidents.example.json` | 이상 상황 예시 (`data/incidents.json` 으로 복사하면 적용) |
+| `data/examples/` | 생성 프롬프트 예시 세트 ex-v0, ex-v1 ... (형식은 그 폴더 README) |
 | `data/handwritten/` | 직접 쓴 리뷰 CSV 형식 설명 (CSV 자체는 `.local/handwritten/`) |
 | `docs/prompt-sample.md` | 실제로 보내는 생성·검수 프롬프트 예시 |
 | `docs/review-columns.md` | 리뷰·정답 이벤트 컬럼 설명 |
+| `docs/examples-scorecard.md` | 예시 세트 버전별 성능 점검표 |
 | `.local/` | 시드, 실행 결과, 벤치 결과. **커밋하지 않는다** (AI Hub 원문·생성 리뷰 원문) |
 
 ## 실행 방법 (Windows PowerShell, `review-simulator/` 폴더에서)
@@ -71,6 +74,8 @@ rsim run --llm fake --sink kafka --count 20
 # 6) Bedrock 으로 소량 생성 (비용 발생)
 rsim run --sink stdout --count 5
 rsim bench --yes --n 100 --max-calls 20     # 100건 비용·검수 결과 + 채점 시트 (.local\bench\)
+rsim bench --yes --n 100 --examples ex-v1   # 예시 세트만 바꿔 비교 (같은 --seed 면 같은 명세)
+rsim scorecard                              # bench 실행들을 점검표로 출력 (docs\examples-scorecard.md 에 붙이기)
 
 # 테스트 (Bedrock·Kafka 없이 돈다)
 ruff check . && ruff format --check .
@@ -146,7 +151,8 @@ rsim inject --file .local\manual\size_spike_1008.csv             # LAKE_ROOT 에
 | 별점 분포, 별점별 감성 확률, 리뷰 길이 | `src/rsim/review/scenario.py` 상단 상수 |
 | 속성 등장 빈도, 말투 종류 | `src/rsim/review/taxonomy.py` 의 `ASPECT_WEIGHTS`, `STYLES` |
 | 어느 출처 말투를 더 따를지 | `src/rsim/review/seeds.py` 의 `SOURCE_WEIGHTS` |
-| 생성 프롬프트 | `src/rsim/review/generator.py` 의 `SYSTEM_PROMPT` (바꾸면 `PROMPT_VERSION` 올리기) |
+| 생성 프롬프트 규칙 | `src/rsim/review/generator.py` 의 `SYSTEM_TEMPLATE` (바꾸면 `PROMPT_VERSION` 올리기) |
+| 생성 프롬프트 예시, 말투 예시 출처 | `data/examples/ex-vN.md` 새 버전 + `.env` 의 `EXAMPLES_VERSION` (`docs/examples-scorecard.md` 에 결과 기록) |
 | 검수 기준 | `src/rsim/review/verifier.py` 의 `VERIFIER_SYSTEM_PROMPT`, `BLOCKING_KINDS` |
 | 불만 급증 상황 | `data/incidents.json` (형식은 `data/incidents.example.json`) |
 | 주문 중 리뷰 비율, 결제 후 리뷰까지 기간 | `.env` 의 `REVIEW_RATE`, `REVIEW_DELAY_MIN_DAYS`, `REVIEW_DELAY_MAX_DAYS` |

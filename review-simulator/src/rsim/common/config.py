@@ -67,6 +67,12 @@ class Settings:
     batch_size: int = field(default_factory=lambda: int(_env("BATCH_SIZE", "5")))
     # 프롬프트에 넣을 말투 예시(시드) 개수. 많을수록 말투가 다양해지지만 입력 토큰이 늘어난다.
     few_shot_k: int = field(default_factory=lambda: int(_env("FEW_SHOT_K", "8")))
+    # 생성 프롬프트 예시 세트 버전 (data/examples/<버전>.md, 2026-10-16 지시서 2단계).
+    # 예시 칸 문장과 말투 예시 출처(seed_sources)가 함께 바뀐다. 버전별 성능은 docs/examples-scorecard.md.
+    # 2026-10-18 lemin 결정: 기본값 ex-v1 (ex-v0 과 성능은 같고, 사람이 쓴 예시 + Gemini 합성 예시 제외)
+    examples_version: str = field(default_factory=lambda: _env("EXAMPLES_VERSION", "ex-v1"))
+    # 예시 세트 파일 폴더
+    examples_dir: Path = field(default_factory=lambda: _path("EXAMPLES_DIR", "data/examples"))
     # 자동 재시도 횟수 (429 스로틀링, 5xx, 네트워크 오류에 대해 지수 백오프로 재시도)
     bedrock_max_retries: int = field(default_factory=lambda: int(_env("BEDROCK_MAX_RETRIES", "5")))
 

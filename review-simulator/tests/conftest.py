@@ -59,4 +59,8 @@ def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RANDOM_SEED", "7")
     monkeypatch.delenv("AWS_BEARER_TOKEN_BEDROCK", raising=False)
+    # 예시 세트는 저장소의 data/examples 를 그대로 쓴다 (작업 폴더가 임시 폴더라서 절대 경로로)
+    monkeypatch.setenv(
+        "EXAMPLES_DIR", str(Path(__file__).resolve().parents[1] / "data" / "examples")
+    )
     return tmp_path

@@ -41,7 +41,7 @@ from rsim.common.config import load_settings
 from rsim.common.rng import derive_seed, make_rng, resolve_seed, seeded_uuid
 
 from .catalog import Catalog
-from .generator import EXAMPLES_VERSION, PROMPT_VERSION, FakeGenerator, make_generator
+from .generator import PROMPT_VERSION, FakeGenerator, make_generator
 from .options import pick_options
 from .orders import (
     JsonlOrderSource,
@@ -65,6 +65,7 @@ def build_events(
     rng: random.Random,
     order: Order | None = None,
     attr_rng: random.Random | None = None,
+    examples_version: str | None = None,
 ) -> tuple[dict, dict]:
     """명세 + 생성된 문장 → (리뷰 이벤트, 정답 이벤트) 두 개를 만든다.
 
@@ -145,8 +146,8 @@ def build_events(
         "generator": {
             "model_id": model_id,
             "prompt_version": PROMPT_VERSION,
-            # 프롬프트 예시 블록 버전 (p5.8, generator.EXAMPLES_VERSION). 예시 버전별 성능 비교용
-            "examples_version": EXAMPLES_VERSION,
+            # 프롬프트 예시 세트 버전 (data/examples/ex-vN.md, 설정 EXAMPLES_VERSION). 예시 버전별 성능 비교용
+            "examples_version": examples_version,
             "style": spec.style,
             "length": spec.length,
         },
@@ -329,7 +330,16 @@ def run(
                     attrs = order_id_rng(order.order_id, "review-attrs")
                 else:
                     ids, attrs = id_rng, attr_rng
-                review, truth = build_events(spec, gen, generator.model_id, ids, order, attrs)
+                review, truth = build_events(
+                    spec,
+                    gen,
+                    generator.model_id,
+                    ids,
+                    order,
+                    attrs,
+                    # 가짜 생성기는 예시를 안 쓰므로 None
+                    examples_version=getattr(generator, "examples_version", None),
+                )
                 sink.send(review, truth)
                 produced += 1
 

@@ -1,6 +1,6 @@
 """Bedrock 리뷰 생성 소량 실행 (비용·속도·검수 결과 확인용).
 
-시뮬레이터와 같은 프롬프트(SYSTEM_PROMPT, build_user_prompt)·검수 루프 규칙으로 고정 시드 명세 N건을 만들고,
+시뮬레이터와 같은 프롬프트(build_system_prompt + 예시 세트, build_user_prompt)·검수 루프 규칙으로 고정 시드 명세 N건을 만들고,
 결과를 사람이 채점할 수 있는 시트로 저장한다. Kafka 로는 보내지 않는다.
 모델 비교(2026-10-13, 8개 모델)는 끝나서 gemma-3-12b 로 확정했고, 모델 목록 조회·호출 확인·자동 선택 기능은
 2026-10-14 정리 때 뺐다. 다른 모델을 다시 보고 싶으면 --models 에 ID 를 직접 넣으면 된다.
@@ -10,9 +10,11 @@
 실행 예 (review-simulator/ 폴더에서)
   rsim bench --n 10                                   # 계획만 출력 (호출 안 함)
   rsim bench --yes --n 100 --max-calls 20 --region ap-northeast-1
+  rsim bench --yes --n 100 --examples ex-v1           # 예시 세트만 바꿔 비교 (같은 --seed 면 같은 명세)
 리전 기본값은 .env 의 AWS_REGION, 모델 기본값은 .env 의 BEDROCK_MODEL_ID.
 
 결과: .local/bench/<실행시각>/ 에 summary.json, calls.jsonl, outputs.jsonl, rating_sheet.csv, blind_key.json
+점검표 한 줄(docs/examples-scorecard.md 에 붙일 것)은 끝에 출력되고, `rsim scorecard` 로 모든 실행을 다시 볼 수 있다.
 """
 
 from __future__ import annotations
@@ -26,17 +28,19 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from rsim.bench.scorecard import scorecard_row
 from rsim.common.config import load_settings
 from rsim.common.rng import make_rng
 from rsim.review.bedrock import converse as _converse
 from rsim.review.bedrock import response_text, response_usage
 from rsim.review.catalog import Catalog
+from rsim.review.examples import load_example_set
 from rsim.review.generator import (
     JSON_INSTRUCTION,
     LENGTH_GUIDE,
     LENGTH_LIMITS_FOR_PROMPT,
     PROMPT_VERSION,
-    SYSTEM_PROMPT,
+    build_system_prompt,
     build_user_prompt,
     normalize_jamo,
     parse_reviews,
@@ -88,15 +92,19 @@ def converse(
 
 
 # ---------------------------------------------------------------- 벤치마크 본체
-def make_specs(settings, n: int, seed: int):
-    """고정 시드로 명세 n건을 만든다. 이상 상황·수정 이벤트는 넣지 않는다(소량 테스트라 기본 경로만)."""
+def make_specs(settings, n: int, seed: int, seed_sources: tuple[str, ...] | None = None):
+    """고정 시드로 명세 n건을 만든다. 이상 상황·수정 이벤트는 넣지 않는다(소량 테스트라 기본 경로만).
+
+    seed_sources = 예시 세트의 말투 예시 출처 제한. 명세를 다 만든 뒤에 적용하므로
+    예시 세트가 달라도 같은 --seed 면 같은 명세가 나온다(예시 버전끼리 공정 비교).
+    """
     rng = make_rng(seed)
     seeds = SeedPool.load(settings.seeds_path, rng)
     catalog = Catalog.build(settings.products_path, seeds.product_names(), rng)
     engine = ScenarioEngine(catalog, [], SimClock(None, 60, rng), rng)
     specs = [engine.next_spec() for _ in range(n)]
     # 말투 예시도 한 번만 뽑아 모든 모델/호출에서 공유한다 (비교 조건 통일)
-    examples = seeds.sample(settings.few_shot_k, specs[0].product.category)
+    examples = seeds.only(seed_sources).sample(settings.few_shot_k, specs[0].product.category)
     return specs, examples
 
 
@@ -127,13 +135,13 @@ def run_verify(region, verifier_model, items):
     return labels, rec
 
 
-def run_batch(region, model_id, batch, examples, feedback=None):
+def run_batch(region, model_id, system, batch, examples, feedback=None):
     """명세 한 묶음을 한 번 호출로 생성하고 기록용 dict 를 돌려준다. feedback = 재생성 때 지난 문제 설명."""
     t0 = time.monotonic()
     r = converse(
         region,
         model_id,
-        SYSTEM_PROMPT,
+        system,
         build_user_prompt(batch, examples, feedback) + JSON_INSTRUCTION,
         max_tokens=1000 + 500 * len(batch),
     )  # 시뮬레이터와 같은 상한
@@ -210,15 +218,23 @@ OUT_DIR = Path(".local/bench")
 
 def run_bench(args) -> None:
     """소량 실행 본체. args 는 cli.py 의 rsim bench 옵션(n, batch_size, models, seed, region, max_calls,
-    dry_run, yes, verifier_model, aspect_retries)을 담은 객체."""
+    dry_run, yes, verifier_model, aspect_retries, examples)을 담은 객체."""
 
     settings = load_settings()
     region = args.region or settings.aws_region
-    print(f"리전={region}  프롬프트={PROMPT_VERSION}")
+    # 예시 세트: --examples 가 없으면 .env 의 EXAMPLES_VERSION
+    example_set = load_example_set(
+        settings.examples_dir, args.examples or settings.examples_version
+    )
+    system = build_system_prompt(example_set.lines)
+    print(
+        f"리전={region}  프롬프트={PROMPT_VERSION}  예시={example_set.version} "
+        f"(말투 예시 출처: {', '.join(example_set.seed_sources or ['전체'])})"
+    )
 
     args.models = args.models or [settings.bedrock_model_id]
 
-    specs, examples = make_specs(settings, args.n, args.seed)
+    specs, examples = make_specs(settings, args.n, args.seed, example_set.seed_sources)
     batches = chunks(specs, args.batch_size)
     total_calls = len(args.models) * len(batches)
     print(
@@ -231,7 +247,7 @@ def run_bench(args) -> None:
     )
     for m in args.models:
         print(f"  - {m}")
-    approx_in = (len(SYSTEM_PROMPT) + len(build_user_prompt(batches[0], examples))) / 1.5
+    approx_in = (len(system) + len(build_user_prompt(batches[0], examples))) / 1.5
     print(
         f"호출 1회 입력 어림: 약 {approx_in:.0f} 토큰 (한국어라 모델마다 토크나이저가 달라 실제 값은 결과 usage 기준)"
     )
@@ -260,6 +276,7 @@ def run_bench(args) -> None:
                 rec = run_batch(
                     region,
                     model_id,
+                    system,
                     batch,
                     examples,
                     {s.spec_id: feedback[s.spec_id] for s in batch if s.spec_id in feedback},
@@ -345,6 +362,10 @@ def run_bench(args) -> None:
     summary = {
         "region": region,
         "prompt_version": PROMPT_VERSION,
+        # 예시 세트 버전과 말투 예시 출처 (2026-10-16 지시서 2단계, 점검표 비교용)
+        "examples_version": example_set.version,
+        "seed_sources": list(example_set.seed_sources) if example_set.seed_sources else None,
+        "seed": args.seed,
         "n_specs": len(specs),
         "models": {},
         "verify": {
@@ -380,6 +401,11 @@ def run_bench(args) -> None:
                 k: sum(any(p.startswith(k) for p in o["aspect_problems"]) for o in first)
                 for k in ("missing", "extra", "sentiment", "verify_failed")
             },
+            # 감성 차이 중 중립이 낀 것 (중립→긍정, 긍정→중립 등). p5.8 bench 에서 버림 사유 1위
+            "neutral_errors_first": sum(
+                any(p.startswith("sentiment:") and "중립" in p for p in o["aspect_problems"])
+                for o in first
+            ),
             "input_tokens": in_t,
             "output_tokens": out_t,
             "cost_usd": None if cost is None else round(cost, 5),
@@ -445,6 +471,9 @@ def run_bench(args) -> None:
 
     print(f"\n저장: {out_dir}")
     print(json.dumps(summary["models"], ensure_ascii=False, indent=1))
+    print("\n점검표 한 줄 (docs/examples-scorecard.md 표에 붙이기):")
+    for model_id in args.models:
+        print(scorecard_row(out_dir.name, summary, model_id))
     if any(v["cost_usd"] is None for v in summary["models"].values()):
         print(
             "※ 단가가 없는 모델은 비용이 None 입니다. src/rsim/bench/prices.json 에 Bedrock 도쿄 단가를 넣으면 다시 계산됩니다."

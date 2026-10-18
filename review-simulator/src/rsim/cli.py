@@ -7,6 +7,7 @@ review-simulator/ 폴더에서 실행한다. 상대 경로(.env, .local/, data/)
   rsim inject ...       직접 작성한 리뷰(CSV/JSONL)를 레이크에 넣기 (review/inject.py, LLM 호출 없음)
   rsim seeds ...        말투 예시(시드) 파일 .local/seeds.jsonl 만들기 (seeds_prep.py)
   rsim bench ...        소량 실행으로 비용·검수 결과 확인 (bench/bench.py, Kafka 로 안 보냄)
+  rsim scorecard        bench 결과를 예시 세트 점검표로 출력 (bench/scorecard.py, 호출 없음)
   rsim verify-eval ...  검수 모델 정확도 측정 (bench/verify_eval.py)
   rsim version          버전 출력
 
@@ -230,11 +231,27 @@ def bench(
         str | None, typer.Option(help="검수 모델 ID. 기본 = 생성 모델")
     ] = None,
     aspect_retries: Annotated[int, typer.Option(help="검수 실패 리뷰 재생성 횟수")] = 1,
+    examples: Annotated[
+        str | None,
+        typer.Option(
+            help="예시 세트 버전 (data/examples/<버전>.md). 기본 = .env 의 EXAMPLES_VERSION"
+        ),
+    ] = None,
 ) -> None:
     """소량 실행으로 비용·검수 결과를 확인한다. 결과는 .local/bench/<시각>/ (Kafka 로는 안 보냄)."""
     from rsim.bench.bench import run_bench
 
     run_bench(SimpleNamespace(**locals()))
+
+
+@app.command()
+def scorecard(
+    bench_dir: Annotated[Path, typer.Option(help="bench 결과 폴더")] = Path(".local/bench"),
+) -> None:
+    """bench 실행들을 예시 세트 점검표(마크다운 표)로 출력한다. docs/examples-scorecard.md 에 붙인다."""
+    from rsim.bench.scorecard import run_scorecard
+
+    run_scorecard(bench_dir)
 
 
 @app.command("verify-eval")

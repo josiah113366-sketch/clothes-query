@@ -58,8 +58,17 @@ def test_style_rules_p58() -> None:
 
 
 def test_prompt_p58_priority_and_rebuy() -> None:
-    from rsim.review.generator import PROMPT_VERSION, SYSTEM_PROMPT
+    from rsim.review.generator import PROMPT_VERSION, SYSTEM_TEMPLATE
 
     assert PROMPT_VERSION == "p5.8"
-    assert "① 속성·감성 ② 길이 ③ 말투" in SYSTEM_PROMPT
-    assert "재구매" not in SYSTEM_PROMPT  # 재구매 말투와 부딪히던 금지어 예시를 뺐다
+    assert "① 속성·감성 ② 길이 ③ 말투" in SYSTEM_TEMPLATE
+    assert (
+        "재구매" not in SYSTEM_TEMPLATE
+    )  # 재구매 말투와 부딪히던 금지어 예시를 뺐다(규칙 부분만 확인)
+
+
+def test_neutral_share_about_5_percent() -> None:
+    # 2026-10-16 lemin 결정: 속성 감성 중 중립은 약 5% (scenario.SENTIMENT_BY_RATING)
+    aspects = [a for s in _specs(5, 3000) for a in s.aspects]
+    share = sum(a["sentiment"] == "중립" for a in aspects) / len(aspects)
+    assert 0.03 <= share <= 0.08, share

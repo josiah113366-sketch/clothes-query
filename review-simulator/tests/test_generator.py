@@ -1,6 +1,6 @@
 from rsim.review.generator import (
     JSON_INSTRUCTION,
-    SYSTEM_PROMPT,
+    SYSTEM_TEMPLATE,
     build_user_prompt,
     generate_checked,
     normalize_jamo,
@@ -13,9 +13,9 @@ from .test_scenario import _specs
 
 def test_prompt_has_no_evidence_rule() -> None:
     # p5.6: 근거 문구(evidence) 출력은 뺐다
-    assert "evidence" not in SYSTEM_PROMPT
+    assert "evidence" not in SYSTEM_TEMPLATE
     assert "evidence" not in JSON_INSTRUCTION
-    assert "활용성·사용감" in SYSTEM_PROMPT
+    assert "활용성·사용감" in SYSTEM_TEMPLATE
 
 
 def test_parse_reviews_handles_code_fence() -> None:

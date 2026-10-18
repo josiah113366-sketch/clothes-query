@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from rsim.cli import app
 from rsim.common.rng import make_rng
 from rsim.review.catalog import Catalog, CsvProductSource
-from rsim.review.generator import SYSTEM_PROMPT, build_user_prompt
+from rsim.review.generator import SYSTEM_TEMPLATE, build_user_prompt
 from rsim.review.options import pick_options
 from rsim.review.scenario import ReviewSpec
 
@@ -82,7 +82,7 @@ def test_prompt_has_product_info_only_when_present(tmp_path) -> None:
     }
     assert "category" not in payload[0]  # category 없는 상품은 명세에서도 뺀다
     assert "product_info" not in build_user_prompt([spec(without)], [])
-    assert "product_info" in SYSTEM_PROMPT  # 규칙 13
+    assert "product_info" in SYSTEM_TEMPLATE  # 묶음 D
 
 
 def test_option_color_and_size_from_product() -> None:

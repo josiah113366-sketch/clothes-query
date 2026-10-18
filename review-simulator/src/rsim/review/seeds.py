@@ -40,6 +40,16 @@ class SeedPool:
             rows = [json.loads(line) for line in fh if line.strip()]
         return cls(rows, rng)
 
+    def only(self, sources: tuple[str, ...] | None) -> SeedPool:
+        """말투 예시를 특정 출처에서만 뽑는 새 시드 묶음 (예시 세트 seed_sources, examples.py).
+
+        sources 가 None 이면 그대로 돌려준다. 난수(rng)는 같이 쓴다.
+        상품명 목록(product_names)은 원래 묶음에서 만들므로, 출처를 줄여도 상품·명세는 바뀌지 않는다.
+        """
+        if sources is None:
+            return self
+        return SeedPool([r for r in self.rows if r["source"] in sources], self.rng)
+
     def product_names(self) -> dict[str, list[str]]:
         """카테고리별 상품명 목록 (catalog.py 가 기본 상품 목록을 만들 때 사용)."""
         names: dict[str, set[str]] = defaultdict(set)

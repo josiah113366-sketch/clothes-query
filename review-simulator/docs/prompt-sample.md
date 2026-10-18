@@ -5,7 +5,7 @@
 (2026-10-16 p5.7: 1절 시스템 프롬프트에 규칙 13(상품 정보)을 더해 다시 뽑았다. 상품 정보가 있는 상품의 명세 모양은 2-1절.)
 (2026-10-16 p5.8: 규칙 13개를 우선순위 + 묶음 4개 + 예시 블록으로 줄였다(docs/prompt-diet-p5.8.md). 1절을 다시 뽑았다.) `rsim bench` 와 `rsim run` 이 이 형식으로 보낸다.
 
-## 1. 생성: 시스템 프롬프트 (매 호출 동일, src/rsim/review/generator.py 의 SYSTEM_PROMPT)
+## 1. 생성: 시스템 프롬프트 (매 호출 동일, src/rsim/review/generator.py 의 SYSTEM_TEMPLATE + 예시 세트 ex-v0)
 
 ```text
 너는 한국 온라인 패션 쇼핑몰의 상품 리뷰를 쓰는 다양한 실제 구매자들을 흉내 낸다.
