@@ -168,9 +168,14 @@ def main():
         pipeline["connect"].update(enabled=True, image=full["connect"]["image"])
         pipeline_docs = render(pipeline)
         assert next(d["spec"]["replicas"] for d in pipeline_docs if d["kind"] == "KafkaConnect") == 1
-        for doc in yaml.safe_load_all((ROOT / "pipeline-smoke/connectors.yaml.example").read_text(encoding="utf-8")):
+        pipeline_connectors = list(yaml.safe_load_all((ROOT / "pipeline-smoke/connectors.yaml.example").read_text(encoding="utf-8")))
+        for doc in pipeline_connectors:
             jsonschema.Draft7Validator(schemas["KafkaConnector"]).validate(doc)
             assert doc["metadata"]["labels"]["strimzi.io/cluster"] == pipeline["connect"]["name"]
+        sink_prefix = next(doc["spec"]["config"]["topics.dir"] for doc in pipeline_connectors
+                           if doc["spec"]["class"] == "io.confluent.connect.s3.S3SinkConnector")
+        role_example = (ROOT / "pipeline-smoke/workload-access.tfvars.example").read_text(encoding="utf-8")
+        assert f'"{sink_prefix}/" =' in role_example, "Trial S3 Sink output and IAM prefix must match"
         budget = [compact_pool["resources"], compact_connect["resources"],
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],

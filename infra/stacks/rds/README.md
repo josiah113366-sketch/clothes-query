@@ -1,12 +1,14 @@
-> **최신 결정(2026-10-14): RDS만 Single-AZ.** VPC·EKS는 두 AZ, NAT는 AZ별 1개씩 총 2개, WEB/WAS와 Kafka는 두 AZ 분산을 유지한다. 전체 단일 AZ 설명과 NAT 1개 plan은 이전 오해에 따른 과거 기록이며 현재 배포 기준이 아니다. 최신 구성은 infra/TOPOLOGY.md를 따른다.
+> **현재 배포(2026-10-18):** RDS는 private Single-AZ로 유지한다. VPC는 두 AZ이며 NAT1개·EKS 노드1대·단일 Kafka 구성이다. 최신 전체 구조는 [TOPOLOGY.md](../../TOPOLOGY.md)를 따른다.
 
 # rds stack
 
-RDS-first 실행에서는 `use_eks_security_group=false`를 비공개 tfvars에 명시한다. 이 경우 EKS remote state를 읽지 않으며 network state만 선행한다. `database_clients={}`이면 DB ingress는 없고, 나중에 같은 VPC의 클라이언트 보안 그룹을 이름별로 추가한다. private/TLS 및 앱 전용 계정을 유지하고 public 접속은 활성화하지 않는다. 기본 true는 기존 EKS 연동을 보존한다.
+RDS-first 실행에서는 `use_eks_security_group=false`를 비공개 tfvars에 명시한다. 이 경우 EKS remote state를 읽지 않으며 network state만 선행한다. `database_clients={}`이면 코드가 추가하는 DB ingress는 없고, 나중에 같은 VPC의 클라이언트 보안 그룹을 이름별로 추가한다. private/TLS 및 앱 전용 계정을 유지하고 public 접속은 활성화하지 않는다. 기본 true는 기존 EKS 연동을 보존한다.
 
 암호화된 private Single-AZ PostgreSQL과 SG 및 subnet group.
 
 현재 승인값은 PostgreSQL 16.15, db.t4g.small(2 vCPU/2 GiB), gp3 초기 20 GiB / 자동 증가 최대 100 GiB다. 2026-10-16 RDS-first로 실제 생성했고 AWS available 상태를 확인했다. 사양과 비용 근거는 [RDS 검토](../../../docs/design/infra/rds-sizing.md)를 따른다.
+
+2026-10-18 사용자 승인으로 논리 복제 설정과 재부팅·실제 CDC→S3 시험을 완료했다. 실배포 입력은 logical_replication 활성(slot 한도5/sender 요청10/WAL256MB)이다. SQL의 유효 sender는20이며 차이 원인은 미확정이다. 시험 schema/계정/publication/slot과 추가 EKS 접속 규칙은 제거했고, 논리 복제 기반 설정만 남겼다. 비공개 배포 입력을 기본 null 예시로 덮어쓰지 않는다. 업무용 CDC 예산·계정·allowlist는 별도 결정한다. [실제 결과](../../../docs/tasks/infra-pipeline-smoke.md).
 
 - 선행: 기존 bootstrap 및 network, eks.
 - backend key: `clothes-query/dev/rds/terraform.tfstate`.

@@ -40,7 +40,7 @@ spec:
     topics: infra-smoke.infra_smoke.events
     s3.bucket.name: clothes-query-datalake
     s3.region: ap-northeast-1
-    topics.dir: infra-smoke
+    topics.dir: infra-smoke/REPLACE_WITH_RUN_ID
     storage.class: io.confluent.connect.s3.storage.S3Storage
     format.class: io.confluent.connect.s3.format.json.JsonFormat
     partitioner.class: io.confluent.connect.storage.partitioner.DefaultPartitioner

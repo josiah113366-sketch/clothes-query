@@ -4,7 +4,7 @@ bindings = {
     namespace       = "kafka"
     service_account = "infra-smoke-connect-connect"
     s3_access = {
-      "infra-smoke/" = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+      "infra-smoke/REPLACE_WITH_RUN_ID/" = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
     }
   }
 }
