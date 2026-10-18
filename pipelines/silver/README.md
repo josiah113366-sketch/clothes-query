@@ -21,7 +21,7 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 
 | 항목 | 기준 |
 |---|---|
-| 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/year=YYYY/month=MM/day=DD/*.jsonl` (UTC 작성일). 기존 `reviews/dt=YYYY-MM-DD/*.jsonl`도 함께 지원 |
+| 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/year=YYYY/month=MM/day=DD/*.jsonl` (UTC 작성일) |
 | 출력 | `silver/reviews/dt=YYYY-MM-DD/part-00000.jsonl` (`dt`는 KST 작성일) |
 | 한 행의 기준 | `review_id`당 현재 `review_created` 1건 |
 | 재처리 | 지정한 KST 날짜별 결과 파일 교체. 같은 범위를 두 번 실행해도 행 수 증가 없음 |
@@ -50,7 +50,7 @@ python -m pipelines.silver.reviews --input-root review-simulator/.local/lake --o
 
 입력은 운영 리뷰 `reviews/`만 읽고, 평가용 `reviews_truth/`는 사용하지 않는다. 원천 `product_id`를 보존하며 실제 상품 키와의 대응을 확인한 뒤 거래 지표에 연결한다.
 
-신규·기존 파티션을 함께 읽은 뒤 review_id로 중복 처리한다. KST 시작일의 전날 UTC부터 종료일 UTC까지 검색하고 KST 작성일로 행을 선택한다. 출력 경로는 기존 Gold A 호환성을 위해 KST `dt=`를 유지한다. 검색 범위에서 운영 JSONL 파일을 하나도 찾지 못하면 기존 출력을 덮어쓰지 않고 실패한다. 명시적으로 비어 있는 입력 파일이나 읽은 파일 중 대상 KST 리뷰가 없는 경우는 정상 0건 결과로 처리한다.
+입력은 year/month/day 구조로 통일한다. KST 시작일의 전날 UTC부터 종료일 UTC까지 검색하고 KST 작성일로 행을 선택한 뒤 review_id로 중복 처리한다. Silver 출력 경로는 Gold A 호환성을 위해 KST `dt=`를 유지한다. 검색 범위에서 운영 JSONL 파일을 하나도 찾지 못하면 기존 출력을 덮어쓰지 않고 실패한다. 명시적으로 비어 있는 입력 파일이나 읽은 파일 중 대상 KST 리뷰가 없는 경우는 정상 0건 결과로 처리한다.
 
 ## 결정: 거래 Silver 계산 규칙
 

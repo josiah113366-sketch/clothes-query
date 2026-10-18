@@ -39,7 +39,8 @@ def _review(
 
 
 def _write_input(root: Path, utc_day: str, rows: list[dict[str, object]]) -> None:
-    path = root / "reviews" / f"dt={utc_day}" / "part-00000.jsonl"
+    day = date.fromisoformat(utc_day)
+    path = root / "reviews" / f"year={day:%Y}" / f"month={day:%m}" / f"day={day:%d}" / "part-00000.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8"
@@ -71,7 +72,7 @@ def test_kst_boundary_deduplication_and_repeat_run(tmp_path: Path) -> None:
     assert _output(target, "2026-10-16") == first
 
 
-def test_current_producer_path_legacy_duplicates_and_truth_separation(tmp_path: Path) -> None:
+def test_current_producer_path_duplicates_and_truth_separation(tmp_path: Path) -> None:
     # 최신 main의 실제 LakeSink로 파일을 만들어 생산자/소비자 경로를 함께 확인한다.
     sink_path = Path(__file__).resolve().parents[3] / "review-simulator/src/rsim/review/sinks.py"
     spec = importlib.util.spec_from_file_location("review_sink_compat", sink_path)
@@ -81,11 +82,11 @@ def test_current_producer_path_legacy_duplicates_and_truth_separation(tmp_path: 
     original = _review("R-1", "2026-10-15T23:30:00+00:00")
     newer = dict(original, emitted_at="2026-10-16T01:00:00+00:00", event_id="E-new")
     sink = module.LakeSink(str(source), str(source))
-    sink.send(newer, {"evaluation_only": True})
+    sink.send(original, {"evaluation_only": True})
+    sink.send(newer, None)
     sink.send(_review("R-2", "2026-10-16T03:00:00+00:00"), None)
     sink.close()
     assert (source / "reviews/year=2026/month=10/day=15/part-00000.jsonl").is_file()
-    _write_input(source, "2026-10-15", [original])
     counts = run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16))
     rows = _output(target, "2026-10-16")
     assert counts == {"2026-10-16": 2}
@@ -95,7 +96,7 @@ def test_current_producer_path_legacy_duplicates_and_truth_separation(tmp_path: 
     assert _output(target, "2026-10-16") == rows
 
 
-def test_s3_lists_both_partition_layouts_without_network(monkeypatch) -> None:
+def test_s3_lists_current_partition_without_network(monkeypatch) -> None:
     prefixes = []
 
     class Paginator:
@@ -106,10 +107,8 @@ def test_s3_lists_both_partition_layouts_without_network(monkeypatch) -> None:
     client = SimpleNamespace(get_paginator=lambda operation: Paginator())
     monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(client=lambda service: client))
     paths = _input_uris("s3://test-bucket/bronze", date(2026, 10, 15))
-    assert set(prefixes) == {
-        "bronze/reviews/year=2026/month=10/day=15/", "bronze/reviews/dt=2026-10-15/",
-    }
-    assert len(paths) == 2
+    assert prefixes == ["bronze/reviews/year=2026/month=10/day=15/"]
+    assert len(paths) == 1
 
 
 def test_missing_input_preserves_output_but_explicit_empty_file_clears_day(tmp_path: Path) -> None:

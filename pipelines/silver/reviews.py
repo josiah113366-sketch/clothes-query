@@ -31,29 +31,21 @@ def _s3_location(uri: str) -> tuple[str, str]:
 
 
 def _input_uris(root: str, utc_day: date) -> list[str]:
-    # 최신 year/month/day와 기존 dt를 모두 읽고, 이후 review_id로 중복 처리한다.
-    prefixes = [
-        _uri(root, "reviews", f"year={utc_day:%Y}", f"month={utc_day:%m}", f"day={utc_day:%d}"),
-        _uri(root, "reviews", f"dt={utc_day.isoformat()}"),
-    ]
-    paths = set()
-    for prefix in prefixes:
-        if prefix.startswith("s3://"):
-            import boto3
+    prefix = _uri(root, "reviews", f"year={utc_day:%Y}", f"month={utc_day:%m}", f"day={utc_day:%d}")
+    if prefix.startswith("s3://"):
+        import boto3
 
-            bucket, key = _s3_location(prefix)
-            objects = boto3.client("s3").get_paginator("list_objects_v2").paginate(
-                Bucket=bucket, Prefix=key.rstrip("/") + "/"
-            )
-            paths.update(
-                f"s3://{bucket}/{item['Key']}"
-                for page in objects
-                for item in page.get("Contents", [])
-                if item["Key"].endswith(".jsonl")
-            )
-        else:
-            paths.update(str(path) for path in Path(prefix).glob("*.jsonl"))
-    return sorted(paths)
+        bucket, key = _s3_location(prefix)
+        objects = boto3.client("s3").get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=key.rstrip("/") + "/"
+        )
+        return sorted(
+            f"s3://{bucket}/{item['Key']}"
+            for page in objects
+            for item in page.get("Contents", [])
+            if item["Key"].endswith(".jsonl")
+        )
+    return sorted(str(path) for path in Path(prefix).glob("*.jsonl"))
 
 
 def _read_text(uri: str) -> str:
