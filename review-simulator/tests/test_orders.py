@@ -71,7 +71,12 @@ def _reviews(path: Path) -> list[dict]:
 
 def _lake(workdir: Path, table: str) -> dict[str, list[dict]]:
     root = workdir / ".local/lake" / table
-    return {d.name: _reviews(d / "part-00000.jsonl") for d in sorted(root.glob("dt=*"))}
+    # year=YYYY/month=MM/day=DD 파티션을 "YYYY-MM-DD" 키로 모은다
+    parts = {}
+    for d in sorted(root.glob("year=*/month=*/day=*")):
+        day = "-".join(p.split("=")[1] for p in d.relative_to(root).parts)
+        parts[day] = _reviews(d / "part-00000.jsonl")
+    return parts
 
 
 def test_run_from_orders_by_date_to_lake(workdir) -> None:
@@ -85,7 +90,7 @@ def test_run_from_orders_by_date_to_lake(workdir) -> None:
     args = ["run", "--source", "orders", "--llm", "fake", "--sink", "lake", "--date"]
     res = runner.invoke(app, [*args, "2026-10-08"])
     assert res.exit_code == 0, res.output
-    first = _lake(workdir, "reviews")["dt=2026-10-08"]
+    first = _lake(workdir, "reviews")["2026-10-08"]
     assert first
     for r in first:
         o = orders[r["order_id"]]
@@ -98,7 +103,7 @@ def test_run_from_orders_by_date_to_lake(workdir) -> None:
 
     # 같은 날짜를 다시 돌리면 파티션을 덮어써서 같은 주문·같은 ID·같은 옵션이 남는다
     runner.invoke(app, [*args, "2026-10-08"])
-    again = _lake(workdir, "reviews")["dt=2026-10-08"]
+    again = _lake(workdir, "reviews")["2026-10-08"]
 
     def strip(rows):
         keys = ("review_id", "order_id", "option_size", "option_color", "has_photo", "created_at")
@@ -141,10 +146,10 @@ def test_lake_sink_writes_s3_with_fake_bucket(monkeypatch) -> None:
             sink.send(review, {"review_id": "R-1"})
             sink.close()
         keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket="test-lake")["Contents"])
-        # KST 10월 8일 23:30 = UTC 10월 8일 14:30 → dt=2026-10-08
+        # KST 10월 8일 23:30 = UTC 10월 8일 14:30 → year=2026/month=10/day=08
         assert keys == [
-            "bronze/reviews/dt=2026-10-08/part-00000.jsonl",
-            "sim-truth/reviews_truth/dt=2026-10-08/part-00000.jsonl",
+            "bronze/reviews/year=2026/month=10/day=08/part-00000.jsonl",
+            "sim-truth/reviews_truth/year=2026/month=10/day=08/part-00000.jsonl",
         ]
         body = s3.get_object(Bucket="test-lake", Key=keys[0])["Body"].read().decode("utf-8")
         assert [json.loads(x)["review_id"] for x in body.splitlines()] == ["R-1"]

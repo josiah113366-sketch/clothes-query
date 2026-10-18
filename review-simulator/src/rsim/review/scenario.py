@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ..common.rng import make_rng, seeded_uuid
 from .catalog import Catalog, Product
-from .taxonomy import ASPECT_WEIGHTS, STYLES
+from .taxonomy import ASPECT_WEIGHTS, PROS_CONS_STYLE, REBUY_STYLE, REBUY_STYLE_RATE, STYLES
 
 # ---------------------------------------------------------------- 별점 분포
 # 실제 쇼핑몰처럼 5점이 많고 1점이 2점보다 조금 많은 'J자' 분포.
@@ -31,12 +31,18 @@ RATING_WEIGHTS = [0.07, 0.05, 0.10, 0.20, 0.58]
 
 # 별점별로 각 속성 감성이 (긍정, 중립, 부정)으로 나올 확률.
 # 예: 5점 리뷰는 대부분 긍정 속성이지만 가끔 "다 좋은데 배송이 느려요" 같은 부정이 섞인다.
+# 2026-10-16 lemin 결정: 중립은 전체 속성의 약 5% 만 나오게 줄인다 (예전 값 기준 약 13%).
+#   예전 값: 1점 (0.03, 0.07, 0.90) / 2점 (0.10, 0.15, 0.75) / 3점 (0.30, 0.40, 0.30)
+#            4점 (0.70, 0.18, 0.12) / 5점 (0.90, 0.07, 0.03)
+#   별점별 중립을 약 0.4배로 줄이고, 줄인 만큼은 그 별점의 긍정·부정 비율대로 나눠 줬다(별점 방향은 그대로).
+#   실제 비율은 별점 분포·상품 품질 편차에 따라 달라진다. 2만 건 시험 결과 속성 기준 중립 약 5%.
+#   중립 비율을 다시 바꾸려면 가운데 숫자만 바꾸고 세 숫자 합을 1 로 맞춘다.
 SENTIMENT_BY_RATING = {
-    1: (0.03, 0.07, 0.90),
-    2: (0.10, 0.15, 0.75),
-    3: (0.30, 0.40, 0.30),
-    4: (0.70, 0.18, 0.12),
-    5: (0.90, 0.07, 0.03),
+    1: (0.03, 0.03, 0.94),
+    2: (0.11, 0.06, 0.83),
+    3: (0.42, 0.16, 0.42),
+    4: (0.79, 0.07, 0.14),
+    5: (0.94, 0.03, 0.03),
 }
 
 # 한 리뷰에 들어갈 속성 개수 분포: 1개, 2개, 3개의 상대 비율
@@ -160,6 +166,21 @@ class SimClock:
 
 
 # ---------------------------------------------------------------- 명세 생성기
+def pick_style(aspects: list[dict], rng: random.Random) -> str:
+    """명세의 말투를 고른다 (p5.8, 2026-10-16 lemin 결정).
+
+    1) REBUY_STYLE_RATE(약 30%) 확률로 "재구매 여부를 언급하는 말투"
+    2) 아니면 나머지 말투 중에서 똑같은 확률로. 단 "장점과 단점을 나눠서 정리하는 말투"는
+       속성에 긍정과 부정이 둘 다 있을 때만 후보에 넣는다(없는 단점·장점을 지어내지 않게).
+    """
+    if rng.random() < REBUY_STYLE_RATE:
+        return REBUY_STYLE
+    sentiments = {a["sentiment"] for a in aspects}
+    mixed = {"긍정", "부정"} <= sentiments
+    others = [s for s in STYLES if s != REBUY_STYLE and (mixed or s != PROS_CONS_STYLE)]
+    return rng.choice(others)
+
+
 class ScenarioEngine:
     def __init__(
         self,
@@ -279,8 +300,8 @@ class ScenarioEngine:
                 incident_id = inc.id
                 break
 
-        # 난수를 뽑는 순서는 예전과 같게 둔다(같은 시드면 p5.1 과 같은 명세가 나와서 비교가 쉽다)
-        style = self.rng.choice(STYLES)
+        # p5.8: 말투는 속성이 다 정해진 뒤에 고른다(장단점 말투는 긍정·부정이 섞였을 때만이라서).
+        # 그래서 같은 시드라도 p5.7 까지와는 다른 명세가 나온다.
         length = self.rng.choices(list(LENGTH_WEIGHTS), weights=list(LENGTH_WEIGHTS.values()))[0]
         if length == "short" and len(aspects) > MAX_ASPECTS_SHORT:
             # 앞쪽(이상 상황 속성이 있으면 그게 맨 앞)만 남긴다. 줄인 뒤에도 별점과 정반대가 되지 않게 다시 맞춘다.
@@ -292,6 +313,7 @@ class ScenarioEngine:
                 aspects[0]["sentiment"] = "부정"
 
         aspects = self._demote_smell(aspects)
+        style = pick_style(aspects, self.rng)
 
         self._counter += 1
         return ReviewSpec(
