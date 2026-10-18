@@ -14,7 +14,7 @@ def active_min(inc_id, m):
             return True
     return False
 
-def generate_ledger(seed, orders_per_day=900, pg_base_rate=0.0):
+def generate_ledger(seed, orders_per_day=900, pg_base_rate=0.0, outage_fail_rate=0.9):
     """분 단위로 합친 원장: 한 칸 = 그 1분 동안 원장에 쌓인 행 수.
     (원장은 한 건씩 쌓이지만 탐지는 최근 N분을 세기만 하므로 분 단위 합계로 같은 결과를 낸다.)"""
     rng = random.Random(seed)
@@ -32,7 +32,7 @@ def generate_ledger(seed, orders_per_day=900, pg_base_rate=0.0):
         for _ in range(a_tot):
             pg = rng.choice(PGS)
             pay[pg]["attempts"][m] += 1
-            if out and pg == "PG_A" and rng.random() < 0.9:
+            if out and pg == "PG_A" and rng.random() < outage_fail_rate:
                 pay[pg]["pg_fail"][m] += 1
             else:
                 r = rng.random()
