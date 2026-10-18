@@ -146,12 +146,16 @@ class NullClickSink:
 
 
 class JsonlClickSink:
-    """한 줄에 이벤트 하나를 JSON으로 덧붙인다."""
+    """한 줄에 이벤트 하나를 JSON으로 덧붙인다.
+
+    줄마다 비우지 않고 기본 버퍼로 쓴다 (close에서 비운다). WSL의 /mnt 드라이브에서는
+    줄마다 비우면 한 줄에 약 0.6ms가 걸려 피크 시간대의 클릭 속도를 따라가지 못한다.
+    """
 
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self._file: TextIO | None = path.open("a", encoding="utf-8", buffering=1)
+        self._file: TextIO | None = path.open("a", encoding="utf-8")
 
     def publish(self, event: ClickEvent) -> None:
         if self._file is None:
