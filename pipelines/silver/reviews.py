@@ -31,21 +31,29 @@ def _s3_location(uri: str) -> tuple[str, str]:
 
 
 def _input_uris(root: str, utc_day: date) -> list[str]:
-    prefix = _uri(root, "reviews", f"dt={utc_day.isoformat()}")
-    if prefix.startswith("s3://"):
-        import boto3
+    # 최신 year/month/day와 기존 dt를 모두 읽고, 이후 review_id로 중복 처리한다.
+    prefixes = [
+        _uri(root, "reviews", f"year={utc_day:%Y}", f"month={utc_day:%m}", f"day={utc_day:%d}"),
+        _uri(root, "reviews", f"dt={utc_day.isoformat()}"),
+    ]
+    paths = set()
+    for prefix in prefixes:
+        if prefix.startswith("s3://"):
+            import boto3
 
-        bucket, key = _s3_location(prefix)
-        objects = boto3.client("s3").get_paginator("list_objects_v2").paginate(
-            Bucket=bucket, Prefix=key.rstrip("/") + "/"
-        )
-        return sorted(
-            f"s3://{bucket}/{item['Key']}"
-            for page in objects
-            for item in page.get("Contents", [])
-            if item["Key"].endswith(".jsonl")
-        )
-    return sorted(str(path) for path in Path(prefix).glob("*.jsonl"))
+            bucket, key = _s3_location(prefix)
+            objects = boto3.client("s3").get_paginator("list_objects_v2").paginate(
+                Bucket=bucket, Prefix=key.rstrip("/") + "/"
+            )
+            paths.update(
+                f"s3://{bucket}/{item['Key']}"
+                for page in objects
+                for item in page.get("Contents", [])
+                if item["Key"].endswith(".jsonl")
+            )
+        else:
+            paths.update(str(path) for path in Path(prefix).glob("*.jsonl"))
+    return sorted(paths)
 
 
 def _read_text(uri: str) -> str:
@@ -107,7 +115,7 @@ def normalize_review(raw: dict[str, object]) -> dict[str, object]:
     created = _timestamp(raw.get("created_at"), "created_at")
     emitted = _timestamp(raw.get("emitted_at"), "emitted_at")
     kst = created.astimezone(KST)
-    # 실제 구매 상품과 연결되기 전이므로 product_id를 그대로 보존한다.
+    # 원천 product_id를 보존한다. 값만 보고 article_id/product_code로 임의 변환하지 않는다.
     # 개인 식별용 member_id와 평가 전용 라벨은 분석용 출력에 복사하지 않는다.
     return {
         "review_id": raw["review_id"],
@@ -134,10 +142,12 @@ def build_reviews(input_root: str, start: date, end: date) -> dict[str, list[dic
     if end < start:
         raise ValueError("end-date가 start-date보다 빠릅니다")
     selected: dict[str, dict[str, object]] = {}
+    found_input = False
     # KST 하루의 앞부분은 전날 UTC 폴더에 있으므로 시작일 하루 전부터 읽는다.
     utc_day = start - timedelta(days=1)
     while utc_day <= end:
         for uri in _input_uris(input_root, utc_day):
+            found_input = True
             for line_no, line in enumerate(_read_text(uri).splitlines(), 1):
                 if not line.strip():
                     continue
@@ -160,6 +170,9 @@ def build_reviews(input_root: str, start: date, end: date) -> dict[str, list[dic
                 elif str(row["emitted_at_utc"]) == str(previous["emitted_at_utc"]) and row != previous:
                     raise ValueError(f"review_id {review_id}: 같은 전송 시각에 서로 다른 내용이 있습니다")
         utc_day += timedelta(days=1)
+
+    if not found_input:
+        raise FileNotFoundError("대상 UTC 날짜 범위에 운영 리뷰 JSONL 파일이 없습니다")
 
     by_day: dict[str, list[dict[str, object]]] = {}
     day = start

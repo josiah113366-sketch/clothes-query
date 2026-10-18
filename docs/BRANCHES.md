@@ -55,6 +55,8 @@ gitGraph
   commit id: "sim(behavior-core)"
   checkout main
   merge sim/behavior-core
+  branch silver/pipelines
+  commit id: "silver(pipelines)"
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -86,4 +88,9 @@ gitGraph
 | `infra/pipeline-smoke` | [infra-pipeline-smoke.md](tasks/infra-pipeline-smoke.md) | 검토 대기 | |
 
 ### 그 밖의 영역
-`db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+`db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+
+### silver
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `silver/pipelines` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 준비 | |

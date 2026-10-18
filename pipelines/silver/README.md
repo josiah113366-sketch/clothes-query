@@ -21,12 +21,12 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 
 | 항목 | 기준 |
 |---|---|
-| 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/dt=YYYY-MM-DD/*.jsonl` (`dt`는 UTC 작성일) |
+| 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/year=YYYY/month=MM/day=DD/*.jsonl` (UTC 작성일). 기존 `reviews/dt=YYYY-MM-DD/*.jsonl`도 함께 지원 |
 | 출력 | `silver/reviews/dt=YYYY-MM-DD/part-00000.jsonl` (`dt`는 KST 작성일) |
 | 한 행의 기준 | `review_id`당 현재 `review_created` 1건 |
 | 재처리 | 지정한 KST 날짜별 결과 파일 교체. 같은 범위를 두 번 실행해도 행 수 증가 없음 |
 | 중복 | 같은 `review_id`의 재전송/재생성은 `emitted_at`이 가장 늦은 행을 선택. 동시간 충돌은 실패 |
-| 보존 | 원문, 별점, 임시 `product_id`, `order_id`, 작성 시각, 전송 시각 |
+| 보존 | 원문, 별점, 원천 `product_id`, `order_id`, 작성 시각, 전송 시각 |
 | 제외 | `member_id`와 `reviews_truth/` 평가 라벨은 운영 분석 출력에 넣지 않음 |
 
 ## 미정: 다른 Silver 입력 연결
@@ -35,7 +35,7 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 |---|---|---|
 | 주문·주문상품·결제 CDC | 가상 입력용 계산 규칙 구현, 실제 Bronze 미연결 | 실제 Bronze 컬럼, CDC 순서·삭제 처리, 중복 식별값 |
 | 클릭 이벤트 | `main`에 실제 Bronze 출력 없음 | 세션·상품 키, 이벤트 시각과 중복 기준 |
-| 상품 기준정보 | 리뷰의 `product_id`가 아직 임시 값 | `article_id`·`product_code` 연결 방식과 스냅샷 위치 |
+| 상품 기준정보 | 생성기는 H&M article_id를 product_id로 읽을 수 있고, 대체 임시 상품 모드도 있음 | 실제 입력의 상품 키 출처·상품 스냅샷 위치 확인 |
 | 리뷰 AI 분석 결과 | 전달 스키마 없음 | `review_id`, 속성, 감성, 모델 버전, 분석 시각 |
 
 이 표는 구현 상태를 기록한다. 미정 항목의 키나 집계 기준을 임의로 확정하지 않는다.
@@ -48,7 +48,9 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 python -m pipelines.silver.reviews --input-root review-simulator/.local/lake --output-root pipelines/silver/.local/lake --start-date 2026-10-08 --end-date 2026-10-08
 ```
 
-입력은 운영 리뷰 `reviews/`만 읽고, 평가용 `reviews_truth/`는 사용하지 않는다. `product_id`는 임시 ID여서 주문·상품 지표와 연결하지 않는다.
+입력은 운영 리뷰 `reviews/`만 읽고, 평가용 `reviews_truth/`는 사용하지 않는다. 원천 `product_id`를 보존하며 실제 상품 키와의 대응을 확인한 뒤 거래 지표에 연결한다.
+
+신규·기존 파티션을 함께 읽은 뒤 review_id로 중복 처리한다. KST 시작일의 전날 UTC부터 종료일 UTC까지 검색하고 KST 작성일로 행을 선택한다. 출력 경로는 기존 Gold A 호환성을 위해 KST `dt=`를 유지한다. 검색 범위에서 운영 JSONL 파일을 하나도 찾지 못하면 기존 출력을 덮어쓰지 않고 실패한다. 명시적으로 비어 있는 입력 파일이나 읽은 파일 중 대상 KST 리뷰가 없는 경우는 정상 0건 결과로 처리한다.
 
 ## 결정: 거래 Silver 계산 규칙
 

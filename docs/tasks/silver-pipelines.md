@@ -61,3 +61,17 @@
 - **검증:** Silver 테스트 13개 통과(기존 회원・리뷰・거래 포함). 원격 main의 상품 DDL과 디자인/상품 출력 컬럼 집합 일치 확인. 합성 JSONL로 클릭 CLI 결과 정상 2행・격리 1행・품질 1행, 상품 CLI 결과 디자인 1행・상품 1행・격리 1행・품질 2행 확인. `git diff --check` 통과.
 - **확인 위치:** `pipelines/silver/.local/clicks-products-md-demo/output/silver/clicks/current.json`, 같은 output 아래 `silver/products/current.json`. 합성 입력・출력은 커밋하지 않는다.
 - **다음 연결:** 실제 Bronze/스냅샷 형식과 S3・Parquet 연결, 부분 재처리, 공통 규칙 적용, Gold A 연결. 리뷰・회원 코드 변경 없음.
+
+## 승인된 추가 작업: 리뷰 경로・최신 main 호환성
+
+- 최신 origin/main을 Silver 브랜치에 병합하고 원천 LakeSink 경로에 맞춘다. 기존 작업과 로컬 자료는 보존한다.
+- 리뷰 입력은 year/month/day와 기존 dt를 모두 지원하고 출력 KST dt는 유지한다. 입력 파일 없음과 정상 0건을 구분한다.
+- 기존 리뷰 테스트 파일에서 최신 생산자 LakeSink 입력・구형 중복・UTC/KST 경계・반복 실행・S3 목록・입력 없음 보호를 확인한다. 실행 중 AWS 쓰기는 하지 않는다.
+- Silver 테스트 전체와 기존 Gold A 리뷰/거래 연결 호환성을 확인한다. 브랜치 대장 자기 영역 등록.
+
+### 작업 결과: 리뷰 경로・최신 main 호환성
+
+- **변경:** 원격 main `9bbc29f`를 병합. 리뷰 입력 year/month/day와 기존 dt를 모두 읽고 review_id로 중복 정리. 출력 KST dt와 Gold A 인터페이스 유지. 운영 입력 파일을 못 찾으면 기존 출력을 보존하고 실패한다.
+- **검증:** Silver 테스트 16개 통과. 최신 main의 LakeSink를 직접 호출한 파일과 Silver 연결, 새/구형 파티션 중복, S3 목록 호출(모의), 입력 없음과 명시적 0건 구분 확인. 기존 Gold A 리뷰 연결 테스트를 구형/신규 경로로 각각 실행해 2개 통과, 거래 연결 테스트 1개 통과. Gold A 소스 파일은 변경하지 않고 브랜치 내용을 메모리에서 실행했다. `git diff --check` 통과, origin/main이 현재 브랜치의 조상임을 확인.
+- **기록:** README 입력 경로와 원천 상품 키 설명 갱신. 최신 브랜치 규칙에 따라 docs/BRANCHES.md의 silver 구역과 구조도 등록.
+- **한계:** AWS 읽기/쓰기를 실행한 결과가 아니라 로컬 합성 입력과 S3 목록 모의 검증이다. 실제 거래 CDC/S3, 부분 재처리, 공통 YAML 실행 연결은 후속 범위다. push・PR 생성・main 머지는 별도 사용자 승인 후 진행한다.

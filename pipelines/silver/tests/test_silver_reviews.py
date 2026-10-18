@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from datetime import date
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
-from pipelines.silver.reviews import run
+import pytest
+
+from pipelines.silver.reviews import _input_uris, run
 
 
 def _review(
@@ -64,3 +69,56 @@ def test_kst_boundary_deduplication_and_repeat_run(tmp_path: Path) -> None:
 
     run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16))
     assert _output(target, "2026-10-16") == first
+
+
+def test_current_producer_path_legacy_duplicates_and_truth_separation(tmp_path: Path) -> None:
+    # 최신 main의 실제 LakeSink로 파일을 만들어 생산자/소비자 경로를 함께 확인한다.
+    sink_path = Path(__file__).resolve().parents[3] / "review-simulator/src/rsim/review/sinks.py"
+    spec = importlib.util.spec_from_file_location("review_sink_compat", sink_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source, target = tmp_path / "bronze", tmp_path / "output"
+    original = _review("R-1", "2026-10-15T23:30:00+00:00")
+    newer = dict(original, emitted_at="2026-10-16T01:00:00+00:00", event_id="E-new")
+    sink = module.LakeSink(str(source), str(source))
+    sink.send(newer, {"evaluation_only": True})
+    sink.send(_review("R-2", "2026-10-16T03:00:00+00:00"), None)
+    sink.close()
+    assert (source / "reviews/year=2026/month=10/day=15/part-00000.jsonl").is_file()
+    _write_input(source, "2026-10-15", [original])
+    counts = run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16))
+    rows = _output(target, "2026-10-16")
+    assert counts == {"2026-10-16": 2}
+    assert [row["review_id"] for row in rows] == ["R-1", "R-2"]
+    assert rows[0]["event_id"] == "E-new"
+    assert run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16)) == counts
+    assert _output(target, "2026-10-16") == rows
+
+
+def test_s3_lists_both_partition_layouts_without_network(monkeypatch) -> None:
+    prefixes = []
+
+    class Paginator:
+        def paginate(self, Bucket, Prefix):
+            prefixes.append(Prefix)
+            return [{"Contents": [{"Key": Prefix + "part-00000.jsonl"}, {"Key": Prefix + "_SUCCESS"}]}]
+
+    client = SimpleNamespace(get_paginator=lambda operation: Paginator())
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(client=lambda service: client))
+    paths = _input_uris("s3://test-bucket/bronze", date(2026, 10, 15))
+    assert set(prefixes) == {
+        "bronze/reviews/year=2026/month=10/day=15/", "bronze/reviews/dt=2026-10-15/",
+    }
+    assert len(paths) == 2
+
+
+def test_missing_input_preserves_output_but_explicit_empty_file_clears_day(tmp_path: Path) -> None:
+    source, target = tmp_path / "bronze", tmp_path / "output"
+    _write_input(source, "2026-10-15", [_review("R-1", "2026-10-15T23:30:00+00:00")])
+    run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16))
+    previous = _output(target, "2026-10-16")
+    with pytest.raises(FileNotFoundError):
+        run(str(tmp_path / "missing"), str(target), date(2026, 10, 16), date(2026, 10, 16))
+    assert _output(target, "2026-10-16") == previous
+    _write_input(source, "2026-10-15", [])
+    assert run(str(source), str(target), date(2026, 10, 16), date(2026, 10, 16)) == {"2026-10-16": 0}
