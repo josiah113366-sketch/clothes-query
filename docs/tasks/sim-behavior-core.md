@@ -1,6 +1,6 @@
 # 작업 지시서: sim/behavior-core
 
-> 상태: 진행 전 · 브랜치: `sim/behavior-core` · 이전 작업: `db/order-schema`, `sim/modes`, `sim/product-seed` · 다음 작업: `sim/controller`, `sim/clickstream`, `sim/cdc-orders`
+> 상태: 완료 · 브랜치: `sim/behavior-core` · 이전 작업: `db/order-schema`, `sim/modes`, `sim/product-seed` · 다음 작업: `sim/controller`, `sim/clickstream`, `sim/cdc-orders`
 
 ## 목표
 
@@ -387,4 +387,53 @@ sim behavior live [--mode normal|medium|burst] [--visits-daily 111000] [--speed 
 
 ## 작업 결과
 
-(머지 전에 Claude Code가 채운다: 무엇을 만들었나, 왜, 확인한 결과(완료 확인 실행 결과), 알려진 한계(재시작하면 진행 중 주문이 멈춤), 다음 할 일. 다음 작업은 `sim/controller`, `sim/ecs-image`.)
+### 만든 것
+
+- `simulator/src/sim/behavior/`: `params.py`(모든 수치, `[가정]` 표시), `model.py`(불변 데이터 클래스와 큐 항목), `ranking.py`(`ProductRanking`: 시드로 섞은 순열 + 구간 선형 누적표 역함수 추첨), `pool.py`(`MemberPool`: sha256 결정론적 성향, 누적 가중치 + `bisect`. `DbMemberSource`/`DbCatalogSource`는 `member_id`와 `article_id, price`만 읽는다), `visit.py`(`plan_visit` 순수 함수), `payment.py`(`choose_pg`, `decide_attempt(… pg_extra_fail)`, `should_retry`, `next_transition`), `queue.py`(`ScheduledQueue`), `sink.py`(`OrderSink`/`ClickSink`와 `DbOrderSink`, `MemoryOrderSink`, `NullClickSink`, `JsonlClickSink`, `MemoryClickSink`), `runner.py`(`BehaviorRunner`: 루프, 제어 신호, 재연결, 종료, 요약, `run_until`, `drain`), `cli.py`(`sim behavior live`)
+- `common/db.py`: `check_db_target(database_url, allow_remote)`와 `DatabaseTargetError`. `sim/cli.py`에 `behavior` 등록
+- 테스트: 단위 `test_behavior_{ranking,pool,visit,payment,queue,sink,runner,cli}.py`(+ `behavior_fixtures.py`, `conftest.py` 픽스처), 통합 `test_behavior_integration.py`
+- 문서: `simulator/README.md`의 `## 행동 (behavior)` 절과 코드 구조 줄, `simulator/CLAUDE.md`의 `behavior/` 한 줄
+
+### 지시서와 다르게 하거나 덧붙인 것
+
+- `JsonlClickSink`는 줄마다 비우지 않고 기본 버퍼로 쓴다. WSL의 `/mnt/e`에서 줄마다 비우면 한 줄에 약 0.6ms라(기본 버퍼는 0.013ms) 피크 시간대 클릭 속도를 따라가지 못해 방문이 버려졌다. 버퍼는 `close()`에서 비운다.
+- 커밋 직후 연결이 끊기면 그 항목을 다시 실행하면서 같은 `UPDATE`가 한 번 더 나간다. 같은 값을 다시 쓰는 것이라 DB 결과는 같다(INSERT는 `23505`로 건너뛴다). 단위 테스트는 이 경우 연속된 같은 UPDATE를 하나로 보고 비교한다.
+- 방문 중 연결이 끊기면 대기한 시간만큼 "밀린 방문은 따라잡지 않는다" 규칙이 적용돼 이후 방문 시각이 달라진다. 그래서 끊김 테스트는 (1) `drain` 중 끊김은 깨끗한 실행과 호출 기록이 같은지, (2) 방문 중 끊김은 정합성·빠짐 없음(모두 종결 상태로 끝남)을 확인한다.
+- `tests/test_product_integration.py`의 `DROP TABLE product_variant, product_design`에 `CASCADE`를 붙였다. `004_orders.sql`의 `order_items`가 `product_variant`를 참조하게 되면서 이 기존 테스트가 실패했다(임시 스키마 안에서만 지운다).
+- 로컬 DB(public)에 `db/schema/004_orders.sql`을 적용했다(사용자 승인). 테이블은 남겨 두고 행만 지웠다.
+- `simulator/CLAUDE.md` 18행의 "`behavior`(쇼핑 행동, 나중에)"는 지시서가 한 줄만 바꾸라고 해서 그대로 두었다.
+
+### 완료 확인 실행 결과 (2026-10-18, 로컬)
+
+| 확인 | 결과 |
+|---|---|
+| `ruff check .`, `ruff format --check .` | 통과 |
+| `pytest` (단위) | 280 passed (기존 baseline·live 재현성 테스트 포함) |
+| `pytest -m integration` | 16 passed (행동 3개 포함) |
+| 시작 전 DB | `members` 103,690 (베이스라인 10만 + 사용자가 돌린 신규 가입 3,690), `product_variant` 101,452, 거래 테이블은 없어서 004 적용 후 0행 |
+| `--visits-daily 20000 --speed 1440 --duration 60 --click-sink jsonl` | 종료 코드 0, 방문 17,145, 주문 759 → **주문 비율 4.43%** (기준 4.49% ± 0.79%). 방문은 기대 약 17,850의 96%로, 10초 구간 하나에서 루프가 1초 넘게 밀려 약 970건이 따라잡기 규칙으로 버려졌다(같은 조건 12초 측정 두 번은 기대값대로 나옴) |
+| DB 정합성 8개 (총액, 줄 없는 주문, SUCCESS 2건+, PAID 이상 SUCCESS 없음, PAYMENT_FAILED 짝, 시도 번호, 결제 금액, 클릭 파일에 없는 주문 세션) | 모두 0 |
+| 분포 (위 실행) | 상태: SHIPPED 508, PAID 127, DELIVERED 57, CANCELLED 38, PAYMENT_FAILED 29 / 결제 단계 주문당 시도 1.046 / 시도 실패율 8.1% / 첫 시도 PG_A 51.8%·PG_B 48.2% / 수단 CARD 55.9%·SIMPLE_PAY 33.9%·BANK_TRANSFER 10.1% / 실패 코드 INSUFFICIENT_BALANCE 25, CARD_LIMIT_EXCEEDED 20, CARD_DECLINED 12, PG_ERROR 4, PG_TIMEOUT 2 |
+| `--mode burst --speed 10 --visits-daily 20000 --duration 30` | 1,180건 (기대 1,250 ± 177) |
+| `--mode medium` 같은 조건 | 381건 (기대 375 ± 97) |
+| 실행 중 제어 파일 `normal` | `mode: burst → normal` 출력 |
+| `{"mode": "surge"}` | 경고 한 번, 다시 써도 추가 경고 없이 normal 유지 |
+| 멈춤 `running=false` | 멈춘 10초 구간 방문 0, 그동안 DB의 배송 이후 상태 주문 600 → 776 증가, 다시 켜자 방문 재개 |
+| 껐다 켜기 (시작 완료 뒤 SIGINT) | 종료 코드 0, 요약 출력, 트레이스백 없음. 다시 실행해도 `pkey` 오류 없음(`run_salt` 1792310756 → 1792310797). 끊긴 실행의 주문이 `PLACED` 5, `PAID` 707, `SHIPPED` 825 등으로 남음 (알려진 한계) |
+| 출력 PII | 모든 실행 출력에 `example.com`, `010-` 없음. `SELECT`는 `member_id`와 `article_id, price`만 읽는다 |
+| 원격 DB | `SIM_ALLOW_REMOTE_DB` 없이 종료 코드 1, 메시지에 호스트·비밀번호 없음 (실제 접속 안 함) |
+| `docker build -t sim-local ./simulator` / `docker run --rm sim-local behavior live --help` | 성공 / 옵션 목록 출력 |
+| 삭제 | 확인 중 세 번 지움: `payments` 794 + 1,247 + 1,775 = 3,816, `order_items` 2,583 + 4,151 + 5,990 = 12,724, `orders` 750 + 1,207 + 1,737 = 3,694. 끝에 세 테이블 0행. 합성 상품은 넣지 않았다 |
+| `git status` | `.env`, `simulator/.local/`은 무시됨. push, PR을 하지 않았다 |
+
+### 알려진 한계
+
+- **재시작하면 진행 중이던 주문이 멈춘다.** 예약 큐가 메모리에만 있고 DB에서 복구하지 않는다.
+- 이 WSL 환경에서는 `/mnt/e`의 모듈을 읽느라 시작(import)에 약 20초가 걸린다. 이 사이에 `Ctrl+C`를 누르면 신호 처리기가 설치되기 전이라 Python 기본 `KeyboardInterrupt` 트레이스백이 나온다(종료 코드 130). 시작이 끝난 뒤에는 정상 처리된다. 컨테이너에서는 import가 빨라 해당하지 않는다.
+- 루프가 실제 시간 1초 넘게 밀리면 그만큼의 방문은 만들지 않는다(지시서 규칙). 로컬에서는 디스크 지연으로 가끔 생긴다.
+
+### 다음 할 일
+
+- `sim/controller`: 모드 자동 복귀, 장애 주입(`pg_extra_fail` 채우기), `incident_log`, 제어 신호 전달 수단
+- `sim/ecs-image`: RDS TLS·전용 계정, 이미지·실행
+- `sim/clickstream`(클릭 Kafka 발행), `sim/cdc-orders`(주문 3개 테이블 CDC)
