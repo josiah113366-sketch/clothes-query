@@ -14,7 +14,7 @@ def active_min(inc_id, m):
             return True
     return False
 
-def generate_ledger(seed, orders_per_day=900):
+def generate_ledger(seed, orders_per_day=900, pg_base_rate=0.0):
     """분 단위로 합친 원장: 한 칸 = 그 1분 동안 원장에 쌓인 행 수.
     (원장은 한 건씩 쌓이지만 탐지는 최근 N분을 세기만 하므로 분 단위 합계로 같은 결과를 낸다.)"""
     rng = random.Random(seed)
@@ -34,8 +34,12 @@ def generate_ledger(seed, orders_per_day=900):
             pay[pg]["attempts"][m] += 1
             if out and pg == "PG_A" and rng.random() < 0.9:
                 pay[pg]["pg_fail"][m] += 1
-            elif rng.random() < 0.04:
-                pay[pg]["cust_fail"][m] += 1
+            else:
+                r = rng.random()
+                if r < pg_base_rate:                 # 평소에도 섞여 있는 PG 원인 실패(시뮬레이터 확률표: 시도 단위 약 1.15%)
+                    pay[pg]["pg_fail"][m] += 1
+                elif r < pg_base_rate + 0.04:
+                    pay[pg]["cust_fail"][m] += 1
         for t in TOPICS:
             n = poisson(rng, base[t]*surge)
             msg[t][m] = n
