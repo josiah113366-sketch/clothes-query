@@ -1,0 +1,17 @@
+# Copy to deployment.local.tfvars (ignored); supply account/backend privately.
+bindings = {}
+
+# Illustrative contract only; namespace, ServiceAccount and prefixes are not approved deployment values.
+# AbortMultipartUpload also requires an explicit network additional_s3_endpoint_actions entry first.
+# bindings = {
+#   bronze-consumer = {
+#     namespace       = "REPLACE_WITH_SERVICE_NAMESPACE"
+#     service_account = "REPLACE_WITH_SERVICE_ACCOUNT"
+#     s3_access       = { "bronze/" = ["s3:PutObject", "s3:AbortMultipartUpload"] }
+#   }
+#   gold-reader = {
+#     namespace       = "REPLACE_WITH_SERVICE_NAMESPACE"
+#     service_account = "REPLACE_WITH_SERVICE_ACCOUNT"
+#     s3_access       = { "gold/" = ["s3:GetObject"] }
+#   }
+# }

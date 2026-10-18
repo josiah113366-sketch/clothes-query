@@ -1,0 +1,27 @@
+# Official Strimzi Helm chart 1.3.0. Install in namespace kafka.
+watchNamespaces: []
+watchAnyNamespace: false
+replicas: 1
+image:
+  tag: 1.3.0@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+topicOperator:
+  image:
+    tag: 1.3.0@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+userOperator:
+  image:
+    tag: 1.3.0@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+kafkaInit:
+  image:
+    tag: 1.3.0@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+createAggregateRoles: false
+generateNetworkPolicy: true
+generatePodDisruptionBudget: true
+nodeSelector:
+  karpenter.sh/nodepool: clothes-query-dev-compute
+resources:
+  requests:
+    cpu: 200m
+    memory: 384Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi

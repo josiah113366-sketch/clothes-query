@@ -50,14 +50,21 @@ RDS 에는 넣지 않는다(조인은 레이크에서). 한때 로컬 Postgres `
 - `src/rsim/review/orders.py`: 주문 읽기(`JsonlOrderSource`, 나중에 S3 결제 데이터용으로 교체), 주문별 리뷰 여부·텀(`ReviewTiming`),
   날짜 하루에 떨어지는 주문 고르기(`due_orders`), 가짜 주문(`fake_orders`). 리뷰 여부·텀·review_id·옵션은 order_id 로만 정한다.
 - `rsim orders-fake`: 가짜 주문 파일 `.local/orders.jsonl`
-- `rsim run --source orders --date D --sink lake`: 리뷰 시각이 D(UTC) 하루인 주문만 만들어 `<LAKE_ROOT>/reviews/dt=D/`,
-  `reviews_truth/dt=D/` 에 덮어쓴다. 같은 날짜를 다시 돌려도 주문당 리뷰 하나(기록 조회 없음). 경로는 날짜별(제품별 아님, lemin 확인).
-- 설정: `ORDERS_PATH`, `LAKE_ROOT`(기본 `.local/lake`, s3:// 는 아직 미지원), `REVIEW_RATE`(기본 1.0), `REVIEW_DELAY_MIN_DAYS`/`MAX_DAYS`(1/14)
+- `rsim run --source orders --date D --sink lake`: 리뷰 시각이 D(UTC) 하루인 주문만 만들어 `<LAKE_ROOT>/reviews/year=YYYY/month=MM/day=DD/`,
+  `reviews_truth/year=.../` 에 덮어쓴다. 같은 날짜를 다시 돌려도 주문당 리뷰 하나(기록 조회 없음). 경로는 날짜별(제품별 아님, lemin 확인). 2026-10-16 `dt=` 를 Hive 형식 year/month/day 로 변경.
+- 설정: `ORDERS_PATH`, `LAKE_ROOT`(기본 `.local/lake`, 또는 `s3://버킷/접두사`), `REVIEW_RATE`(기본 1.0), `REVIEW_DELAY_MIN_DAYS`/`MAX_DAYS`(1/14)
 
 ### 5. 확정 컬럼 추가 (2026-10-14 lemin: 제안 컬럼 모두 확정)
 `order_id`, `purchased_at`, `option_size`, `option_color`, `has_photo`, `emitted_at` → 스키마 `review.v2`, 정답은 `order_id` 추가로 `review_truth.v2`.
 사이즈·색상·포토 비율은 `src/rsim/review/options.py` 상수(임시 값, 나중에 주문 데이터에서). 프롬프트는 바꾸지 않았다.
 무작위 모드의 명세·ID 는 예전과 같다(새 칸은 별도 난수열).
+
+### 6. 직접 작성한 리뷰 넣기 (2026-10-16 lemin 결정)
+테스트용으로 사람이 쓴 리뷰를 넣는 `rsim inject --file <CSV|JSONL>` (`src/rsim/review/inject.py`, LLM 호출 없음).
+- 같은 날짜 파티션에 `part-manual-<입력 파일 이름>.jsonl` 로 쓴다 → 매일 덮어쓰는 `part-00000` 과 서로 지우지 않음. 같은 입력을 다시 넣으면 그 파일만 덮어씀.
+- `review_id` 는 `M-` 접두어, `source` = `manual`. `aspects` 를 적은 줄만 정답에도 쓴다. 한 줄이라도 틀리면 아무것도 쓰지 않음.
+- 입력은 로컬 또는 `s3://`. ECS 에서는 입력을 S3 에 올리고 같은 태스크 정의로 RunTask 1회(명령만 바꿈).
+- 직접 지어낸 문장만 넣는다. 경로에 `private` 가 들어가면 거부.
 
 ## 완료 확인
 

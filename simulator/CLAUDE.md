@@ -44,10 +44,10 @@ simulator/
 ├── data/                  # 지역 목록 CSV 등 (필요한 브랜치에서 추가)
 ├── src/sim/
 │   ├── cli.py             # sim 명령 진입점
-│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
+│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 곡선, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
-│   └── behavior/          # (나중에)
+│   └── behavior/          # 쇼핑 행동: 방문, 주문, 결제, 상태 전이
 └── tests/
 ```
 
@@ -57,7 +57,7 @@ simulator/
 ## 개발 환경과 명령
 
 - Python 3.12, 로컬 DB는 Docker Compose의 PostgreSQL이다.
-- 의존성: 실행용 `boto3`, `confluent-kafka`, `faker`, `psycopg[binary]`(v3), `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`
+- 의존성: 실행용 `boto3`, `confluent-kafka`, `faker`, `psycopg[binary]`(v3), `pyarrow`, `python-dotenv`, `typer` / 개발용 `pytest`, `ruff`
 
 ```bash
 cd simulator

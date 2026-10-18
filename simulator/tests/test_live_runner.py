@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import psycopg
 import pytest
 
+from sim.common import curve
 from sim.common.clock import FakeTime, SimClock
 from sim.common.control import ControlState
 from sim.common.db import SafeDatabaseError
@@ -18,6 +19,8 @@ from sim.member.generate import allocate_phones, draw_phone, generate_member
 from sim.member.live import LiveError, LiveRunner, stop_on_signals
 
 START = datetime(2026, 10, 1, 0, 0, 0, tzinfo=params.KST)
+MONDAY = datetime(2026, 10, 12, 0, 0, 0, tzinfo=params.KST)  # 요일 곡선 테스트의 고정 시작
+DAILY = params.NORMAL_DAILY_SIGNUPS
 PII = "hong.gildong@secret-mail.com 010-7777-8888"
 
 
@@ -106,7 +109,8 @@ class Script:
 
 
 NORMAL = ControlState(True, "normal")
-SURGE = ControlState(True, "surge")
+BURST = ControlState(True, "burst")
+MEDIUM = ControlState(True, "medium")
 PAUSED = ControlState(False, "normal")
 
 
@@ -126,41 +130,53 @@ def _within_5_sigma(count: int, expected: float) -> bool:
     return abs(count - expected) <= 5 * math.sqrt(expected)
 
 
-def test_normal_rate_over_ten_sim_days(regions) -> None:
-    # 시뮬레이터 10일 = 실제 14,400초 (배속 60)
-    runner, store, _, _ = make(regions, duration=14_400)
+def _expected_normal(start: datetime, end: datetime, daily: float = DAILY) -> float:
+    """normal 모드에서 [start, end) 동안의 기대 건수 (곡선은 시간 단위 계단이라 분 단위 합이면 정확하다)."""
+    minutes = int((end - start).total_seconds() // 60)
+    total = sum(curve.rate_factor("normal", start + timedelta(minutes=m)) for m in range(minutes))
+    return daily * total * 60 / params.SECONDS_PER_DAY
+
+
+def test_normal_rate_over_fourteen_sim_days(regions) -> None:
+    # 시뮬레이터 14일 = 실제 20,160초 (배속 60). 7의 배수라 요일 곡선의 평균이 1이다
+    runner, store, _, _ = make(regions, duration=20_160, start=MONDAY)
     summary = runner.run()
-    assert _within_5_sigma(summary.total, 10 * params.NORMAL_DAILY_SIGNUPS)
+    assert _within_5_sigma(summary.total, 14 * DAILY)
     assert len(store.rows) == summary.total
     assert summary.by_mode == Counter(normal=summary.total)
 
 
-def test_surge_rate_one_sim_day(regions) -> None:
+@pytest.mark.parametrize(("state", "factor"), [(BURST, 18.0), (MEDIUM, 5.4)])
+def test_fixed_mode_rate_one_sim_hour(regions, state: ControlState, factor: float) -> None:
+    # 시뮬레이터 1시간 = 실제 60초. 밤 0시에 시작해도 시간대 곡선과 무관하게 고정 속도다
     runner, _, _, lines = make(
-        regions, steps=[(0, SURGE)], duration=1_440, mode="surge"
-    )  # 시뮬레이터 1일
+        regions, steps=[(0, state)], duration=60, mode=state.mode, start=MONDAY
+    )
     summary = runner.run()
-    assert _within_5_sigma(summary.total, params.NORMAL_DAILY_SIGNUPS * params.SURGE_MULTIPLIER)
+    assert _within_5_sigma(summary.total, DAILY * factor / 24)
+    assert summary.by_mode == Counter({state.mode: summary.total})
     assert not any("→" in line for line in lines)
 
 
 def test_mode_switch_segments_follow_their_rates(regions) -> None:
-    # 구간 1일(실제 1,440초)씩: normal → surge → normal
-    steps = [(0, NORMAL), (1_440, SURGE), (2_880, NORMAL)]
-    runner, store, _, lines = make(regions, steps=steps, duration=4_320)
+    # 배속 10: normal 월요일 하루 → burst 1시간 → normal 23시간 (제어 확인 지연은 시뮬레이터 10초 이내)
+    day, hour = 8_640, 360  # 실제 초
+    steps = [(0, NORMAL), (day, BURST), (day + hour, NORMAL)]
+    runner, store, _, lines = make(regions, steps=steps, duration=2 * day, speed=10, start=MONDAY)
     runner.run()
-    bounds = [START + timedelta(days=d) for d in (0, 1, 2, 3)]
+    bounds = [
+        MONDAY,
+        MONDAY + timedelta(days=1),
+        MONDAY + timedelta(days=1, hours=1),
+        MONDAY + timedelta(days=2),
+    ]
     seg = [sum(1 for m in store.rows if bounds[i] <= m.signup_at < bounds[i + 1]) for i in range(3)]
-    daily, surge = (
-        params.NORMAL_DAILY_SIGNUPS,
-        params.NORMAL_DAILY_SIGNUPS * params.SURGE_MULTIPLIER,
-    )
-    assert _within_5_sigma(seg[0], daily)
-    assert _within_5_sigma(seg[1], surge)
-    assert _within_5_sigma(seg[2], daily)
+    assert _within_5_sigma(seg[0], _expected_normal(bounds[0], bounds[1]))
+    assert _within_5_sigma(seg[1], DAILY * 18 / 24)
+    assert _within_5_sigma(seg[2], _expected_normal(bounds[2], bounds[3]))
     assert [line for line in lines if "→" in line] == [
-        "mode: normal → surge",
-        "mode: surge → normal",
+        "mode: normal → burst",
+        "mode: burst → normal",
     ]
 
 
@@ -336,9 +352,9 @@ def test_draw_phone_uses_baseline_format() -> None:
 
 def test_slow_insert_does_not_lower_the_arrival_rate(regions) -> None:
     # 가입 하나에 INSERT가 5ms 걸려도 도착 속도는 설계(하루 5,000명)를 따라야 한다.
-    # 간격을 INSERT가 끝난 뒤부터 새로 재면 약 59건/초로 떨어진다 (기대 83건/초).
+    # 간격을 INSERT가 끝난 뒤부터 새로 재면 도착 속도가 눈에 띄게 떨어진다.
     runner, store, clock, _ = make(regions, speed=1440, duration=120)
     store.on_insert = lambda s, m: clock.sleep(0.005)
     summary = runner.run()
-    expected = 120 * 1440 * params.NORMAL_DAILY_SIGNUPS / params.SECONDS_PER_DAY
+    expected = _expected_normal(START, START + timedelta(days=2))  # 실제 120초 = 시뮬레이터 2일
     assert _within_5_sigma(summary.total, expected)

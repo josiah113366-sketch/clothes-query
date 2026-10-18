@@ -1,0 +1,23 @@
+# Copy to deployment.local.tfvars (ignored by Git).
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+# Set TF_VAR_state_bucket privately to the existing bootstrap bucket.
+engine_version = "16.15"
+instance_class = "db.t4g.small"
+# Approved initial storage and autoscaling ceiling.
+allocated_storage = 20
+max_allocated_storage = 100
+database_name = "clothes"
+
+# RDS-first deployment: do not read EKS state; keep DB ingress closed initially.
+# use_eks_security_group = false
+# database_clients = {}
+# Later, allow only an approved same-VPC generator security group:
+# database_clients = { generator = "REPLACE_WITH_APPROVED_SECURITY_GROUP_ID" }
+
+# Optional: enable only after DB/CDC budgets and reboot timing are approved.
+# Test fixture sizes are not production or measured sizing defaults.
+# logical_replication = {
+#   max_replication_slots     = REPLACE_WITH_APPROVED_SLOT_COUNT
+#   max_wal_senders           = REPLACE_WITH_APPROVED_SENDER_COUNT
+#   max_slot_wal_keep_size_mb = REPLACE_WITH_APPROVED_FINITE_WAL_BUDGET
+# }

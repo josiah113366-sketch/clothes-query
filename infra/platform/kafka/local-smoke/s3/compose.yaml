@@ -1,0 +1,20 @@
+# Local S3 API fixture, not a replacement for AWS S3 or IAM verification.
+services:
+  connect:
+    environment:
+      AWS_ACCESS_KEY_ID: local-smoke-only
+      AWS_SECRET_ACCESS_KEY: local-smoke-only
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+  s3:
+    # Moto 5.1.15, verified manifest digest; no published host port.
+    image: motoserver/moto@sha256:8860b18917e1ee4d067df19a406ae95dc26037e6965d5b499e1cffd33755b914
+    platform: linux/amd64
+    environment:
+      MOTO_PORT: "5000"
+      AWS_ACCESS_KEY_ID: local-smoke-only
+      AWS_SECRET_ACCESS_KEY: local-smoke-only
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    mem_limit: 512m
+    networks: [smoke]

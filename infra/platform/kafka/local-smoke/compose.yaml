@@ -1,0 +1,111 @@
+# Disposable single-broker test only. No host ports or external Docker network.
+services:
+  kafka-data-init:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    user: "0:0"
+    entrypoint: [/bin/bash, -ec, 'mkdir -p /data/logs && chown -R 1001:0 /data']
+    volumes:
+      - kafka-data:/data
+    mem_limit: 128m
+    networks: [smoke]
+  postgres:
+    image: postgres@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: smoke
+      POSTGRES_PASSWORD: ${SMOKE_ADMIN_PASSWORD:?run check.py}
+    command: [postgres, -c, wal_level=logical, -c, max_replication_slots=2, -c, max_wal_senders=2, -c, max_slot_wal_keep_size=256MB]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    mem_limit: 512m
+    networks: [smoke]
+  kafka:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    environment:
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+      LOG_DIR: /tmp/kafka-app-logs
+      KAFKA_OPTS: -javaagent:/opt/prometheus-jmx-exporter/jmx_prometheus_javaagent-1.6.0.jar=9404:/mnt/metrics.yml
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        /opt/kafka/bin/kafka-storage.sh format --standalone --cluster-id cqCdcSmokeTestCluster01 --config /mnt/server.properties --ignore-formatted
+        exec /opt/kafka/bin/kafka-server-start.sh /mnt/server.properties
+    volumes:
+      - kafka-data:/var/lib/cq-kafka
+      - type: bind
+        source: ./server.properties
+        target: /mnt/server.properties
+        read_only: true
+      - type: bind
+        source: ../chart/files/kafka-metrics.yml
+        target: /mnt/metrics.yml
+        read_only: true
+      - type: bind
+        source: ${SMOKE_TLS_DIR:?run check.py}/server
+        target: /mnt/tls
+        read_only: true
+    mem_limit: 1536m
+    networks: [smoke]
+  connect:
+    image: ${SMOKE_CONNECT_IMAGE:?run check.py}
+    platform: linux/amd64
+    environment:
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+      LOG_DIR: /tmp/connect-app-logs
+      KAFKA_LOG4J_OPTS: -Dlog4j2.configurationFile=/opt/kafka/config/connect-log4j2.yaml
+      KAFKA_OPTS: -javaagent:/opt/prometheus-jmx-exporter/jmx_prometheus_javaagent-1.6.0.jar=9404:/mnt/metrics.yml
+    entrypoint: [/opt/kafka/kafka_connect_run.sh]
+    volumes:
+      - type: bind
+        source: ${SMOKE_WORKER_CONFIG:?run check.py}
+        target: /opt/kafka/custom-config/kafka-connect.properties
+        read_only: true
+      - type: bind
+        source: ${SMOKE_SECRET_DIR:?run check.py}
+        target: /mnt/cdc-database
+        read_only: true
+      - type: bind
+        source: ../chart/files/connect-metrics.yml
+        target: /mnt/metrics.yml
+        read_only: true
+      - type: bind
+        source: ${SMOKE_TLS_DIR:?run check.py}/connect
+        target: /mnt/tls
+        read_only: true
+    mem_limit: 1536m
+    networks: [smoke]
+  client:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    entrypoint: [/bin/bash, -c, 'exec sleep infinity']
+    environment:
+      KAFKA_HEAP_OPTS: -Xms128m -Xmx256m
+      LOG_DIR: /tmp/client-logs
+    volumes:
+      - type: bind
+        source: ${SMOKE_TLS_DIR:?run check.py}/clients
+        target: /mnt/tls
+        read_only: true
+    mem_limit: 512m
+    networks: [smoke]
+  lag-exporter:
+    image: quay.io/strimzi/kafka@sha256:1f189b1f0f32684302d8b018b1d21b411e2469a9c465fbdc18fa3599cb5bbdad
+    platform: linux/amd64
+    entrypoint: [/opt/kafka-exporter/kafka_exporter]
+    command:
+      - --kafka.server=kafka:9092
+      - --kafka.version=4.3.1
+      - --web.listen-address=:9404
+      - '--topic.filter=^smoke\.public\.cdc_probe$$'
+      - '--group.filter=^smoke-lag$$'
+      - --offset.show-all
+    mem_limit: 256m
+    networks: [smoke]
+volumes:
+  postgres-data: {}
+  kafka-data: {}
+networks:
+  smoke:
+    internal: true

@@ -1,9 +1,8 @@
 """회원 베이스라인에 쓰는 설계 수치. 값은 이 파일 한 곳에만 둔다."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-# 고정 오프셋 (+09:00). zoneinfo는 slim 이미지에 tzdata가 없을 수 있어 쓰지 않는다.
-KST = timezone(timedelta(hours=9))
+from sim.common.timezone import KST
 
 # 가입 시각 구간: [시작, 끝). 구간 전체에서 초 단위로 균등 추출한다.
 SIGNUP_START = datetime(2026, 8, 1, 0, 0, 0, tzinfo=KST)
@@ -66,7 +65,6 @@ EMAIL_DOMAIN = "example.com"
 
 # live(신규 가입): 값은 모두 바꿀 수 있는 파라미터다
 NORMAL_DAILY_SIGNUPS = 5000  # 평상시 하루 평균 (설계 제안 1,000~2,000에서 올림)
-SURGE_MULTIPLIER = 4.6  # 폭주 모드일 때 평상시 대비 배율
 DEFAULT_SPEED = 1  # 시간 배속 (1 = 실시간)
 BASELINE_END = SIGNUP_END  # 이 시각 이후의 가입이 신규 가입이다
 CONTROL_POLL_SECONDS = 1.0  # 제어 신호 확인 주기 (실제 시간)

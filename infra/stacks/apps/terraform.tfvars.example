@@ -1,0 +1,29 @@
+# Copy to deployment.local.tfvars (ignored by Git).
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+# Set TF_VAR_state_bucket privately to the existing bootstrap bucket.
+# Foundation includes namespace, service account, Pod Identity, configuration and Metrics Server.
+# Internal S3 layout is deferred. Choose an approved scoped prefix before planning apps.
+s3_prefix = "REPLACE_WITH_APPROVED_PREFIX/"
+deploy_workloads = false
+# WEB replicas are fixed; WAS replicas are HPA-managed.
+workload_settings = {
+  web = { replicas = 2 }
+  was = { cpu_request_millicores = 100, memory_request_mib = 128 }
+}
+# After image/Secret/certificate preparation, provide all the following:
+# deploy_workloads = true
+# images = {
+#   web = "REPLACE_WITH_ECR_IMAGE_AT_SHA256_DIGEST"
+#   was = "REPLACE_WITH_ECR_IMAGE_AT_SHA256_DIGEST"
+# }
+# certificate_arn = "REPLACE_WITH_ACM_CERTIFICATE_ARN"
+# hostname = "REPLACE_WITH_APPLICATION_HOSTNAME"
+# alb_inbound_cidrs = ["REPLACE_WITH_APPROVED_IPV4_CIDR"]
+# database_secret_name = "was-database"
+
+was_autoscaling = {
+  min_replicas = 2
+  max_replicas = 3
+  target_cpu_utilization = 70
+  scale_down_stabilization_seconds = 300
+}

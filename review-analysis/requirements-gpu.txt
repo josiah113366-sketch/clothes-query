@@ -1,0 +1,11 @@
+# GPU 작업(번역 모델, 파인튜닝)용. Colab이나 GPU 서버에서 설치.
+-r requirements.txt
+torch
+# EXAONE 3.5의 원격 코드(trust_remote_code)가 최신 transformers와 맞지 않아(create_causal_mask 오류) 상한을 둠.
+# 아직 GPU에서 검증하지 못한 가정입니다. 다른 모델이 더 새 버전을 요구하면 EXAONE만 따로 환경을 만드세요.
+transformers>=4.51,<4.54
+accelerate
+bitsandbytes
+sentencepiece
+protobuf
+sacremoses

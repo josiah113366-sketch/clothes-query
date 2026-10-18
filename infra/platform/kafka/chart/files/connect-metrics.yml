@@ -1,0 +1,39 @@
+# Selected worker/task and Debezium aggregate MBeans; no row values or SQL.
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+includeObjectNames:
+  - kafka.connect:type=connect-worker-metrics
+  - kafka.connect:type=connector-task-metrics,*
+  - kafka.connect:type=task-error-metrics,*
+  - kafka.connect:type=source-task-metrics,*
+  - debezium.postgres:type=connector-metrics,*
+rules:
+  - pattern: 'kafka.connect<type=connect-worker-metrics><>(connector-count|task-count)'
+    name: kafka_connect_worker_$1
+    type: GAUGE
+  - pattern: 'kafka.connect<type=connector-task-metrics, connector=(.+), task=(.+)><>status: ([a-z-]+)'
+    name: kafka_connect_task_status
+    value: 1
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      status: "$3"
+  - pattern: 'kafka.connect<type=task-error-metrics, connector=(.+), task=(.+)><>(total-record-errors|total-record-failures|total-retries)'
+    name: kafka_connect_task_$3
+    type: COUNTER
+    labels:
+      connector: "$1"
+      task: "$2"
+  - pattern: 'kafka.connect<type=source-task-metrics, connector=(.+), task=(.+)><>(source-record-poll-total|source-record-write-total)'
+    name: kafka_connect_source_$3
+    type: COUNTER
+    labels:
+      connector: "$1"
+      task: "$2"
+  - pattern: 'debezium.postgres<type=connector-metrics, context=(snapshot|streaming), server=([^,>]+)(?:, task=([^,>]+))?><>(Connected|MilliSecondsBehindSource|TotalNumberOfEventsSeen|QueueRemainingCapacity|QueueTotalCapacity)'
+    name: debezium_postgres_$4
+    type: GAUGE
+    labels:
+      context: "$1"
+      server: "$2"

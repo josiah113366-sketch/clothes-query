@@ -1,0 +1,5 @@
+# 점수화 배치 실행 환경 (학습·평가 때 쓴 버전)
+torch
+transformers==4.53.3
+accelerate
+boto3

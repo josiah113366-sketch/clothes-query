@@ -57,6 +57,22 @@ def target_host(database_url: str) -> str:
     return str(conninfo_to_dict(database_url).get("host", "localhost"))
 
 
+LOCAL_HOSTS = ("localhost", "127.0.0.1")
+
+
+class DatabaseTargetError(RuntimeError):
+    """접속 대상이 허용되지 않을 때. 메시지에 호스트와 비밀번호를 싣지 않는다."""
+
+
+def check_db_target(database_url: str, allow_remote: bool) -> None:
+    """로컬 DB가 아니면 allow_remote(SIM_ALLOW_REMOTE_DB=1)일 때만 통과시킨다."""
+    if allow_remote or target_host(database_url) in LOCAL_HOSTS:
+        return
+    raise DatabaseTargetError(
+        "로컬 DB(localhost, 127.0.0.1)가 아니면 SIM_ALLOW_REMOTE_DB=1이 필요합니다."
+    )
+
+
 def connect(database_url: str, schema: str | None = None) -> psycopg.Connection:
     """연결한다. schema를 주면 search_path를 그 스키마로 바꾼다 (통합 테스트용)."""
     with safe_db_errors():

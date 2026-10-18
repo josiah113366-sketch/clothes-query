@@ -1,0 +1,11 @@
+{{- if and .Values.kafka.enabled .Values.metrics.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.kafka.name }}-metrics
+data:
+  kafka.yml: |
+    {{- .Files.Get "files/kafka-metrics.yml" | nindent 4 }}
+  connect.yml: |
+    {{- .Files.Get "files/connect-metrics.yml" | nindent 4 }}
+{{- end }}
