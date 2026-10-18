@@ -16,7 +16,7 @@ simulator/
 │   ├── cdc/               # 로컬 CDC: 커넥터 등록·상태·초기화, 토픽 검증 (sim cdc)
 │   ├── sink/              # 로컬 S3 Sink: 커넥터 등록·상태·초기화, S3 파일 검증 (sim sink)
 │   ├── product/           # 상품 시드(Parquet)를 DB에 옮기고 확인 (sim product)
-│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
+│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 곡선, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
 │   └── behavior/          # 쇼핑 행동 (나중에)
@@ -84,16 +84,16 @@ pytest -m integration
 베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
-sim member live                                   # 평상시, 실시간, 하루 평균 5,000명
+sim member live                                   # normal, 실시간, 하루 평균 5,000명 (요일·시간대 곡선)
+sim member live --mode burst --speed 60 --duration 30   # 폭주로 시작, 시뮬레이터 30분
 sim member live --speed 1440 --duration 30        # 시뮬레이터 하루 = 실제 1분으로 30초 실행
 sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만들고 종료
 ```
 
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
-| `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `surge`) |
-| `--daily` | `SIM_LIVE_DAILY` | 5000 | 평상시 하루 평균 가입 수 |
-| `--surge-multiplier` | `SIM_LIVE_SURGE_MULTIPLIER` | 4.6 | 폭주 모드의 배율 |
+| `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`) |
+| `--daily` | `SIM_LIVE_DAILY` | 5000 | `normal`의 하루 평균 가입 수. `medium`·`burst` 속도도 이 값에서 정해진다 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
 | `--max-signups` | | 없음 | 이 건수만큼 만들면 정상 종료 |
@@ -102,16 +102,25 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 환경 변수 중 `DATABASE_URL`, `SIM_SEED`는 `.env`에서도 읽고, 나머지 `SIM_LIVE_*`, `SIM_CONTROL_FILE`은 실제 환경 변수로만 읽는다.
 
-- **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `하루 가입 수 × 모드 배율 ÷ 86,400`건/초이고, 하루 안의 시간대·날짜별 차이는 아직 없다(균등). 그 자리는 `member/schedule.py`의 `rate_multiplier`다.
+- **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `--daily ÷ 86,400 × rate_factor(모드, 시뮬레이터 시각)`건/초다. `rate_factor`는 `common/curve.py`에 있고, 방문(`behavior`)도 나중에 같은 함수를 쓴다.
+
+  | 모드 | `rate_factor` (하루 평균 대비) | `--daily 5000`일 때 |
+  |---|---|---|
+  | `normal` (일상) | 요일 배율 × 시간대 배율 | 하루 평균 5,000명. 월요일 20시는 분당 약 5.6명 |
+  | `medium` (중간) | 일상 피크 시간대 배율(1.8) × 3 = 5.4, 고정 | 시간당 1,125명 |
+  | `burst` (폭주) | 일상 피크 시간대 배율(1.8) × 10 = 18, 고정 | 시간당 3,750명 |
+
+  **곡선:** 요일 배율은 H&M 요일 비율 × 7(월 0.896 … 토 1.113, 한 주 평균 1), 시간대 배율은 우리가 정한 시간대 비율 ÷ 구간 길이(0~6시 0.20, 6~9시 0.64, 9~12시 1.12, 12~14시 1.32, 14~18시 1.02, 18~24시 1.80)다. 날짜와 시각은 KST 기준이고, 구간 안에서는 일정한 계단 함수다. 간격은 뽑은 시점의 속도로 뽑으므로 구간 경계에서 약간의 오차가 있다. `medium`·`burst`는 시간대·요일과 상관없이 고정이라 밤에 바꿔도 폭주가 된다. 자동 복귀(중간 60분, 폭주 15분)는 아직 없다(컨트롤러 작업).
 - **제어 파일**을 약 1초마다 읽는다. 로컬에서는 이렇게 바꾼다.
 
   ```bash
-  echo '{"running": true,  "mode": "surge"}'  > .local/control.json   # 폭주 (평상시의 4.6배)
-  echo '{"running": true,  "mode": "normal"}' > .local/control.json   # 평상시로 복귀
+  echo '{"running": true,  "mode": "burst"}'  > .local/control.json   # 폭주 (피크 시간대의 10배)
+  echo '{"running": true,  "mode": "medium"}' > .local/control.json   # 중간 (피크 시간대의 3배)
+  echo '{"running": true,  "mode": "normal"}' > .local/control.json   # 일상(곡선)으로 복귀
   echo '{"running": false, "mode": "normal"}' > .local/control.json   # 멈춤 (프로세스는 살아 있음)
   ```
 
-  모드가 바뀌면 `mode: normal → surge` 한 줄이 출력되고 새 속도로 간격을 다시 뽑는다. 파일이 없거나 깨졌거나 값이 잘못되면 마지막 상태를 유지하고 경고를 한 번만 낸다. 제어 파일은 시작 상태(`--mode`)를 이후에 덮어쓴다.
+  모드가 바뀌면 `mode: normal → burst` 한 줄이 출력되고 새 속도로 간격을 다시 뽑는다. 파일이 없거나 깨졌거나 값이 잘못되면 마지막 상태를 유지하고 경고를 한 번만 낸다. 제어 파일은 시작 상태(`--mode`)를 이후에 덮어쓴다.
 - **제어 신호 전달 수단은 아직 정해지지 않았다.** 파일 방식은 로컬 개발용이고, 실제 수단은 컨트롤러 작업에서 `ControlSource`를 새로 구현해 붙인다.
 - **배속과 시각:** `signup_at`은 시뮬레이터 시각(KST)이고 `created_at`은 DB가 기록한 실제 시각이다. 배속 1이면 거의 같고, 배속이 크면 어긋난다. 정상이다.
 - **껐다 켜도 이어진다:** k번째 신규 회원은 `derive_seed(시드, "live", k)`로 난수를 다시 심어 만들어 값이 시드와 k만으로 정해진다. 시작할 때 k는 `members`에서 `signup_at >= 2026-10-01 00:00 KST`인 행 수로 센다(탈퇴는 행을 지우지 않으므로 줄지 않는다). 그래서 껐다 켜도 같은 순서로 이어지고 `member_id`가 겹치지 않는다. 시뮬레이터 시각이 10/1 KST보다 이르면 이 기준이 깨지므로 오류로 멈춘다.

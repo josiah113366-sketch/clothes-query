@@ -47,6 +47,10 @@ gitGraph
   commit id: "sim(member-live)"
   checkout main
   merge sim/member-live
+  branch sim/modes
+  commit id: "sim(modes)"
+  checkout main
+  merge sim/modes
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -61,6 +65,7 @@ gitGraph
 | `sim/skeleton` | `docs/tasks/sim-skeleton.md` | 머지됨 | 2026-10-13 |
 | `sim/member-baseline` | `docs/tasks/sim-member-baseline.md` | 머지됨 | 2026-10-13 |
 | `sim/member-live` | `docs/tasks/sim-member-live.md` | 머지됨 | 2026-10-14 |
+| `sim/modes` | `docs/tasks/sim-modes.md` | 머지됨 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

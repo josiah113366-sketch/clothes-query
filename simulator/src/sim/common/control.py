@@ -10,14 +10,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-MODES: tuple[str, ...] = ("normal", "surge")
+MODES: tuple[str, ...] = ("normal", "medium", "burst")
 DEFAULT_CONTROL_FILE = ".local/control.json"
 
 
 @dataclass(frozen=True)
 class ControlState:
     running: bool  # False면 가입 생성을 멈춘다 (프로세스는 살아 있음)
-    mode: str  # "normal" | "surge"
+    mode: str  # "normal" | "medium" | "burst"
 
 
 class ControlSource(Protocol):
@@ -34,7 +34,7 @@ def _parse(text: str) -> ControlState:
     if not isinstance(running, bool):
         raise TypeError("running은 true/false여야 합니다.")
     if mode not in MODES:
-        raise ValueError(f"mode는 {' 또는 '.join(MODES)}여야 합니다.")
+        raise ValueError(f"mode는 {', '.join(MODES)} 중 하나여야 합니다.")
     return ControlState(running=running, mode=mode)
 
 
@@ -43,7 +43,7 @@ def _warn_stderr(message: str) -> None:
 
 
 class FileControlSource:
-    """JSON 파일 {"running": true, "mode": "surge"}를 읽는다 (로컬 개발용)."""
+    """JSON 파일 {"running": true, "mode": "burst"}를 읽는다 (로컬 개발용)."""
 
     def __init__(self, path: Path, warn: Callable[[str], None] = _warn_stderr) -> None:
         self.path = path

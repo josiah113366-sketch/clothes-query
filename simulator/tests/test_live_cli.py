@@ -13,7 +13,6 @@ def test_live_help_lists_options() -> None:
     for option in (
         "--mode",
         "--daily",
-        "--surge-multiplier",
         "--speed",
         "--duration",
         "--max-signups",
@@ -21,6 +20,8 @@ def test_live_help_lists_options() -> None:
         "--seed",
     ):
         assert option in result.output
+    assert "--surge-multiplier" not in result.output
+    assert "burst" in result.output and "medium" in result.output
 
 
 def test_live_refuses_non_local_database(monkeypatch, tmp_path: Path) -> None:
@@ -34,5 +35,6 @@ def test_live_refuses_non_local_database(monkeypatch, tmp_path: Path) -> None:
 
 def test_live_rejects_unknown_mode(monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:pw@localhost:5432/clothes")
-    result = runner.invoke(app, ["member", "live", "--mode", "turbo"])
-    assert result.exit_code == 1
+    for mode in ("turbo", "surge"):  # surge는 burst로 이름이 바뀌었다
+        result = runner.invoke(app, ["member", "live", "--mode", mode])
+        assert result.exit_code == 1

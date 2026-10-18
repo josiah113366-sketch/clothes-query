@@ -136,7 +136,6 @@ class LiveRunner:
         seed: int,
         mode: str = "normal",
         daily: float = params.NORMAL_DAILY_SIGNUPS,
-        surge_multiplier: float = params.SURGE_MULTIPLIER,
         duration: float | None = None,
         max_signups: int | None = None,
         out: Callable[[str], None] = print,
@@ -148,7 +147,6 @@ class LiveRunner:
         self.seed = seed
         self.mode = mode
         self.daily = daily
-        self.surge_multiplier = surge_multiplier
         self.duration = duration
         self.max_signups = max_signups
         self.out = out
@@ -226,9 +224,7 @@ class LiveRunner:
         return self.duration is not None and self.clock.real_elapsed() >= self.duration
 
     def _draw_wait(self) -> float:
-        interval = next_interval(
-            self._schedule_rng, self.daily, self.mode, self.surge_multiplier, self.clock.now()
-        )
+        interval = next_interval(self._schedule_rng, self.daily, self.mode, self.clock.now())
         return interval / self.clock.speed
 
     def _poll_control(self) -> bool:
