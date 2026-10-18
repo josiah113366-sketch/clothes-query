@@ -17,8 +17,9 @@ GROUP BY topic, kafka_partition
 HAVING (MAX(kafka_offset) - MIN(kafka_offset) + 1) - COUNT(DISTINCT kafka_offset) > 0;
 -- 결과가 0줄이면 누락 없음.
 
--- Q2 중복 확인: 같은 메시지 위치가 두 번 쌓였거나, 같은 결제 번호가 두 번 쌓였는지 센다.
---    (결제 중복은 정리 뷰가 걸러 주지만, 원장에 몇 번 겹쳤는지는 "재시작이 잦았는가"를 알려 준다.)
+-- Q2 중복 확인: 같은 메시지 위치가 두 번 쌓였는지(적재 쪽 문제 판단 기준)와, 같은 결제 번호가 두 번 쌓였는지(참고)를 센다.
+--    메시지가 들어 있는 표는 topic_messages뿐이라 적재 문제는 이 표로 판단한다.
+--    같은 payment_id는 Debezium 재시작·전송 재시도로 생기는 정상 현상이며 뷰가 걸러 준다. "재시작이 잦았는가"를 보는 참고값이다.
 SELECT 'topic_messages' AS ledger,
        COUNT(*) - COUNT(DISTINCT CONCAT(topic, '-', CAST(kafka_partition AS VARCHAR), '-', CAST(kafka_offset AS VARCHAR))) AS duplicate_rows
 FROM gold_b.topic_messages
@@ -28,7 +29,7 @@ SELECT 'payment_events',
        COUNT(*) - COUNT(DISTINCT payment_id)
 FROM gold_b.payment_events
 WHERE completed_at >= :from_ts AND completed_at < :to_ts;
--- 0이면 중복 없음. 0보다 크면 중복 전송이 있었다는 뜻(결제는 뷰가 걸러 주므로 지표는 안전).
+-- topic_messages 줄이 0이면 적재 중복 없음. 0보다 크면 적재 쪽 문제. payment_events 줄은 참고값이다(뷰가 걸러 주므로 지표는 안전).
 
 -- Q3 멈춤(신선도) 확인: 장부를 쓰는 잡과 지연 수집기가 살아 있는지 본다.
 --    은서 님 문서 기준: 2분 넘게 멈추면 고장이며, 데이터 이상과 섞지 않고 따로 표시한다.
