@@ -19,7 +19,7 @@ simulator/
 │   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 곡선, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
-│   └── behavior/          # 쇼핑 행동 (나중에)
+│   └── behavior/          # 쇼핑 행동: 방문, 주문, 결제, 상태 전이 (sim behavior)
 └── tests/
 ```
 
@@ -102,7 +102,7 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 환경 변수 중 `DATABASE_URL`, `SIM_SEED`는 `.env`에서도 읽고, 나머지 `SIM_LIVE_*`, `SIM_CONTROL_FILE`은 실제 환경 변수로만 읽는다.
 
-- **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `--daily ÷ 86,400 × rate_factor(모드, 시뮬레이터 시각)`건/초다. `rate_factor`는 `common/curve.py`에 있고, 방문(`behavior`)도 나중에 같은 함수를 쓴다.
+- **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `--daily ÷ 86,400 × rate_factor(모드, 시뮬레이터 시각)`건/초다. `rate_factor`는 `common/curve.py`에 있고, 방문(`behavior`)도 같은 함수를 쓴다.
 
   | 모드 | `rate_factor` (하루 평균 대비) | `--daily 5000`일 때 |
   |---|---|---|
@@ -129,6 +129,41 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 - 실제 시간 10초마다 진행 한 줄(모드, 구간 건수와 초당 건수, 누적, 시뮬레이터 시각)을 출력한다. 회원 값(PII)은 출력하지 않는다.
 - 이 명령으로 `member`에 신규 가입이 섞이면 `sim member verify`의 가입 기간·일별·시간대별 항목은 베이스라인 기준이라 실패할 수 있다.
 - 확인 후 로컬에서 신규 가입만 지우려면: `DELETE FROM members WHERE signup_at >= '2026-10-01 00:00:00+09';`
+
+## 행동 (behavior)
+
+회원의 쇼핑 행동을 만들어 `orders`, `order_items`, `payments`에 쓴다. 회원(`members`)과 상품(`product_variant`)이 먼저 있어야 하고, 로컬 DB에 `db/schema/004_orders.sql`이 적용돼 있어야 한다.
+
+```bash
+docker compose exec -T postgres psql -U sim -d clothes < ../db/schema/004_orders.sql   # 처음 한 번
+sim behavior live                                                  # normal, 실시간, 하루 평균 11만 1천 방문
+sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink jsonl
+```
+
+| 옵션 | 환경 변수 | 기본값 | 설명 |
+|---|---|---|---|
+| `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`). `member live`와 같은 변수 |
+| `--visits-daily` | `SIM_VISITS_DAILY` | 111000 | `normal`의 하루 평균 방문 수 |
+| `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 |
+| `--duration` | | 계속 | **실제 시간** 기준 실행 초 |
+| `--max-visits` | | 없음 | 이만큼 방문을 만들면 정상 종료 |
+| `--control-file` | `SIM_CONTROL_FILE` | `.local/control.json` | 제어 신호 파일 (`member live`와 **같은 파일**) |
+| `--seed` | `SIM_SEED` | 42 | 기본 시드 |
+| `--run-salt` | | 시작 시각의 epoch 초 | 실행 구분값 (아래) |
+| `--click-sink` | | `none` | 클릭 로그 출력: `none`(버림) 또는 `jsonl` |
+| `--click-file` | | `.local/clicks.jsonl` | `jsonl`일 때 경로. `.local/`은 커밋하지 않는다 |
+
+- **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 11만 1천 방문이면 주문은 약 5,000건이다.
+- **값을 바꾸는 곳:** 확률, 분포, 지연은 모두 `src/sim/behavior/params.py` 한 곳에 있다. `[가정]` 표시는 팀과 맞추는 임시값이다.
+- **쓰는 방식:** 주문과 그 상품 줄은 한 트랜잭션, 결제 INSERT와 상태 UPDATE는 한 건씩 자동 커밋이다. `orders.updated_at`과 모든 전이 시각은 **예정된 시뮬레이터 시각**이다(실제 UPDATE 시각이 아니다). 결제는 INSERT만 하고 환불도 결제 행을 만들지 않는다.
+- **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink` 또는 `JsonlClickSink`)로 나간다. 나중에 쇼핑몰 API나 Kafka로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(`+09:00`), `session_id`다.
+- **제어 파일:** `member live`와 같은 파일을 약 1초마다 읽는다. 모드를 바꾸면 다음 방문 간격을 지금부터 다시 뽑고 `mode: normal → burst` 한 줄이 나온다. `{"running": false, ...}`는 **새 방문만 멈춘다.** 이미 예약된 클릭·결제·상태 전이는 계속 실행된다.
+- **run_salt:** 같은 시드 + 같은 `run_salt` + 같은 시계 + 같은 제어 순서이면 결과가 완전히 같다. 기본값이 시작 시각이라 재시작마다 달라지고, 그래서 `order_id`·`payment_id`가 이전 실행과 겹치지 않는다. 시작 출력에 항상 보인다.
+- **알려진 한계: 재시작하면 진행 중이던 주문이 멈춘다.** 예약된 결제·상태 전이는 메모리 큐에만 있고 DB에서 복구하지 않는다. 껐다 켜면 그때 `PLACED`, `PAID`, `SHIPPED`였던 주문은 그 상태로 남는다.
+- **원격 DB:** 접속 대상이 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다. ECS에서 RDS에 붙을 때는 `SIM_ALLOW_REMOTE_DB=1`을 명시한다. 오류 메시지에는 호스트와 비밀번호를 싣지 않는다.
+- **오류와 종료:** DB 연결이 끊기면 실패한 항목을 큐 맨 앞에 되돌리고 1, 2, 4, … 최대 30초 간격으로 다시 연결한 뒤 그 항목부터 이어서 한다. 다시 할 때 `23505`(PK/UNIQUE 위반)는 이미 반영된 것으로 본다. SIGINT/SIGTERM이면 하던 항목을 끝내고 요약(남은 큐 건수 포함)을 출력한 뒤 종료 코드 0으로 끝난다.
+- **출력:** 실제 시간 10초마다 진행 한 줄(모드, 구간 방문·주문·결제 시도, 누적, 큐 길이, 시뮬레이터 시각). 회원 값은 읽지도 출력하지도 않는다(회원은 `member_id`만 읽는다).
+- 확인 후 로컬에서 거래 행을 지우려면: `DELETE FROM payments; DELETE FROM order_items; DELETE FROM orders;`
 
 ## 로컬 CDC
 

@@ -1,6 +1,7 @@
 import typer
 
 from sim import __version__
+from sim.behavior.cli import app as behavior_app
 from sim.cdc.cli import app as cdc_app
 from sim.member.cli import app as member_app
 from sim.product.cli import app as product_app
@@ -11,6 +12,7 @@ app.add_typer(member_app, name="member")
 app.add_typer(cdc_app, name="cdc")
 app.add_typer(sink_app, name="sink")
 app.add_typer(product_app, name="product")
+app.add_typer(behavior_app, name="behavior")
 
 
 @app.callback()
