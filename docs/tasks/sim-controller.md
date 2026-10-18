@@ -1,6 +1,6 @@
 # 작업 지시서: sim/controller
 
-> 상태: 진행 전 · 브랜치: `sim/controller` · 이전 작업: `sim/modes`, `sim/behavior-core` · 다음 작업: `sim/ecs-image`, `sim/clickstream`, `sim/cdc-orders`
+> 상태: 완료 · 브랜치: `sim/controller` · 이전 작업: `sim/modes`, `sim/behavior-core` · 다음 작업: `sim/ecs-image`, `sim/clickstream`, `sim/cdc-orders`
 
 ## 목표
 
@@ -276,4 +276,52 @@ class IncidentLog(Protocol):
 
 ## 작업 결과
 
-(머지 전에 Claude Code가 채운다: 무엇을 만들었나, 왜, 확인한 결과(완료 확인 실행 결과), 알려진 한계, 다음 할 일. 다음 작업은 `sim/ecs-image`, `sim/clickstream`, `sim/cdc-orders`.)
+### 만든 것
+
+- `common/control.py`: `ControlState.pg_extra_fail`(기본 빈 값)과 파일의 선택 항목 `pg_extra_fail` 읽기. 범위 밖·숫자가 아닌 값·객체가 아닌 값은 파일 전체를 잘못된 값으로 본다.
+- `behavior/runner.py`: `_poll_control`이 `pg_extra_fail`을 반영한다(모르는 PG 이름은 무시, 바뀌면 `pg_extra_fail: {...} → {...}` 한 줄).
+- `simulator/src/sim/controller/`: `model.py`(사건 종류·상한·`Incident`), `log.py`(`FileIncidentLog`, `S3IncidentLog`, `MemoryIncidentLog`), `control_writer.py`(임시 파일 + `os.replace`), `pollution.py`(`DbPollution`: 한 트랜잭션, 사전 점검은 읽기만), `service.py`(`ControllerService`: 순서 규칙, 자동 복귀, 한 번에 하나, `shutdown`), `server.py`(`ThreadingHTTPServer`, 토큰, 1초 tick 스레드), `page.py`(버튼 화면), `cli.py`(`sim controller serve/status/mode/running/pg-outage/pollution/end`)
+- 테스트: 단위 `test_controller_{log,pollution,service,server,cli}.py`와 `test_live_common.py`·`test_behavior_runner.py` 추가분, 통합 `test_controller_integration.py`
+- 문서: `simulator/README.md`의 `## 컨트롤러 (controller)` 절과 코드 구조 줄, `simulator/CLAUDE.md`의 `controller/` 한 줄
+
+### 지시서와 다르게 하거나 정한 것
+
+- **버튼 화면 HTML은 `page.py`의 문자열**로 두었다. `.html` 파일은 현재 setuptools 설정으로는 설치본(Docker 이미지)에 들어가지 않을 수 있어서다.
+- **사건 id**는 `SimRandom(derive_seed(seed, "controller", 시작 시각 ns)).uuid4()`로 만든다(난수는 `common`의 시드 고정 생성기만 쓴다는 규칙).
+- **`medium` 중에 `burst`를 누르면 409**다(한 번에 하나). 먼저 `normal`로 돌린 뒤 바꾼다.
+- **오염의 사전 점검**은 `PollutionExecutor.check(kind, count)`로 두었다(읽기만 한다).
+- 기존 `BehaviorRunner(pg_extra_fail=...)` 생성자 인자는 남겼지만, 제어 신호를 읽으면 그 값으로 바뀐다. 이를 전제한 기존 테스트 하나를 제어 신호로 넣도록 고쳤다.
+- **기본 포트 8080은 로컬 `docker-compose`의 Kafka UI(127.0.0.1:8080)와 겹친다.** 기본값은 지시서대로 8080으로 두고, 확인은 `--port 8090`으로 했다.
+
+### 완료 확인 실행 결과 (2026-10-18, 로컬)
+
+| 확인 | 결과 |
+|---|---|
+| `ruff check .`, `ruff format --check .` | 통과 |
+| `pytest` (단위) / `pytest -m integration` | 341 passed / 20 passed (기존 baseline·live·behavior 포함) |
+| 시작 전 주문 테이블 | 비어 있지 않아(`orders` 1,804, `order_items` 6,273, `payments` 1,871, 사용자가 돌린 데이터) 사용자 승인 후 지우고 시작 |
+| 서버와 모드 (`--burst-minutes 0.2`, 실행기 `--speed 60`) | `mode burst` → 시작 파일 19:01:53.784, 제어 파일 19:01:53.805 (**기록이 먼저**). 실행기에 `mode: normal → burst`. 12초 뒤 제어 파일 19:02:05.900 → 끝 파일(`timer`) 19:02:05.940, `mode: burst → normal` |
+| PG 장애 (배속 1, `PG_B`, 0.9, 5분) | 장애 구간(10:05:06Z~10:10:06Z) `PG_B` 52건 중 51건 실패(98.1%, PG 원인 50: `PG_TIMEOUT` 31·`PG_ERROR` 19), `PG_A` 33건 중 2건(6.1%). 장애 후 `PG_B` 12.5%. 끝난 뒤 제어 파일 `pg_extra_fail` = `{}`. 실행기에 `pg_extra_fail` 변경 줄 두 개 |
+| 데이터 오염 | `ORDER_TOTAL_MISMATCH --count 20`: 끝 파일 `affected_count` 20 = 총액 불일치 쿼리 20행(전 0). `DUPLICATE_SUCCESS_PAYMENT`(기본 30): `affected_count` 30 = SUCCESS 2건 이상 주문 30(전 0). 실행기는 오류 없이 계속 동작 |
+| 한 번에 하나 / 인증 | 사건 중 다른 사건 409, 토큰 없음·틀린 토큰 401, `/healthz` 토큰 없이 200, `GET /` 200 |
+| 정답표 내용 | 파일 14개, 사건 7개 모두 `schema_version`·`phase`·`type`·`at`(UTC `Z`)이 있고 시작·끝이 짝을 이룸 (`INGEST_LAG` timer, `TRAFFIC_SURGE` timer, `PG_OUTAGE` manual·timer·shutdown, `DATA_POLLUTION` complete 둘) |
+| 종료 | PG 장애 진행 중 SIGINT → 종료 코드 0, 트레이스백 없음, `shutdown` 끝 파일, 제어 파일 `normal`·`{}` |
+| 시작 거부 | `--host 0.0.0.0` 토큰 없이 → 종료 코드 1, 메시지에 토큰·접속 정보 없음, 제어 파일도 쓰지 않음 |
+| 버튼 화면 | 이 환경에 브라우저가 없어 `curl`로 `GET /`(200)과 API 호출로 대신했다. 화면 조작은 사용자 확인 필요 |
+| S3 기록기 | 실제 S3에는 쓰지 않았다. 가짜 클라이언트 단위 테스트(키 접두어, 실패 시 버킷·키 없는 메시지) 통과 |
+| 출력 검사 | 모든 실행 출력에 `example.com`, `010-`, 토큰, `DATABASE_URL`, 버킷 이름 없음. 정답표의 `010-` 검출 2건은 UUID 안의 문자열(`…-5010-…`)이라 오탐이고, UUID를 빼면 0건 |
+| 삭제 | `payments` 645, `order_items` 1,889, `orders` 575 → 세 테이블 0행. 정답표 확인 파일 14개와 제어 파일 삭제 |
+| `git status` | `.env`, `simulator/.local/` 무시됨. push, PR 안 함 |
+
+PG 장애 확인은 지시서의 `--mode medium` 대신 `normal`에 `--visits-daily 600000`(111,000 × 5.4)으로 같은 양을 냈다. 컨트롤러가 켜질 때 제어 파일을 `normal`로 써서 실행기가 곧 `normal`로 바뀌고, `mode medium`을 누르면 PG 장애가 409가 되기 때문이다. 또 장애 구간 집계는 앞선 배속 60 실행(시뮬레이터 시각이 앞서 있음)의 행을 `xmin`으로 빼고 배속 1 실행의 행만 셌다.
+
+### 알려진 한계
+
+- 컨트롤러를 비정상 종료하면 진행 중 사건의 끝 기록이 남지 않고, 다시 켜면 깨끗한 상태로 시작한다(복구 없음).
+- 시각은 벽시계 기준이라 실행기 배속이 1이 아니면 정답표 시각과 데이터 시각이 어긋난다(ECS에서는 `--speed 1`).
+- 로컬 기본 포트 8080이 Kafka UI와 겹친다(`--port`로 바꾼다).
+
+### 다음 할 일
+
+- `sim/ecs-image`: 이미지, RDS TLS·전용 계정, 버튼 화면 접속 경로, 정답표 S3 쓰기 권한(Task Role)
+- `sim/clickstream`, `sim/cdc-orders`
