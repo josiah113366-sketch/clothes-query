@@ -95,3 +95,37 @@ python -m pipelines.silver.transactions --orders-input <주문-JSONL-경로> --o
 잘못된 JSON 행은 원문을 복사하지 않고 PARSE_ERROR로 격리한다. 파일 없음·파일 읽기/인코딩 실패, CDC 봉투 입력, 결과 저장 실패는 실행 실패로 전달하고 기존 current.json을 유지한다. 명시적으로 비어 있는 파일은 정상 0건 입력이다. 출력과 입력 경로의 겹침은 금지한다.
 
 실제 거래 Bronze가 생기면 CDC 변경 종류·시각 직렬화·메타데이터를 확인해 이 입력 앞의 변환을 연결한다. 이번 검증은 문서 기반 합성 데이터이며 실제 거래 Bronze 검증이 아니다. 공통 YAML 검사는 아직 실행하지 않는다.
+
+## 클릭 Silver (`click_events`)
+
+원천 `simulator/src/sim/behavior/model.py`의 ClickEvent와 `sink.py`의 click_record를 기준으로 한다. 입력은 로컬 업무 행 JSONL이며 필드는 `event_id`, `event_type`, `member_id`, `article_id`, `event_time`, `session_id`다. `view`/`cart_add`만 허용하고 시간대가 있는 event_time을 UTC·KST 시각 및 KST 날짜로 변환한다. 상품 ID의 앞자리 0을 보존한다.
+
+`event_id`가 같은 동일 내용은 1건, 내용이 다르면 같은 ID 전체를 오류로 분리한다. 같은 방문의 반복 조회도 event_id가 다르면 별도 이벤트로 보존한다. 방문 수·전환율 집계는 Gold A의 역할이다.
+
+```powershell
+python -m pipelines.silver.clicks --input-root <클릭-JSONL-경로> --output-root pipelines/silver/.local/clicks-output
+```
+
+결과는 `click_events`, `quarantined_records`, `dq_results`다. 대표 결과 위치는 `<output-root>/silver/clicks/current.json`이며 event_time 대신 `event_time_utc`, `event_time_kst`, `event_date_kst`를 출력한다. 이번 범위에서는 상품·회원 저장소를 추가 조회하거나 존재 여부를 단정하지 않는다.
+
+## 상품 기준정보 Silver
+
+원천 `db/schema/003_product.sql`의 product_design·product_variant 스냅샷을 JSONL 업무 행으로 받는다. 두 테이블의 전체 원천 컬럼을 선택해 `silver_product_design`, `silver_product_variant`로 출력하며 임의의 사이즈·상품 속성을 추가하지 않는다.
+
+- 디자인: product_code당 1행. 정수 필드와 상품 분류 명칭 검사.
+- 상품: 문자열 article_id당 1행. product_code로 정상 디자인과 연결한다. 앞자리 0을 보존하고 가격·색상·그래픽 컬럼은 원천 타입을 따른다.
+- 같은 키의 동일 내용은 중복 제거하고 다른 내용은 해당 키 전체를 격리한다. 한 입력 묶음은 하나의 스냅샷이며 서로 다른 시점의 기준정보를 함께 넣어 최신값을 임의 선택하지 않는다.
+- 디자인이 현재 입력에 없으면 PENDING_REFERENCE, 디자인 오류로 연결할 수 없으면 DEPENDENCY_BLOCKED로 분리한다.
+- 상품 기준가격을 주문상품의 실제 unit_price 대신 매출 계산에 사용하지 않는다. DDL에 없는 최솟값이나 article_id 길이를 추측해 검사하지 않는다. 필수 명칭은 비어 있지 않은 문자열로 검사한다.
+
+```powershell
+python -m pipelines.silver.products --designs-input <디자인-JSONL-경로> --variants-input <상품-JSONL-경로> --output-root pipelines/silver/.local/products-output
+```
+
+결과는 상품 기준정보 2개와 `quarantined_records`, `dq_results`다. 대표 위치는 `<output-root>/silver/products/current.json`이다. 실제 스냅샷 경로·Parquet 입력은 별도 연결하며 이번 버전에서 S3를 읽었다고 가정하지 않는다.
+
+## 공용 로컬 처리
+
+`common.py`에서 JSONL 읽기·기본 타입 검사·클릭/상품 중복 검사·결과 묶음 저장을 공유한다. 거래도 동일한 읽기·저장 함수를 사용하며 기존 CLI 옵션과 출력 경로는 유지한다. 각 검사는 코드 버전(`transactions.v1`, `clicks.v1`, `products.v1`)으로 기록하고 공통 YAML 적용 버전으로 표시하지 않는다.
+
+모든 로컬 결과는 지정 입력 전체의 스냅샷이다. current.json이 가리키는 결과만 읽고, 과거 runs 전체를 합치지 않는다. 파일/저장 실패 시 이전 대표 결과를 보존하며 날짜·상품 부분 병합과 상시 실행 연결은 이번 범위에 포함하지 않는다.

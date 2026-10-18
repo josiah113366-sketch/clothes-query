@@ -45,3 +45,19 @@
 - **검증:** Silver 테스트 9개 통과. 정상·중복·실패 코드 누락을 포함한 합성 입력 CLI 실행 결과는 주문 현재 상태 2행, 상태 이력 2행, 주문상품 1행, 정상 결제 1행, 격리 1행, 품질 요약 3행. 반복 실행 후 같은 결과 건수 확인. 읽기·저장 실패 시 이전 current.json 보존 테스트 통과. `git diff --check` 통과.
 - **로컬 확인 위치:** `pipelines/silver/.local/transactions-md-demo/output/silver/transactions/current.json`. 합성 입력·출력은 커밋하지 않는다.
 - **한계:** 실제 S3 거래 Bronze·CDC 연결, 날짜·상품 부분 재처리, 공통 YAML 검사기, Gold A 파일 연동은 포함하지 않는다. 대표 manifest가 가리키는 결과만 읽어야 하며 과거 runs 전체를 합치지 않는다.
+
+## 승인된 추가 작업: 클릭・상품 Silver
+
+- 사용자가 선택한 클릭・상품의 문서 기반 구현을 진행한다. 리뷰 경로 수정과 회원 코드는 포함하지 않는다.
+- `clicks.py`: 이벤트 키 중복/충돌, 조회·담기 허용 값, UTC・KST 변환, 정상/격리/품질 결과.
+- `products.py`: 원천 DDL 컬럼의 디자인/상품 스냅샷 검사, 중복/충돌, 디자인 연결 대기와 오류 구분.
+- `common.py`: 기존 거래 입출력과 기본 검사 재사용. 거래 CLI와 정상 반환 구조를 유지한다.
+- 테스트 파일은 `tests/test_clicks_products.py` 1개만 추가한다. 회원・리뷰・거래 기존 테스트를 함께 확인하고 문서 기반 합성 데이터로 클릭/상품 CLI를 실행한다.
+- 실제 CDC/S3/Parquet 입력, YAML 공통 검사기, 날짜・상품 부분 재처리, Gold A 코드 변경은 포함하지 않는다.
+
+### 작업 결과: 클릭・상품 Silver
+
+- **변경:** 클릭 정제・이벤트 중복/충돌・UTC/KST 시각, 디자인/상품 원천 컬럼 정제・키 중복/충돌・디자인 연결 검사. 각 처리에 정상/격리/품질 결과와 로컬 CLI 제공. 공용 읽기・저장을 common.py로 이동해 거래에서도 재사용.
+- **검증:** Silver 테스트 13개 통과(기존 회원・리뷰・거래 포함). 원격 main의 상품 DDL과 디자인/상품 출력 컬럼 집합 일치 확인. 합성 JSONL로 클릭 CLI 결과 정상 2행・격리 1행・품질 1행, 상품 CLI 결과 디자인 1행・상품 1행・격리 1행・품질 2행 확인. `git diff --check` 통과.
+- **확인 위치:** `pipelines/silver/.local/clicks-products-md-demo/output/silver/clicks/current.json`, 같은 output 아래 `silver/products/current.json`. 합성 입력・출력은 커밋하지 않는다.
+- **다음 연결:** 실제 Bronze/스냅샷 형식과 S3・Parquet 연결, 부분 재처리, 공통 규칙 적용, Gold A 연결. 리뷰・회원 코드 변경 없음.
