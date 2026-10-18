@@ -48,7 +48,8 @@ def _write_input(root: Path, utc_day: str, rows: list[dict[str, object]]) -> Non
 
 
 def _output(root: Path, kst_day: str) -> list[dict[str, object]]:
-    path = root / "silver" / "reviews" / f"dt={kst_day}" / "part-00000.jsonl"
+    day = date.fromisoformat(kst_day)
+    path = root / "silver" / "reviews" / f"year={day:%Y}" / f"month={day:%m}" / f"day={day:%d}" / "part-00000.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 

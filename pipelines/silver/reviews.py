@@ -187,7 +187,9 @@ def run(input_root: str, output_root: str, start: date, end: date) -> dict[str, 
     for day, rows in by_day.items():
         body = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows)
         # 재처리: 지정 날짜의 기존 파일을 새 결과로 교체하며 뒤에 덧붙이지 않는다.
-        _write_text(_uri(output_root, "silver", "reviews", f"dt={day}", OUTPUT_FILE), body)
+        kst_day = date.fromisoformat(day)
+        _write_text(_uri(output_root, "silver", "reviews", f"year={kst_day:%Y}",
+                         f"month={kst_day:%m}", f"day={kst_day:%d}", OUTPUT_FILE), body)
         counts[day] = len(rows)
     return counts
 
