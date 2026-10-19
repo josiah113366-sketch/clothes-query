@@ -1,0 +1,6 @@
+# Copy to deployment.local.tfvars (ignored by Git) and fill privately.
+# Set TF_VAR_expected_account_id privately. Do not put credentials in tfvars.
+state_bucket = "REPLACE_WITH_STATE_BUCKET"
+# Optional: failed-run alert and monthly budget mails (empty = not created)
+alarm_email  = ""
+budget_email = ""
