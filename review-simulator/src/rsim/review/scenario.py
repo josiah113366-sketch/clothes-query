@@ -126,10 +126,23 @@ class Incident:
         return True
 
 
-def load_incidents(path: Path) -> list[Incident]:
-    if not path.exists():
-        return []
-    raw = json.loads(path.read_text(encoding="utf-8"))
+def load_incidents(path: Path | str) -> list[Incident]:
+    """incidents JSON 을 읽는다. 로컬 파일이 없으면 이상 상황 없음([]).
+
+    s3://버킷/키 도 읽는다(ECS 태스크 역할 권한, 2026-10-18 sim/review-ecs). S3 는 파일이 없으면 오류로 멈춘다
+    (일부러 경로를 준 실행이라, 조용히 평소 리뷰만 만들면 시험 결과를 잘못 읽게 된다).
+    """
+    if isinstance(path, str) and path.startswith("s3://"):
+        from .sinks import s3_client
+
+        bucket, _, key = path[len("s3://") :].partition("/")
+        text = s3_client().get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8-sig")
+    else:
+        path = Path(path)
+        if not path.exists():
+            return []
+        text = path.read_text(encoding="utf-8")
+    raw = json.loads(text)
     incidents = []
     for r in raw:
         for key in ("start", "end"):
