@@ -32,7 +32,7 @@
 
 - **한 줄 요약:** 5분마다 도는 판정 잡의 틀(순찰 한 바퀴, 회차별 이상 이력 쌓기, 재처리 뒤 재판정과 해결 여부 확인)을 만들었다.
 - **무엇을 만들었나:** `agent/detect/`의 `rules.py`, `job.py`, `test_job.py`, `README.md`.
-- **왜 그렇게 했나:** 바깥과는 `query`, `write` 함수 두 개로만 만나게 해서, 가짜 데이터로 먼저 시험하고 Athena는 나중에 이 두 함수만 바꿔 연결하도록 했다. 이상 이력은 덮어쓰지 않고 회차(`run_id`)별로 쌓는다(설계 문서의 결정). 재처리 뒤 재판정은 Gold B 담당과 합의한 임시 방식(5분마다 `reprocess_events` 확인)을 썼다.
-- **입력과 출력:** 입력은 원장 4개와 정리 뷰 2개, `reprocess_events`. 출력은 `anomaly`, `detection_runs`(제안), `reprocess_events`의 `REDETECTED`·`VERIFIED` 줄.
+- **왜 그렇게 했나:** 바깥과는 `query`, `write` 함수 두 개로만 만나게 해서, 가짜 데이터로 먼저 시험하고 Athena는 나중에 이 두 함수만 바꿔 연결하도록 했다. 이상 이력은 덮어쓰지 않고 회차(`run_id`)별로 쌓는다(설계 문서의 결정). 재처리 뒤 재판정은 Gold B 담당과 정리된 방식(판정 잡이 5분마다 `reprocess_events`를 읽어 재판정)을 썼다.
+- **입력과 출력:** 입력은 원장 4개와 정리 뷰 2개, `reprocess_events`. 출력은 `anomaly`, `detection_runs`(Gold B 문서에 내 표로 적힘), `reprocess_events`의 `REDETECTED`·`VERIFIED` 줄.
 - **확인한 결과:** sqlite 가짜 원장에서 시험 19건이 모두 통과했다. 장애 시작 5분 뒤에는 3분 대기 때문에 안 잡히고 10분 뒤 잡힘, 지연·깨진 메시지·측정 줄 없음 탐지, 옛 규칙 버전은 세지 않음, 같은 순찰을 두 번 돌지 않음, 재처리 후 이상이 그대로면 `STILL_OPEN`·사라지면 `RESOLVED`, 옛 이상 줄이 지워지지 않음.
-- **알려진 한계·남은 일:** Athena·Airflow 미연결. `detection_runs` 필요 여부, 이상 구간 합치기, 임계값, `FAILED` 요청 처리는 미정이다.
+- **알려진 한계·남은 일:** Athena·Airflow 미연결. 이상 구간 합치기, 임계값, `FAILED` 요청 처리, 시나리오 3(업무 규칙 오염)을 잡는 규칙은 미정이다.
