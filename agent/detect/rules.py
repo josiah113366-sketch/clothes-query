@@ -18,6 +18,7 @@ class Config:
     r4_win_min: int = 5                   # R4: 최근 몇 분의 깨진 메시지를 보나
     r4_min: int = 5                       # R4: 깨진 메시지가 몇 개 이상
     r4_ratio: float = 0.05                # R4: 그 토픽 메시지 중 깨진 비율이 얼마 이상
+    r5_min_orders: int = 1                # R5: 성공 결제가 2건 이상인 주문이 몇 개 이상 (평소 0이어야 하는 값이라 1로 둠, 제안)
     ratio_wait_min: int = 3               # 비율 규칙은 구간이 끝난 지 몇 분 지난 것만 본다 (Gold B 문서)
     format_rule_version: str = "v1.0"     # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다)
     pgs: tuple = ("PG_A", "PG_B")
@@ -84,3 +85,16 @@ def r4_malformed(cfg, run_id, now, window, broken_by_topic, total_by_topic):
                                  {"table": "malformed_events", "topic": topic, "rule_version": cfg.format_rule_version,
                                   "broken_ratio": round(broken / total, 3)}))
     return rows
+
+
+def r5_duplicate_success(cfg, run_id, now, window, dup_orders):
+    """R5: 한 주문에 SUCCESS 결제가 2건 이상인 주문이 r5_min_orders개 이상이면 이상 (업무 규칙 위반, 형식은 정상).
+
+    dup_orders: [{"order_id", "success_count"}]. 대상은 전체 하나(scope global/all)로 묶고 주문 id 몇 개를 증거로 붙인다.
+    """
+    if len(dup_orders) < cfg.r5_min_orders:
+        return []
+    ids = sorted(str(r["order_id"]) for r in dup_orders)
+    return [make_row(cfg, run_id, now, "R5_DUPLICATE_SUCCESS", "DUPLICATE_SUCCESS_PAYMENT", "payment_attempts", window,
+                     "global", "all", "duplicate_success_orders", len(ids), 0, "FIXED_THRESHOLD", None,
+                     {"table": "payment_attempts", "orders": len(ids), "sample_order_ids": ids[:5]})]

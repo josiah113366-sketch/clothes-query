@@ -60,6 +60,12 @@ def build():
             gone = topic == "payments" and at(16, 40) <= t < at(16, 50)
             if not gone:
                 lag.append((t.strftime(F), topic, 0, 0, 0, 0, 200.0 if slow else 5.0, "RUNNING"))
+    # 데이터 오염: 15:20에 끝난 PG_B 성공 주문 3건(o484~o486)에 성공 결제를 한 건씩 더 넣고, 적재는 16:41에 된 것처럼 한다.
+    # 중복 행의 completed_at은 원래 결제 시각(+2초)이라 과거다. 정상 재시도(실패 뒤 성공)는 넣어도 이상이 아니어야 한다.
+    for i, oid in enumerate(("o484", "o485", "o486")):
+        pay.append((f"dup{i}", oid, 2, "PG_B", "SUCCESS", None, None, "2026-10-20 15:20:02", "2026-10-20 16:41:00"))
+    pay.append(("rt0", "o-retry", 1, "PG_A", "FAILED", "PG_TIMEOUT", "PG", "2026-10-20 16:41:10", "2026-10-20 16:41:30"))
+    pay.append(("rt1", "o-retry", 2, "PG_B", "SUCCESS", None, None, "2026-10-20 16:41:40", "2026-10-20 16:42:00"))
     con.executemany("INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)", pay)
     con.executemany("INSERT INTO gold_b.topic_messages VALUES (?,?,?,?,?)", msg)
     con.executemany("INSERT INTO gold_b.bronze_lag_snapshots VALUES (?,?,?,?,?,?,?,?)", lag)
@@ -110,6 +116,11 @@ check("16:25 순찰: orders 지연 200초가 잡힘, 유입은 평소대로(증�
 regular_run(query, write, CFG, at(16, 45))
 r3 = anomalies("WHERE rule_id = 'R3_BRONZE_LAG' AND run_id = '20261020T1645Z'")
 check("16:45 순찰: payments 측정 줄이 없어서 잡힘", [(x["scope_key"], '"no_snapshots": true' in x["evidence_ref"]) for x in r3], [("payments", True)])
+r5 = anomalies("WHERE rule_id = 'R5_DUPLICATE_SUCCESS'")
+check("16:45 순찰까지: 중복 성공 결제는 16:45 순찰에서만 잡힘(주문 3개, 정상 재시도는 안 셈)", [(x["run_id"], x["scope_key"], x["observed_value"]) for x in r5], [("20261020T1645Z", "all", 3)])
+check("R5 증거에 주문 id가 붙음", '"sample_order_ids": ["o484", "o485", "o486"]' in r5[0]["evidence_ref"], True)
+regular_run(query, write, CFG, at(16, 50))
+check("다음 순찰(16:50)에서는 같은 줄을 다시 세지 않음", len(anomalies("WHERE rule_id = 'R5_DUPLICATE_SUCCESS'")), 1)
 regular_run(query, write, CFG, at(16, 10))
 r4 = anomalies("WHERE rule_id = 'R4_MALFORMED'")
 check("16:10 순찰: clickstream 깨진 메시지 10개만 (옛 규칙 v0.9의 orders 12개는 안 셈)", [(x["scope_key"], x["observed_value"]) for x in r4], [("clickstream", 10)])
@@ -133,6 +144,7 @@ check("같은 교체를 두 번 재판정하지 않음", len(run_once(query, wri
 
 con.execute("UPDATE gold_b.payment_attempts SET status='SUCCESS', failure_code=NULL, failure_cause=NULL, loaded_at=? WHERE completed_at >= ? AND completed_at < ?",
             (at(16, 28).strftime(F), at(15, 0).strftime(F), at(16, 0).strftime(F)))   # 재처리로 원장이 바뀐 것을 흉내
+con.execute("DELETE FROM gold_b.payment_attempts WHERE payment_id LIKE 'dup%'")   # 중복 성공 결제도 재처리 결과에서 없어졌다고 가정(실제로는 원본 DB에 남아 있으면 그대로 다시 나온다)
 event("rq-1", "LEDGER_REPLACED", at(15, 0), at(16, 0))
 s = run_once(query, write, CFG, at(16, 30))
 check("재처리로 원장이 바뀐 뒤 재판정: 이상이 사라짐 (RESOLVED)", [x["result"] for x in s["redetected"]], ["RESOLVED"])

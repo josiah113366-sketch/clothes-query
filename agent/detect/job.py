@@ -2,7 +2,7 @@
 
 한 바퀴(run_once)가 하는 일
   1. 지금 시각을 5분 단위로 내려 순찰 번호(run_id)를 정한다. 이미 돈 번호면 건너뛴다.
-  2. 원장·뷰를 읽어 규칙 R1·R3·R4로 판정한다.
+  2. 원장·뷰를 읽어 규칙 R1·R3·R4·R5로 판정한다.
   3. 이상 줄을 gold_b.anomaly 에 **새 줄로 쌓는다**(지우거나 덮지 않는다). 순찰 기록(detection_runs)도 남긴다.
   4. 재처리 기록(reprocess_events)에 "교체 끝났는데 아직 재판정 안 한" 줄이 있으면 그 시간대를 다시 판정하고
      REDETECTED, VERIFIED 줄을 남긴다. (Airflow가 재처리 뒤에 이 잡을 바로 이어 붙이기 전까지의 임시 방식)
@@ -13,7 +13,7 @@
 import json
 from datetime import datetime, timedelta
 
-from rules import Config, r1_pg_failures, r3_bronze_lag, r4_malformed
+from rules import Config, r1_pg_failures, r3_bronze_lag, r4_malformed, r5_duplicate_success
 
 STEP_MIN = 5     # 판정 주기 (제안)
 ACTOR = "detect_job"
@@ -66,6 +66,15 @@ WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)} G
 WHERE {_in('kafka_timestamp', *w4, cfg)} AND rule_version = '{cfg.format_rule_version}'{_seen(as_of, cfg)} GROUP BY topic""")
     total = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w4, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
     out += r4_malformed(cfg, run_id, now, w4, {r["topic"]: r["n"] for r in broken}, {r["topic"]: r["n"] for r in total})
+    # R5: 한 주문에 성공 결제 2건. 비율 조건이 없어 기다리지 않는다.
+    #   순찰은 "방금 적재된" 줄(loaded_at)을 본다. 중복 행의 completed_at은 원래 결제 시각이라 과거일 수 있다.
+    #   재판정은 교체된 시간대의 줄을 봐야 해서(교체된 줄의 loaded_at은 재처리 시각이다) 결제 완료 시각(completed_at)으로 본다.
+    col = "loaded_at" if as_of else "completed_at"
+    dup = query(f"""SELECT t.order_id, COUNT(*) AS success_count FROM gold_b.payment_attempts t
+WHERE t.status = 'SUCCESS' AND t.order_id IN (SELECT order_id FROM gold_b.payment_attempts
+                                              WHERE status = 'SUCCESS' AND {_in(col, *w3, cfg)})
+GROUP BY t.order_id HAVING COUNT(*) > 1""")
+    out += r5_duplicate_success(cfg, run_id, now, w3, dup)
     return out
 
 
@@ -110,9 +119,10 @@ def redetect(query, write, cfg: Config, now: datetime, item):
     rid, ws, we = item["request_id"], item["window_start"], item["window_end"]
     start, end = datetime.fromisoformat(str(ws)), datetime.fromisoformat(str(we))
     run_id = f"{floor_tick(now):%Y%m%dT%H%MZ}-RD-{rid}-{start:%H%M}"
-    prior = query(f"""SELECT DISTINCT anomaly_id FROM gold_b.anomaly
+    prior = query(f"""SELECT DISTINCT rule_id, scope_type, scope_key FROM gold_b.anomaly
 WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)}""")   # 교체된 시간대와 겹치는 옛 판정
-    prior_ids = {r["anomaly_id"] for r in prior}
+    key = lambda r: (r["rule_id"], r["scope_type"], r["scope_key"])   # 규칙·대상이 같으면 같은 이상 (R5는 순찰·재판정의 시간 기준이 달라 id로 비교할 수 없다)
+    prior_ids = {key(r) for r in prior}
     rows, tick = [], start + timedelta(minutes=STEP_MIN)
     while tick <= end + timedelta(minutes=cfg.ratio_wait_min):   # 정규 순찰과 같은 5분 시각으로 훑는다
         rows += judge(query, cfg, tick, run_id, now, as_of=None)
@@ -121,7 +131,7 @@ WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)}""")   # 
     for r in rows:                                            # 겹치는 판정 구간의 같은 이상은 한 줄만
         if r["anomaly_id"] not in seen:
             seen.add(r["anomaly_id"]); unique.append(r)
-    new_ids = {r["anomaly_id"] for r in unique}
+    new_ids = {key(r) for r in unique}
     if unique:
         write("anomaly", unique)
     write("detection_runs", [_run_record(run_id, "REDETECT", rid, start, end, now, len(unique))])
