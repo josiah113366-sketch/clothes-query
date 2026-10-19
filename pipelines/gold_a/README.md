@@ -9,7 +9,7 @@
 | funnel_session_product | session_id × article_id | 첫 조회·담기·주문·성공 결제 시각, 도달 여부 |
 | funnel_daily | 첫 조회 KST 날짜 × article_id | 단계별 방문 수와 전환율 |
 | review_product_daily | 리뷰 작성 KST 날짜 × article_id | product_code, 리뷰 수·별점 합계·평균·1~2점 건수·비율 |
-| review_aspect_daily | 리뷰 작성 KST 날짜 × article_id × aspect × model_version | 언급·긍정·중립·부정 리뷰 수·부정 비율 |
+| review_aspect_daily | 리뷰 작성 KST 날짜 × article_id × aspect × model_version | 점수별 리뷰 수·점수 합계·평균 |
 
 현재 실행은 Python 배치와 JSONL이다. Spark·Airflow·Parquet/Glue 스키마·실제 AWS 전체 연결까지 완료했다는 뜻은 아니다. 리뷰 모델을 실행하거나 truth 라벨로 판정을 대신 만들지 않는다.
 
@@ -57,11 +57,37 @@ python -m pipelines.gold_a.reviews aspects --silver-root S --products-root S --o
 
 ### 리뷰 분석 결과
 
-명세 입력은 JSONL `review_id, aspect, sentiment, model_version`이다. 감성은 긍정/중립/부정, 속성은 현재 라벨 가이드 v3의 11개다. 선택한 모델 버전만 집계한다. 동일 리뷰·속성·모델 버전의 완전히 같은 행은 한 번, 내용 충돌은 실행 중단이다.
+입력은 JSONL `review_id, aspect, score, model_version` 또는 실제 score_batch.py의 CSV `review_id,aspect,score`다. CSV에는 --model-version으로 출처 버전을 명시한다. score는 정수 -2,-1,0,1,2만 허용하며 bool·실수·누락을 거부한다. sentiment만 있는 기록에서 점수를 추정하지 않는다. 모델 추론은 이 코드의 역할이 아니다.
 
-실제 review-analysis/deploy/score_batch.py 출력 CSV `review_id,aspect,score`도 지원한다. --model-version으로 출처 버전을 명시하며 -2/-1→부정, 0→중립, 1/2→긍정의 score-sign.v1 변환을 manifest에 기록한다. 모델 추론은 이 코드의 역할이 아니다.
+점수 기준은 review-analysis/README.md, docs/absa-label-guide.md 3-1, deploy/score_batch.py 프롬프트를 따른다. +2 분명한 만족, +1 약한 만족, 0 보통·혼재, -1 약한 불만, -2 분명한 불만이다. 라벨 가이드의 3분류 파생 기준은 미정이므로 부호로 긍정/중립/부정을 자동 생성하지 않는다.
 
-분모는 해당 속성이 언급된 고유 리뷰 수다. 여러 속성 건수를 합쳐 전체 리뷰 수로 표시하지 않는다. 분석 결과 없는 리뷰를 중립으로 세지 않는다. manifest analysis_coverage에 속성 결과가 있는/없는 리뷰 수를 기록하되, 없는 경우 미언급·미분석을 구분할 수 없어 완료 상태는 UNVERIFIED다. 모델 배치의 완료·실패 목록 연결은 별도다. 지퍼 독립 라벨은 없으므로 품질·내구성 비율을 지퍼 비율로 표시하지 않는다.
+선택한 모델 버전만 집계하며 속성은 현재 가이드 v3의 11개다. 같은 review_id/aspect/model_version의 같은 score는 한 번, 다른 score는 충돌로 실행 중단한다. 기타 메타데이터 차이를 점수 충돌로 간주하지 않는다.
+
+### review_aspect_daily 점수 명세
+
+한 행·고유 키는 review_date_kst × article_id × aspect × model_version이다. product_code는 디자인 묶음 기준이다.
+
+| 컬럼 | 타입 | 정의 |
+|---|---|---|
+| review_date_kst | DATE | 리뷰 작성 KST 날짜 |
+| article_id | STRING | 검증된 상품 키 |
+| product_code | BIGINT | 디자인 묶음 키 |
+| aspect | STRING | 분석 속성 |
+| model_version | STRING | 모델 버전 |
+| scored_review_count | BIGINT | 해당 속성 점수가 있는 고유 리뷰 수 |
+| score_neg2_count | BIGINT | -2점 리뷰 수 |
+| score_neg1_count | BIGINT | -1점 리뷰 수 |
+| score_zero_count | BIGINT | 0점 리뷰 수 |
+| score_pos1_count | BIGINT | +1점 리뷰 수 |
+| score_pos2_count | BIGINT | +2점 리뷰 수 |
+| score_sum | BIGINT | 점수 합계 |
+| average_score | DECIMAL(10,4) | score_sum / scored_review_count, 소수 4자리 HALF_UP |
+
+점수별 5개 건수의 합은 scored_review_count, 점수×건수의 합은 score_sum이다. 여러 날짜의 평균은 score_sum 합계 / scored_review_count 합계로 구한다. 여러 속성의 건수를 전체 리뷰 수로 합치지 않는다. 기존 mentioned/positive/neutral/negative_review_count·negative_rate는 출력하지 않는다.
+
+미언급·미분석은 0점이 아니다. manifest analysis_coverage에 속성 결과 유무를 기록하되, 없는 경우 미언급·미분석을 구분할 수 없어 완료 상태는 UNVERIFIED다. 실제 모델 배치 완료·실패 목록 연결은 별도다.
+
+manifest inputs에 aspect_schema=score.v1, score_policy=integer-minus2-plus2.v1을 기록한다. 기존 3분류 결과에는 원점수 정보가 없으므로 **원래 모델 점수 입력으로 같은 범위를 전체 재집계한 뒤** 부분 재처리를 사용한다. 부분 재처리 전에 버전·필수 점수 컬럼·구형 컬럼 혼입을 검사한다. 구형 결과가 0건이어도 버전으로 차단한다. 전체 재집계 완료 전에는 이전 current.json을 보존한다.
 
 ## 출력 읽기
 

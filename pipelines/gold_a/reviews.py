@@ -132,7 +132,9 @@ def run_aggregate(silver_root: str, output_root: str, start: date, end: date,
 
 ASPECTS = {"재질·촉감", "사이즈·핏", "색상·디자인", "품질·내구성", "가격·가성비", "냄새",
            "세탁·관리", "활용성·사용감", "배송", "포장", "교환·환불·CS"}
-SENTIMENTS = {"긍정", "중립", "부정"}
+SCORE_FIELDS = {-2: "score_neg2_count", -1: "score_neg1_count", 0: "score_zero_count",
+                1: "score_pos1_count", 2: "score_pos2_count"}
+ASPECT_SCHEMA = "score.v1"
 
 
 def load_analysis(path: str, model_version: str) -> list[dict]:
@@ -145,7 +147,6 @@ def load_analysis(path: str, model_version: str) -> list[dict]:
                 raise ValueError("모델 score CSV는 -2~2 정수여야 합니다")
             score = int(value)
             converted.append({"review_id": row.get("review_id"), "aspect": row.get("aspect"),
-                              "sentiment": "긍정" if score > 0 else "부정" if score < 0 else "중립",
                               "model_version": model_version, "score": score})
         return converted
     return read_rows(path)
@@ -159,11 +160,14 @@ def aggregate_aspects(reviews: list[dict], analysis: list[dict], model_version: 
         raise ValueError("분석 연결 대상 리뷰 ID 중복")
     selected, unknown, analyzed, matching_version = {}, set(), set(), False
     for row in analysis:
-        review_id, aspect, sentiment, version = (row.get(field) for field in ("review_id", "aspect", "sentiment", "model_version"))
-        if not all(isinstance(value, str) and value.strip() for value in (review_id, aspect, sentiment, version)):
-            raise ValueError("분석 결과의 키·속성·감성·모델 버전이 필요합니다")
-        if aspect not in ASPECTS or sentiment not in SENTIMENTS:
-            raise ValueError("지원하지 않는 분석 속성 또는 감성")
+        review_id, aspect, version = (row.get(field) for field in ("review_id", "aspect", "model_version"))
+        if not all(isinstance(value, str) and value.strip() for value in (review_id, aspect, version)):
+            raise ValueError("분석 결과의 키·속성·모델 버전이 필요합니다")
+        if aspect not in ASPECTS:
+            raise ValueError("지원하지 않는 분석 속성")
+        score = row.get("score")
+        if isinstance(score, bool) or not isinstance(score, int) or score not in SCORE_FIELDS:
+            raise ValueError("score는 -2~2 정수여야 합니다. sentiment에서 점수를 추정하지 않습니다")
         if version != model_version:
             continue
         matching_version = True
@@ -171,48 +175,67 @@ def aggregate_aspects(reviews: list[dict], analysis: list[dict], model_version: 
             unknown.add(review_id)
             continue
         key = (review_id, aspect)
-        if key in selected and selected[key] != row:
+        if key in selected and selected[key] != score:
             raise ValueError("동일 리뷰·속성·모델 버전의 분석 내용 충돌")
-        selected[key] = row
+        selected[key] = score
         analyzed.add(review_id)
     if analysis and not matching_version:
         raise ValueError("입력에 요청한 모델 버전 결과가 없습니다")
     if unknown:
         raise ValueError("분석 결과에 Silver 범위에 없는 review_id가 있습니다")
     buckets = {}
-    for (review_id, aspect), prediction in sorted(selected.items()):
+    for (review_id, aspect), score in sorted(selected.items()):
         review = originals[review_id]
         if "article_id" not in review:
             raise ValueError("속성 집계에는 검증된 상품 연결이 필요합니다")
         key = (review["review_date_kst"], review["article_id"], aspect, model_version)
         bucket = buckets.setdefault(key, {"review_date_kst": key[0], "article_id": key[1],
             "product_code": review["product_code"], "aspect": aspect, "model_version": model_version,
-            "mentioned_review_count": 0, "positive_review_count": 0, "neutral_review_count": 0, "negative_review_count": 0})
-        bucket["mentioned_review_count"] += 1
-        field = {"긍정": "positive_review_count", "중립": "neutral_review_count", "부정": "negative_review_count"}[prediction["sentiment"]]
-        bucket[field] += 1
+            "scored_review_count": 0, "score_sum": 0, **{field: 0 for field in SCORE_FIELDS.values()}})
+        bucket["scored_review_count"] += 1
+        bucket["score_sum"] += score
+        bucket[SCORE_FIELDS[score]] += 1
     for bucket in buckets.values():
-        bucket["negative_rate"] = ratio(bucket["negative_review_count"], bucket["mentioned_review_count"])
+        bucket["average_score"] = ratio(bucket["score_sum"], bucket["scored_review_count"], 4)
     coverage = {"review_count": len(originals), "reviews_with_aspect_result": len(analyzed),
                 "reviews_without_aspect_result": len(originals) - len(analyzed),
                 "analysis_completion_status": "UNVERIFIED",
-                "note": "결과 없음은 속성 미언급 또는 미분석일 수 있습니다. 중립으로 세지 않습니다."}
+                "note": "결과 없음은 속성 미언급 또는 미분석일 수 있습니다. 0점으로 세지 않습니다."}
     return [buckets[key] for key in sorted(buckets)], coverage
+
+
+def _check_score_baseline(base: str) -> None:
+    """3분류 결과에 점수 결과를 부분 병합하지 않는다. 0건 기존 결과도 버전으로 판별한다."""
+    try:
+        previous = json.loads(_read_text(_uri(base, "current.json")))
+    except FileNotFoundError as exc:
+        raise ValueError("점수 기반 전체 집계를 먼저 실행한 뒤 부분 재처리하세요") from exc
+    if not isinstance(previous, dict) or previous.get("inputs", {}).get("aspect_schema") != ASPECT_SCHEMA:
+        raise ValueError("기존 속성 결과 형식이 다릅니다. 원래 점수 입력으로 전체 재집계하세요")
+    required = set(SCORE_FIELDS.values()) | {"scored_review_count", "score_sum", "average_score"}
+    legacy = {"mentioned_review_count", "positive_review_count", "neutral_review_count", "negative_review_count", "negative_rate"}
+    path = previous.get("outputs", {}).get("review_aspect_daily.jsonl")
+    if not isinstance(path, str):
+        raise ValueError("기존 점수 집계 파일 경로가 없습니다")
+    if any(not required.issubset(row) or legacy.intersection(row) for row in read_rows(path)):
+        raise ValueError("기존 속성 결과에 다른 형식이 섞여 있습니다. 전체 재집계하세요")
 
 
 def run_aspects(silver_root: str, output_root: str, start: date, end: date, products_root: str,
                 analysis_path: str, model_version: str, mapping_path: str | None = None,
                 reprocess: dict | None = None) -> dict:
     _check_scope(reprocess, start, end)
+    base = _uri(output_root, "gold_a", "review_aspect_daily", "scopes", f"{start}_{end}")
+    if reprocess:
+        _check_score_baseline(base)
     by_day, refs = _connected_scope(silver_root, start, end, products_root, mapping_path)
     analysis = load_analysis(analysis_path, model_version)
     rows, coverage = aggregate_aspects([row for group in by_day.values() for row in group], analysis, model_version)
     refs.update(analysis_path=analysis_path, model_version=model_version, analysis_coverage=coverage,
-                sentiment_policy="score-sign.v1" if analysis_path.lower().endswith(".csv") else "supplied-sentiment")
+                aspect_schema=ASPECT_SCHEMA, score_policy="integer-minus2-plus2.v1")
     if reprocess:
         reprocess = {**reprocess, "model_version": model_version}
-    return save_gold(_uri(output_root, "gold_a", "review_aspect_daily", "scopes", f"{start}_{end}"),
-                     {"review_aspect_daily.jsonl": rows}, refs, reprocess)
+    return save_gold(base, {"review_aspect_daily.jsonl": rows}, refs, reprocess)
 
 
 def search_reviews(

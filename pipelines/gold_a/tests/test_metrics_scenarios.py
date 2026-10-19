@@ -83,10 +83,10 @@ def make_example(root):
     silver_reviews(str(source), str(silver), START, END)
     mapping = source / "mapping.jsonl"
     write(mapping, [{"product_id": "alias-0001", "article_id": "0001"}])
-    analysis = [{"review_id": rid, "aspect": aspect, "sentiment": sentiment, "model_version": "demo.v1"}
-                for rid, aspect, sentiment in (("R1", "품질·내구성", "부정"), ("R1", "배송", "긍정"),
-                                               ("R2", "품질·내구성", "긍정"), ("R3", "사이즈·핏", "긍정"),
-                                               ("R4", "품질·내구성", "부정"))]
+    analysis = [{"review_id": rid, "aspect": aspect, "score": score, "model_version": "demo.v1"}
+                for rid, aspect, score in (("R1", "품질·내구성", -2), ("R1", "배송", 2),
+                                               ("R2", "품질·내구성", 1), ("R3", "사이즈·핏", 2),
+                                               ("R4", "품질·내구성", -1))]
     analysis.append(dict(analysis[0]))  # 동일 분석 재수신은 한 번만 집계한다.
     write(source / "analysis.jsonl", analysis)
     manifests = {"transactions": gold_transactions(str(silver), str(gold), str(silver)),
@@ -128,7 +128,9 @@ def test_all_six_datasets_and_late_payment(tmp_path):
                             "low_rating_count": 1, "low_rating_rate": 0.5}
     quality = next(row for row in output["aspects"]["review_aspect_daily.jsonl"]
                    if row["article_id"] == "0001" and row["aspect"] == "품질·내구성")
-    assert (quality["mentioned_review_count"], quality["negative_review_count"], quality["negative_rate"]) == (2, 1, 0.5)
+    assert (quality["scored_review_count"], quality["score_neg2_count"], quality["score_pos1_count"]) == (2, 1, 1)
+    assert quality["score_sum"] == -1 and quality["average_score"] == -0.5
+    assert "negative_rate" not in quality
 
 
 def test_partial_review_replace_preserves_other_product_and_deletes_zero(tmp_path):
@@ -162,12 +164,12 @@ def test_mapping_analysis_conflict_and_score_adapter(tmp_path):
     connected = connect_reviews(example["reviews"], example["variants"], [{"product_id": "alias-0001", "article_id": "0001"}])
     connected = [{**row, "review_date_kst": row["created_at"][:10]} for row in connected]
     with pytest.raises(ValueError, match="충돌"):
-        aggregate_aspects(connected, example["analysis"] + [dict(example["analysis"][0], sentiment="긍정")], "demo.v1")
+        aggregate_aspects(connected, example["analysis"] + [dict(example["analysis"][0], score=2)], "demo.v1")
     csv_path = example["source"] / "scores.csv"
     csv_path.write_text("review_id,aspect,score\nR1,품질·내구성,-2\nR2,품질·내구성,2\n", encoding="utf-8")
     analysis = load_analysis(str(csv_path), "score.v1")
     rows, coverage = aggregate_aspects(connected, analysis, "score.v1")
-    assert rows[0]["negative_rate"] == 0.5
+    assert rows[0]["average_score"] == 0 and rows[0]["score_neg2_count"] == 1 and rows[0]["score_pos2_count"] == 1
     assert coverage["reviews_without_aspect_result"] == 2
     assert len(rows) == 1
 
@@ -211,11 +213,44 @@ def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
 
 def test_aspect_partial_replace_preserves_other_product(tmp_path):
     example = make_example(tmp_path)
-    modified = [dict(row, sentiment="긍정") if row["review_id"] in {"R1", "R4"} else row for row in example["analysis"]]
+    modified = [dict(row, score=2) if row["review_id"] in {"R1", "R4"} else row for row in example["analysis"]]
     write(example["source"] / "analysis.jsonl", modified)
     result = run_aspects(str(example["silver"]), str(example["gold"]), START, END, str(example["silver"]),
                          str(example["source"] / "analysis.jsonl"), "demo.v1", str(example["mapping"]),
                          replacement("2026-10-19", "2026-10-19", ["0001"]))
     rows = read_outputs(result)["review_aspect_daily.jsonl"]
-    assert next(row for row in rows if row["article_id"] == "0001" and row["aspect"] == "품질·내구성")["negative_rate"] == 0
-    assert next(row for row in rows if row["article_id"] == "0002" and row["review_date_kst"] == "2026-10-19")["negative_rate"] == 1
+    assert next(row for row in rows if row["article_id"] == "0001" and row["aspect"] == "품질·내구성")["average_score"] == 1.5
+    assert next(row for row in rows if row["article_id"] == "0002" and row["review_date_kst"] == "2026-10-19")["average_score"] == -1
+
+
+def test_five_scores_are_preserved_and_sentiment_is_not_inferred():
+    reviews = [{"review_id": str(score), "review_date_kst": "2026-10-19", "article_id": "0001", "product_code": 100}
+               for score in range(-2, 3)]
+    predictions = [{"review_id": str(score), "aspect": "품질·내구성", "score": score, "model_version": "v1"}
+                   for score in range(-2, 3)]
+    rows, _ = aggregate_aspects(reviews, predictions + [dict(predictions[0], extra_metadata="ignored")], "v1")
+    row = rows[0]
+    assert row["scored_review_count"] == 5 and row["score_sum"] == 0 and row["average_score"] == 0
+    assert all(row[field] == 1 for field in ("score_neg2_count", "score_neg1_count", "score_zero_count", "score_pos1_count", "score_pos2_count"))
+    for invalid in (None, True, 1.0, "1", -3, 3):
+        with pytest.raises(ValueError, match="score"):
+            aggregate_aspects(reviews, [dict(predictions[0], score=invalid)], "v1")
+    with pytest.raises(ValueError, match="score"):
+        aggregate_aspects(reviews, [{"review_id": "0", "aspect": "품질·내구성", "sentiment": "중립", "model_version": "v1"}], "v1")
+
+
+def test_legacy_aspect_output_blocks_partial_until_full_rebuild(tmp_path):
+    example = make_example(tmp_path)
+    path = Path(example["manifests"]["aspects"]["manifest_path"])
+    legacy = pointer(path)
+    legacy["inputs"].pop("aspect_schema")
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    previous = path.read_bytes()
+    arguments = (str(example["silver"]), str(example["gold"]), START, END, str(example["silver"]),
+                 str(example["source"] / "analysis.jsonl"), "demo.v1", str(example["mapping"]))
+    with pytest.raises(ValueError, match="전체 재집계"):
+        run_aspects(*arguments, replacement("2026-10-19", "2026-10-19", ["0001"]))
+    assert path.read_bytes() == previous
+    rebuilt = run_aspects(*arguments)
+    assert rebuilt["inputs"]["aspect_schema"] == "score.v1"
+    assert run_aspects(*arguments, replacement("2026-10-19", "2026-10-19", ["0001"]))["status"] == "PASS"
