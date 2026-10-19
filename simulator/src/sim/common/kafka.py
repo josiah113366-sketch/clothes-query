@@ -4,6 +4,7 @@
 TLS(KAFKA_SECURITY_PROTOCOL=SSL)는 설정 연결까지만 했고 로컬에서는 검증하지 못했다.
 """
 
+import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -98,6 +99,15 @@ def consumer_config(settings: KafkaSettings, group_id: str) -> dict[str, object]
         "enable.partition.eof": False,
         "allow.auto.create.topics": False,
     }
+
+
+def quiet_logger() -> logging.Logger:
+    """librdkafka 내부 로그를 버리는 로거. 그 로그에는 브로커 주소가 들어 있다."""
+    logger = logging.getLogger("sim.kafka.librdkafka")
+    if not logger.handlers:
+        logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    return logger
 
 
 def is_local_bootstrap(bootstrap: str) -> bool:
