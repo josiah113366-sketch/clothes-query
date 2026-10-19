@@ -1,8 +1,8 @@
 # team-access stack
 
-상태: 2026-10-19 실제 생성3개·사후 plan 변경 없음. 그룹 impersonation 허용3/거부5 검사 통과. 동료 본인 인증과 업무 앱 배포는 미검증이다. [실행 기록](../../../docs/tasks/infra-generator-was-access.md).
+상태: 2026-10-19 초기 생성3개 후 사용자 요청으로 운영 조회 권한2개를 추가했다. RBAC16개(허용8/거부8)·사후 plan 변경 없음 확인. 동료 본인 인증과 업무 앱 배포는 미검증이다. [실행 기록](../../../docs/tasks/infra-generator-was-access.md).
 
-사용자 요청으로 Fargate 제네레이터와 EKS WAS를 함께 담당하는 동료에게 배포 접근을 연결한다. 이번 변경은 `clothes-query` namespace·EKS access entry·namespace RoleBinding만 관리한다. 도쿄의 기존 EKS·컴퓨트·DB·ALB 설정과 공유 IAM 그룹은 변경하지 않는다.
+사용자 요청으로 Fargate 제네레이터와 EKS WAS를 함께 담당하는 동료에게 배포 접근과 클러스터 운영 조회를 연결한다. `clothes-query` namespace·EKS access entry·namespace RoleBinding 및 운영 조회 ClusterRole/Binding을 관리한다. 도쿄의 기존 EKS·컴퓨트·DB·ALB 설정과 공유 IAM 그룹은 변경하지 않는다.
 
 ## 기존 권한과 실제 부여 범위
 
@@ -13,7 +13,9 @@
 - IAM user/role → EKS STANDARD access entry → `clothes-query:was-deployer` 그룹.
 - `clothes-query` namespace에서 기본 Kubernetes `edit` ClusterRole을 RoleBinding으로 연결.
 - WAS Deployment·Pod·Service·ConfigMap·Secret·Job 배포와 로그/exec/port-forward 등. namespace 내 Secret과 ServiceAccount 사용도 가능하므로 그 공간에 관리자나 채점용 자격증명을 두지 않는다.
-- 이 RoleBinding으로는 Kafka/Airflow namespace, 노드, namespace 생성/삭제, ClusterRoleBinding, IAM·EKS 설정 관리 권한을 부여하지 않는다. 기존 IAM 정책에서 받은 AWS 권한은 별개다.
+- 추가한 운영 조회 ClusterRole/Binding으로 노드·namespace·전체 Pod/로그·Deployment/Job·Service/Ingress·스토리지 상태·HPA·Kafka CR·NodePool/NodeClass를 get/list/watch할 수 있다. Kafka/Airflow의 실행 상태와 로그도 조회한다.
+- 다른 namespace의 Secret/ConfigMap 내용, Pod exec·node proxy, WAS 밖의 배포 변경·노드 삭제·RBAC 변경 권한은 추가하지 않는다. 기존 IAM 정책에서 받은 AWS 권한은 별개다.
+- metrics API의 노드/Pod 조회도 허용하지만 현재 지표 서버 설치를 의미하지 않는다. `kubectl top`은 별도 지표 제공 여부에 따라 동작한다.
 
 `edit`는 Ingress와 Service 변경도 허용하므로 동료가 LoadBalancer/Ingress를 배포하면 별도 ALB 등이 생성될 수 있다. 이번 적용에서는 그런 manifest·ALB를 만들지 않는다. 비용 발생 자원은 앞서 합의한 시점에 인프라 담당자와 plan을 확인한다.
 
@@ -39,7 +41,7 @@ terraform validate
 terraform plan -var-file=deployment.local.tfvars.json -out=deployment.tfplan
 ```
 
-신규3개·기존 자원 수정/삭제/교체0개인 계획만 적용한다. 실제 ARN·계정·endpoint를 포함한 plan/state는 비공개다. 원칙적으로 apply는 인프라 담당자가 수행하며, 이번 사용자 요청은 작업 지시서의 실제 권한 연결 특례를 따른다.
+초기 plan은 신규3개, 조회 확장 plan은 신규2개이며 기존 자원 수정/삭제/교체0개였다. 이후에는 최종 plan의 범위를 다시 확인한다. 실제 ARN·계정·endpoint를 포함한 plan/state는 비공개다. 원칙적으로 apply는 인프라 담당자가 수행하며, 이번 사용자 요청은 작업 지시서의 실제 권한 연결 특례를 따른다.
 
 동료는 자신의 개인 인증 profile을 사용한다. 관리자 역할을 assume하거나 다른 사람 키를 받지 않는다.
 
@@ -48,6 +50,8 @@ $env:AWS_PROFILE = '<동료 본인 프로필>'
 $env:KUBECONFIG = Join-Path $env:TEMP 'clothes-query-was-kubeconfig'
 aws eks update-kubeconfig --region ap-northeast-1 --name clothes-query-dev-eks --alias clothes-query-was
 kubectl get pods -n clothes-query
+kubectl get nodes
+kubectl get pods -A
 kubectl auth can-i create deployments -n clothes-query
 kubectl auth can-i get secrets -n kafka
 ```
@@ -56,6 +60,6 @@ namespace 내 배포는 yes, Kafka Secret 접근은 no가 기대값이다. kubec
 
 ## 검증과 회수
 
-EKS access entry의 신원·그룹을 확인하고, 관리자의 Kubernetes impersonation으로 해당 그룹의 WAS 배포 허용과 Kafka/Airflow·노드·RBAC 변경 거부를 검사한다. 이는 RBAC 검사이며 동료 본인 인증의 end-to-end kubectl 성공을 대신하지 않는다. 최종 접속은 동료가 확인한다.
+EKS access entry의 신원·그룹을 확인하고, 관리자의 Kubernetes impersonation으로 WAS 배포·클러스터 운영 조회 허용과 Kafka Secret/Airflow 변경·노드 삭제·RBAC 변경 거부를 검사한다. 하위 리소스는 `kubectl auth can-i get nodes --subresource=proxy`처럼 명시적 옵션으로 검사한다. 이는 RBAC 검사이며 동료 본인 인증의 end-to-end kubectl 성공을 대신하지 않는다. 최종 접속은 동료가 확인한다.
 
 접근 회수 시 access entry와 RoleBinding을 먼저 검토한다. namespace 삭제는 내부 WAS·Secret·PVC 등까지 삭제할 수 있으므로 운영 중에는 스택 전체 destroy를 실행하지 않는다. 다른 팀원의 자원과 기존 공통 그룹 권한은 그대로 유지한다.

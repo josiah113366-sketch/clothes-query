@@ -32,6 +32,27 @@ run "reject_root" {
   expect_failures = [var.principal_arn]
 }
 
+run "cluster_operational_reads_exclude_secrets_and_mutations" {
+  command = plan
+  module { source = "../modules/team-access" }
+  assert {
+    condition = (
+      kubernetes_cluster_role_binding_v1.operations_view.role_ref[0].name == kubernetes_cluster_role_v1.operations_view.metadata[0].name &&
+      one(kubernetes_cluster_role_binding_v1.operations_view.subject).name == "clothes-query:was-deployer" &&
+      alltrue([for rule in kubernetes_cluster_role_v1.operations_view.rule :
+        toset(rule.verbs) == toset(["get", "list", "watch"]) &&
+        !contains(rule.resources, "*") && !contains(rule.resources, "secrets") &&
+        !contains(rule.resources, "nodes/proxy") && !contains(rule.resources, "pods/exec") &&
+        !contains(rule.api_groups, "*")
+      ]) &&
+      contains(flatten([for rule in kubernetes_cluster_role_v1.operations_view.rule : rule.resources]), "nodes") &&
+      contains(flatten([for rule in kubernetes_cluster_role_v1.operations_view.rule : rule.resources]), "pods/log") &&
+      contains(flatten([for rule in kubernetes_cluster_role_v1.operations_view.rule : rule.resources]), "kafkas")
+    )
+    error_message = "The additional cluster binding must allow operational reads without secret, exec, proxy or write access."
+  }
+}
+
 run "reject_session" {
   command = plan
   module { source = "../modules/team-access" }

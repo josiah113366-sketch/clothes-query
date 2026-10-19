@@ -10,6 +10,8 @@
 
 동료는 본인 AWS profile로 `aws eks update-kubeconfig --region ap-northeast-1 --name clothes-query-dev-eks` 후 `kubectl get pods -n clothes-query`로 확인한다. [전체 인계](stacks/team-access/README.md), [적용 기록](../docs/tasks/infra-generator-was-access.md). Airflow 설치 권한은 이번 대상이 아니다. 아래는 기존 관리자 접속의 준비/추가 절차다.
 
+같은 날 사용자의 권한 확대 요청으로 운영 조회 ClusterRole/Binding을 추가했다. `kubectl get nodes`, `kubectl get pods -A` 및 Kafka/Airflow 실행 상태·로그 조회를 허용한다. WAS 배포 권한은 유지하며 다른 namespace Secret·exec, node proxy·노드 삭제·클러스터 RBAC 변경은 추가하지 않는다. 기존 공통 IAM의 AWS 권한은 별개다.
+
 ## 현재 준비한 것
 
 - EKS 스택이 전용 역할 clothes-query-dev-eks-admin을 생성했고 실제 assume 및 kubectl 접속을 확인했다.
