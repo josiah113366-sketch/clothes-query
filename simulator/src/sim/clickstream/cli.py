@@ -41,7 +41,7 @@ def _settings() -> KafkaSettings:
 def _require_local(settings: KafkaSettings, action: str) -> None:
     if not settings.is_local:
         raise _fail(
-            f"{action}은(는) 로컬 Kafka(localhost, 127.0.0.1)에서만 합니다. "
+            f"{action} 로컬 Kafka(localhost, 127.0.0.1)에서만 합니다. "
             "원격 토픽은 인프라에서 관리합니다."
         )
 
@@ -50,7 +50,7 @@ def _require_local(settings: KafkaSettings, action: str) -> None:
 def setup() -> None:
     """토픽이 없으면 만든다 (파티션 3, 복제 1, 보관 72시간). 있으면 그대로 둔다."""
     settings = _settings()
-    _require_local(settings, "토픽 만들기")
+    _require_local(settings, "토픽 만들기는")
     try:
         info = kafka_topic.describe(settings, CLICK_TOPIC)
         if info is None:
@@ -126,7 +126,7 @@ def reset(
     if not yes:
         raise _fail("토픽을 지우려면 --yes를 붙이세요.")
     settings = _settings()
-    _require_local(settings, "토픽 지우기")
+    _require_local(settings, "토픽 지우기는")
     try:
         if kafka_topic.describe(settings, CLICK_TOPIC) is None:
             typer.echo(f"토픽 {CLICK_TOPIC}이(가) 없습니다. 지울 것이 없습니다.")
