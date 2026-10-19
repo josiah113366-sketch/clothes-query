@@ -17,7 +17,7 @@ simulator/
 │   ├── sink/              # 로컬 S3 Sink: 커넥터 등록·상태·초기화, S3 파일 검증 (sim sink)
 │   ├── product/           # 상품 시드(Parquet)를 DB에 옮기고 확인 (sim product)
 │   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 곡선, 제어 신호, 로깅, 지역 로더
-│   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
+│   ├── controller/        # 모드 전환, 장애 주입, 정답표 기록 (sim controller)
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
 │   └── behavior/          # 쇼핑 행동: 방문, 주문, 결제, 상태 전이 (sim behavior)
 └── tests/
@@ -164,6 +164,70 @@ sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink j
 - **오류와 종료:** DB 연결이 끊기면 실패한 항목을 큐 맨 앞에 되돌리고 1, 2, 4, … 최대 30초 간격으로 다시 연결한 뒤 그 항목부터 이어서 한다. 다시 할 때 `23505`(PK/UNIQUE 위반)는 이미 반영된 것으로 본다. SIGINT/SIGTERM이면 하던 항목을 끝내고 요약(남은 큐 건수 포함)을 출력한 뒤 종료 코드 0으로 끝난다.
 - **출력:** 실제 시간 10초마다 진행 한 줄(모드, 구간 방문·주문·결제 시도, 누적, 큐 길이, 시뮬레이터 시각). 회원 값은 읽지도 출력하지도 않는다(회원은 `member_id`만 읽는다).
 - 확인 후 로컬에서 거래 행을 지우려면: `DELETE FROM payments; DELETE FROM order_items; DELETE FROM orders;`
+
+## 컨트롤러 (controller)
+
+시연자가 버튼(또는 명령)으로 모드와 장애를 바꾸고, 바꾸기 **전에** 정답표(`incident_log`)를 JSON으로 남긴다. 정답표는 AI 조사 에이전트가 맞혀야 할 답이라, 기록이 실패하면 아무것도 바꾸지 않는다. 컨트롤러는 제어 파일만 쓰고(데이터 오염만 DB에 직접 쓴다), 실행 중인 `sim member live`와 `sim behavior live`가 1초마다 그 파일을 읽어 따라 움직인다.
+
+```bash
+sim controller serve                                   # http://127.0.0.1:8080 (버튼 화면)
+sim controller mode burst                              # 다른 터미널에서
+sim controller pg-outage --pg PG_B --extra-fail 0.85 --minutes 10
+sim controller pollution --kind ORDER_TOTAL_MISMATCH --count 30
+sim controller end                                     # 진행 중 사건 종료
+```
+
+| 명령 | 동작 |
+|---|---|
+| `serve` | 서버를 켠다. `--host`(`SIM_CONTROLLER_HOST`, 기본 `127.0.0.1`), `--port`(`SIM_CONTROLLER_PORT`, 기본 8080), `--control-file`(기본 `.local/control.json`), `--incident-log file\|s3`(기본 `file`), `--incident-dir`(기본 `.local/incident_log`), `--medium-minutes`(`SIM_MEDIUM_MINUTES`, 기본 60), `--burst-minutes`(`SIM_BURST_MINUTES`, 기본 15, 소수 허용) |
+| `status` | 현재 상태 |
+| `mode <normal\|medium\|burst>` | 모드 전환 |
+| `running <true\|false>` | 새 가입·방문 멈춤/재개 |
+| `pg-outage --pg PG_B [--extra-fail 0.85] [--minutes 10]` | PG 장애 시작 |
+| `pollution [--kind ORDER_TOTAL_MISMATCH] [--count 30]` | 데이터 오염 |
+| `end` | 진행 중 사건 종료 |
+
+`serve` 밖의 명령은 `--url`(`SIM_CONTROLLER_URL`, 기본 `http://127.0.0.1:8080`)로 서버를 HTTP로 부르는 얇은 클라이언트다. 파일을 쓰는 곳은 서버 하나다.
+
+**제어 파일** (`member live`, `behavior live`가 같은 파일을 읽는다):
+
+```json
+{"running": true, "mode": "normal", "pg_extra_fail": {"PG_B": 0.85}}
+```
+
+`pg_extra_fail`(PG 이름 → 그 PG의 PG 원인 실패 확률 추가분, 0~1)은 없어도 된다. 값이 틀리면 파일 전체를 잘못된 값으로 보고 마지막 상태를 유지한다. `behavior live`는 바뀌면 `pg_extra_fail: {} → {"PG_B": 0.85}` 한 줄을 출력하고, 그 뒤에 시작하는 결제 시도부터 적용한다. `member live`는 이 항목을 무시한다. 컨트롤러는 임시 파일에 쓴 뒤 `os.replace`로 바꿔, 읽는 쪽이 반쯤 쓴 파일을 보지 않는다.
+
+**사건 종류** (한 번에 하나만 진행한다. 진행 중에 다른 사건을 요청하면 409. 일시정지는 예외):
+
+| 사건 | 만드는 법 | 끝나는 때 |
+|---|---|---|
+| `INGEST_LAG` | `mode burst` (적재 지연이 목적) | 15분 뒤 자동으로 `normal`, 또는 `mode normal` |
+| `TRAFFIC_SURGE` | `mode medium` (약한 급증) | 60분 뒤 자동으로 `normal`, 또는 `mode normal` |
+| `PG_OUTAGE` | `pg-outage` (PG 하나, 기본 추가 실패율 0.85, 10분, 최대 60분) | 정한 시간 뒤 자동, 또는 `end` |
+| `DATA_POLLUTION` | `pollution` (기본 30건, 최대 500건) | 즉시 (`complete`) |
+| `OPERATOR_PAUSE` | `running false` (사건은 아니지만 트래픽 공백이 장애로 오해되지 않게 남긴다) | `running true` |
+
+**데이터 오염**은 DB 제약(CHECK, UNIQUE, FK)은 통과하지만 업무 규칙을 어기는 행만 만든다. 스키마 변경은 하지 않는다. 한 종류의 오염은 한 트랜잭션이다.
+
+| 종류 | 하는 일 | 어기는 규칙 |
+|---|---|---|
+| `ORDER_TOTAL_MISMATCH` | `PAID`·`SHIPPED`·`DELIVERED` 중 가장 최근 주문의 `total_amount`에 10,000을 더한다 (`updated_at`은 그대로) | 주문 총액 = 항목 합계 = 결제 금액 |
+| `DUPLICATE_SUCCESS_PAYMENT` | SUCCESS 결제가 있는 최근 주문에 같은 수단·PG·금액의 SUCCESS 결제를 한 건 더 넣는다 (`attempt_no`는 최대 + 1) | 주문당 SUCCESS 결제는 1건 |
+
+**정답표**는 레코드 하나를 파일 하나로 쓴다. 로컬은 `.local/incident_log/YYYYMMDDTHHMMSSZ_<incident_id>_<phase>.json`, S3는 키 접두어 `ground_truth/incident_log/`(`--incident-log s3`, `S3_BUCKET` 필요)다. 시각은 UTC다.
+
+```json
+{"schema_version": 1, "incident_id": "…", "phase": "start", "type": "PG_OUTAGE", "at": "2026-10-18T08:12:00Z", "params": {"pg": "PG_B", "extra_fail": 0.85, "planned_minutes": 10.0}}
+{"schema_version": 1, "incident_id": "…", "phase": "end", "type": "PG_OUTAGE", "at": "2026-10-18T08:22:00Z", "ended_by": "timer", "result": {}}
+```
+
+`ended_by`는 `timer`, `manual`, `shutdown`, `complete`, `failed`(적용 실패) 중 하나다. 오염의 `result`에는 `kind`, `affected_count`, `order_ids`(최대 500개)가 들어간다. 회원 정보, 접속 정보, 버킷 이름은 넣지 않는다. 기록 순서는 "시작 기록 → 바꾸기"이고, 끝은 "되돌리기 → 끝 기록"이다. 끝 기록이 실패하면 1초마다 다시 쓴다.
+
+- **인증:** `/api/*`는 `Authorization: Bearer <SIM_CONTROLLER_TOKEN>`이 필요하다. 로컬(`127.0.0.1`)에 열 때만 토큰 없이 켤 수 있고, 다른 주소에 열면서 토큰이 없으면 시작하지 않는다. `/healthz`는 토큰 없이 `{"ok": true}`다. 버튼 화면은 운영자용이라 정답표 내용(`result`)은 보여 주지 않는다.
+- **데이터 오염**은 `DATABASE_URL`이 있을 때만 켜진다(없으면 오염 요청만 503). 로컬이 아니면 `SIM_ALLOW_REMOTE_DB=1`이 필요하다.
+- **시각:** 컨트롤러는 벽시계(UTC)만 쓴다. ECS에서는 실행기를 `--speed 1`로 돌린다. 배속이 1이 아니면 정답표 시각과 데이터 시각이 어긋난다.
+- **종료와 재시작:** SIGINT/SIGTERM이면 진행 중 사건을 `shutdown`으로 끝내고 제어 파일을 `normal`, 장애 없음으로 되돌린 뒤 종료 코드 0으로 끝난다. 다시 켜면 깨끗한 상태로 시작한다.
+- **알려진 한계:** 비정상 종료(강제 종료)하면 진행 중이던 사건의 끝 기록이 남지 않는다. 컨트롤러를 다시 켜도 그 사건을 복구하지 않는다.
 
 ## 로컬 CDC
 

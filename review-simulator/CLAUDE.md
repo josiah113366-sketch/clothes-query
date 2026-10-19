@@ -33,10 +33,12 @@ RDS 에는 넣지 않는다(2026-10-14 lemin 결정). 지금은 로컬 파일 �
 | 프롬프트를 바꾸면 `PROMPT_VERSION`(생성) 또는 `VERIFIER_PROMPT_VERSION`(검수)을 올리고 `docs/prompt-sample.md` 를 다시 뽑는다 | 어떤 프롬프트로 만든 리뷰인지 정답 이벤트에 남는다 |
 | 시각은 시간대 정보가 있는 값으로 만든다 | `simulator/` 와 같은 기준 |
 
+ECS 실행(v0.2.0)은 `deploy/` 스크립트로 한다(`deploy/README.md`). 로컬과 같은 `rsim` 명령만 쓰고 기능 차이를 두지 않는다. 버전별 차이는 `CHANGELOG.md`.
+
 ## 개발 환경과 명령
 
 - Python 3.12, 로컬 Kafka 는 Docker Compose 다.
-- 의존성: 실행용 `boto3`(S3 저장만), `confluent-kafka`, `python-dotenv`, `typer` / 개발용 `moto[s3]`, `pytest`, `ruff`. Bedrock 호출에는 SDK 를 쓰지 않는다.
+- 의존성: 실행용 `boto3`(S3 저장만), `confluent-kafka`, `python-dotenv`, `typer` / 개발용 `moto`(가짜 S3·ECS 등, 배포 스크립트 테스트), `pytest`, `ruff`. Bedrock 호출에는 SDK 를 쓰지 않는다.
 
 ```bash
 cd review-simulator
@@ -58,4 +60,4 @@ rsim run --llm fake --sink stdout --count 5
 
 - `main`에 직접 커밋하지 않는다. push와 PR은 사용자 확인 후에 한다.
 - 비밀값, 계정 ID, 엔드포인트, 리뷰 원문 파일을 커밋하지 않는다.
-- `simulator/`, `infra/` 파일을 이 폴더 작업에서 고치지 않는다.
+- `simulator/` 파일과 `infra/` 의 다른 스택은 이 폴더 작업에서 고치지 않는다. 리뷰 시뮬레이터 자기 AWS 리소스는 `infra/modules·stacks/ecs-review-simulator` 에 두고 담당자가 apply 한다(2026-10-18 lemin).
