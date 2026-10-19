@@ -174,6 +174,24 @@ LIMIT 1"""),
     ]
 
 
+def duplicate_success_orders(args, dialect):
+    """성공(SUCCESS) 결제가 2건 이상인 주문. 업무 규칙 위반(데이터 오염)이다. 기본은 적재된 시각(loaded_at) 기준이다.
+
+    중복 행의 결제 시각(completed_at)은 원래 결제 시각이라 과거일 수 있다. 재처리한 시간대를 볼 때는 completed_at 기준으로 본다.
+    """
+    a, b = check_window(args["window_start"], args["window_end"])
+    col = _pick(args.get("time_basis") or "loaded_at", ("loaded_at", "completed_at"), "time_basis")
+    return [("duplicate_success_orders", f"""SELECT t.order_id, COUNT(*) AS success_count, MIN(t.attempt_no) AS first_attempt_no,
+       MAX(t.attempt_no) AS last_attempt_no, MIN(t.completed_at) AS first_completed_at, MAX(t.loaded_at) AS last_loaded_at
+FROM gold_b.payment_attempts t
+WHERE t.status = 'SUCCESS' AND t.order_id IN (SELECT order_id FROM gold_b.payment_attempts
+                                              WHERE status = 'SUCCESS' AND {_range(col, a, b, dialect)})
+GROUP BY t.order_id
+HAVING COUNT(*) > 1
+ORDER BY success_count DESC, t.order_id
+LIMIT 200""")]
+
+
 def list_anomalies(args, dialect):
     """탐지가 기록한 이상 이력. 같은 시간대를 여러 회차(run_id)가 판정했을 수 있으니 가장 큰 run_id가 최신이다."""
     a, b = check_window(args["window_start"], args["window_end"])
@@ -241,6 +259,7 @@ TOOLS = {
     "malformed_summary": (malformed_summary, _spec("malformed_summary", malformed_summary.__doc__, {**_WIN, **_TOPIC, **_RULE}, ["window_start", "window_end", "rule_version"])),
     "malformed_fields": (malformed_fields, _spec("malformed_fields", malformed_fields.__doc__, {**_WIN, **_TOPIC, **_RULE}, ["window_start", "window_end", "rule_version"])),
     "ledger_reliability": (ledger_reliability, _spec("ledger_reliability", ledger_reliability.__doc__, _WIN, ["window_start", "window_end"])),
+    "duplicate_success_orders": (duplicate_success_orders, _spec("duplicate_success_orders", duplicate_success_orders.__doc__, {**_WIN, "time_basis": {"type": "string", "enum": ["loaded_at", "completed_at"], "description": "어느 시각으로 구간을 볼까. 기본 loaded_at"}}, ["window_start", "window_end"])),
     "list_anomalies": (list_anomalies, _spec("list_anomalies", list_anomalies.__doc__, _WIN, ["window_start", "window_end"])),
     "reprocess_status": (reprocess_status, _spec("reprocess_status", reprocess_status.__doc__, {"request_id": {"type": "string", "description": "재처리 요청 번호"}}, ["request_id"])),
 }

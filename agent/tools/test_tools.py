@@ -124,6 +124,15 @@ an = run("list_anomalies", **W)["rows"]
 check("이상 이력: 같은 이상이 2회차(r2가 앞)로 나옴", [r["run_id"] for r in an], ["r2", "r1"])
 check("재처리 상태: 최근 단계가 APPROVED", run("reprocess_status", request_id="rq-1")["rows"][0]["step"], "APPROVED")
 
+# 데이터 오염: o4(성공 1건)에 성공을 한 건 더, 결제 시각은 과거(14:30), 적재는 15:10. o1은 실패 뒤 재시도라 SUCCESS가 없다.
+con.execute("INSERT INTO gold_b.payment_attempts VALUES ('d1','o4',2,'PG_A','SUCCESS',NULL,NULL,'2026-10-20 14:30:02','2026-10-20 15:10:00')")
+dup = run("duplicate_success_orders", **W)["rows"]
+check("성공 결제 중복: o4 하나, 성공 2건 (결제 시각이 구간 밖이어도 적재 시각으로 잡음)", [(r["order_id"], r["success_count"]) for r in dup], [("o4", 2)])
+EARLY = dict(window_start="2026-10-20T14:00:00", window_end="2026-10-20T15:00:00")
+check("성공 결제 중복: 14시대를 적재 시각으로 보면 없고, 결제 시각으로 보면 o4(중복 행이 14:30)",
+      ([r["order_id"] for r in run("duplicate_success_orders", **EARLY)["rows"]], [r["order_id"] for r in run("duplicate_success_orders", time_basis="completed_at", **EARLY)["rows"]]), ([], ["o4"]))
+rejects("모르는 time_basis 막힘", lambda: run("duplicate_success_orders", time_basis="x; DROP", **W))
+
 # --- 울타리가 막는가 ---
 rejects("INSERT 막힘", lambda: validate_sql("INSERT INTO gold_b.anomaly VALUES (1) LIMIT 1"))
 rejects("DROP 막힘", lambda: validate_sql("SELECT 1 FROM gold_b.anomaly; DROP TABLE gold_b.anomaly LIMIT 1"))
@@ -137,7 +146,7 @@ rejects("끝이 시작보다 앞이면 막힘", lambda: run("payment_summary", w
 rejects("모르는 PG 이름 막힘", lambda: run("payment_summary", pg="PG_C'; DROP TABLE x; --", **W))
 rejects("이상한 request_id 막힘", lambda: run("reprocess_status", request_id="rq-1' OR '1'='1"))
 rejects("없는 도구 막힘", lambda: run("delete_everything"))
-check("도구 정의 10개", len(TOOL_SPECS), 10)
+check("도구 정의 11개", len(TOOL_SPECS), 11)
 check("모든 도구가 SELECT만 만든다 (울타리 통과)", all(
     validate_sql(sql) for name, (b, _) in __import__("ledger_tools").TOOLS.items()
     for _, sql in b({**W, "request_id": "rq-1", "rule_version": "v1.0"}, "athena")), True)

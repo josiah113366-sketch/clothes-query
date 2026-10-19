@@ -5,13 +5,13 @@
 
 ## 쉬운 설명
 
-에이전트에게 데이터 창고 열쇠를 통째로 주는 대신, **질문 10개짜리 조회 창구**를 준다.
+에이전트에게 데이터 창고 열쇠를 통째로 주는 대신, **질문 11개짜리 조회 창구**를 준다.
 - 창구에 없는 질문은 못 한다.
 - 창구는 정해진 표(원장 4개, 정리 뷰 2개, 이상 이력, 재처리 기록)만 읽는다.
 - 정답표 폴더(`ground_truth/`)와 원문 일부(`raw_sample`)는 읽지 못한다.
 - 한 번에 6시간 범위, 200줄까지만 돌려준다.
 
-## 도구 10개
+## 도구 11개
 
 | 도구 | 묻는 것 | 읽는 곳 | 어느 시나리오 |
 |---|---|---|---|
@@ -23,6 +23,7 @@
 | `malformed_summary` | 토픽·사유별 깨진 메시지 수(현재 규칙 버전만) | `malformed_messages` 뷰 | 3 스키마 오염 |
 | `malformed_fields` | 어느 필드가 왜, 언제부터, 가장 이른 offset | `malformed_events` | 3 |
 | `ledger_reliability` | 원장을 믿어도 되나(누락·중복·멈춤) | `topic_messages` 등 | 모두 |
+| `duplicate_success_orders` | 성공 결제가 2건 이상인 주문 (적재 시각 기준, 결제 시각 기준으로도 가능) | `payment_attempts` | 3 데이터 오염 |
 | `list_anomalies` | 탐지가 기록한 이상 이력(회차별) | `anomaly` | 모두 |
 | `reprocess_status` | 재처리 요청의 진행 상태 | `reprocess_events` | 재처리 |
 
@@ -32,7 +33,7 @@
 
 ```
 cd agent/tools
-python3 test_tools.py     # sqlite 가짜 원장으로 도구 10개와 울타리를 시험 (표준 라이브러리만 사용)
+python3 test_tools.py     # sqlite 가짜 원장으로 도구 11개와 울타리를 시험 (표준 라이브러리만 사용)
 ```
 
 ## 파일
@@ -40,7 +41,7 @@ python3 test_tools.py     # sqlite 가짜 원장으로 도구 10개와 울타리
 | 파일 | 역할 |
 |---|---|
 | `guard.py` | SQL 울타리: SELECT만, 허용된 표만, `LIMIT` 필수, 정답표·원문 차단, 시간 범위 6시간 한도 |
-| `ledger_tools.py` | 도구 10개, 도구 목록(`TOOL_SPECS`), 실행 함수(`run_tool`) |
+| `ledger_tools.py` | 도구 11개, 도구 목록(`TOOL_SPECS`), 실행 함수(`run_tool`) |
 | `test_tools.py` | 도구가 맞는 숫자를 돌려주는지, 울타리가 위험한 요청을 막는지 시험 |
 
 ## 알아야 할 것 (한계)
