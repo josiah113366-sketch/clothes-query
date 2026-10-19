@@ -1,6 +1,6 @@
 # simulator/
 
-가상 쇼핑몰의 회원 데이터를 만들어 RDS(PostgreSQL)에 쓰는 시뮬레이터이다. Kafka에는 직접 쓰지 않고, Debezium이 변경 로그를 읽어 보낸다. 설계는 `docs/design/`에 있다. 작업 규칙은 `CLAUDE.md`를 따른다.
+가상 쇼핑몰의 회원 데이터를 만들어 RDS(PostgreSQL)에 쓰는 시뮬레이터이다. 회원·주문·결제는 Kafka에 직접 쓰지 않고 Debezium이 변경 로그를 읽어 보낸다. 클릭 로그만 예외로 Kafka 토픽 `clickstream`에 직접 발행한다. 설계는 `docs/design/`에 있다. 작업 규칙은 `CLAUDE.md`를 따른다.
 
 ## 코드 구조
 
@@ -15,15 +15,16 @@ simulator/
 │   ├── cli.py             # sim 명령 진입점
 │   ├── cdc/               # 로컬 CDC: 커넥터 등록·상태·초기화, 토픽 검증 (sim cdc)
 │   ├── sink/              # 로컬 S3 Sink: 커넥터 등록·상태·초기화, S3 파일 검증 (sim sink)
+│   ├── clickstream/       # 클릭 로그 토픽 만들기·상태·검증·지우기 (sim clickstream)
 │   ├── product/           # 상품 시드(Parquet)를 DB에 옮기고 확인 (sim product)
-│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 곡선, 제어 신호, 로깅, 지역 로더
+│   ├── common/            # 설정, 시드·난수, DB 연결, Kafka 설정, 시계, 곡선, 제어 신호, 로깅, 지역 로더
 │   ├── controller/        # 모드 전환, 장애 주입, 정답표 기록 (sim controller)
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
 │   └── behavior/          # 쇼핑 행동: 방문, 주문, 결제, 상태 전이 (sim behavior)
 └── tests/
 ```
 
-`member`, `behavior`, `controller`는 서로 import하지 않고 `common`만 공유한다. 데이터는 DB로, 제어는 컨트롤러 신호로만 주고받는다. DDL은 `db/schema/`에 있다.
+`member`, `behavior`, `controller`, `clickstream`은 서로 import하지 않고 `common`만 공유한다. 데이터는 DB로, 제어는 컨트롤러 신호로만 주고받는다. DDL은 `db/schema/`에 있다.
 
 ## 로컬 실행
 
@@ -150,13 +151,13 @@ sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink j
 | `--control-file` | `SIM_CONTROL_FILE` | `.local/control.json` | 제어 신호 파일 (`member live`와 **같은 파일**) |
 | `--seed` | `SIM_SEED` | 42 | 기본 시드 |
 | `--run-salt` | | 시작 시각의 epoch 초 | 실행 구분값 (아래) |
-| `--click-sink` | | `none` | 클릭 로그 출력: `none`(버림) 또는 `jsonl` |
+| `--click-sink` | `SIM_CLICK_SINK` | `none` | 클릭 로그 출력: `none`(버림), `jsonl`(파일), `kafka`(토픽 `clickstream`, 아래 "클릭 로그" 절) |
 | `--click-file` | | `.local/clicks.jsonl` | `jsonl`일 때 경로. `.local/`은 커밋하지 않는다 |
 
 - **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 11만 1천 방문이면 주문은 약 5,000건이다.
 - **값을 바꾸는 곳:** 확률, 분포, 지연은 모두 `src/sim/behavior/params.py` 한 곳에 있다. `[가정]` 표시는 팀과 맞추는 임시값이다.
 - **쓰는 방식:** 주문과 그 상품 줄은 한 트랜잭션, 결제 INSERT와 상태 UPDATE는 한 건씩 자동 커밋이다. `orders.updated_at`과 모든 전이 시각은 **예정된 시뮬레이터 시각**이다(실제 UPDATE 시각이 아니다). 결제는 INSERT만 하고 환불도 결제 행을 만들지 않는다.
-- **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink` 또는 `JsonlClickSink`)로 나간다. 나중에 쇼핑몰 API나 Kafka로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(`+09:00`), `session_id`다.
+- **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink`, `JsonlClickSink`, `KafkaClickSink`)로 나간다. 나중에 쇼핑몰 API로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(`+09:00`), `session_id`다.
 - **제어 파일:** `member live`와 같은 파일을 약 1초마다 읽는다. 모드를 바꾸면 다음 방문 간격을 지금부터 다시 뽑고 `mode: normal → burst` 한 줄이 나온다. `{"running": false, ...}`는 **새 방문만 멈춘다.** 이미 예약된 클릭·결제·상태 전이는 계속 실행된다.
 - **run_salt:** 같은 시드 + 같은 `run_salt` + 같은 시계 + 같은 제어 순서이면 결과가 완전히 같다. 기본값이 시작 시각이라 재시작마다 달라지고, 그래서 `order_id`·`payment_id`가 이전 실행과 겹치지 않는다. 시작 출력에 항상 보인다.
 - **알려진 한계: 재시작하면 진행 중이던 주문이 멈춘다.** 예약된 결제·상태 전이는 메모리 큐에만 있고 DB에서 복구하지 않는다. 껐다 켜면 그때 `PLACED`, `PAID`, `SHIPPED`였던 주문은 그 상태로 남는다.
@@ -228,6 +229,52 @@ sim controller end                                     # 진행 중 사건 종�
 - **시각:** 컨트롤러는 벽시계(UTC)만 쓴다. ECS에서는 실행기를 `--speed 1`로 돌린다. 배속이 1이 아니면 정답표 시각과 데이터 시각이 어긋난다.
 - **종료와 재시작:** SIGINT/SIGTERM이면 진행 중 사건을 `shutdown`으로 끝내고 제어 파일을 `normal`, 장애 없음으로 되돌린 뒤 종료 코드 0으로 끝난다. 다시 켜면 깨끗한 상태로 시작한다.
 - **알려진 한계:** 비정상 종료(강제 종료)하면 진행 중이던 사건의 끝 기록이 남지 않는다. 컨트롤러를 다시 켜도 그 사건을 복구하지 않는다.
+
+## 클릭 로그 (clickstream)
+
+방문 중에 생기는 조회(`view`)와 장바구니 담기(`cart_add`)를 Kafka 토픽 `clickstream`에 직접 발행한다. 주문·결제·회원은 지금처럼 DB에만 쓰고(Debezium이 Kafka로 보낸다), **클릭만 예외**다. 클릭은 DB에 넣지 않는다. 토픽의 S3 적재(Bronze)는 아직 없다(`sim/cdc-orders`에서 다른 토픽과 함께 한다).
+
+```bash
+docker compose --profile cdc up -d kafka
+sim clickstream setup                       # 토픽 만들기 (처음 한 번)
+sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink kafka
+sim clickstream status                      # 파티션별 offset과 합계
+sim clickstream verify                      # 내용·순서·중복 확인
+sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
+```
+
+**메시지 모양:** 토픽 `clickstream`(파티션 3, 보관 72시간), 키는 `session_id`(UTF-8), 값은 한 건당 JSON 하나다. `--click-sink jsonl`의 한 줄과 **같은 6개 필드**다.
+
+```json
+{"event_id":"<uuid>","event_type":"view","member_id":"<uuid>","article_id":"0108775015","event_time":"2026-10-19T15:20:01.123456+09:00","session_id":"<uuid>"}
+```
+
+- 키가 `session_id`라서 같은 방문의 `view` → `cart_add` 순서가 한 파티션 안에서 지켜진다. PII는 없다(`member_id`, `article_id`뿐). 메시지 내용은 로그·콘솔에 출력하지 않는다.
+- Kafka 레코드 시각은 프로듀서 기본값(보낸 시각)이다. `ingest_time`은 파이프라인이 붙이므로 메시지에 넣지 않는다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `sim clickstream setup` | 토픽이 없으면 만든다(파티션 3, 복제 1, `retention.ms=259200000`). 있으면 그대로 두고 설정이 다르면 알린다. **로컬 부트스트랩에서만** 한다 |
+| `sim clickstream status` | 토픽 존재 여부, 파티션별 low/high offset, 합계. 토픽이 없으면 종료 코드 1 |
+| `sim clickstream verify` | 처음부터 **실행 시점의 끝까지** 한 번 읽는다(임시 컨슈머 그룹, offset 저장 없음). 아래 확인 중 하나라도 실패면 종료 코드 1, 메시지가 0건이면 "비어 있음"으로 종료 코드 2 |
+| `sim clickstream reset --yes` | 토픽을 지운다. `--yes`가 없으면 하지 않는다. **로컬 부트스트랩에서만** 한다 |
+
+`verify`가 확인하는 것: ① 모든 메시지가 JSON이고 6개 필드가 있다 ② `event_type`이 `view` 또는 `cart_add` ③ 메시지 키 = 값의 `session_id` ④ 같은 `session_id`는 한 파티션에만 있다 ⑤ `event_id` 중복 없음 ⑥ 같은 파티션·세션 안에서 `event_time`이 줄어들지 않는다 ⑦ 0건이면 비어 있음. 틀린 메시지는 파티션·offset(`p2@17`)만 알리고 내용은 출력하지 않는다.
+
+- **발행 실패는 버리고 센다.** 클릭이 주문 흐름(DB)을 멈추게 하면 안 되기 때문이다. 전송이 실패해도 예외를 던지지 않고, 처음 실패할 때 경고를 한 번만 출력한 뒤 건수만 센다. 종료 요약에 `클릭 발행: 성공 N건, 실패 M건`이 나온다. Kafka가 잠깐 끊겼다 돌아오면 프로듀서가 다시 연결해 새 클릭부터 다시 쌓인다(끊긴 동안 10초 넘게 못 보낸 클릭은 실패로 센다). 끊기는 순간 실제로는 기록됐지만 응답을 못 받은 메시지도 실패로 세므로, 끊김이 있었으면 **실패 건수는 상한값**이다(토픽 건수가 성공 건수보다 조금 많을 수 있다. 중복은 생기지 않는다).
+- **시작할 때 확인:** `--click-sink kafka`는 시작할 때 브로커와 토픽을 한 번 확인한다. 닿지 않거나 토픽이 없으면 방문을 시작하지 않고 종료 코드 1이다. 이 확인은 토픽을 만들지 않는다(`allow.auto.create.topics=false`).
+- **프로듀서 설정:** `acks=all`, `enable.idempotence=true`, `linger.ms=50`, `message.timeout.ms=10000`. 종료할 때(`Ctrl+C`/SIGTERM 포함) 최대 30초 동안 남은 메시지를 보낸다.
+
+| 환경 변수 | 기본값 | 설명 |
+|---|---|---|
+| `KAFKA_BOOTSTRAP` | `localhost:29092` | 브로커 주소. 출력하지 않는다 |
+| `KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT` | `PLAINTEXT` 또는 `SSL` |
+| `KAFKA_SSL_CA_FILE` | | CA 인증서 경로 (`SSL`일 때) |
+| `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | | 클라이언트 인증서·키 경로 (mTLS, 둘은 함께) |
+
+- **TLS는 로컬에서 검증하지 않았다.** 환경 변수를 librdkafka 설정(`ssl.ca.location` 등)으로 연결하는 데까지만 했다.
+- **ECS에서 EKS 안 Kafka로 가는 경로는 아직 없다.** Kafka가 EKS 내부 전용이라 Fargate에서 닿지 않는다. 경로(내부 NLB, 클라이언트 인증서 공급, 네트워크 규칙)는 인프라와 `sim/ecs-image`에서 정한다.
+- **알려진 한계:** 클릭 `event_time`은 `+09:00`(KST) 표기로 나간다(`jsonl`과 같다). 시간대가 표기에 있어 값은 모호하지 않지만 "Bronze는 UTC" 규칙과 맞출지는 정해지지 않았다. 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
 
 ## 로컬 CDC
 
