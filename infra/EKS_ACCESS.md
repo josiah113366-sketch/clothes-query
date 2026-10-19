@@ -1,6 +1,14 @@
 # EKS 관리자 접속 준비
 
-상태: 실제 접속 검증 완료 — 전용 관리자 역할, 현재 사용자·현재 PC만 허용. 팀원은 나중에 추가 · 2026-10-16
+상태: 본인 관리자 접속 검증 완료 / 동료 WAS namespace 배포 권한 연결 완료 · 2026-10-19
+
+## 동료 WAS 배포 접근 — 2026-10-19
+
+사용자 요청으로 제네레이터와 WAS 담당 동료의 IAM 신원을 EKS STANDARD access entry와 `clothes-query:was-deployer` 그룹으로 연결했다. `clothes-query` namespace의 RoleBinding은 기본 `edit` ClusterRole을 사용한다. cluster-admin이나 기존 관리자 역할 trust는 추가하지 않았다. 같은 공인 IP 네트워크를 사용한다고 확인받아 기존 public API 허용 범위1개를 유지했다.
+
+실제 namespace/access entry/RoleBinding 생성3개·수정/삭제0개, 사후 plan 변경 없음. 그룹 impersonation으로 WAS 배포/로그/Secret 허용 및 Kafka/Airflow/노드/관리자 권한 변경 거부를 확인했다. 동료 본인 AWS 인증으로의 kubectl 확인은 아직 남았다. 동료의 기존 공통 지원 계정 그룹은 광범위한 ECS/ECR/IAM 권한을 이미 제공하고 있으며 이번 RBAC가 그 AWS 권한까지 제한하지 않는다.
+
+동료는 본인 AWS profile로 `aws eks update-kubeconfig --region ap-northeast-1 --name clothes-query-dev-eks` 후 `kubectl get pods -n clothes-query`로 확인한다. [전체 인계](stacks/team-access/README.md), [적용 기록](../docs/tasks/infra-generator-was-access.md). Airflow 설치 권한은 이번 대상이 아니다. 아래는 기존 관리자 접속의 준비/추가 절차다.
 
 ## 현재 준비한 것
 

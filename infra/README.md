@@ -33,6 +33,7 @@ bootstrap → network → eks → compute → apps
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `ecs-review-simulator` | `stacks/ecs-review-simulator/` | 리뷰 시뮬레이터 ECS Fargate 기반: ECR·클러스터·IAM·Secret·꺼진 예약 실행·로그/대시보드 (담당자 apply, [안내](stacks/ecs-review-simulator/README.md)) | network, storage | 코드·validate, 미배포 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
+| `team-access` | [stacks/team-access/](stacks/team-access/README.md) | 동료 WAS 배포 namespace·EKS 신원·RBAC | 기존 EKS, 비공개 동료 신원 | 2026-10-19 실제 연결·RBAC8개 통과·후속 plan 변경 없음; 동료 본인 접속 확인 후속 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
 | Spark | 미구현 | 정제 runtime | 실행 방식·서비스 입력 | 예정 |
 | Airflow | [로컬 실행 후보](platform/airflow/README.md) | API 재처리·5분 예약 | 운영 배포 방식·메타데이터 DB·인증/IAM | AWS 미배포 |
