@@ -82,7 +82,8 @@ def create(settings: KafkaSettings, topic: str, partitions: int) -> None:
         replication_factor=LOCAL_REPLICATION,
         config={"retention.ms": str(TOPIC_RETENTION_MS)},
     )
-    futures = _admin(settings).create_topics([new], operation_timeout=OPERATION_TIMEOUT_SECONDS)
+    admin = _admin(settings)  # 결과를 받을 때까지 클라이언트를 붙잡아 둔다
+    futures = admin.create_topics([new], operation_timeout=OPERATION_TIMEOUT_SECONDS)
     try:
         futures[topic].result()
     except KafkaException:
@@ -90,7 +91,8 @@ def create(settings: KafkaSettings, topic: str, partitions: int) -> None:
 
 
 def delete(settings: KafkaSettings, topic: str) -> None:
-    futures = _admin(settings).delete_topics([topic], operation_timeout=OPERATION_TIMEOUT_SECONDS)
+    admin = _admin(settings)
+    futures = admin.delete_topics([topic], operation_timeout=OPERATION_TIMEOUT_SECONDS)
     try:
         futures[topic].result()
     except KafkaException:
