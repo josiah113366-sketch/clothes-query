@@ -41,6 +41,12 @@ variable "public_access_cidrs" {
   }
 }
 
+variable "allow_public_api_from_anywhere" {
+  description = "Temporary development opt-in for public EKS API access from any IPv4; set false to restore the preserved restricted CIDRs."
+  type        = bool
+  default     = false
+}
+
 variable "admin_trusted_principal_arns" {
   description = "Explicit IAM users/roles permitted to assume the dedicated EKS administrator role. Keep real ARNs in private inputs."
   type        = set(string)

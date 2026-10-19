@@ -21,7 +21,7 @@
 
 ## 네트워크와 후속 연결
 
-동료는 현재 관리자와 같은 공인 IP 네트워크를 사용한다고 확인받았다. EKS public API의 기존 1개 허용 범위를 유지한다. 장소/출구 IP가 바뀌면 별도로 /32 허용을 검토한다. EKS 권한만으로 Fargate→ALB/WAS→RDS의 통신이 자동으로 열리지 않는다.
+초기 권한 연결 때 동료는 관리자와 같은 공인 IP 네트워크를 사용한다고 확인받아 기존 1개 허용 범위를 유지했다. 이후 사용자의 개발용 개방 요청으로 EKS 스택에서 public 관리 API를 전체 IPv4에 개방했다. 현재는 장소 변경 시 IP 추가가 필요 없고, IP 제한 모드로 원복한 뒤에는 /32 허용을 검토한다. [현재 접속 상태](../../EKS_ACCESS.md). EKS 권한만으로 Fargate→ALB/WAS→RDS의 통신이 자동으로 열리지 않는다.
 
 Fargate cluster/task·전용 Execution Role/Task Role·이미지·DB 계정·Secret·보안 그룹은 실제 앱 입력에 맞춰 연결한다. 현재 도쿄에 다른 팀원이 만든 review-simulator ECS/ECR이 있어 이 스택에서 재사용·수정하지 않는다. 제네레이터는 자기 전용 자원을 사용한다. 내부 ALB는 WAS API와 제네레이터 호출 준비 후 생성한다.
 

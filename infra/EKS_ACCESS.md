@@ -2,6 +2,12 @@
 
 상태: 본인 관리자 접속 검증 완료 / 동료 WAS namespace 배포 권한 연결 완료 · 2026-10-19
 
+## 현재 개발용 관리 API 접속 — 2026-10-19
+
+사용자의 “일단 개발이니까 그냥 다 열자” 요청으로 **우리 도쿄 EKS public 관리 API만 `0.0.0.0/0`으로 개방**했다. 다른 장소에서도 IP 목록 추가 없이 kubectl/Helm 접속을 시도할 수 있지만 본인 IAM 인증과 기존 Kubernetes 권한은 계속 필요하다. private API는 유지하며 RDS/Kafka/노드 포트·다른 리전 자원은 변경하지 않았다.
+
+비공개 EKS 배포 입력의 `allow_public_api_from_anywhere=true`로 관리한다. 원래 제한된 `public_access_cidrs` 목록은 그대로 보존했으므로 false로 바꿔 plan/apply하면 다시 제한된다. 자동 만료나 자동 원복은 없다. [옵션·원복 절차](stacks/eks/README.md). 아래의 같은 네트워크·허용 IP1개 설명은 임시 개방 이전 이력이며, 제한 모드로 복귀할 때 적용한다.
+
 ## 동료 WAS 배포 접근 — 2026-10-19
 
 사용자 요청으로 제네레이터와 WAS 담당 동료의 IAM 신원을 EKS STANDARD access entry와 `clothes-query:was-deployer` 그룹으로 연결했다. `clothes-query` namespace의 RoleBinding은 기본 `edit` ClusterRole을 사용한다. cluster-admin이나 기존 관리자 역할 trust는 추가하지 않았다. 같은 공인 IP 네트워크를 사용한다고 확인받아 기존 public API 허용 범위1개를 유지했다.
@@ -21,7 +27,7 @@
 - compute/apps의 Kubernetes provider는 EKS state의 admin_role_arn으로 get-token을 실행한다. Terraform의 AWS 배포 신원은 기존 인증을 사용한다.
 - 현재 권한은 해당 EKS 클러스터 전체 관리자다. 계정 전체 AWS AdministratorAccess를 부여하지 않는다.
 
-현재 PC의 기존 kubeconfig는 덮어쓰지 않았다. 작업 폴더에서 아래처럼 Git 제외 설정을 선택하면 된다. 공인 IP가 바뀌면 먼저 허용 CIDR을 갱신해야 한다.
+현재 PC의 기존 kubeconfig는 덮어쓰지 않았다. 작업 폴더에서 아래처럼 Git 제외 설정을 선택하면 된다. IP 제한 모드에서는 공인 IP가 바뀌면 먼저 허용 CIDR을 갱신해야 한다.
 
 ```powershell
 $env:KUBECONFIG = "$PWD\.cache\eks-kubeconfig.private"
@@ -43,7 +49,7 @@ Git 제외 EKS 입력의 두 목록에 병합한다.
 
 admin_role_arns는 별도로 이미 존재하는 관리자 역할을 직접 추가할 때만 사용하는 선택 입력이다. 전용 역할을 사용할 팀원은 그 목록이 아니라 admin_trusted_principal_arns에 추가한다.
 
-현재 PC만 허용하므로 다른 네트워크의 팀원은 지금 접속할 수 없다. 공인 IP 변경 시 기존 값을 무조건 누적하지 않고 더 이상 사용하지 않는 주소를 제거한다. CIDR은 EKS 관리 API용이며 서비스 ALB 접근 범위와 다르다. VPC 내부 private API는 유지한다.
+IP 제한 모드에서 현재 PC의 네트워크만 허용하면 다른 네트워크의 팀원은 접속할 수 없다. 공인 IP 변경 시 기존 값을 무조건 누적하지 않고 더 이상 사용하지 않는 주소를 제거한다. CIDR은 EKS 관리 API용이며 서비스 ALB 접근 범위와 다르다. VPC 내부 private API는 유지한다. 현재 개발용 임시 개방 상태는 문서 상단을 따른다.
 
 ## 마지막 배포 때 접속 확인
 

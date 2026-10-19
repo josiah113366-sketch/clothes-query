@@ -20,6 +20,7 @@
 - 사용자의 “둘 다 한다 가정하에 열어주자”는 실제 배포 접근 연결 요청에 따라 새 team-access 스택만 plan 검증 후 적용한다. 기존 인프라/공통 IAM/ALB/비용 알림은 적용 대상이 아니다.
 - PR 승인·머지는 팀원이 한다. 공개 Git에 실제 사용자 ARN·계정·endpoint를 넣지 않는다.
 - 후속 권한 확대 요청에 따라 같은 team-access 스택의 읽기 전용 ClusterRole/Binding 2개도 실제 적용한다.
+- 후속 “일단 개발이니까 그냥 다 열자” 요청은 직전 논의의 EKS public 관리 API IP 제한에 한정해 실제 적용한다. eks 스택의 CIDR 변경1건만 허용하고 RDS/Kafka/노드 포트·IAM/RBAC는 유지한다.
 
 ## 만드는 것
 
@@ -46,3 +47,9 @@ namespace·EKS access entry·namespace RoleBinding 3개. EKS 전체 관리자 �
 운영 상태용 ClusterRole과 ClusterRoleBinding을 추가해 현재 스택의 총 관리 자원은 5개다. WAS namespace의 edit 권한을 유지하고 전체 노드·namespace·Pod/로그·Deployment/Job·Service/Ingress·스토리지·HPA·Kafka/NodePool 상태를 get/list/watch로 조회한다. 지표 조회 권한은 지표 수집기 설치를 의미하지 않는다.
 
 새 mock 검사 포함5개·validate·fmt 통과. 확장 plan 신규2개·수정/삭제0개 적용 후 실제 RBAC16개(허용8/거부8) 및 no-change plan을 통과했다. 동료 본인 로그인 검증은 남는다. 첫 실측 검사에서 kubectl의 슬래시 리소스 표기가 하위 리소스를 구분하지 않아, 명시적 `--subresource` 옵션으로 검사 방식을 수정했다. 권한 정책 자체를 넓혀서 검사를 통과시키지는 않았다.
+
+## 후속: 개발용 EKS 관리 API IPv4 개방
+
+사용자가 장소 제약 없이 개발하도록 public API IP 제한 임시 해제를 요청했다. 최신 main (`07724d4`)을 병합한 뒤 `allow_public_api_from_anywhere` 옵션을 모듈/스택에 추가했다. 기본 false와 기존 CIDR 입력의 /24 이상 제한은 유지한다. 비공개 배포 입력에서 true일 때만 유효 CIDR이 `0.0.0.0/0`이 되며, false로 바꿔 적용하면 보존된 원래 CIDR로 돌아간다. 자동 만료/원복은 없다.
+
+기본 제한·개방·원복·IAM/private 보존을 포함한 EKS mock8개와 validate/fmt를 통과했다. 실제 plan은 기존 클러스터의 publicAccessCidrs만 수정1개이며 생성/삭제/교체0개다. 사용자 요청에 따라 적용 후 실제 클러스터 ACTIVE·CIDR `0.0.0.0/0`·private endpoint 및 API 인증 유지, 노드1대·Kafka Pod 정상, 사후 plan 변경 없음을 확인했다. RDS·Kafka·노드 보안 그룹·기존 IAM/RBAC·다른 리전 자원은 변경하지 않았다. 비공개 EKS 배포 입력에 true를 저장해 코드와 현재 상태가 일치하도록 했으며 원래 제한 CIDR도 보존했다.

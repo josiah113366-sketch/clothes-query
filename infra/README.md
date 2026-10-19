@@ -12,6 +12,8 @@ compute는 `t3a.large` On-Demand, 6 vCPU/24GiB(세 대분 한도)다. 실제 한
 
 배치 기준: **두 AZ subnet, RDS Single-AZ, NAT 1개 공유, private t3a.large 1대·Kafka 1개**. 현재 계정에서는 t3a.large 제공 AZ를 ap-northeast-1a만 확인했다. [현재 구성](TOPOLOGY.md)을 따른다.
 
+2026-10-19 개발용 사용자 요청으로 우리 EKS public 관리 API의 IPv4 접속 범위를 `0.0.0.0/0`으로 변경했다. IAM/RBAC와 private endpoint는 유지한다. 원래 IP 목록은 비공개 입력에 보존하며 `allow_public_api_from_anywhere=false`로 바꿔 적용하면 복원된다. 자동 원복은 없다. [현재 접속·원복](EKS_ACCESS.md).
+
 clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별도 Helm release로 준비한다. 리전은 `ap-northeast-1`(도쿄).
 
 ## 스택 순서와 의존 관계
