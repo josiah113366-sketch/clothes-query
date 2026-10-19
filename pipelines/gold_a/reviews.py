@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import csv
+import io
+from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
 from datetime import date, timedelta
 
-from . import _uri, _write_text, load_silver, save_gold
+from . import (_uri, _read_text, _write_text, read_rows, load_silver, save_gold,
+               load_products, connect_reviews, replacement)
 
 OUTPUT_FILE = "part-00000.jsonl"
 
@@ -57,9 +61,13 @@ def aggregate_day(rows: list[dict[str, object]], day: date) -> list[dict[str, ob
         if review_id in seen:
             raise ValueError("Silver 리뷰에 동일 review_id가 두 번 있습니다")
         seen.add(review_id)
-        product_id = str(row["product_id"])
+        product_id = str(row.get("article_id", row.get("product_id")))
         item = by_product[product_id]
-        rating = int(row["rating"])
+        if "article_id" in row:
+            item["article_id"], item["product_code"] = row["article_id"], row["product_code"]
+        rating = row["rating"]
+        if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
+            raise ValueError("별점은 1~5 정수여야 합니다")
         item["review_count"] = int(item["review_count"]) + 1
         item["rating_sum"] = int(item["rating_sum"]) + rating
         item["low_rating_count"] = int(item["low_rating_count"]) + int(rating <= 2)
@@ -67,26 +75,144 @@ def aggregate_day(rows: list[dict[str, object]], day: date) -> list[dict[str, ob
     return [
         {
             "review_date_kst": day.isoformat(),
-            "product_id": product_id,
+            **({"article_id": item["article_id"], "product_code": item["product_code"]}
+               if "article_id" in item else {"product_id": product_id}),
             "review_count": item["review_count"],
-            "average_rating": round(int(item["rating_sum"]) / int(item["review_count"]), 2),
+            "rating_sum": item["rating_sum"],
+            "average_rating": ratio(item["rating_sum"], item["review_count"], 4),
+            "low_rating_rate": ratio(item["low_rating_count"], item["review_count"]),
             "low_rating_count": item["low_rating_count"],
         }
         for product_id, item in sorted(by_product.items())
     ]
 
 
-def run_aggregate(silver_root: str, output_root: str, start: date, end: date) -> dict[str, int]:
-    by_day, reference = _read_scope(silver_root, start, end)
+def ratio(numerator: int, denominator: int, places: int = 6) -> float | None:
+    if denominator == 0:
+        return None
+    value = (Decimal(numerator) / Decimal(denominator)).quantize(Decimal(10) ** -places, rounding=ROUND_HALF_UP)
+    return float(value)
+
+
+def _connected_scope(silver_root, start, end, products_root=None, mapping_path=None):
+    by_day, ref = _read_scope(silver_root, start, end)
+    refs = {"silver_reviews": ref, "start_date_kst": str(start), "end_date_kst": str(end)}
+    if mapping_path and not products_root:
+        raise ValueError("리뷰 매핑에는 상품 기준정보가 필요합니다")
+    if products_root:
+        products, catalog_ref = load_products(products_root)
+        mapping = read_rows(mapping_path) if mapping_path else None
+        by_day = {day: connect_reviews(rows, products, mapping) for day, rows in by_day.items()}
+        refs.update(silver_products=catalog_ref, product_mapping=mapping_path,
+                    product_mapping_rows=mapping or [])
+    return by_day, refs
+
+
+def _check_scope(reprocess, start, end):
+    if reprocess and (reprocess["start_date"] < str(start) or reprocess["end_date"] > str(end)):
+        raise ValueError("교체 날짜는 전체 Silver 입력 범위 안이어야 합니다")
+
+
+def run_aggregate(silver_root: str, output_root: str, start: date, end: date,
+                  products_root: str | None = None, mapping_path: str | None = None,
+                  reprocess: dict | None = None) -> dict[str, int]:
+    _check_scope(reprocess, start, end)
+    by_day, refs = _connected_scope(silver_root, start, end, products_root, mapping_path)
     result, counts = {}, {}
     for day in _days(start, end):
         rows = aggregate_day(by_day[str(day)], day)
         result[f"year={day:%Y}/month={day:%m}/day={day:%d}/{OUTPUT_FILE}"] = rows
         counts[str(day)] = len(rows)
-    # 여러 날짜를 모두 계산한 뒤 실행 묶음 한 개로 공개한다.
-    save_gold(_uri(output_root, "gold_a", "review_product_daily", "scopes", f"{start}_{end}"),
-              result, {"silver_reviews": reference, "start_date_kst": str(start), "end_date_kst": str(end)})
-    return counts
+    saved = save_gold(_uri(output_root, "gold_a", "review_product_daily", "scopes", f"{start}_{end}"),
+                      result, refs, reprocess)
+    # 부분 재처리도 저장된 전체 범위의 행 수를 반환한다.
+    return {str(day): saved["output_counts"][f"year={day:%Y}/month={day:%m}/day={day:%d}/{OUTPUT_FILE}"]
+            for day in _days(start, end)}
+
+
+ASPECTS = {"재질·촉감", "사이즈·핏", "색상·디자인", "품질·내구성", "가격·가성비", "냄새",
+           "세탁·관리", "활용성·사용감", "배송", "포장", "교환·환불·CS"}
+SENTIMENTS = {"긍정", "중립", "부정"}
+
+
+def load_analysis(path: str, model_version: str) -> list[dict]:
+    if path.lower().endswith(".csv"):
+        rows = list(csv.DictReader(io.StringIO(_read_text(path).lstrip("\ufeff"))))
+        converted = []
+        for row in rows:
+            value = row.get("score")
+            if value not in {"-2", "-1", "0", "1", "2"}:
+                raise ValueError("모델 score CSV는 -2~2 정수여야 합니다")
+            score = int(value)
+            converted.append({"review_id": row.get("review_id"), "aspect": row.get("aspect"),
+                              "sentiment": "긍정" if score > 0 else "부정" if score < 0 else "중립",
+                              "model_version": model_version, "score": score})
+        return converted
+    return read_rows(path)
+
+
+def aggregate_aspects(reviews: list[dict], analysis: list[dict], model_version: str) -> tuple[list[dict], dict]:
+    if not isinstance(model_version, str) or not model_version.strip():
+        raise ValueError("분석 모델 버전이 필요합니다")
+    originals = {row["review_id"]: row for row in reviews}
+    if len(originals) != len(reviews):
+        raise ValueError("분석 연결 대상 리뷰 ID 중복")
+    selected, unknown, analyzed, matching_version = {}, set(), set(), False
+    for row in analysis:
+        review_id, aspect, sentiment, version = (row.get(field) for field in ("review_id", "aspect", "sentiment", "model_version"))
+        if not all(isinstance(value, str) and value.strip() for value in (review_id, aspect, sentiment, version)):
+            raise ValueError("분석 결과의 키·속성·감성·모델 버전이 필요합니다")
+        if aspect not in ASPECTS or sentiment not in SENTIMENTS:
+            raise ValueError("지원하지 않는 분석 속성 또는 감성")
+        if version != model_version:
+            continue
+        matching_version = True
+        if review_id not in originals:
+            unknown.add(review_id)
+            continue
+        key = (review_id, aspect)
+        if key in selected and selected[key] != row:
+            raise ValueError("동일 리뷰·속성·모델 버전의 분석 내용 충돌")
+        selected[key] = row
+        analyzed.add(review_id)
+    if analysis and not matching_version:
+        raise ValueError("입력에 요청한 모델 버전 결과가 없습니다")
+    if unknown:
+        raise ValueError("분석 결과에 Silver 범위에 없는 review_id가 있습니다")
+    buckets = {}
+    for (review_id, aspect), prediction in sorted(selected.items()):
+        review = originals[review_id]
+        if "article_id" not in review:
+            raise ValueError("속성 집계에는 검증된 상품 연결이 필요합니다")
+        key = (review["review_date_kst"], review["article_id"], aspect, model_version)
+        bucket = buckets.setdefault(key, {"review_date_kst": key[0], "article_id": key[1],
+            "product_code": review["product_code"], "aspect": aspect, "model_version": model_version,
+            "mentioned_review_count": 0, "positive_review_count": 0, "neutral_review_count": 0, "negative_review_count": 0})
+        bucket["mentioned_review_count"] += 1
+        field = {"긍정": "positive_review_count", "중립": "neutral_review_count", "부정": "negative_review_count"}[prediction["sentiment"]]
+        bucket[field] += 1
+    for bucket in buckets.values():
+        bucket["negative_rate"] = ratio(bucket["negative_review_count"], bucket["mentioned_review_count"])
+    coverage = {"review_count": len(originals), "reviews_with_aspect_result": len(analyzed),
+                "reviews_without_aspect_result": len(originals) - len(analyzed),
+                "analysis_completion_status": "UNVERIFIED",
+                "note": "결과 없음은 속성 미언급 또는 미분석일 수 있습니다. 중립으로 세지 않습니다."}
+    return [buckets[key] for key in sorted(buckets)], coverage
+
+
+def run_aspects(silver_root: str, output_root: str, start: date, end: date, products_root: str,
+                analysis_path: str, model_version: str, mapping_path: str | None = None,
+                reprocess: dict | None = None) -> dict:
+    _check_scope(reprocess, start, end)
+    by_day, refs = _connected_scope(silver_root, start, end, products_root, mapping_path)
+    analysis = load_analysis(analysis_path, model_version)
+    rows, coverage = aggregate_aspects([row for group in by_day.values() for row in group], analysis, model_version)
+    refs.update(analysis_path=analysis_path, model_version=model_version, analysis_coverage=coverage,
+                sentiment_policy="score-sign.v1" if analysis_path.lower().endswith(".csv") else "supplied-sentiment")
+    if reprocess:
+        reprocess = {**reprocess, "model_version": model_version}
+    return save_gold(_uri(output_root, "gold_a", "review_aspect_daily", "scopes", f"{start}_{end}"),
+                     {"review_aspect_daily.jsonl": rows}, refs, reprocess)
 
 
 def search_reviews(
@@ -141,12 +267,31 @@ def main() -> None:
     query.add_argument("--keyword", required=True)
     query.add_argument("--limit", type=int, default=50)
     query.add_argument("--output", required=True)
+    aggregate = commands.choices["aggregate"]
+    aggregate.add_argument("--products-root")
+    aggregate.add_argument("--mapping-path")
+    aspect = commands.add_parser("aspects")
+    for option in ("silver-root", "output-root", "products-root", "analysis-path", "model-version"):
+        aspect.add_argument("--" + option, required=True)
+    aspect.add_argument("--start-date", type=date.fromisoformat, required=True)
+    aspect.add_argument("--end-date", type=date.fromisoformat, required=True)
+    aspect.add_argument("--mapping-path")
+    for command in (aggregate, aspect):
+        command.add_argument("--replace-start-date")
+        command.add_argument("--replace-end-date")
+        command.add_argument("--article-id", action="append")
     args = parser.parse_args()
     if args.command == "aggregate":
         for day, count in run_aggregate(
-            args.silver_root, args.output_root, args.start_date, args.end_date
+            args.silver_root, args.output_root, args.start_date, args.end_date, args.products_root, args.mapping_path,
+            replacement(args.replace_start_date, args.replace_end_date, args.article_id)
         ).items():
             print(f"{day}: 상품별 리뷰 집계 {count}행")
+    elif args.command == "aspects":
+        result = run_aspects(args.silver_root, args.output_root, args.start_date, args.end_date,
+                             args.products_root, args.analysis_path, args.model_version, args.mapping_path,
+                             replacement(args.replace_start_date, args.replace_end_date, args.article_id))
+        print("속성 집계 완료: " + result["manifest_path"])
     else:
         total, rows = search_reviews(
             args.silver_root, args.start_date, args.end_date, args.keyword, args.product_id, args.limit

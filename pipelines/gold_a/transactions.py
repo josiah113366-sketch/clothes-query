@@ -5,20 +5,23 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import _uri, load_silver, save_gold
+from . import load_silver, save_gold, load_products, product_index, replacement
 
 from collections import defaultdict
 from datetime import datetime
 
 
-def build_gold(silver: dict[str, list[dict]]) -> dict[str, list[dict]]:
+def build_gold(silver: dict[str, list[dict]], products: list[dict] | None = None) -> dict[str, list[dict]]:
     """같은 Silver 입력은 언제 실행해도 같은 Gold 결과를 돌려준다."""
     checks = silver.get("dq_results")
     if not checks or any(row.get("status") != "PASS" or row.get("quarantined_count") != 0 for row in checks):
         raise ValueError("Silver 품질 결과가 불완전하므로 Gold A 계산을 중단합니다")
+    catalog = None if products is None else product_index(products)
     orders = {row["order_id"]: row for row in silver["orders_current"]}
     items_by_order: dict[str, list[dict]] = defaultdict(list)
     for item in silver["silver_order_items"]:
+        if catalog is not None and item["article_id"] not in catalog:
+            raise ValueError("판매 상품 기준정보 연결 실패")
         items_by_order[item["order_id"]].append(item)
 
     hourly: dict[str, dict] = {}
@@ -40,12 +43,18 @@ def build_gold(silver: dict[str, list[dict]]) -> dict[str, list[dict]]:
         hour_bucket(order["ordered_at_kst"])["order_count"] += 1
 
     product_daily: dict[tuple[str, str], dict] = {}
+    successful_orders = set()
     for payment in silver["payment_attempts"]:
         if payment["status"] != "SUCCESS":
             continue
         order_id = payment["order_id"]
         if order_id not in orders:
             raise ValueError("성공 결제가 연결할 주문이 없습니다")
+        if order_id in successful_orders:
+            raise ValueError("주문에 성공 결제가 둘 이상 있습니다")
+        successful_orders.add(order_id)
+        if not items_by_order[order_id]:
+            raise ValueError("성공 주문의 주문상품 입력이 없습니다")
         bucket = hour_bucket(payment["completed_at_kst"])
         bucket["paid_order_count"] += 1
         bucket["approved_amount"] += payment["amount"]
@@ -62,6 +71,8 @@ def build_gold(silver: dict[str, list[dict]]) -> dict[str, list[dict]]:
                     "item_sales_amount": 0,
                 }
             row = product_daily[key]
+            if catalog is not None:
+                row["product_code"] = catalog[item["article_id"]]
             row["sold_quantity"] += item["quantity"]
             row["item_sales_amount"] += item["item_amount"]
             # 같은 주문에 같은 article_id의 상품 행이 여러 개여도 주문은 1건이다.
@@ -76,7 +87,8 @@ def build_gold(silver: dict[str, list[dict]]) -> dict[str, list[dict]]:
     }
 
 
-def run(silver_root: str, output_root: str) -> dict:
+def run(silver_root: str, output_root: str, products_root: str | None = None,
+        reprocess: dict | None = None) -> dict:
     """로컬 거래 Silver 대표 묶음을 읽어 기존 두 지표를 저장한다."""
     if "://" in silver_root or "://" in output_root:
         raise ValueError("거래 Gold A 입출력은 로컬 경로만 지원합니다")
@@ -86,17 +98,23 @@ def run(silver_root: str, output_root: str) -> dict:
     manifest_uri = str(source / "silver/transactions/current.json")
     names = ["orders_current", "order_status_history", "silver_order_items", "payment_attempts", "dq_results"]
     silver, reference = load_silver(manifest_uri, {}, names)
-    result = build_gold(silver)
+    products, catalog_ref = (None, None) if products_root is None else load_products(products_root)
+    result = build_gold(silver, products)
     return save_gold(str(target / "gold_a/transactions"),
-                     {name + ".jsonl": rows for name, rows in result.items()}, {"silver_transactions": reference})
+                     {name + ".jsonl": rows for name, rows in result.items()}, {"silver_transactions": reference, "silver_products": catalog_ref}, reprocess)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="거래 Silver 대표 결과 → Gold A 주문·상품 판매")
     parser.add_argument("--silver-root", required=True)
     parser.add_argument("--output-root", required=True)
+    parser.add_argument("--products-root")
+    parser.add_argument("--replace-start-date")
+    parser.add_argument("--replace-end-date")
+    parser.add_argument("--article-id", action="append")
     args = parser.parse_args()
-    manifest = run(args.silver_root, args.output_root)
+    scope = replacement(args.replace_start_date, args.replace_end_date, args.article_id)
+    manifest = run(args.silver_root, args.output_root, args.products_root, scope)
     print("Gold A 결과·입력 품질 확인: " + manifest["manifest_path"])
 
 

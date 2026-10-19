@@ -36,7 +36,7 @@ def test_review_flow_reprocesses_without_double_count(tmp_path: Path) -> None:
     result = [json.loads(line) for line in result_file.read_text(encoding="utf-8").splitlines()]
     assert result == [{
         "review_date_kst": "2026-10-08", "product_id": "P-1",
-        "review_count": 1, "average_rating": 2.0, "low_rating_count": 1,
+        "review_count": 1, "rating_sum": 2, "average_rating": 2.0, "low_rating_count": 1, "low_rating_rate": 1.0,
     }]
     total, matches = search_reviews(str(silver), day, day, "지퍼", "P-1")
     assert total == 1
