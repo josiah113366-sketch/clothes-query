@@ -21,9 +21,11 @@
 
 ```
 탐지 적발: 2/3개 사건을 허용 시간 안에 잡았습니다.
-  - INC-001 PG 장애: 맞게 잡음 (10.0분 만에, 허용 15분)
-  - INC-002 소비 지연: 맞게 잡음 (10.0분 만에, 허용 10분)
-  - INC-003 스키마 오염: 잡았지만 늦음 (14.0분 만에, 허용 10분)
+  - inc-pg PG 장애: 맞게 잡음 (10.0분 만에, 허용 15분)
+  - inc-lag 소비 지연: 맞게 잡음 (10.0분 만에, 허용 10분)
+  - inc-dup 한 주문에 성공 결제 2건: 잡았지만 늦음 (14.0분 만에, 허용 10분)
+  - inc-total 주문 총액 불일치: 탐지 규칙이 아직 없음(점수에서 뺌)
+채점 대상이 아닌 사건 1건(약한 급증·일시 정지·적용 실패): 이 구간에 울린 이상은 오탐으로 셉니다.
 오탐: 장애와 상관없는 이상이 2건(이어진 것을 합치면 1덩어리)입니다.
 층 판별: 2/3개 사건의 원인 층을 맞혔습니다.
 근거 연결: 주장 6개 중 4개에 근거가 있습니다 (67%).
@@ -36,7 +38,7 @@ cd agent/eval
 python3 test_score.py                                    # 시험 (표준 라이브러리만 사용)
 python3 score.py --incidents sample/incident_log --anomalies sample/anomalies.json \
                  --runs sample/detection_runs.json --reports sample/reports.json
-python3 score.py ... --allow PG_OUTAGE=15,INGEST_LAG=10,SCHEMA_POLLUTION=10   # 허용 지연 바꾸기
+python3 score.py ... --allow PG_OUTAGE=15,INGEST_LAG=10,DUPLICATE_SUCCESS_PAYMENT=10   # 허용 지연 바꾸기
 python3 score.py ... --json                              # 요약을 JSON으로
 ```
 
@@ -54,12 +56,24 @@ python3 score.py ... --json                              # 요약을 JSON으로
 
 ## 입력 형식
 
-- **정답표**: 성철 님과 합의한 컬럼 8개(`incident_id`, `scenario`, `injected_start`, `injected_end`, `scope_key`, `expected_signal`, `expected_layer`, `expected_evidence`). 시각은 UTC(`Z`나 `+09:00`이 붙어도 읽는다).
+- **정답표**: 시뮬레이터 컨트롤러가 실제로 쓰는 기록(`simulator/src/sim/controller`, 설명은 `docs/tasks/sim-controller.md`). 사건 하나가 **파일 두 개**다: `start`(`type`, `at`, `params`)와 `end`(`at`, `ended_by`, `result`). 같은 `incident_id`로 짝지어 `injected_start`=start의 `at`, `injected_end`=end의 `at`으로 쓴다. 시각은 UTC. 사건 종류별 정답은 이렇게 정한다.
+
+| 컨트롤러 기록 | 정답 이상 종류 | 정답 층 | 대상 |
+|---|---|---|---|
+| `PG_OUTAGE` | `PG_FAILURE_SPIKE` | PAYMENT | `params.pg` |
+| `INGEST_LAG` (burst 모드) | `BRONZE_LAG_SPIKE` | INGEST | 모든 토픽 |
+| `DATA_POLLUTION`, `params.kind=DUPLICATE_SUCCESS_PAYMENT` | `DUPLICATE_SUCCESS_PAYMENT` | DATA_QUALITY | 전체 |
+| `DATA_POLLUTION`, `params.kind=ORDER_TOTAL_MISMATCH` | (규칙 없음) | DATA_QUALITY | - |
+| `TRAFFIC_SURGE`(medium 모드), `OPERATOR_PAUSE` | 채점 안 함 (이 구간의 이상은 오탐으로 셈) | - | - |
 - **이상 이력**: `agent/detect`가 쌓는 `anomaly` 줄(`run_id`, `anomaly_id`, `anomaly_type`, `scope_type`, `scope_key`, `window_*`, `detected_at`).
 - **원인 리포트**: 아직 에이전트가 없어서 **내가 제안한 형식**이다. `anomaly_id`(어느 이상에 대한 리포트인지), `cause_layer`, `claims`(주장 목록, 주장마다 `evidence`).
 
 ## 알아야 할 것 (한계)
 
+- **주문 총액 불일치(`ORDER_TOTAL_MISMATCH`)는 아직 탐지 규칙이 없다.** 주문 금액은 Gold B 원장에 없어서(Silver 쪽 값 검사가 필요) 점수의 분모에서 빼고 "규칙 없음"으로 따로 보고한다.
+- 형식이 깨진 메시지(R4 `MALFORMED_SPIKE`)를 주입하는 사건은 컨트롤러에 없다. 그래서 R4가 울리면 지금은 오탐으로 센다.
+- 사건 끝 뒤 `허용 지연 x 2`까지 울린 이상은 그 사건에 대한 것으로 보고(2는 임의 값), 허용 지연을 넘기면 LATE다. 오염처럼 순간에 끝나는 사건은 끝 기록이 시작 직후라서 이 값이 필요하다.
+- 끝 기록이 없으면(컨트롤러 비정상 종료) 계획한 시간(`planned_minutes`)만큼 이어졌다고 본다. `ended_by=failed`(적용 실패)는 채점하지 않는다.
 - **허용 지연(15, 10, 10분)은 제안이며 팀 결정 전이다.** 실행할 때 `--allow`로 바꿀 수 있다.
 - **원인 리포트 형식은 에이전트가 만들어질 때 맞춰야 한다**(제안 단계).
 - 층 판별은 "층 이름이 같은가"만 본다. 리포트의 서술이 맞는지는 보지 않는다(나중에 사람이 읽거나 모델로 평가).

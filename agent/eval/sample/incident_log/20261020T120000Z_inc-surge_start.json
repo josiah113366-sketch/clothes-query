@@ -1,0 +1,1 @@
+{"schema_version": 1, "incident_id": "inc-surge", "phase": "start", "type": "TRAFFIC_SURGE", "at": "2026-10-20T12:00:00Z", "params": {"mode": "medium", "planned_minutes": 60}}

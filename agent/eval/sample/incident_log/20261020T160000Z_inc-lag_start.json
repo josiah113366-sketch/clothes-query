@@ -1,0 +1,1 @@
+{"schema_version": 1, "incident_id": "inc-lag", "phase": "start", "type": "INGEST_LAG", "at": "2026-10-20T16:00:00Z", "params": {"mode": "burst", "planned_minutes": 15}}

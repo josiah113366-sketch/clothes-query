@@ -53,12 +53,12 @@
   },
   {
     "report_id": "rep-3",
-    "anomaly_id": "a-r4-1",
+    "anomaly_id": "a-r5-1",
     "cause_layer": "INGEST",
     "conclusion": "적재 지연으로 보입니다.",
     "claims": [
       {
-        "text": "clickstream 지연",
+        "text": "payments 지연",
         "evidence": []
       }
     ]

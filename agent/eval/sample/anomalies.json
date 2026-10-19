@@ -31,10 +31,10 @@
   },
   {
     "run_id": "20261020T1714Z",
-    "anomaly_id": "a-r4-1",
-    "anomaly_type": "MALFORMED_SPIKE",
-    "scope_type": "topic",
-    "scope_key": "clickstream",
+    "anomaly_id": "a-r5-1",
+    "anomaly_type": "DUPLICATE_SUCCESS_PAYMENT",
+    "scope_type": "global",
+    "scope_key": "all",
     "window_start": "2026-10-20 17:09:00",
     "window_end": "2026-10-20 17:14:00",
     "detected_at": "2026-10-20 17:14:00"
