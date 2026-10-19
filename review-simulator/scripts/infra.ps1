@@ -23,10 +23,15 @@ param(
 $stack = Join-Path $RepoRoot "infra\stacks\ecs-review-simulator"
 $plan = "ecs-review-simulator.tfplan"
 Push-Location $stack
+# Windows PowerShell 5.1 은 -이름=값.확장자 형태 인자를 점(.)에서 둘로 쪼개 넘긴다
+# (terraform 이 "Too many command line arguments" 로 멈춤). 그래서 -옵션=값 인자는 모두 따옴표로 감싼다.
 try {
+    # terraform 은 진행 메시지를 stderr 로도 쓴다. 5.1 에서 Stop 때문에 멈추지 않게 종료 코드로만 판단한다
+    # (throw 는 이 설정과 상관없이 항상 멈춘다)
+    $ErrorActionPreference = "Continue"
     switch ($Action) {
         "check" {
-            terraform init -backend=false -lockfile=readonly -input=false
+            terraform init "-backend=false" "-lockfile=readonly" "-input=false"
             if ($LASTEXITCODE -eq 0) { terraform fmt -check }
             if ($LASTEXITCODE -eq 0) { terraform validate }
         }
@@ -34,12 +39,12 @@ try {
             if (-not (Test-Path "deployment.backend.hcl")) { throw "deployment.backend.hcl 이 없습니다 (bucket, region)" }
             $extra = @()
             if ($Reconfigure) { $extra += "-reconfigure" }
-            terraform init -backend-config=deployment.backend.hcl -lockfile=readonly -input=false @extra
+            terraform init "-backend-config=deployment.backend.hcl" "-lockfile=readonly" "-input=false" @extra
         }
         "plan" {
             if (-not $env:TF_VAR_expected_account_id) { throw "`$env:TF_VAR_expected_account_id 를 먼저 넣어 주세요" }
             if (-not (Test-Path "deployment.local.tfvars")) { throw "deployment.local.tfvars 가 없습니다 (terraform.tfvars.example 복사)" }
-            terraform plan -input=false -var-file=deployment.local.tfvars -out=$plan
+            terraform plan "-input=false" "-var-file=deployment.local.tfvars" "-out=$plan"
             if ($LASTEXITCODE -eq 0) { Write-Host "plan 저장: $plan. 내용을 확인한 뒤 .\scripts\infra.ps1 apply" -ForegroundColor Green }
         }
         "apply" {
