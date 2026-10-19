@@ -61,6 +61,8 @@ gitGraph
   merge sim/controller
   branch sim/clickstream
   commit id: "sim(clickstream)"
+  checkout main
+  merge sim/clickstream
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -78,7 +80,7 @@ gitGraph
 | `sim/modes` | `docs/tasks/sim-modes.md` | 머지됨 | |
 | `sim/behavior-core` | `docs/tasks/sim-behavior-core.md` | 머지됨 | |
 | `sim/controller` | `docs/tasks/sim-controller.md` | 머지됨 | |
-| `sim/clickstream` | `docs/tasks/sim-clickstream.md` | 진행 중 | |
+| `sim/clickstream` | `docs/tasks/sim-clickstream.md` | 머지됨 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

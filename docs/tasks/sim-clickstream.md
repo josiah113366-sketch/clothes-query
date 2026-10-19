@@ -1,6 +1,6 @@
 # 작업 지시서: sim/clickstream
 
-> 상태: 진행 중 · 브랜치: `sim/clickstream` (분기 기준: 최신 `main`, `sim/controller` 머지 후) · 이전 작업: `sim/behavior-core` · 다음 작업: `sim/cdc-orders`(클릭 로그 S3 Sink 포함), `sim/ecs-image`
+> 상태: 완료 · 브랜치: `sim/clickstream` (분기 기준: 최신 `main`, `sim/controller` 머지 후) · 이전 작업: `sim/behavior-core` · 다음 작업: `sim/cdc-orders`(클릭 로그 S3 Sink 포함), `sim/ecs-image`
 
 ## 목표
 
@@ -213,4 +213,71 @@ class KafkaClickSink:
 
 ## 작업 결과
 
-(머지 전에 Claude Code가 채운다: 무엇을 만들었나, 왜, 확인한 결과(완료 확인 실행 결과), 알려진 한계, 다음 할 일. 다음 작업은 `sim/cdc-orders`(`clickstream` S3 Sink 포함)와 `sim/ecs-image`.)
+### 무엇을 만들었나
+
+- `common/kafka.py`: 토픽 상수(`clickstream`, 파티션 3, 보관 72시간), `KafkaSettings`(TLS 환경 변수, `repr`에 주소·경로 없음), producer/admin/consumer 설정, `is_local_bootstrap`, librdkafka 내부 로그를 버리는 `quiet_logger`
+- `behavior/kafka_sink.py`: `KafkaClickSink`
+  - 키 `session_id`, 값은 `click_record` 재사용(공백 없는 JSON)
+  - 시작 확인 `check_ready`, 발행 실패는 버리고 세며 경고는 한 번만
+  - `BufferError`면 재시도, `close`는 최대 30초 flush하고 두 번 불러도 안전
+- `sim behavior live --click-sink kafka`(환경 변수 `SIM_CLICK_SINK`): 시작 확인이 실패하면 방문을 시작하지 않고 종료 코드 1. 종료 요약에 `클릭 발행: 성공 N건, 실패 M건`
+- `clickstream/` 모듈과 `sim clickstream setup | status | verify | reset --yes`. `setup`·`reset`은 로컬 부트스트랩에서만 동작하고, `verify`는 7개 항목을 확인
+- 테스트: 단위 57개 추가(공용 설정 15, Sink 15, CLI 5, clickstream 22), 로컬 Kafka 통합 2개(임시 토픽)
+- 문서: `simulator/README.md`의 `## 클릭 로그 (clickstream)` 절, `.env.example`(TLS 변수 주석), `simulator/CLAUDE.md`(클릭만 Kafka 직접 발행, `clickstream` 모듈)
+
+### 지시서와 다르게 한 것
+
+- **분기 기준:** 작업을 시작하기 전에 `sim/controller`가 `main`에 머지돼서(PR #23), 특례 없이 최신 `main`에서 분기했다. 지시서 위쪽의 특례 문구도 그에 맞게 고쳤다.
+- **`quiet_logger` 추가:** librdkafka는 브로커가 끊기면 브로커 주소가 들어간 로그를 stderr에 계속 찍는다. "출력에 브로커 주소 없음, 경고는 한 번" 조건을 지키려고 클라이언트마다 이 로거를 넣었다(새 의존성 없음).
+- **admin·consumer에도 `allow.auto.create.topics=false`:** 시작 확인과 `status`·`verify`의 메타데이터 조회가 토픽을 만들지 않게 했다. 로컬 브로커는 자동 생성이 켜진 기본값인데, 없는 토픽을 조회해도 생기지 않는 것을 확인했다.
+
+### 확인한 결과 (로컬 Docker Postgres + Kafka)
+
+- `ruff check`, `ruff format --check` 통과
+- 단위 테스트 398개 통과(기존 341개 + 57개)
+- 통합 테스트 22개 통과(기존 DB 20개 + Kafka 2개). `.env`에 `DATABASE_URL`이 없어서 로컬 compose 더미 값을 환경 변수로 넣고 돌렸다
+- **토픽:**
+  - 토픽이 없을 때 `behavior live --click-sink kafka`는 종료 코드 1이었고, 토픽이 자동으로 생기지 않았다
+  - `setup`은 토픽을 만들었고(파티션 3, `retention.ms=259200000`), 다시 실행하면 "이미 있습니다"가 나왔다
+  - `status`는 파티션 3개, offset 0을 보여 줬다
+- **발행** (`--visits-daily 20000 --speed 1440 --duration 60`): 종료 코드 0
+  - 방문 18,031, 조회 91,077, 담기 6,742, 주문 845
+  - `클릭 발행: 성공 97,819건, 실패 0건` = `status` 합계 97,819건 (파티션별 32,515 / 32,647 / 32,657)
+- **검증:** `verify` 6개 항목 모두 통과(97,819건)
+- **주문과의 연결:**
+  - 주문 845건의 `session_id`가 모두 토픽에 있었다
+  - `cart_add` 없는 주문은 39건(방문 대비 0.22%)으로, 직접 주문 비율(약 0.3%)에 맞는다
+  - 토픽 세션은 18,030개로 방문 수보다 1개 적다. 조회 0번으로 끝난 방문이다
+- **같은 시드:** `--seed 42 --run-salt 1 --max-visits 300`을 jsonl과 kafka로 한 번씩 돌렸다. 두 쪽 모두 1,543건이었고 `event_id` 집합과 세션별 `event_type` 순서가 같았다(세션 299개)
+- **Kafka 끊김** (150초 실행 중 40초 뒤 `stop kafka`, 54초 뒤 `start kafka`):
+  - 꺼진 동안에도 주문이 계속 쌓였다(950 → 1,536)
+  - 경고는 한 번만 나왔다(`_MSG_TIMED_OUT`), 종료 코드 0
+  - Kafka를 켠 지 약 6초 뒤부터 클릭이 다시 쌓였다
+  - 요약은 성공 60,390건, 실패 91,234건이었다
+  - 토픽은 60,453건으로 성공보다 63건 많다. 끊기는 순간 기록됐지만 응답을 못 받은 메시지라서 실패 건수는 상한값이다. 그래도 `verify`(중복 없음 포함)는 모두 통과했다
+  - 이 구간 주문 정합성 7개 쿼리(총액, 줄 없는 주문, SUCCESS 2건+, PAID 이상 SUCCESS 없음, PAYMENT_FAILED 짝, 시도 번호, 결제 금액)는 모두 0건
+- **종료:** 실행 중 SIGINT를 보내면 종료 코드 0이었고, 요약에 `클릭 발행: 성공 49,660건, 실패 0건`이 나왔으며 트레이스백은 없었다. 종료 직후 `status` 합계 49,660건이 성공 건수와 같았다(flush 확인)
+- **원격 거부:** `KAFKA_BOOTSTRAP=kafka.example.internal:9093`이면 `setup`과 `reset --yes`가 접속 없이 종료 코드 1로 거부됐다. `reset`은 `--yes` 없이는 종료 코드 1이었다
+- **PII·접속 정보:**
+  - 모든 실행 출력에 `example.com`, `010-`, 브로커 주소(`29092`), 접속 문자열이 없었다
+  - 토픽 메시지 49,660건의 키는 모두 6개 필드뿐이었다
+- `docker build -t sim-local ./simulator`에 성공했고, `docker run --rm sim-local behavior live --help`에 `kafka`와 `SIM_CLICK_SINK`가 보였다
+- **삭제:**
+  - `clickstream` 토픽을 지웠다. 통합 테스트용 임시 토픽도 남은 것이 없다
+  - 결제 2,670, 주문 항목 8,993, 주문 2,555건을 지웠고 세 테이블 모두 0행이다
+  - 시작 전 남아 있던 주문 265건 등은 사용자 승인으로 미리 지웠다
+- `git status`에 `.env`와 `simulator/.local/`이 없다. push와 PR은 하지 않았다
+
+### 알려진 한계
+
+- 끊김이 있으면 실패 건수는 상한값이다(위 63건). 중복은 생기지 않는다(멱등 프로듀서).
+- TLS(`KAFKA_SECURITY_PROTOCOL=SSL`)는 설정 연결까지만 했고, 실제 TLS 브로커로는 검증하지 않았다.
+- ECS(Fargate)에서 EKS Kafka로 가는 경로가 아직 없다.
+- 클릭 `event_time`이 `+09:00`(KST) 표기로 나간다. 지시서대로 바꾸지 않았고, "Bronze는 UTC" 규칙과 맞출지는 사용자 확인이 필요하다.
+- 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
+- (기존 동작) 시작 직후 회원·상품을 읽는 동안 SIGINT를 받으면, 신호 처리기가 걸리기 전이라 요약 없이 종료 코드 130으로 끝난다. 이때는 아직 발행한 클릭이 없다.
+
+### 다음 할 일
+
+- `sim/cdc-orders`: 주문 세 테이블 CDC와 `clickstream` 토픽의 S3 Sink(Bronze). Debezium tombstone(null 메시지) 설정도 함께 정리한다
+- `sim/ecs-image`: ECS에서 EKS Kafka로 가는 경로(내부 NLB, 클라이언트 인증서, 네트워크 규칙), TLS 실제 검증, `SIM_CLICK_SINK=kafka` 운영값
