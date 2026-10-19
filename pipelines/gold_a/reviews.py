@@ -4,81 +4,36 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import tempfile
 from collections import defaultdict
 from datetime import date, timedelta
-from pathlib import Path
-from urllib.parse import urlsplit
+
+from . import _uri, _write_text, load_silver, save_gold
 
 OUTPUT_FILE = "part-00000.jsonl"
 
 
-def _uri(root: str, *parts: str) -> str:
-    return "/".join((root.rstrip("/"), *(part.strip("/") for part in parts)))
-
-
-def _s3_location(uri: str) -> tuple[str, str]:
-    parsed = urlsplit(uri)
-    if parsed.scheme != "s3" or not parsed.netloc:
-        raise ValueError("S3 경로는 s3://버킷/접두사 형식이어야 합니다")
-    return parsed.netloc, parsed.path.lstrip("/")
-
-
-def _read_text(uri: str) -> str:
-    if uri.startswith("s3://"):
-        import boto3
-
-        bucket, key = _s3_location(uri)
-        return boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read().decode(
-            "utf-8"
-        )
-    return Path(uri).read_text(encoding="utf-8")
-
-
-def _write_text(uri: str, body: str) -> None:
-    if uri.startswith("s3://"):
-        import boto3
-
-        bucket, key = _s3_location(uri)
-        boto3.client("s3").put_object(
-            Bucket=bucket, Key=key, Body=body.encode("utf-8"), ContentType="application/x-ndjson"
-        )
-        return
-    path = Path(uri)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, prefix=".gold-a-", delete=False
-    ) as handle:
-        temp_path = Path(handle.name)
-        handle.write(body)
-    try:
-        os.replace(temp_path, path)
-    finally:
-        temp_path.unlink(missing_ok=True)
-
-
-def _read_day(silver_root: str, day: date) -> list[dict[str, object]]:
-    uri = _uri(silver_root, "silver", "reviews", f"dt={day.isoformat()}", OUTPUT_FILE)
-    if not uri.startswith("s3://") and not Path(uri).exists():
-        raise FileNotFoundError(f"Silver 리뷰 날짜 파일이 없습니다: {uri}")
-    rows: list[dict[str, object]] = []
-    for line_no, line in enumerate(_read_text(uri).splitlines(), 1):
-        if not line.strip():
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{uri}:{line_no}: JSON 파싱 실패") from exc
-        if not isinstance(row, dict) or row.get("review_date_kst") != day.isoformat():
-            raise ValueError(f"{uri}:{line_no}: Silver 리뷰 날짜가 파일 경로와 다릅니다")
-        if not isinstance(row.get("review_id"), str) or not isinstance(row.get("product_id"), str):
-            raise ValueError(f"{uri}:{line_no}: 리뷰·상품 ID가 없습니다")
-        rating = row.get("rating")
-        if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
-            raise ValueError(f"{uri}:{line_no}: 별점이 올바르지 않습니다")
-        rows.append(row)
-    return rows
+def _read_scope(silver_root: str, start: date, end: date) -> tuple[dict, dict]:
+    days = list(_days(start, end))
+    names = [f"year={day:%Y}/month={day:%m}/day={day:%d}/{OUTPUT_FILE}" for day in days]
+    manifest = _uri(silver_root, "silver", "reviews", "scopes", f"{start}_{end}", "current.json")
+    loaded, reference = load_silver(manifest, {"start_date_kst": str(start), "end_date_kst": str(end)}, names)
+    by_day, seen = {}, set()
+    for day, name in zip(days, names):
+        rows = loaded[name]
+        for row in rows:
+            if row.get("review_date_kst") != str(day):
+                raise ValueError("Silver 리뷰 날짜가 요청 날짜와 다릅니다")
+            for field in ("review_id", "product_id"):
+                if not isinstance(row.get(field), str) or not row[field].strip():
+                    raise ValueError("Silver 리뷰·상품 키가 없습니다")
+            if row["review_id"] in seen:
+                raise ValueError("Silver 요청 범위에 동일 review_id가 두 번 있습니다")
+            seen.add(row["review_id"])
+            rating = row.get("rating")
+            if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
+                raise ValueError("Silver 리뷰 별점이 올바르지 않습니다")
+        by_day[str(day)] = rows
+    return by_day, reference
 
 
 def _days(start: date, end: date):
@@ -122,14 +77,15 @@ def aggregate_day(rows: list[dict[str, object]], day: date) -> list[dict[str, ob
 
 
 def run_aggregate(silver_root: str, output_root: str, start: date, end: date) -> dict[str, int]:
-    counts: dict[str, int] = {}
+    by_day, reference = _read_scope(silver_root, start, end)
+    result, counts = {}, {}
     for day in _days(start, end):
-        result = aggregate_day(_read_day(silver_root, day), day)
-        body = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in result)
-        uri = _uri(output_root, "gold_a", "review_product_daily", f"dt={day}", OUTPUT_FILE)
-        # 재처리: 해당 날짜의 Gold A 파일을 교체한다. 0건이면 빈 파일로 교체한다.
-        _write_text(uri, body)
-        counts[day.isoformat()] = len(result)
+        rows = aggregate_day(by_day[str(day)], day)
+        result[f"year={day:%Y}/month={day:%m}/day={day:%d}/{OUTPUT_FILE}"] = rows
+        counts[str(day)] = len(rows)
+    # 여러 날짜를 모두 계산한 뒤 실행 묶음 한 개로 공개한다.
+    save_gold(_uri(output_root, "gold_a", "review_product_daily", "scopes", f"{start}_{end}"),
+              result, {"silver_reviews": reference, "start_date_kst": str(start), "end_date_kst": str(end)})
     return counts
 
 
@@ -148,8 +104,9 @@ def search_reviews(
     if limit < 1:
         raise ValueError("limit는 1 이상이어야 합니다")
     matches: list[dict[str, object]] = []
+    by_day, _ = _read_scope(silver_root, start, end)
     for day in _days(start, end):
-        for row in _read_day(silver_root, day):
+        for row in by_day[str(day)]:
             if product_id is not None and row["product_id"] != product_id:
                 continue
             content = row.get("text")

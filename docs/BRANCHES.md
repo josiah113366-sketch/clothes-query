@@ -57,6 +57,8 @@ gitGraph
   merge sim/behavior-core
   branch silver/pipelines
   commit id: "silver(pipelines)"
+  branch gold-a/metrics
+  commit id: "gold-a(metrics)"
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -94,3 +96,8 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `silver/pipelines` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
+
+### gold-a
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `gold-a/metrics` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | 진행 중 (silver/pipelines 선행) | |

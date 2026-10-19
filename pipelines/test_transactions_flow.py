@@ -1,6 +1,12 @@
 """거래 Silver → Gold A 연결에서 계산 기준이 유지되는지 확인한다."""
 
 import unittest
+import json
+import tempfile
+from pathlib import Path
+
+from pipelines.silver.transactions import run as run_silver
+from pipelines.gold_a.transactions import run as run_gold
 
 from pipelines.gold_a.transactions import build_gold
 from pipelines.silver.transactions import build_silver
@@ -88,6 +94,40 @@ class TransactionFlowTest(unittest.TestCase):
             ],
         )
         self.assertEqual(gold, build_gold(build_silver(orders, items, payments)))
+
+    def test_saved_silver_bundle_quality_gate_and_repeat(self):
+        Path("pipelines/gold_a/.local").mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir="pipelines/gold_a/.local") as temporary:
+            root = Path(temporary)
+            source = root / "input"
+            source.mkdir()
+            order = {"order_id": "O-1", "member_id": "M-1", "session_id": "S-1", "status": "PAID",
+                     "status_reason": None, "total_amount": 2000,
+                     "ordered_at": "2026-10-14T00:30:00+09:00", "updated_at": "2026-10-14T01:00:00+09:00"}
+            item = {"order_item_id": "I-1", "order_id": "O-1", "article_id": "0001", "quantity": 2, "unit_price": 1000}
+            payment = {"payment_id": "P-1", "order_id": "O-1", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
+                       "amount": 2000, "status": "SUCCESS", "failure_code": None,
+                       "requested_at": "2026-10-14T00:59:00+09:00", "completed_at": "2026-10-14T01:00:00+09:00"}
+            locations = {}
+            for name, row in (("orders", order), ("order_items", item), ("payments", payment)):
+                path = source / (name + ".jsonl")
+                path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+                locations[name] = str(path)
+            silver, gold = root / "silver", root / "gold"
+            run_silver(locations["orders"], locations["order_items"], locations["payments"], str(silver))
+            first = run_gold(str(silver), str(gold))
+            first_rows = {name: Path(path).read_bytes() for name, path in first["outputs"].items()}
+            repeated = run_gold(str(silver), str(gold))
+            self.assertEqual(first_rows, {name: Path(path).read_bytes() for name, path in repeated["outputs"].items()})
+            self.assertIn(b'"approved_amount": 2000', first_rows["order_sales_hourly.jsonl"])
+            self.assertIn(b'"article_id": "0001"', first_rows["product_sales_daily.jsonl"])
+            pointer = gold / "gold_a/transactions/current.json"
+            previous = pointer.read_bytes()
+            Path(locations["payments"]).write_text(json.dumps(dict(payment, amount=0)) + "\n", encoding="utf-8")
+            run_silver(locations["orders"], locations["order_items"], locations["payments"], str(silver))
+            with self.assertRaisesRegex(ValueError, "PASS"):
+                run_gold(str(silver), str(gold))
+            self.assertEqual(pointer.read_bytes(), previous)
 
 
 if __name__ == "__main__":

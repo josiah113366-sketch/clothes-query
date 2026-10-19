@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
+from . import _uri, load_silver, save_gold
+
 from collections import defaultdict
 from datetime import datetime
 
 
 def build_gold(silver: dict[str, list[dict]]) -> dict[str, list[dict]]:
     """같은 Silver 입력은 언제 실행해도 같은 Gold 결과를 돌려준다."""
+    checks = silver.get("dq_results")
+    if not checks or any(row.get("status") != "PASS" or row.get("quarantined_count") != 0 for row in checks):
+        raise ValueError("Silver 품질 결과가 불완전하므로 Gold A 계산을 중단합니다")
     orders = {row["order_id"]: row for row in silver["orders_current"]}
     items_by_order: dict[str, list[dict]] = defaultdict(list)
     for item in silver["silver_order_items"]:
@@ -66,3 +74,31 @@ def build_gold(silver: dict[str, list[dict]]) -> dict[str, list[dict]]:
         "order_sales_hourly": [hourly[key] for key in sorted(hourly)],
         "product_sales_daily": [product_daily[key] for key in sorted(product_daily)],
     }
+
+
+def run(silver_root: str, output_root: str) -> dict:
+    """로컬 거래 Silver 대표 묶음을 읽어 기존 두 지표를 저장한다."""
+    if "://" in silver_root or "://" in output_root:
+        raise ValueError("거래 Gold A 입출력은 로컬 경로만 지원합니다")
+    source, target = Path(silver_root).resolve(), Path(output_root).resolve()
+    if source == target or source in target.parents or target in source.parents:
+        raise ValueError("입력과 출력 경로는 서로 겹치지 않아야 합니다")
+    manifest_uri = str(source / "silver/transactions/current.json")
+    names = ["orders_current", "order_status_history", "silver_order_items", "payment_attempts", "dq_results"]
+    silver, reference = load_silver(manifest_uri, {}, names)
+    result = build_gold(silver)
+    return save_gold(str(target / "gold_a/transactions"),
+                     {name + ".jsonl": rows for name, rows in result.items()}, {"silver_transactions": reference})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="거래 Silver 대표 결과 → Gold A 주문·상품 판매")
+    parser.add_argument("--silver-root", required=True)
+    parser.add_argument("--output-root", required=True)
+    args = parser.parse_args()
+    manifest = run(args.silver_root, args.output_root)
+    print("Gold A 결과·입력 품질 확인: " + manifest["manifest_path"])
+
+
+if __name__ == "__main__":
+    main()
