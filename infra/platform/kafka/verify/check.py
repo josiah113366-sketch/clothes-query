@@ -65,6 +65,9 @@ def check_business_connectors(connector_schema, values):
         assert source[key].startswith("${directory:/mnt/cdc-database:"), key
     assert source["database.sslmode"] == "verify-full"
     assert source["publication.autocreate.mode"] == "disabled"
+    # Heartbeat must not write tables or publish messages (nothing may reach Bronze).
+    assert source["heartbeat.action.query"].startswith("SELECT pg_logical_emit_message(false, 'heartbeat'")
+    assert source["message.prefix.exclude.list"] == "heartbeat"
     tables = source["table.include.list"].split(",")
     assert tables == ["public.members", "public.orders", "public.order_items", "public.payments"]
     columns = {}

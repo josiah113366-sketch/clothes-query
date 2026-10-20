@@ -36,6 +36,11 @@ spec:
     tombstones.on.delete: "false"
     heartbeat.interval.ms: "10000"
     topic.heartbeat.prefix: debezium-heartbeat
+    # 업무 테이블에 변경이 없으면 slot 확인 위치가 멈춰 RDS WAL 이 쌓인다(5분마다 64MB 파일 전환).
+    # 10초마다 WAL 에 논리 메시지만 남겨(테이블 쓰기 없음) Debezium 이 받고 위치를 확정하게 한다.
+    heartbeat.action.query: "SELECT pg_logical_emit_message(false, 'heartbeat', now()::varchar)"
+    # 그 메시지는 Kafka 로 보내지 않는다(cdc.message 토픽 없음, Bronze 영향 없음).
+    message.prefix.exclude.list: heartbeat
     key.converter: org.apache.kafka.connect.json.JsonConverter
     key.converter.schemas.enable: "false"
     value.converter: org.apache.kafka.connect.json.JsonConverter

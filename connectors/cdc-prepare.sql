@@ -12,7 +12,8 @@
 \endif
 
 BEGIN;
-CREATE ROLE clothes_cdc WITH LOGIN PASSWORD :'cdc_password' CONNECTION LIMIT 3;
+-- 연결: 복제 1 + 메타데이터 조회 1 + heartbeat.action.query 1, 재시작 겹침 여유 2.
+CREATE ROLE clothes_cdc WITH LOGIN PASSWORD :'cdc_password' CONNECTION LIMIT 5;
 -- RDS 에서는 REPLICATION 속성 대신 이 역할로 복제 연결(slot 생성·읽기) 권한을 준다.
 GRANT rds_replication TO clothes_cdc;
 GRANT CONNECT ON DATABASE postgres TO clothes_cdc;
