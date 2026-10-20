@@ -15,7 +15,11 @@ from .common import run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v3"
+CHECK_VERSION = "transactions.v4"
+FAILURE_CODES = {
+    "INSUFFICIENT_BALANCE", "CARD_LIMIT_EXCEEDED", "CARD_DECLINED", "PG_TIMEOUT", "PG_ERROR",
+}
+FAILURE_CODE_POLICY = "source-ddl-five-codes.v1"
 ORDER_STATUSES = {
     "PLACED", "PAID", "SHIPPED", "DELIVERED",
     "PAYMENT_FAILED", "CANCELLED", "REFUNDED",
@@ -81,6 +85,8 @@ def _payment(raw: dict) -> dict:
     code = raw.get("failure_code")
     if status == "FAILED":
         _required_text(raw, "failure_code")
+        if code not in FAILURE_CODES:
+            raise _RowError("failure_code", "INVALID_VALUE", "원천 허용 목록에 없는 실패 코드입니다")
     elif code is not None:
         raise _RowError("failure_code", "INVALID_VALUE", "성공 결제의 실패 코드는 NULL이어야 합니다")
     requested, completed = _time(raw, "requested_at"), _time(raw, "completed_at")
@@ -329,6 +335,8 @@ def build_silver(
         if name == "orders":
             quality[-1]["amount_checks"] = amount_checks
             quality[-1]["amount_check_policy"] = "items-sum-v1; requires-declared-complete-input"
+        elif name == "payments":
+            quality[-1]["failure_code_policy"] = FAILURE_CODE_POLICY
     output["quarantined_records"], output["dq_results"] = quarantine, quality
     # 정상 결과에서 사라진 후보도 추적한다. 회원 정보·원문 대신 집계 연결 최소값만 보존.
     candidates = []
