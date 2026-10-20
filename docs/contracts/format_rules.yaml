@@ -106,9 +106,11 @@ proposed_changes:
     description: "Gold B 원장과 뷰에서도 order_id를 필수로 보존한다."
   - id: payment_failure_code_forward_compatibility
     status: proposed
-    description: "실패 코드가 없으면 형식 오류. 비어 있지 않은 미등록 코드는 통과시키고 Gold B 뷰에서 UNKNOWN 분류."
+    description: "합의 전에는 원천의 5개 코드만 허용한다. 향후 비어 있지 않은 미등록 문자열을 실패 결제로 포함하고 Gold B 뷰의 원인 분류만 UNKNOWN으로 두는 제안."
     target: payments.failure_code
-    change_after_agreement: "소비 검사에서 enum 제한을 제거하고 FAILED의 빈 문자열도 거부하도록 정의. 원천 DDL 변경 여부는 별도 확인."
+    rationale: "새 PG 코드로 인한 실제 실패가 집계에서 빠지는 일을 방지. 오타/비정상 코드 포함 위험은 별도 관제 합의 필요."
+    preserve_original_code: true
+    change_after_agreement: "누락/빈 문자열/공백/비문자열은 계속 오류. 원본 failure_code를 보존하고 소비 enum 정책과 Gold B 분류를 같은 합의 버전으로 변경. 원천 DDL 변경 여부는 별도 확인."
   - id: payment_content_conflict
     status: proposed
     description: "동일 payment_id의 업무 내용이 다르면 정상 중복으로 넘기지 않고 오류 기록. 비교 필드와 기존 집계 처리는 합의 후 구현."
