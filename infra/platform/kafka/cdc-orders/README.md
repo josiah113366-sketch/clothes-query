@@ -65,7 +65,7 @@ terraform apply "$env:TEMP\<스택>.tfplan"
    Remove-Item $tmp; Remove-Variable pw
    ```
 
-2. 마스터 계정으로 `connectors/cdc-prepare.sql`을 실행한다.
+2. 마스터 계정으로 **`postgres` DB에 접속해** `connectors/cdc-prepare.sql`을 실행한다. RDS의 업무 테이블은 `postgres` DB에 있다(`clothes`는 로컬 Docker의 DB 이름이다). publication은 DB마다 따로라서, 다른 DB에 만들면 Debezium이 `Publication autocreation is disabled`로 실패한다.
    - **psql 15 이상:** 환경 변수 `CDC_DB_PASSWORD`에 위 비밀번호를 넣고 `psql -X "<접속 문자열, sslmode=verify-full>" -f connectors/cdc-prepare.sql`.
    - **DBeaver:** `BEGIN;`부터 `COMMIT;`까지 붙여 넣고 `:'cdc_password'` 자리만 비밀번호 문자열로 바꿔 실행한다. 바꾼 SQL은 저장하지 않는다.
 3. 확인: 마지막 두 SELECT가 `clothes_cdc`(연결 한도 3)와 테이블 4개(`members`, `order_items`, `orders`, `payments`)를 보여 준다. `members_archive`가 없어야 한다.
@@ -79,7 +79,7 @@ $cdc = aws secretsmanager get-secret-value --secret-id clothes-query-dev-cdc-db 
 $rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text --region ap-northeast-1
 $d = New-Item -ItemType Directory -Path ("E:\cdc-tmp-" + [guid]::NewGuid())   # 레포 밖, 한글 없는 경로
 Set-Content -NoNewline "$d\hostname" $rdsHost
-Set-Content -NoNewline "$d\database" "clothes"
+Set-Content -NoNewline "$d\database" "postgres"   # 업무 테이블이 있는 DB (clothes 아님)
 Set-Content -NoNewline "$d\username" $cdc.username
 Set-Content -NoNewline "$d\password" $cdc.password
 kubectl create secret generic cdc-database -n kafka --from-file="$d\hostname" --from-file="$d\database" --from-file="$d\username" --from-file="$d\password"

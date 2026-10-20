@@ -1,5 +1,6 @@
 -- CDC 전용 계정과 publication. 사용자가 마스터 계정으로 한 번 실행한다 (Claude는 실행하지 않는다).
--- 실행: psql -X "host=<RDS 주소> dbname=clothes user=<마스터> sslmode=verify-full sslrootcert=<RDS CA 번들>" -f connectors/cdc-prepare.sql
+-- RDS 의 업무 테이블은 postgres DB 에 있다 (로컬 Docker 는 clothes DB). 반드시 RDS 의 postgres DB 에 접속해 실행한다.
+-- 실행: psql -X "host=<RDS 주소> dbname=postgres user=<마스터> sslmode=verify-full sslrootcert=<RDS CA 번들>" -f connectors/cdc-prepare.sql
 -- 비밀번호는 이 파일과 명령행에 쓰지 않는다. 실행 전에 환경 변수 CDC_DB_PASSWORD 에 넣는다 (Secrets Manager 에 저장한 값).
 -- 같은 이름의 계정이나 publication 이 이미 있으면 오류로 멈춘다 (덮어쓰지 않는다).
 \set ON_ERROR_STOP on
@@ -14,7 +15,7 @@ BEGIN;
 CREATE ROLE clothes_cdc WITH LOGIN PASSWORD :'cdc_password' CONNECTION LIMIT 3;
 -- RDS 에서는 REPLICATION 속성 대신 이 역할로 복제 연결(slot 생성·읽기) 권한을 준다.
 GRANT rds_replication TO clothes_cdc;
-GRANT CONNECT ON DATABASE clothes TO clothes_cdc;
+GRANT CONNECT ON DATABASE postgres TO clothes_cdc;
 GRANT USAGE ON SCHEMA public TO clothes_cdc;
 -- snapshot 은 SELECT 로 읽는다. 회원은 PII 없는 10컬럼만 컬럼 단위로 허용한다.
 GRANT SELECT (member_id, signup_at, signup_channel, gender, age_band, region_sigungu,
@@ -33,6 +34,6 @@ SELECT pubname, schemaname, tablename FROM pg_publication_tables WHERE pubname =
 -- DROP PUBLICATION cdc_pub;
 -- REVOKE ALL ON public.members, public.orders, public.order_items, public.payments FROM clothes_cdc;
 -- REVOKE USAGE ON SCHEMA public FROM clothes_cdc;
--- REVOKE CONNECT ON DATABASE clothes FROM clothes_cdc;
+-- REVOKE CONNECT ON DATABASE postgres FROM clothes_cdc;
 -- REVOKE rds_replication FROM clothes_cdc;
 -- DROP ROLE clothes_cdc;
