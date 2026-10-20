@@ -53,3 +53,19 @@ namespace·EKS access entry·namespace RoleBinding 3개. EKS 전체 관리자 �
 사용자가 장소 제약 없이 개발하도록 public API IP 제한 임시 해제를 요청했다. 최신 main (`07724d4`)을 병합한 뒤 `allow_public_api_from_anywhere` 옵션을 모듈/스택에 추가했다. 기본 false와 기존 CIDR 입력의 /24 이상 제한은 유지한다. 비공개 배포 입력에서 true일 때만 유효 CIDR이 `0.0.0.0/0`이 되며, false로 바꿔 적용하면 보존된 원래 CIDR로 돌아간다. 자동 만료/원복은 없다.
 
 기본 제한·개방·원복·IAM/private 보존을 포함한 EKS mock8개와 validate/fmt를 통과했다. 실제 plan은 기존 클러스터의 publicAccessCidrs만 수정1개이며 생성/삭제/교체0개다. 사용자 요청에 따라 적용 후 실제 클러스터 ACTIVE·CIDR `0.0.0.0/0`·private endpoint 및 API 인증 유지, 노드1대·Kafka Pod 정상, 사후 plan 변경 없음을 확인했다. RDS·Kafka·노드 보안 그룹·기존 IAM/RBAC·다른 리전 자원은 변경하지 않았다. 비공개 EKS 배포 입력에 true를 저장해 코드와 현재 상태가 일치하도록 했으며 원래 제한 CIDR도 보존했다.
+
+## 후속: CDC 담당자의 EKS 관리자 역할 사용
+
+2026-10-20 CDC 담당자의 기존 그룹 권한으로 Kafka namespace Secret 생성·조회·수정, KafkaConnect 수정 및 KafkaConnector 생성이 거부됨을 그룹 impersonation으로 확인했다. 사용자가 이 확인 직후 “그냥 전부 열어줘”라고 요청해, 앞서 설명한 전용 EKS 관리자 역할의 신뢰 목록에 해당 담당자를 추가하는 실제 적용을 승인했다. 이 요청이 이번 적용에 대한 사용자 결정이며 공통 IAM 정책이나 다른 서비스 접근 변경은 포함하지 않는다.
+
+실제 사용자 ARN은 비공개 EKS `deployment.local.tfvars.json`의 `admin_trusted_principal_arns`에만 저장한다. 기존 신뢰 대상은 보존하며, 기존 역할에 이미 연결된 cluster 범위 `AmazonEKSClusterAdminPolicy`를 사용한다. 담당자는 자신의 AWS 자격 증명으로 아래 명령을 실행해야 한다. `--role-arn`을 생략한 기존 직접 사용자 접속은 기존 WAS 배포 그룹 권한을 유지한다.
+
+```powershell
+aws eks update-kubeconfig --region ap-northeast-1 --name clothes-query-dev-eks --role-arn arn:aws:iam::<ACCOUNT_ID>:role/clothes-query-dev-eks-admin --alias clothes-query-dev-admin
+kubectl auth can-i create secrets -n kafka
+kubectl auth can-i patch kafkaconnects.kafka.strimzi.io -n kafka
+```
+
+Helm도 이 kubeconfig context를 사용한다. 동료 본인의 로그인·Helm upgrade·커넥터 등록 성공 여부는 별도로 확인한다. 관리자 역할은 Kafka뿐 아니라 EKS 전체 자원의 변경·삭제 권한을 포함한다. PR 승인·머지는 팀원이 하며 이번 작업에서 수행하지 않는다.
+
+적용 결과: 최신 origin/main 반영 여부 확인, EKS 스택 fmt/validate 통과, 실제 plan 수정1·생성/삭제0을 확인해 적용했다. 변경 필드는 기존 관리자 역할의 assume_role_policy뿐이다. 실제 신뢰 목록 추가 및 기존 신뢰 대상 보존, cluster 관리자 정책 연결을 확인했다. 같은 관리자 역할을 사용하는 기존 작업자 세션으로 Kafka Secret 생성·KafkaConnect 수정·KafkaConnector 생성·전체 관리자 권한 검사4개를 통과했고 사후 plan은 변경 없음이다. 동료 자신의 세션으로 역할 전환하는 검증은 아직 수행하지 않았다. 실제 Helm upgrade나 커넥터 등록은 실행하지 않았다.
