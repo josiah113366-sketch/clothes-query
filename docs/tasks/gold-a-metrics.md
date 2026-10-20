@@ -2,9 +2,11 @@
 
 # Gold A 지표 분리
 
-브랜치: `gold-a/metrics`. 최신 `main`에서 생성한 뒤 선행 `silver/pipelines` 커밋을 포함한다. Silver 브랜치가 먼저 반영되면 이 브랜치의 PR 차이는 Gold A 파일과 이 작업 문서만 남는다.
+브랜치: `pipelines/gold-a` (기존 `gold-a/metrics`에서 이름 변경). 최초 생성 시 최신 `main`에서 선행 Silver 커밋을 포함했다. 선행 Silver 브랜치는 `pipelines/silver`다. Silver 브랜치가 먼저 반영되면 이 브랜치의 PR 차이는 Gold A 파일과 이 작업 문서만 남는다.
 
 ## 범위
+
+- **2026-10-20 문서 보완:** Gold A README에 오류 영향 범위 추적・범위별 갱신 보류・manifest 기록・복구 확인을 제안으로 추가한다. 실행 코드・YAML・테스트는 변경하지 않는다. 현재 전체 작업 차단 및 날짜 단위 시간별 교체와 추가 설계의 차이를 명시한다. 문서 기준과 diff 공백만 확인하며 기능 구현 완료로 취급하지 않는다.
 
 - Silver 리뷰를 이용한 상품별 일간 리뷰 집계와 상품·기간·키워드 조회.
 - 거래 Silver를 이용한 KST 시간별 주문·승인 금액과 결제일·`article_id`별 판매 수량·금액.
