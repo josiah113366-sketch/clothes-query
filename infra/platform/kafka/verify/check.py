@@ -44,6 +44,68 @@ def strict_schema(schema):
             strict_schema(value)
 
 
+def check_business_connectors(connector_schema, values):
+    """connectors/cdc-source.yaml, bronze-s3-sink.yaml: CRD, topic contract, PII allowlist, secrets."""
+    pii = {"name", "email", "phone", "birth_date", "password_hash"}
+    ddl = (REPO / "db" / "schema" / "004_orders.sql").read_text(encoding="utf-8")
+    order_columns = {}
+    for table, body in re.findall(r"CREATE TABLE (\w+) \((.*?)\n\);", ddl, re.S):
+        order_columns[table] = {m for m in re.findall(r"^\s{4}(\w+)\s+(?:uuid|text|bigint|integer|timestamptz)", body, re.M)}
+    assert set(order_columns) == {"orders", "order_items", "payments"}
+    docs = {}
+    for name in ("cdc-source", "bronze-s3-sink"):
+        text = (REPO / "connectors" / f"{name}.yaml").read_text(encoding="utf-8")
+        assert not re.search(r"AKIA[0-9A-Z]{16}|amazonaws\.com|[0-9]{12}", text), name
+        doc = yaml.safe_load(text)
+        jsonschema.Draft7Validator(connector_schema).validate(doc)
+        assert doc["metadata"]["labels"]["strimzi.io/cluster"] == "clothes-query-dev-connect"
+        docs[name] = doc["spec"]["config"]
+    source, sink = docs["cdc-source"], docs["bronze-s3-sink"]
+    for key in ("database.hostname", "database.dbname", "database.user", "database.password"):
+        assert source[key].startswith("${directory:/mnt/cdc-database:"), key
+    assert source["database.sslmode"] == "verify-full"
+    assert source["publication.autocreate.mode"] == "disabled"
+    tables = source["table.include.list"].split(",")
+    assert tables == ["public.members", "public.orders", "public.order_items", "public.payments"]
+    columns = {}
+    for item in source["column.include.list"].split(","):
+        schema, table, column = item.split(".")
+        assert schema == "public"
+        columns.setdefault(table, set()).add(column)
+    assert set(columns) == {"members", "orders", "order_items", "payments"}
+    assert not columns["members"] & pii and len(columns["members"]) == 10
+    member_source = json.loads((REPO / "connectors" / "member-source.json").read_text(encoding="utf-8"))
+    assert columns["members"] == {c.split(".")[-1] for c in member_source["column.include.list"].split(",")}
+    for table, expected in order_columns.items():
+        assert columns[table] == expected, table
+    routes = {}
+    for transform in source["transforms"].split(","):
+        if source[f"transforms.{transform}.type"].endswith("RegexRouter"):
+            routes[source[f"transforms.{transform}.regex"]] = source[f"transforms.{transform}.replacement"]
+    routed = set()
+    for table in ("members", "orders", "order_items", "payments"):
+        topic = "cdc.public." + table
+        for regex, replacement in routes.items():
+            if re.fullmatch(regex, topic):
+                topic = re.sub(regex, replacement.replace("$", "\\"), topic)
+        routed.add(topic)
+    assert routed == BUSINESS_TOPICS - {"clickstream"}
+    heartbeat = f'{source["topic.heartbeat.prefix"]}.{source["topic.prefix"]}'
+    assert set(values["connect"]["produceTopics"]) == routed | {heartbeat}
+    assert {t["name"] for t in values["topics"]} == BUSINESS_TOPICS | {heartbeat}
+    assert set(sink["topics"].split(",")) == BUSINESS_TOPICS == set(values["connect"]["consumeTopics"])
+    assert values["connect"]["consumerGroups"] == ["connect-bronze-s3-sink"]
+    assert sink["topics.dir"] == "bronze" and sink["timezone"] == "UTC"
+    assert sink["path.format"] == "'year'=YYYY/'month'=MM/'day'=dd"
+    assert not any(k.startswith(("aws.", "s3.credentials")) for k in sink), "S3 credentials come from Pod Identity"
+    prepare = (REPO / "connectors" / "cdc-prepare.sql").read_text(encoding="utf-8")
+    publication = re.search(r"CREATE PUBLICATION cdc_pub FOR TABLE ([^;]+);", prepare).group(1)
+    assert [t.strip() for t in publication.split(",")] == tables
+    member_grant = re.search(r"GRANT SELECT \(([^)]*)\) ON public\.members", prepare).group(1)
+    assert {c.strip() for c in member_grant.split(",")} == columns["members"]
+    assert "members_archive" not in publication and "PASSWORD '" not in prepare
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--helm", required=True, type=Path)
@@ -230,6 +292,7 @@ def main():
         bad = copy.deepcopy(business); bad["ui"]["name"] = "clothes-query-dev-connect"
         render(bad, error="Duplicate or reserved ui name")
         render({"ui": {"enabled": True}}, error="ui requires kafka.enabled")
+        check_business_connectors(schemas["KafkaConnector"], business)
         budget = [compact_pool["resources"], compact_connect["resources"],
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],

@@ -1,0 +1,60 @@
+# RDS 회원·주문 3테이블 → Kafka. EKS Connect(clothes-query-dev-connect)에 kubectl apply 로 등록한다.
+# 선행: cdc-prepare.sql(계정·publication), Secret cdc-database/rds-ca, 토픽 6개 Ready.
+# 값마다 이유: connectors/README.md 의 "cdc-source.yaml".
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: cdc-source
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: clothes-query-dev-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    database.hostname: "${directory:/mnt/cdc-database:hostname}"
+    database.port: "5432"
+    database.dbname: "${directory:/mnt/cdc-database:database}"
+    database.user: "${directory:/mnt/cdc-database:username}"
+    database.password: "${directory:/mnt/cdc-database:password}"
+    database.sslmode: verify-full
+    database.sslrootcert: /mnt/rds-ca/bundle.pem
+    plugin.name: pgoutput
+    topic.prefix: cdc
+    schema.include.list: public
+    table.include.list: public.members,public.orders,public.order_items,public.payments
+    # 회원은 PII 없는 10컬럼만(member-source.json 과 같다). 주문 3테이블은 DDL(004_orders.sql)의 모든 컬럼.
+    column.include.list: >-
+      public.members.member_id,public.members.signup_at,public.members.signup_channel,public.members.gender,public.members.age_band,public.members.region_sigungu,public.members.marketing_consent,public.members.status,public.members.withdrawn_at,public.members.created_at,public.orders.order_id,public.orders.member_id,public.orders.session_id,public.orders.status,public.orders.status_reason,public.orders.total_amount,public.orders.ordered_at,public.orders.updated_at,public.order_items.order_item_id,public.order_items.order_id,public.order_items.article_id,public.order_items.quantity,public.order_items.unit_price,public.payments.payment_id,public.payments.order_id,public.payments.attempt_no,public.payments.method,public.payments.pg,public.payments.amount,public.payments.status,public.payments.failure_code,public.payments.requested_at,public.payments.completed_at
+    slot.name: cdc_slot
+    publication.name: cdc_pub
+    publication.autocreate.mode: disabled
+    slot.drop.on.stop: "false"
+    snapshot.mode: initial
+    # 회원은 컬럼 단위 SELECT 권한뿐이라 LOCK TABLE 을 할 수 없다. slot 의 exported snapshot 으로 일관성은 지켜진다.
+    snapshot.locking.mode: none
+    tombstones.on.delete: "false"
+    heartbeat.interval.ms: "10000"
+    topic.heartbeat.prefix: debezium-heartbeat
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: "false"
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: "false"
+    predicates: isData
+    predicates.isData.type: org.apache.kafka.connect.transforms.predicates.TopicNameMatches
+    predicates.isData.pattern: 'cdc\.public\..*'
+    transforms: unwrap,routeMembers,routeItems,routeOrders
+    transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
+    transforms.unwrap.add.fields: op,source.ts_ms,source.snapshot
+    transforms.unwrap.add.fields.prefix: __
+    transforms.unwrap.delete.handling.mode: drop
+    transforms.unwrap.predicate: isData
+    transforms.routeMembers.type: org.apache.kafka.connect.transforms.RegexRouter
+    transforms.routeMembers.regex: 'cdc\.public\.members'
+    transforms.routeMembers.replacement: members-events
+    transforms.routeItems.type: org.apache.kafka.connect.transforms.RegexRouter
+    transforms.routeItems.regex: 'cdc\.public\.order_items'
+    transforms.routeItems.replacement: order-items
+    transforms.routeOrders.type: org.apache.kafka.connect.transforms.RegexRouter
+    transforms.routeOrders.regex: 'cdc\.public\.(orders|payments)'
+    transforms.routeOrders.replacement: $1
