@@ -30,25 +30,27 @@ API를 거치면:
 | 인증 (Q4) | **없음** (MVP). 내부 ALB와 SG로만 막는다 (10절) |
 | 데이터 오염 주입 (Q5) | 컨트롤러가 **DB에 직접** 쓴다(지금 유지). 오염 전용 DB 계정을 따로 둔다 (11절) |
 | 배포 도구 (Q6) | **Helm** (9절) |
-| replica (Q7) | **1개**로 시작한다. 부하는 ECS 시뮬레이터가 정하고 API는 버티기만 한다. burst 부하는 `api/skeleton`에서 측정해 늘릴지 정한다 (9절) |
+| replica (Q7) | **1개**로 시작한다. 부하는 ECS 시뮬레이터가 정하고 API는 버티기만 한다. burst 부하는 `api/mvp`에서 측정해 늘릴지 정한다 (9절) |
 | 목록 읽기 (Q2) | 시뮬레이터는 회원·상품 목록을 **API로** 읽는다(DB 계정 없음). 상품은 시작 때 한 번, 회원은 시작 때 전체 한 번 + **5초마다 변경분**만. 주문 API는 회원이 `ACTIVE`인지 확인한다 (5절) |
 | 기존 `apps` 스택 (Q8) | **쓰지 않는다.** 공개 HTTPS(도메인·인증서 필수)와 WEB이 묶여 있다. api Helm chart가 **내부 HTTP(80) ALB**를 만든다. ALB는 HTTPS가 필수가 아니다 (9절) |
 
-## 3. 전체 구조 (제안)
+## 3. 전체 구조 (결정)
 
 ```
-ECS Fargate (시뮬레이터)                 EKS                                       
- member live ─┐                    ┌──────────────────────────────┐
- behavior live┼─HTTP─▶ 내부 ALB ──▶│ api namespace: WAS (FastAPI) │──▶ RDS postgres DB (members, orders, order_items, payments)
- controller ──┘   (VPC 안에서만)    │                              │──▶ Kafka clickstream (mTLS, KafkaUser api)
-                                   └──────────────────────────────┘
+ECS Fargate (시뮬레이터)                 EKS
+ member live ──┐                    ┌──────────────────────────────┐
+ behavior live ┴─HTTP─▶ 내부 ALB ──▶│ api namespace: WAS (FastAPI) │──▶ RDS postgres DB (members, orders, order_items, payments)
+                 (VPC 안에서만)      │                              │──▶ Kafka clickstream (mTLS, KafkaUser api)
+                                    └──────────────────────────────┘
+ controller ──── 데이터 오염만 DB 직접 (전용 계정, Q5) ─────────────▶ RDS
+ (모드·장애 신호는 시뮬레이터에 직접. 방식은 sim/console에서)
 RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-items / payments ──▶ S3 bronze/
 ```
 
 - 외부(인터넷)에는 열지 않는다. ALB는 VPC 안에서만 닿는다.
 - 기존 `infra/stacks/apps`의 Ingress는 **인터넷 공개 HTTPS**(도메인, 인증서 필요)용이라 이번 용도와 다르다. 2026-10-20 기준 AWS에 로드밸런서는 0개이고, EKS Auto Mode 로드밸런싱은 켜져 있어 Ingress를 만들면 ALB가 자동으로 생긴다.
 
-## 4. 책임 나누기 — 무엇을 시뮬레이터가 정하고 무엇을 API가 정하나 (미정, 가장 중요)
+## 4. 책임 나누기 — 무엇을 시뮬레이터가 정하고 무엇을 API가 정하나 (결정: A)
 
 시뮬레이터는 지금 **ID, 시각, 결제 결과를 모두 스스로 정한다.**
 - **ID**: 시드로 만든 UUID. 같은 시드면 같은 데이터가 나오고, 재실행 때 이미 있는 주문은 `23505`로 건너뛴다.
@@ -57,7 +59,7 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 
 | 선택지 | 내용 | 장점 | 단점 |
 |---|---|---|---|
-| **A. 얇은 API (제안)** | 시뮬레이터가 ID, 시각, 결제 결과를 정해 보내고, API는 **검증하고 저장**한다. 클릭은 받아서 Kafka에 넘긴다 | 지금 시뮬레이터 동작(배속, 재현성, 장애 주입, 테스트 기준값)이 그대로 유지된다. 구현이 작다 | API에 "업무 로직"이 거의 없다 |
+| **A. 얇은 API (결정)** | 시뮬레이터가 ID, 시각, 결제 결과를 정해 보내고, API는 **검증하고 저장**한다. 클릭은 받아서 Kafka에 넘긴다 | 지금 시뮬레이터 동작(배속, 재현성, 장애 주입, 테스트 기준값)이 그대로 유지된다. 구현이 작다 | API에 "업무 로직"이 거의 없다 |
 | B. 실제 API | API가 ID, 시각(서버 시각)을 정하고, WAS 안의 **가짜 PG**가 결제 결과를 정한다. PG 장애도 WAS에 주입한다 | 더 실제 같다. 장애가 API 지표(결제 API 실패율)로 자연스럽게 드러난다 | 배속을 쓰면 시각이 실제 시각과 어긋난다. 재현성과 기존 테스트 기준값이 깨진다. 장애 주입 경로를 새로 만들어야 한다 |
 | C. 섞기 | ID와 시각은 시뮬레이터(A), **결제만** WAS의 가짜 PG(B) | 결제 장애가 API 쪽 지표로 드러난다 | 두 방식이 섞여 복잡하다. 결제 결과의 재현성이 깨진다 |
 
@@ -75,18 +77,19 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 | `PATCH /v1/orders/{order_id}` | `update_order_status` | 상태 전이(`status`, `status_reason`, `updated_at`) | 200 / 404 / 409 허용되지 않는 전이 |
 | `POST /v1/events/clicks` | `KafkaClickSink.publish` | 클릭 **묶음**(시뮬레이터가 약 1초씩 모아 보냄, 한 번에 최대 500건 제안). 키 `session_id`로 `clickstream`에 발행 | 202 받음 |
 | `GET /v1/members/active` | `pool.py`의 활성 회원 목록 (시작 때 한 번) | `member_id`만, 커서 페이지. 응답에 변경분 시작 커서를 같이 준다 | 200 |
-| `GET /v1/members/changes?after=<커서>` | (새로 생김) 지금은 60초마다 10만 명을 통째로 다시 읽는다 | 커서 이후 **가입한 회원**(나중에 탈퇴한 회원도)만. 커서는 DB가 기록하는 실제 시각(`created_at`)과 `member_id`로 만든다(시뮬레이터 배속 시각과 섞지 않음) | 200 |
+| `GET /v1/members/changes?after=<커서>` | (새로 생김) 지금은 60초마다 10만 명을 통째로 다시 읽는다 | 커서 이후 **가입한 회원**(나중에 탈퇴한 회원도)만. 커서는 DB가 기록하는 실제 시각(`created_at`)과 `member_id`로 만든다(시뮬레이터 배속 시각과 섞지 않음). **동시에 처리된 요청은 늦게 커밋될 수 있어**, 커서보다 몇 초 앞부터 겹쳐 읽고 시뮬레이터가 중복을 버린다 | 200 |
+| `GET /v1/members/signup-count?from=<시각>` | `member live` 시작 때 `SELECT count(*) FROM members WHERE signup_at >= …` | `signup_at`이 그 시각 이후인 회원 수. `member live`가 몇 번째 가입자부터 이어서 만들지(k) 정하는 데 쓴다. 껐다 켜도 같은 순서로 이어지고 `member_id`가 겹치지 않게 하는 장치다 | 200 |
 | `GET /v1/catalog` | `pool.py`의 상품 가격 (시작 때 한 번) | `article_id`, `price`, 커서 페이지 | 200 |
 | `GET /healthz`, `GET /readyz` | – | 살아 있음 / DB·Kafka 연결 준비 | 200 / 503 |
 | `GET /metrics` | – | Prometheus 지표 (8절) | 200 |
 
-- **멱등성**: ID를 시뮬레이터가 정하므로, 같은 ID로 다시 보내면 새로 만들지 않고 200을 준다. 지금의 "`23505`면 건너뜀"과 같은 효과다. 네트워크 재시도에도 안전하다.
+- **멱등성**: ID를 시뮬레이터가 정하므로, 같은 ID로 다시 보내면 새로 만들지 않고 200을 준다. 지금의 "`23505`면 건너뜀"과 같은 효과다. 네트워크 재시도에도 안전하다. 단 **같은 ID인데 내용이 다르면 `409`**(`ID_CONFLICT`)로 거절한다. 조용히 200을 주면 시뮬레이터 버그가 숨는다.
 - **탈퇴**(`POST /v1/members/{member_id}/withdraw`, `members_archive` 이동)는 탈퇴 작업이 정해질 때 더한다. 지금 시뮬레이터에 탈퇴가 없다.
 - **목록 읽기 (결정, Q2)**: 시뮬레이터는 API로 읽는다. 주문마다 읽지 않고 메모리 목록에서 뽑는다.
   - 목록이 늦어도 오류는 없다. 새 회원은 다음 변경분(최대 약 5초)부터 주문자에 들어간다. 목록에 있는 회원은 모두 DB에 있다.
   - 위험은 (나중에 생길) **탈퇴한 회원이 목록에 남는 것**이다. 그래서 주문 API가 `ACTIVE`를 확인해 `409`로 거절하고, 시뮬레이터는 409를 받으면 그 회원을 목록에서 뺀다.
   - 시뮬레이터 코드에는 이미 `MemberSource`, `CatalogSource` 인터페이스가 있어 `ApiMemberSource`, `ApiCatalogSource`만 더하면 된다.
-- 지금 시뮬레이터 코드에서 `ApiOrderSink`, `ApiClickSink`로 바꿀 곳: `behavior/sink.py`(`OrderSink`, `ClickSink`), `member/live.py`(`INSERT`), `behavior/pool.py`(읽기).
+- 지금 시뮬레이터 코드에서 API로 바꿀 곳: `behavior/sink.py`(`OrderSink`, `ClickSink`), `member/live.py`(가입 `INSERT`와 시작 때 `COUNT`), `behavior/pool.py`(목록 읽기). 바꾼 뒤 `member live`·`behavior live`는 DB 계정 없이 돈다.
 
 ### 요청·응답 예시
 
@@ -142,7 +145,7 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 ### Kafka (클릭)
 - **KafkaUser `api`**: `clickstream` 쓰기만(`clients`에 한 줄). `acks=all`, idempotent.
 - 발행 실패 정책: 지금 시뮬레이터처럼 **버리고 센다**(주문 흐름을 막지 않는다). 대신 실패 수를 지표로 낸다.
-- **인증서 전달 (미정)**: Strimzi는 KafkaUser Secret을 `kafka` namespace에만 만든다. WAS가 다른 namespace(`api`)에 있으면 Secret을 옮기는 절차가 필요하다. 인프라 chart도 이 부분을 비워 뒀다.
+- **인증서 전달 (결정)**: Strimzi는 KafkaUser Secret을 `kafka` namespace에만 만든다. WAS가 다른 namespace(`api`)에 있으면 Secret을 옮기는 절차가 필요하다. 인프라 chart도 이 부분을 비워 뒀다.
   - **결정: ② `api` namespace + Secret 복사 절차.** 인증서가 갱신되면 다시 복사해야 하므로 절차를 문서화한다. (버린 대안: `kafka` namespace에 두기, External Secrets)
 - Kafka 브로커 NetworkPolicy에 WAS를 허용 대상으로 더한다(`kafka.clientNamespaces` 또는 Pod 선택).
 
@@ -165,7 +168,7 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | 피크 시간대 | 약 2.6 | 약 13 | 약 0.7 |
 | burst (15분) | 약 26 | 약 135 | 약 6 |
 
-- 클릭을 묶어 보내면 burst 때도 API 요청은 초당 수 건~수십 건이다. Pod 1개와 db.t4g.small로 충분할 것으로 본다. **`api/skeleton`에서 초당 200 요청으로 실제 측정한다.**
+- 클릭을 묶어 보내면 burst 때도 API 요청은 초당 수 건~수십 건이다. Pod 1개와 db.t4g.small로 충분할 것으로 본다. **`api/mvp`에서 초당 200 요청으로 실제 측정한다.**
 - **배속(`--speed`)을 올리면 위 숫자가 그 배수로 늘어난다.** ECS 기본은 배속 1로 두고, 배속을 올릴 수 있는 한계를 측정으로 정한다.
 - 시뮬레이터: 주문·결제·가입 요청이 실패하면 **간격을 늘려 가며 다시 보낸다**(ID가 고정이라 중복 없음). 클릭은 지금처럼 버리고 센다.
 - API: DB 연결이 꽉 차면 기다리지 않고 **503**으로 빨리 거절한다. `/readyz`가 실패하면 ALB가 그 Pod로 보내지 않는다.
@@ -178,14 +181,14 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | replica | **1개로 시작 (결정)**, 부하를 보고 늘린다 | 지금 노드 1대(t3a.large) CPU 요청 약 76%. WAS 250m를 더하면 약 90%라 노드 추가 없이 들어갈 수 있다. 2개면 노드가 늘 가능성이 크다(월 약 65달러) |
 | 리소스 | requests 250m / 256Mi, limits 500m / 512Mi | 시작값. 부하를 본 뒤 조정 |
 | 이미지 | 새 ECR 저장소, digest 고정, 비root 실행 | `infra/stacks/ecr`에 저장소 추가가 필요하다 |
-| 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service. Helm chart에 `IngressClassParams`(scheme internal) + `IngressClass`(`controller: eks.amazonaws.com/alb`) + `Ingress`를 넣으면 EKS Auto Mode가 ALB를 만든다(`infra/modules/apps/main.tf`의 예시를 internal·HTTP로 바꿔 쓴다). `app-a`·`app-c` 서브넷에 `kubernetes.io/role/internal-elb=1` 태그가 이미 있다(2026-10-20 확인). 헬스체크 `/readyz` | 인증서·도메인 불필요. 월 약 20달러. ALB SG는 ECS 시뮬레이터 태스크 SG만 허용 |
+| 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service. Helm chart에 `IngressClassParams`(scheme internal) + `IngressClass`(`controller: eks.amazonaws.com/alb`) + `Ingress`를 넣으면 EKS Auto Mode가 ALB를 만든다(`infra/modules/apps/main.tf`의 예시를 internal·HTTP로 바꿔 쓴다). `app-a`·`app-c` 서브넷에 `kubernetes.io/role/internal-elb=1` 태그가 이미 있다(2026-10-20 확인). 헬스체크 `/readyz` | 인증서·도메인 불필요. 월 약 20달러. **접근 제한**: `api/mvp`에서는 ECS 태스크 SG가 아직 없으므로 처음에는 **VPC 대역만** 허용하고, `sim/ecs-image`에서 ECS SG가 생기면 그 SG만 허용하도록 좁힌다 |
 | 배포 도구 | **Helm chart (결정)** | Kafka와 같은 방식. values로 환경을 나눈다 |
 | 기존 `apps` 스택 | **쓰지 않는다 (결정)** | 공개 HTTPS Ingress(도메인·인증서 필수)와 WEB이 묶여 있다. 재영에게 api 전용으로 따로 간다고 알린다 |
 
 ## 10. 보안 (제안)
 
 - 인터넷에 열지 않는다(내부 ALB + SG).
-- **인증: 없음 (결정, MVP).** 내부 ALB와 SG(ECS 시뮬레이터 태스크 SG만 허용)로 막는다. 나중에 필요하면 API 키 헤더를 더한다.
+- **인증: 없음 (결정, MVP).** 내부 ALB와 SG로 막는다(처음엔 VPC 대역, ECS SG가 생기면 그 SG만). 나중에 필요하면 API 키 헤더를 더한다.
 - TLS: **HTTP 80으로 시작한다 (결정, MVP).** 내부 통신이고 ALB는 HTTPS가 필수가 아니다. 필요하면 나중에 인증서를 붙인다.
 - 비밀값(DB 비밀번호, API 키, Kafka 인증서)은 Git, 이미지, 로그에 넣지 않는다.
 
@@ -222,4 +225,4 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 
 ## 14. 남은 결정
 
-없음. Q1~Q8 모두 2026-10-20 결정(2절 표). 구현 세부(커서 형식, 묶음 상한, 재시도 간격, 풀 크기)는 `api/skeleton` 작업 지시서에서 정한다.
+없음. Q1~Q8 모두 2026-10-20 결정(2절 표). 구현 세부(커서 형식, 묶음 상한, 재시도 간격, 풀 크기)는 `api/mvp` 작업 지시서에서 정한다.
