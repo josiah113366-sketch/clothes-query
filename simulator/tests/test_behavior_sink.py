@@ -7,14 +7,13 @@ import pytest
 from sim.behavior import sink
 from sim.behavior.model import ClickEvent
 from sim.common.db import DatabaseTargetError, check_db_target
-from sim.common.timezone import KST
 
 EVENT = ClickEvent(
     "e-1", "view", "m-1", "0108775015", datetime(2026, 10, 12, 0, 30, 0, tzinfo=UTC), "s-1"
 )
 
 
-def test_jsonl_click_sink_writes_six_fields_in_kst(tmp_path: Path) -> None:
+def test_jsonl_click_sink_writes_six_fields_in_utc(tmp_path: Path) -> None:
     path = tmp_path / "sub" / "clicks.jsonl"
     click = sink.JsonlClickSink(path)
     click.publish(EVENT)
@@ -31,8 +30,8 @@ def test_jsonl_click_sink_writes_six_fields_in_kst(tmp_path: Path) -> None:
         "event_time",
         "session_id",
     }
-    assert record["event_time"] == "2026-10-12T09:30:00+09:00"
-    assert datetime.fromisoformat(record["event_time"]) == EVENT.event_time.astimezone(KST)
+    assert record["event_time"] == "2026-10-12T00:30:00Z"
+    assert datetime.fromisoformat(record["event_time"]) == EVENT.event_time
 
 
 def test_memory_and_null_sinks() -> None:
