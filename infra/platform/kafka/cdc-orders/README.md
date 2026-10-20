@@ -37,13 +37,17 @@ kubectl describe node | Select-String -Context 0,8 "Allocated resources"
 
 ```powershell
 terraform init "-backend-config=deployment.backend.hcl" "-lockfile=readonly"
-terraform plan -input=false "-var-file=deployment.local.tfvars" "-out=tfplan"
-terraform apply tfplan
+terraform plan -input=false "-var-file=deployment.local.tfvars.json" "-out=$env:TEMP\<스택>.tfplan"
+terraform apply "$env:TEMP\<스택>.tfplan"
 ```
+
+- 비공개 입력은 JSON이면 이름이 `deployment.local.tfvars.json`이어야 한다(`.tfvars`는 HCL로 읽는다). 받은 그대로 먼저 plan해서 `No changes`를 확인한 뒤 예시 값을 합친다.
+- plan 파일은 Git 제외 대상이 아니고 민감한 값이 들어갈 수 있다. **레포 밖(`$env:TEMP`)에 저장한다.**
+- 순서는 network → rds → workload-access. workload-access는 network의 S3 endpoint 허용 작업을 읽어 검사하므로 network를 먼저 apply한다.
 
 - PowerShell은 `-`로 시작하는 인자 안의 `.`에서 인자를 나눈다. **따옴표를 꼭 붙인다**(없으면 `Too many command line arguments`).
 - `deployment.backend.hcl`(Git 제외)은 두 줄이다: `bucket = "clothes-query-tfstate-<계정ID>"`, `region = "ap-northeast-1"`. 키(state 경로)는 각 스택의 `backend.tf`에 있다.
-- **`deployment.local.tfvars` 없이 plan하지 않는다.** 기본값으로 계산되어 rds에서 논리 복제 parameter group을 떼는 변경이 나온다.
+- **비공개 입력 없이 plan하지 않는다.** 기본값으로 계산되어 rds에서 논리 복제 parameter group을 떼는 변경이 나온다.
 
 - plan에 **삭제(destroy)나 교체(replace)가 하나라도 있으면 apply하지 않는다.**
 - 기대하는 변경: network는 endpoint 정책 변경 1, rds는 보안 그룹 규칙 생성 1, workload-access는 역할·정책·Pod Identity association 생성.
