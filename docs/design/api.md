@@ -88,6 +88,41 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
   - 시뮬레이터 코드에는 이미 `MemberSource`, `CatalogSource` 인터페이스가 있어 `ApiMemberSource`, `ApiCatalogSource`만 더하면 된다.
 - 지금 시뮬레이터 코드에서 `ApiOrderSink`, `ApiClickSink`로 바꿀 곳: `behavior/sink.py`(`OrderSink`, `ClickSink`), `member/live.py`(`INSERT`), `behavior/pool.py`(읽기).
 
+### 요청·응답 예시
+
+모두 `Content-Type: application/json`. 필드 이름은 지금 시뮬레이터가 DB에 넣는 이름 그대로다(`behavior/model.py`, `db/schema/`). ID와 시각은 시뮬레이터가 정해서 보낸다(Q1 A).
+
+```json
+// POST /v1/members  (PII 포함, 로그에 남기지 않는다. status·created_at은 서버가 채운다)
+{"member_id": "…", "name": "…", "email": "…", "phone": "…", "birth_date": "1995-03-14",
+ "password_hash": "…", "gender": "F", "age_band": "20s", "region_sigungu": "서울특별시 강남구",
+ "signup_channel": "app", "marketing_consent": true, "signup_at": "2026-10-20T06:20:01Z"}
+
+// POST /v1/orders  (주문 + 항목 한 번에)
+{"order_id": "…", "member_id": "…", "session_id": "…", "status": "PLACED", "total_amount": 15800,
+ "ordered_at": "2026-10-20T06:21:10Z",
+ "items": [{"order_item_id": "…", "article_id": "0108775015", "quantity": 2, "unit_price": 7900}]}
+
+// POST /v1/orders/{order_id}/payments
+{"payment_id": "…", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 15800,
+ "status": "FAILED", "failure_code": "PG_TIMEOUT",
+ "requested_at": "2026-10-20T06:21:20Z", "completed_at": "2026-10-20T06:21:23Z"}
+
+// PATCH /v1/orders/{order_id}
+{"status": "CANCELLED", "status_reason": "USER_REQUEST", "updated_at": "2026-10-20T06:25:00Z"}
+
+// POST /v1/events/clicks  (각 이벤트를 그대로 clickstream에 한 건씩, 키 session_id. Bronze 모양은 지금과 같다)
+{"events": [{"event_id": "…", "event_type": "view", "member_id": "…", "article_id": "0108775015",
+             "event_time": "2026-10-20T06:20:05Z", "session_id": "…"}]}
+
+// 응답: GET /v1/catalog,  GET /v1/members/changes?after=…
+{"items": [{"article_id": "0108775015", "price": 7900}], "next_cursor": "…"}
+{"added": ["…"], "removed": [], "next_cursor": "…"}
+
+// 오류
+{"error": "MEMBER_NOT_ACTIVE", "detail": "member_id …"}
+```
+
 ## 6. 데이터 규칙 (제안)
 
 - 업무 DB는 RDS **`postgres` DB**다(로컬 Docker는 `clothes`). 스키마는 `db/schema/`를 그대로 쓴다. API는 DDL을 바꾸지 않는다.
@@ -167,20 +202,23 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 ## 12. 범위 밖 (다음 문서·브랜치)
 
 - 시뮬레이터를 구성요소별 Fargate로 나눌 때의 **제어 방식**. 지금은 같은 컨테이너의 제어 파일(`FileControlSource`)로 소통하므로, 나누면 네트워크 제어가 필요하다 → `sim/console` 설계와 함께
-- 웹 관리 화면(시작·정지, 모드, 대시보드) → `sim/console`
+- 웹 관리 화면 → `sim/console`. 범위 메모(2026-10-20 사용자):
+  - **들어가는 것**: 시뮬레이터 시작·정지, 모드 전환, 장애 주입·정답표, 트래픽 보기
+  - 트래픽 숫자는 ① **시뮬레이터 자신**(보낸 방문·클릭·주문·결제 실패·가입, API 오류·재시도)과 ② **API `/metrics`**(받은 요청, 응답 코드별 수, 결제 FAILED, 응답 시간)를 나란히 보여 준다. 둘 다 ECS에서 닿는다(내부 ALB). RDS 직접 조회는 필요해지면 나중에
+  - **빠지는 것**: 업무 분석 대시보드(매출, 인기 상품 등)는 **Gold 담당**, Kafka 상세는 Kafka UI, 원인 분석은 AI 관제 에이전트
 - 시뮬레이터 이미지와 ECS 자원 → `sim/ecs-image` (ECS는 사용자가 직접)
 - 탈퇴, 리뷰 API
 
-## 13. 브랜치 계획 (제안)
+## 13. 브랜치 계획 (결정, 2026-10-20)
 
-| 순서 | 브랜치 | 영역 | 내용 |
-|---|---|---|---|
-| 1 | `docs/api-design` | docs | 이 문서, 새 영역 `api` 등록 |
-| 2 | `api/skeleton` | api | FastAPI 앱, 5절 엔드포인트, DB·Kafka 연결, 지표, 테스트, 로컬 Docker로 검증 |
-| 3 | `api/deploy` | api (+ 인프라 값) | ECR, Helm/매니페스트, 내부 ALB, DB 앱 계정, KafkaUser, EKS 배포 |
-| 4 | `sim/api-sink` | sim | `ApiOrderSink`, `ApiClickSink`, 읽기 API 사용. 로컬에서 API와 함께 검증 |
-| 5 | `sim/ecs-image` | sim | 시뮬레이터 이미지, Fargate (ECS는 사용자) |
-| 6 | `sim/console` | sim | 웹 관리 화면 |
+시간 때문에 API 구현·배포·시뮬레이터 연동을 **한 브랜치**로 합친다("PR 하나에 한 영역" 예외, PR 설명에 적는다).
+
+| 순서 | 브랜치 | 내용 |
+|---|---|---|
+| 1 | `docs/api-design` | 이 문서, 새 영역 `api` 등록 |
+| 2 | **`api/mvp`** (이름 제안) | ① FastAPI 앱(5절 엔드포인트, DB·Kafka 연결, 지표, 테스트, 로컬 Docker 검증, 부하 측정) ② 배포(ECR, Helm chart, 내부 ALB, DB 앱 계정, KafkaUser, EKS) ③ 시뮬레이터 연동(`ApiOrderSink`, `ApiClickSink`, `ApiMemberSource`, `ApiCatalogSource`, 재시도) |
+| 3 | `sim/ecs-image` | 시뮬레이터 이미지, Fargate (ECS는 사용자) |
+| 4 | `sim/console` | 웹 관리 화면 |
 
 ## 14. 남은 결정
 
