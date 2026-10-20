@@ -228,12 +228,17 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 
 ### 확인한 결과
 
-- `api/`: `ruff` 통과, `pytest` 37 통과(단위 32 + chart 5). 통합 6개는 **Docker Desktop이 꺼져 있어 건너뜀(아직 미실행)**
+- `api/`: `ruff` 통과, `pytest` 37 통과(단위 32 + chart 5), **통합 6 통과**(2026-10-21, 로컬 Docker Postgres 16·Kafka. 임시 스키마·임시 토픽은 모두 지워짐)
 - `simulator/`: `ruff` 통과, `pytest` **412 통과**(기존 398 그대로 + 새 14)
 - Kafka `verify/check.py` 통과(브로커 NodePool 불변, `api` ACL = `clickstream` Write·Describe + IdempotentWrite)
 - **계약 확인(일회성, 커밋 안 함)**: 실제 FastAPI 앱(가짜 저장소)에 실제 시뮬레이터 실행기를 붙여 시뮬레이터 시각 2일 실행 → 방문 90,715, 주문 4,119 = API 주문 4,119, 결제 4,293 = 4,293, 상태 변경 12,040건 모두 200, 클릭 490,475 = 490,475(묶음 981번), `member live` 가입 50 = 50. **4xx·5xx 0건**
 
+- **로컬 끝-끝**(실제 uvicorn API + 로컬 Postgres·Kafka + 시뮬레이터 `--backend api`): `member live` 가입 20 = DB +20(시작 인덱스 3,690으로 이어짐). `behavior live`(배속 60, 2분) 주문 117 = DB 117, 결제 117(SUCCESS 112·FAILED 5) = DB, 항목 421·금액 불일치 0, 상태 PAID 110·CANCELLED 3·PAYMENT_FAILED 4, 클릭 15,361 = Kafka `clickstream` +15,361. API 오류 응답 0, 시각 UTC 저장
+- **부하**: burst·배속 30 시뮬레이터 1개 → 초당 46 요청(클릭 이벤트 약 1,770/초), 전부 2xx, p95 ≤ 50ms. 4개 동시 → 초당 76 요청, 전부 2xx, p95 ≤ 250ms(이때는 시뮬레이터 CPU가 먼저 한계). **API 직접 동시 요청**(이미 있는 주문에 같은 상태 PATCH, 트랜잭션·행 잠금 포함): 동시 10 → **초당 208, p95 77ms**, 동시 30 → 초당 182, p95 267ms, 모두 200. 이 PC에서 프로세스 1개 한계는 초당 약 200이고, 실제 burst(초당 약 7)의 약 30배 여유. EKS Pod(CPU 0.5코어)는 더 낮을 수 있어 배포 후 다시 본다
+- 확인 뒤 로컬 DB 정리: 주문 2,300·항목 7,807·결제 2,346·새 회원 20 삭제 → 회원 103,690, 주문 3테이블 0(시작 전과 같음). 로컬 `clickstream` 토픽에는 시험 클릭이 남음(33 → 306,943건, 72시간 보관)
+- 발견: 시뮬레이터 시작 모드가 기존 control 파일(`.local/control.json`)의 `normal`로 덮어써진다(설계대로의 동작). 부하 측정은 비어 있는 control 파일 경로로 했다
+- 참고: `api_kafka_produced_total`은 전송 완료 알림을 받을 때 세므로 마지막 묶음만큼 실제 발행 수보다 잠깐 적다(토픽에는 모두 들어감)
+
 ### 남은 일
 
-- Docker Desktop을 켜고: API 통합 테스트, 로컬 끝-끝(실제 Postgres·Kafka), 부하 측정(burst 상당 초당 약 200 요청)
 - 사용자 EKS 적용(`api/README.md` 1~7단계) 후 "완료 확인"의 EKS 항목
