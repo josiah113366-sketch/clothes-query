@@ -358,12 +358,12 @@ plan에서 **삭제나 교체가 하나라도 나오면** apply하지 않고 알
 - S3 `day=20` 검증: `members-events` 파일 12개·**100,000줄·고유 member_id 100,000**·모두 `r`(`first` 1, `true` 99,998, `last` 1)·PII 키 0·offset 빈 구간 0. `orders` 4줄(c 2, u 2), `order-items` 1, `payments` 1, 시각 모두 `Z`.
 - 주문 흐름(테스트 A): 시험 주문의 c/u, 항목 c, 결제 c가 각 토픽과 Bronze에 도착. 키는 각 PK.
 - 중단 후 이어받기(테스트 B): 커넥터 `stopped` 동안 slot `active=false`, 넣은 주문이 재개 후 도착, 회원 snapshot 반복 없음(100,000 그대로).
-- WAL: heartbeat 적용 후 `retained` 1,752 bytes, `wal_status` `reserved`, `until_limit` 2,112MB.
+- WAL: heartbeat 적용 후 `retained` 1,752 bytes, `wal_status` `reserved`, `until_limit` 2,112MB. 이후 5분 주기 파일 전환을 넘겨도 64MB를 넘지 않음.
 - Kafka UI: 초록불, 토픽 6개, Connect 1개(port-forward).
 
 ### 알려진 한계·남은 일
 
-- **시험 데이터**: S3 `bronze/orders|order-items|payments/…/day=20/`에 시험 주문(ID `00000000-0000-4000-8000-…`)이 있다. RDS의 시험 행 처리도 사용자 결정 대기. 사용자 결정으로 S3는 그대로 둔다.
+- **시험 데이터 (사용자 결정으로 남김)**: RDS(`orders` 2, `order_items` 1, `payments` 1)와 S3 `bronze/orders|order-items|payments/…/day=20/`에 시험 주문이 있다. ID가 모두 `00000000-0000-4000-8000-`로 시작하므로 Silver에서 이 접두사로 거를 수 있다.
 - **Bronze에 섞인 예전 데이터**: `bronze/members-events/…/day=14`, `day=15`(21개 파일, `r` 100,000 + `c` 2,592)는 10-15에 올라간 로컬 시험 데이터로 보인다. 같은 회원이 중복되고 `c` 2,592명은 RDS에 없다. Silver 전에 정리 여부를 정해야 한다(사용자 결정으로 지금은 그대로). `bronze/reviews/`는 리뷰 시뮬레이터 데이터(정상).
 - **CDC 비밀번호 교체 보류**: 첫 Secret 만들기에서 값이 레포 루트 파일 이름으로 잠시 생겼다(커밋 안 함, 삭제함). 사용자 결정으로 교체는 나중에 한다.
 - **Terraform 비공개 입력**: 바꾼 `deployment.local.tfvars.json` 3개는 재영에게 전달했다. 비공개 입력 중 민감한 것은 계정 ID·state 버킷뿐이라, 나머지를 커밋된 `terraform.tfvars`로 옮기자는 제안을 남긴다.
