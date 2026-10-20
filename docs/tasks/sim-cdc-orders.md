@@ -1,6 +1,6 @@
 # 작업 지시서: sim/cdc-orders
 
-> 상태: 진행 전 · 브랜치: `sim/cdc-orders` (분기 기준: 최신 `main`, `sim/clickstream` 머지 후) · 이전 작업: `sim/cdc-local`, `sim/s3-sink-local`, `sim/clickstream` · 다음 작업: `sim/ecs-image`
+> 상태: 완료 · 브랜치: `sim/cdc-orders` (분기 기준: 최신 `main`, `sim/clickstream` 머지 후) · 이전 작업: `sim/cdc-local`, `sim/s3-sink-local`, `sim/clickstream` · 다음 작업: `sim/ecs-image`
 
 ## 목표
 
@@ -301,11 +301,72 @@ plan에서 **삭제나 교체가 하나라도 나오면** apply하지 않고 알
 - slot의 밀린 WAL이 256 MB(`max_slot_wal_keep_size`)에 가까워지면 알린다. 넘으면 slot이 무효가 되어 snapshot을 다시 해야 한다.
 - Kafka UI를 NetworkPolicy로 막을 수 없거나 읽기 전용이 되지 않으면 배포하지 말고 알린다.
 
-## 작업 결과 (머지 전에 작성한다. 사람과 AI가 나중에 이 브랜치가 무엇을 했는지 읽는 곳이다)
+## 작업 결과
 
-- **한 줄 요약:**
-- **무엇을 만들었나:**
-- **왜 그렇게 했나:**
-- **입력과 출력:**
-- **확인한 결과:**
-- **알려진 한계·남은 일:**
+- **한 줄 요약:** 실제 AWS에서 `RDS(postgres DB) → Debezium → Kafka(EKS, 업무 토픽 5개) → S3 Sink → clothes-query-datalake/bronze/` 경로를 띄우고, 회원 10만 명 snapshot과 주문 CDC가 Bronze까지 가는 것을 확인했다. 읽기 전용 Kafka UI도 붙였다.
+
+### 무엇을 만들었나
+
+- **Kafka (`infra/platform/kafka/`)**: `cdc-orders-values.yaml`(업무 토픽 5개 + `debezium-heartbeat.cdc`, Connect 1대, Kafka UI, lag exporter). chart에 `ui`(KafkaUser 읽기 ACL, Deployment, ClusterIP Service, Connect REST NetworkPolicy, broker listener 허용 대상) 추가. `verify/check.py`에 업무 values·UI·커넥터 검사(잘못된 입력 28 → 35개) 추가. 비공개 `runtime.local.yaml`(Connect 이미지 digest, Git 제외).
+- **커넥터 (`connectors/`)**: `cdc-source.yaml`(Debezium, Strimzi KafkaConnector), `bronze-s3-sink.yaml`(Confluent S3 Sink), `cdc-prepare.sql`(CDC 계정·권한·publication). README에 토픽 계약 표와 로컬과의 차이.
+- **Terraform 입력 예시 (`infra/platform/kafka/cdc-orders/`)**: network·rds·workload-access `*.tfvars.example`과 적용 안내 README. Terraform 코드(.tf)는 바꾸지 않았다.
+- **시뮬레이터**: 클릭 `event_time`을 UTC(`…Z`)로 발행(`behavior/sink.py`).
+- **기타**: `.gitignore`에 확장자 없는 `tfplan`.
+
+### 실제로 적용한 것 (사용자가 실행)
+
+| 대상 | 변경 |
+|---|---|
+| Terraform network | S3 endpoint 정책에 `s3:AbortMultipartUpload` (1 change) |
+| Terraform rds | RDS SG에 EKS 클러스터 SG → 5432 (1 add). 인스턴스·parameter group·재부팅 없음 |
+| Terraform workload-access | `bronze-s3-sink` 역할·정책·Pod Identity (3 add). `bronze/`만 Get/Put/AbortMultipartUpload |
+| RDS `postgres` DB | 계정 `clothes_cdc`(연결 한도 8), 회원 10컬럼만 컬럼 단위 SELECT, 주문 3테이블 SELECT, publication `cdc_pub`(4테이블) |
+| Secrets Manager (도쿄) | `clothes-query-dev-cdc-db` |
+| K8s Secret (`kafka`) | `cdc-database`(hostname, database=`postgres`, username, password), `rds-ca` |
+| Helm `cq-kafka` | rev 3 → 4 (→ 5: Kafka UI ACL). 브로커·NodePool·PVC 변경 없음, 노드 1대 그대로 |
+| KafkaConnector | `cdc-source`, `bronze-s3-sink` |
+| EKS 접근 | 재영이 `eks` 스택 `admin_trusted_principal_arns`에 `de-ai-22` 추가(관리자 역할) |
+
+### 왜 그렇게 했나 / 지시서와 다르게 한 것
+
+- **RDS 업무 DB는 `postgres`다.** 로컬 Docker는 `clothes`. 처음 Secret에 `clothes`를 넣어 `Publication autocreation is disabled`로 실패했고 `postgres`로 고쳤다.
+- **heartbeat 토픽 이름** `debezium-heartbeat.cdc`(`topic.heartbeat.prefix`). chart 토픽 이름 규칙이 `_`로 시작하는 이름을 받지 않는다.
+- **`snapshot.locking.mode: none`**: 회원은 컬럼 단위 권한뿐이라 `LOCK TABLE`을 못 한다. slot의 exported snapshot으로 일관성은 지켜진다.
+- **S3 Sink 키는 `StringConverter`**: `clickstream` 키는 JSON이 아니다. **`s3.part.size` 5MB**: 열린 파티션 15개 버퍼가 Connect 힙(512MB)을 넘지 않게.
+- **WAL heartbeat (지시서에 없던 것, 사용자 결정 B)**: 업무 테이블 변경이 없으면 slot 위치가 멈추고, RDS가 5분마다(`archive_timeout`) 64MB WAL 파일을 넘겨 계속 쌓였다(실측 64 → 512MB). `heartbeat.action.query = SELECT pg_logical_emit_message(true, 'heartbeat', …)` + Filter 변환(`dropMessage`, 토픽 `cdc.message`)으로 해결했다. 테이블에 쓰지 않고 Kafka·Bronze에도 가지 않는다.
+  - `message.prefix.exclude.list`로 버리면 위치가 기록되지 않아 안 됐다.
+  - 첫 인자 `false`(트랜잭션 밖 메시지)이면 COMMIT 위치(`lsn_commit`)가 안 움직여 안 됐다.
+  - 적용 후 `retained` 512MB → 1,752 bytes.
+- **연결 한도 8**: 실측 평소 4개(walsender 1 + Debezium General 2 + heartbeat 1), 재시작 겹침 여유.
+- **Kafka UI 그룹 ACL**: 10-18 시험이 남긴 빈 그룹(`infra-smoke-group` 등)을 UI가 못 읽어 상태 수집 전체가 실패했다(빨간불). 그 세 그룹에 읽기 ACL을 더했다. 그룹은 offset 보존 7일 뒤(2026-10-25 무렵) 저절로 사라지므로 그때 values에서 지운다.
+- **커넥터 정적 검사**는 pytest가 아니라 `infra/platform/kafka/verify/check.py`에 넣었다(시뮬레이터 venv에 PyYAML이 없어 새 의존성을 피함).
+
+### 입력과 출력 (다른 영역과 맞춘 약속)
+
+- 토픽 5개와 키는 위 "토픽 계약" 표. 모두 파티션 3, RF 1, 72시간.
+- Bronze 경로: `bronze/<토픽>/year=YYYY/month=MM/day=DD/<토픽>+<파티션>+<시작offset>.json` (JSON Lines, UTC, Kafka 레코드 시각 기준). 15분 또는 파티션당 10,000건마다 파일.
+- 관리 컬럼: `__op`(`r`/`c`/`u`), `__source_ts_ms`, `__source_snapshot`. **실시간 행의 `__source_snapshot`은 `false`가 아니라 `null`**(Debezium 3.7). Silver는 snapshot 여부를 `__op = 'r'`로 판단한다.
+- 시각은 모두 UTC `…Z`. 클릭 `event_time`도 이제 UTC.
+
+### 확인한 결과
+
+- 정적: `verify/check.py` 통과(잘못된 입력 35개 거부), `terraform validate`(network, rds, workload-access) 통과, 시뮬레이터 `ruff`·`pytest` 398 통과.
+- Terraform: 받은 비공개 입력으로 세 스택 모두 `No changes` 확인 → 값 추가 → plan이 예상과 같음(1 change / 1 add / 3 add, 삭제·교체 없음) → apply.
+- Helm diff: 지워진 것은 `infra-smoke` 토픽·KafkaUser뿐, NodePool 변경 없음. upgrade 후 토픽 9개·KafkaUser 2개·KafkaConnect Ready, 브로커 재시작 0, PVC 그대로, 노드 1대. 요청량 CPU 1,350m / 메모리 3,840Mi.
+- Connect: 플러그인 `PostgresConnector`, `S3SinkConnector` 확인. Pod Identity 환경 변수(`AWS_CONTAINER_CREDENTIALS_FULL_URI`) 확인.
+- snapshot: Kafka `members-events` 33,179 + 33,506 + 33,315 = **100,000**.
+- S3 `day=20` 검증: `members-events` 파일 12개·**100,000줄·고유 member_id 100,000**·모두 `r`(`first` 1, `true` 99,998, `last` 1)·PII 키 0·offset 빈 구간 0. `orders` 4줄(c 2, u 2), `order-items` 1, `payments` 1, 시각 모두 `Z`.
+- 주문 흐름(테스트 A): 시험 주문의 c/u, 항목 c, 결제 c가 각 토픽과 Bronze에 도착. 키는 각 PK.
+- 중단 후 이어받기(테스트 B): 커넥터 `stopped` 동안 slot `active=false`, 넣은 주문이 재개 후 도착, 회원 snapshot 반복 없음(100,000 그대로).
+- WAL: heartbeat 적용 후 `retained` 1,752 bytes, `wal_status` `reserved`, `until_limit` 2,112MB.
+- Kafka UI: 초록불, 토픽 6개, Connect 1개(port-forward).
+
+### 알려진 한계·남은 일
+
+- **시험 데이터**: S3 `bronze/orders|order-items|payments/…/day=20/`에 시험 주문(ID `00000000-0000-4000-8000-…`)이 있다. RDS의 시험 행 처리도 사용자 결정 대기. 사용자 결정으로 S3는 그대로 둔다.
+- **Bronze에 섞인 예전 데이터**: `bronze/members-events/…/day=14`, `day=15`(21개 파일, `r` 100,000 + `c` 2,592)는 10-15에 올라간 로컬 시험 데이터로 보인다. 같은 회원이 중복되고 `c` 2,592명은 RDS에 없다. Silver 전에 정리 여부를 정해야 한다(사용자 결정으로 지금은 그대로). `bronze/reviews/`는 리뷰 시뮬레이터 데이터(정상).
+- **CDC 비밀번호 교체 보류**: 첫 Secret 만들기에서 값이 레포 루트 파일 이름으로 잠시 생겼다(커밋 안 함, 삭제함). 사용자 결정으로 교체는 나중에 한다.
+- **Terraform 비공개 입력**: 바꾼 `deployment.local.tfvars.json` 3개는 재영에게 전달했다. 비공개 입력 중 민감한 것은 계정 ID·state 버킷뿐이라, 나머지를 커밋된 `terraform.tfvars`로 옮기자는 제안을 남긴다.
+- **slot 한도**: 실제 한도는 `wal_keep_size` 2GB. Connect가 멈추면 5분마다 64MB씩 늘어 약 2시간 40분 뒤 slot이 무효가 된다. slot lag 알람을 관제 지표로 둘 것.
+- **10-18 시험 정리 누락**: 소비자 그룹을 지우지 않았다. 시험 정리 절차에 그룹 삭제를 넣자고 인프라에 전달.
+- **다음 작업 `sim/ecs-image`**: ECS 시뮬레이터 → EKS Kafka(`clickstream`) 경로(내부 리스너, 클라이언트 인증서, SG), ECS → RDS SG(`database_clients`).
