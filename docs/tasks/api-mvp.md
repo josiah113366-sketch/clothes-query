@@ -209,11 +209,31 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 - 노드가 늘어나면(`kubectl get nodes` 2대) 바로 알린다.
 - 내부 ALB가 안 생기거나 public으로 생기면 적용을 멈추고 알린다.
 
-## 작업 결과 (머지 전에 작성한다)
+## 작업 결과 (진행 중 — EKS 적용 전)
 
-- **한 줄 요약:**
-- **무엇을 만들었나:**
-- **왜 그렇게 했나:**
-- **입력과 출력:**
-- **확인한 결과:**
-- **알려진 한계·남은 일:**
+### 지금까지 만든 것 (커밋됨)
+
+- `api/`: FastAPI 앱(`src/clothes_api/`), 단위 테스트 32개, chart 렌더 테스트 5개, 통합 테스트 6개(로컬 Docker 필요), Dockerfile(베이스 digest 고정, 비root), `deploy/sql/app-account.sql`, `deploy/chart/`(Deployment·Service·내부 ALB), `README.md`, `CLAUDE.md`
+- `infra/platform/kafka/cdc-orders-values.yaml`: KafkaUser `api`(`clickstream` 쓰기만), `clientNamespaces: [api]`. `verify/check.py`에 ACL·허용 대상 검사 추가
+- `simulator/`: `common/api.py`(urllib 클라이언트, 오류 3종), `member/api_store.py`, `behavior/api_sink.py`, CLI `--backend db|api`, `--click-sink api`, 실행기의 API 오류 처리(재시도, 비활성 회원 제외), 회원 목록 변경분 반영(5초), 테스트 14개
+- `.gitignore`: `api/**/*.local.yaml`. 루트 `CLAUDE.md` 폴더 표에 `api/`
+
+### 지시서와 다르게 한 것
+
+- **결제 금액 = 주문 총액 검사를 뺐다.** 컨트롤러의 데이터 오염(`ORDER_TOTAL_MISMATCH`)이 DB에서 총액을 바꾸면, 그 뒤 시뮬레이터의 정상 결제가 API에서 거절돼 실험이 달라진다. DB에도 그런 제약은 없다
+- **`404 MEMBER_NOT_FOUND`** 추가(주문의 회원이 아예 없을 때)
+- **`--click-sink api`** 추가: `--backend api`와 따로 고를 수 있게 했다(클릭만 API로 보내기 등)
+- HTTP 클라이언트는 **표준 라이브러리 `urllib`**(시뮬레이터 새 의존성 없음, 사용자 확인)
+- API dev 의존성에 `pyyaml`(chart 렌더 테스트)
+
+### 확인한 결과
+
+- `api/`: `ruff` 통과, `pytest` 37 통과(단위 32 + chart 5). 통합 6개는 **Docker Desktop이 꺼져 있어 건너뜀(아직 미실행)**
+- `simulator/`: `ruff` 통과, `pytest` **412 통과**(기존 398 그대로 + 새 14)
+- Kafka `verify/check.py` 통과(브로커 NodePool 불변, `api` ACL = `clickstream` Write·Describe + IdempotentWrite)
+- **계약 확인(일회성, 커밋 안 함)**: 실제 FastAPI 앱(가짜 저장소)에 실제 시뮬레이터 실행기를 붙여 시뮬레이터 시각 2일 실행 → 방문 90,715, 주문 4,119 = API 주문 4,119, 결제 4,293 = 4,293, 상태 변경 12,040건 모두 200, 클릭 490,475 = 490,475(묶음 981번), `member live` 가입 50 = 50. **4xx·5xx 0건**
+
+### 남은 일
+
+- Docker Desktop을 켜고: API 통합 테스트, 로컬 끝-끝(실제 Postgres·Kafka), 부하 측정(burst 상당 초당 약 200 요청)
+- 사용자 EKS 적용(`api/README.md` 1~7단계) 후 "완료 확인"의 EKS 항목
