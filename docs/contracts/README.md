@@ -7,9 +7,11 @@
 | 파일 | 역할 |
 |---|---|
 | 이 문서 | 데이터의 의미, 계층별 역할, 중복・격리・재처리・대조 약속 |
-| [format_rules.yaml](format_rules.yaml) | 프로그램에 전달할 필수 컬럼・타입・허용 값・조건 검사 초안 |
+| [format_rules.yaml](format_rules.yaml) | Silver가 읽는 원천 필수 컬럼・타입・허용 값・조건 검사와 별도 합의 대기 제안 |
 
-두 파일을 하나의 공통 계약 작업으로 관리한다. YAML의 필드 목록을 이 문서에 다시 복사하지 않는다. 아직 검사기나 Silver・Gold B 잡에 연결하지 않았다. YAML의 위치와 형식도 공동 검토 대상이며, 운영 파일 경로로 확정된 것은 아니다.
+두 파일을 하나의 공통 계약 작업으로 관리한다. YAML의 필드 목록을 이 문서에 다시 복사하지 않는다. 사용자 승인으로 `source_rules`를 공통 검사기 `pipelines/format_rules.py`와 거래 Silver에 연결했다. Gold B는 아직 연결하지 않았다. 로컬 기본 경로는 이 폴더의 format_rules.yaml이며 CLI --rules-path로 명시할 수 있다. 운영 배포 방식과 Gold B 연결은 공동 검토 대상이다.
+
+YAML 전체 status=proposed는 경로 간 미합의 제안을 포함한다는 뜻이다. 실행하는 원천 규칙만 source_rules_status=decided, version=0.1.0으로 구분한다. runtime_connected는 소비 경로별 상태(silver=true, gold_b=false)를 나타낸다. proposed_changes를 원천 검사에 자동으로 합치지 않는다.
 
 현재 범위는 주문・주문상품・결제다. 회원・클릭・리뷰・AI 결과 계약은 이번 YAML에 추측해서 추가하지 않는다. Gold A 지표의 상세 정의는 Gold A 설계에서 관리하고, 여기에는 다른 경로와 맞출 접점만 남긴다.
 
@@ -102,7 +104,7 @@ Gold A의 시간별 승인 금액・성공 주문 수는 같은 기간의 사업
 
 YAML의 `source_rules`는 현재 DDL을 충실히 옮긴 기준이다. `proposed_changes`의 UNKNOWN 허용안을 합의하기 전에는 소비 검사 기준으로 자동 적용하지 않는다. 향후 허용한다면 실패 코드의 열거 제한을 변경하고, 분류표에 없는 비어 있지 않은 코드를 통과시키도록 같은 버전으로 반영해야 한다. UNKNOWN은 분류 규칙이며 분류 실행은 Gold B 뷰의 책임이다.
 
-YAML은 여전히 검사 코드와 미연결이다(runtime_connected=false). 현재 Silver는 같은 DDL 허용 목록을 코드에서 검사한다. YAML 자동 실행・공통 규칙 버전 적용을 완료했다고 표시하지 않으며, 이번 수정으로 원천 DB 허용값을 변경하지 않는다.
+현재 Silver는 YAML source_rules의 허용 목록을 실제로 읽는다. Gold B 연결과 UNKNOWN 분류는 미적용이다. 이번 수정으로 원천 DB 허용값을 변경하지 않는다. 이전의 runtime_connected=false 단일 값은 경로별 연결 상태로 대체했다.
 
 ### 내용 충돌
 
@@ -136,7 +138,14 @@ YAML은 CDC 봉투를 해석하고 원천 타입을 정규화한 뒤의 업무 �
 - 오류 사유는 PARSE_ERROR / MISSING_FIELD / TYPE_MISMATCH / INVALID_VALUE로 맞추는 제안이다. 내용 충돌은 단일 행 형식 오류와 별도로 기록한다.
 - 정수는 bool이나 소수로 대체하지 않는다. timestamp는 시간대가 있는 시각으로 해석하고, UTC와 KST를 서로 다른 순간으로 저장하지 않는다.
 
-필드 검사 조건의 세부 목록은 YAML만 수정하며 이 문서에는 동일 목록을 중복 유지하지 않는다. 이번 YAML은 자체 초안 형식이며 범용 검증 도구의 표준 스키마가 아니다.
+필드 검사 조건의 세부 목록은 YAML에서 관리하고, 변경 시 버전과 source_rules_status를 함께 검토한다. 이 문서에는 동일 목록을 중복 유지하지 않는다. 자체 규칙 형식이며 범용 검증 도구의 표준 스키마가 아니다. 중복 키・알 수 없는 규칙/타입/조건・잘못된 참조・적용 미승인 상태는 실행 실패로 처리하며 기본값으로 통과시키지 않는다.
+
+### Silver 실행 연결
+
+- 거래 업무 필드 검사는 UUID・문자열・정수(bool 제외)・시간대 포함 시각・허용값・최솟값 및 YAML 조건 7개를 실행한다. CDC 봉투 처리・변경 순서・중복・여러 행의 금액 검사는 기존 Silver 코드에 남긴다.
+- 데이터 오류는 MISSING_FIELD/TYPE_MISMATCH/INVALID_VALUE와 rule_id를 기존 격리 기록에 남긴다. YAML 파일 누락/문법/정의 오류는 실행을 중단하고 이전 결과를 보존한다.
+- YAML을 실행 시작에 한 번 읽고 파일 내용의 SHA-256・version・경로・적용 범위・소비 경로를 dq_results와 current.json의 format_rules에 기록한다. 실행 중 파일이 바뀌어도 읽어 둔 같은 규칙으로 해당 실행을 마친다.
+- 실행 의존성은 pipelines/requirements.txt의 PyYAML이다. 테스트만을 위한 느슨한 UUID/PG 허용 모드는 제공하지 않는다. 정상 예시는 원천 형식과 같은 UUID 및 허용값을 사용한다.
 
 ## 8. 재처리・검증・대조
 
@@ -183,4 +192,4 @@ YAML은 CDC 봉투를 해석하고 원천 타입을 정규화한 뒤의 업무 �
 4. Silver・Gold B를 같은 버전으로 연결하고, 같은 범위로 최초 결과 비교.
 5. 처리 범위 기록을 기준으로 Silver → Gold A 재처리 연결과 복구 검증 구체화.
 
-이번 작업은 문서와 YAML 초안까지다. 검사 모듈, DAG, 새 데이터셋, 자동 대조 잡은 별도 구현 계획에서 다룬다.
+공통 검사기와 거래 Silver 연결까지 로컬 구현했다. Gold B 연결・DAG・자동 대조・운영 배포는 별도다. 공통 계약의 경로 간 제안을 모두 합의 또는 구현한 것으로 표시하지 않는다.

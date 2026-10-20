@@ -1,9 +1,12 @@
-# 검토용 규칙 초안. 운영 검사기에 아직 연결하지 않는다.
+# 원천 규칙은 승인된 Silver 검사기에 연결한다. 경로 간 제안은 별도다.
 # source_rules는 db/schema/004_orders.sql의 정규화된 업무 행 규칙이다.
 # proposed_changes는 합의 후 반영할 안이며 실행 규칙으로 자동 합치지 않는다.
-version: "0.1.0-draft"
+version: "0.1.0"
 status: proposed
-runtime_connected: false
+source_rules_status: decided
+runtime_connected:
+  silver: true
+  gold_b: false
 input_stage: normalized_business_row
 source:
   path: db/schema/004_orders.sql
