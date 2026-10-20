@@ -6,6 +6,9 @@
 
 ## 2026-10-20 승인된 연결 작업
 
+- **추가 승인: 실패 코드 불일치 정리.** 현재 원천 DDL/YAML의 5개 허용 코드 검사를 Silver에 추가했다. 누락・비문자열・미등록・성공 코드 오류를 구분하고 payments DQ에 source-ddl-five-codes.v1 정책을 남긴다. 검사 버전은 transactions.v4다. 미등록 문자열 수용/UNKNOWN 분류는 공통 계약 및 Silver README에 제안으로 유지하며 코드에는 적용하지 않는다. 기존 테스트 파일에서 허용 5개・잘못된 코드 구분을 검증한다. YAML 런타임 연결은 아직 아니다.
+- **실패 코드 검증 결과:** DDL・계약 브랜치 YAML・Silver의 5개 허용 목록 일치 확인. 전체 Silver/Gold A/거래 연결 테스트 43개 통과(7.49초). 기존 연결 시험의 임시 TEMP 코드는 PG_TIMEOUT으로 교체했다. 공백 검사 통과. 별도 테스트 파일・Gold B 분류 코드는 만들지 않았다.
+
 - **추가 승인: 주문상품 합계 검사.** 전체 입력 확인 시 고유 order_item_id의 수량×단가 합과 현재 주문 total_amount를 비교한다. 불일치 시 주문/이력/연결 결과를 보류하고 세 금액을 오류 기록에 남긴다. 미확인 입력은 UNVERIFIED, 상품 미도착은 PENDING_REFERENCE, 상품 오류는 ITEM_ERROR로 구분한다. 검사 버전은 transactions.v3이며 별도 결과 파일을 만들지 않고 orders DQ의 amount_checks에 남긴다. 수정 후 재처리와 Gold A 복구를 기존 테스트에서 확인한다.
 
 - 사용자 승인으로 Gold A 작업 폴더에서 선행 Silver 입력 연결과 후행 Gold A 보류를 함께 검증한다. 아직 Silver 원격 브랜치・PR에 반영한 것은 아니다.

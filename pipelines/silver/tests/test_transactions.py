@@ -32,6 +32,33 @@ def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
 
 
+def test_failure_codes_follow_source_allowlist_and_preserve_valid_failed_attempts():
+    codes = ["INSUFFICIENT_BALANCE", "CARD_LIMIT_EXCEEDED", "CARD_DECLINED", "PG_TIMEOUT", "PG_ERROR"]
+    payments = [payment("P" + str(index), attempt_no=index + 1, status="FAILED", failure_code=code)
+                for index, code in enumerate(codes)]
+    result = build_silver([order()], [], payments)
+    assert not result["quarantined_records"]
+    assert {row["failure_code"] for row in result["payment_attempts"]} == set(codes)
+    assert summary(result, "payments")["failure_code_policy"] == "source-ddl-five-codes.v1"
+
+
+def test_missing_unknown_and_non_string_failure_codes_have_distinct_errors():
+    cases = [(None, "MISSING_FIELD"), ("", "MISSING_FIELD"), ("  ", "MISSING_FIELD"),
+             (123, "TYPE_MISMATCH"), ("PG_NEW_ERROR", "INVALID_VALUE"),
+             ("UNKNOWN", "INVALID_VALUE"), (" PG_TIMEOUT ", "INVALID_VALUE")]
+    rows = [payment("bad" + str(index), attempt_no=index + 1, status="FAILED", failure_code=code)
+            for index, (code, _) in enumerate(cases)]
+    rows += [payment("good", attempt_no=20, status="FAILED", failure_code="PG_ERROR"),
+             payment("success-with-code", attempt_no=21, status="SUCCESS", failure_code="PG_ERROR"),
+             payment("success-without-code", attempt_no=22)]
+    result = build_silver([order()], [], rows)
+    errors = {row["record_key"]: row for row in result["quarantined_records"]}
+    for index, (_, expected) in enumerate(cases):
+        assert errors["bad" + str(index)]["error_code"] == expected
+    assert errors["success-with-code"]["error_code"] == "INVALID_VALUE"
+    assert {row["payment_id"] for row in result["payment_attempts"]} == {"good", "success-without-code"}
+
+
 def test_cdc_uses_source_time_and_holds_equal_time_conflicts():
     first = order(status="PLACED", updated_at="2026-10-14T02:00:00+09:00",
                   __op="c", __source_ts_ms=1000, __source_snapshot=None)
