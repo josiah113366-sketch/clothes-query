@@ -142,7 +142,8 @@ def load_jsonl(location: str, allow_cdc: bool = False) -> tuple[list[dict], list
 
 
 def run_local(locations: dict[str, str], output_root: str, dataset: str,
-              check_version: str, build, input_complete: bool = False) -> dict:
+              check_version: str, build, input_complete: bool = False,
+              rule_metadata: dict | None = None) -> dict:
     """입력 전체를 계산하고, 결과 묶음 저장 완료 후 current.json만 원자적으로 교체한다."""
     if any("://" in location for location in (*locations.values(), output_root)):
         raise ValueError("이번 입출력은 로컬 경로만 지원합니다")
@@ -171,6 +172,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
         manifest = {
             "status": "INCOMPLETE" if result["quarantined_records"] else "PASS",
             "check_version": check_version,
+            **({"format_rules": rule_metadata} if rule_metadata is not None else {}),
             "input_completeness": "DECLARED_COMPLETE" if input_complete else "UNVERIFIED",
             "run_id": snapshot.name,
             "input_files": sources,

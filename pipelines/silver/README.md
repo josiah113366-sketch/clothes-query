@@ -74,18 +74,26 @@ Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 �
 - 같은 결제·주문상품 키에 다른 업무 내용이 있으면 그 키의 모든 행을 분리한다. 같은 키의 한 행이 형식 오류인 경우도 다른 행만 임의로 채택하지 않는다.
 - 주문의 일부 변경에 오류·동시각 충돌이 있으면 해당 주문 전체를 보류해 이전 상태를 최신 상태로 잘못 내보내지 않는다. 관련 주문상품·결제는 `DEPENDENCY_BLOCKED`로 남긴다.
 - 현재 입력에 주문이 없는 항목은 `PENDING_REFERENCE`다. 잘못된 결제라고 확정하거나 실제 주문 저장소를 자동 조회하지 않는다. 주문을 포함한 입력으로 재실행해야 한다.
-- 실패 코드 누락・미등록・성공 결제의 실패 코드, 0 이하 금액・단가를 분리한다. 실패 결제는 원천 DDL의 5개 코드만 허용한다. 미등록 코드 허용과 Gold B UNKNOWN 분류는 합의 전 제안이며 실행하지 않는다. YAML의 전체 검사기는 연결하지 않았다.
+- 실패 코드 누락・미등록・성공 결제의 실패 코드, 0 이하 금액・단가를 분리한다. 원천 YAML의 5개 실패 코드만 허용한다. 미등록 코드 허용과 Gold B UNKNOWN 분류는 합의 전 제안이며 실행하지 않는다.
 - `input_count = accepted_count + duplicate_count + quarantined_count`다. accepted_count는 중복 제거 후 채택한 입력 기록 수이며 주문 현재 상태 출력 수와 다를 수 있다. 오류는 행당 첫 사유를 기록하고, conflict_count/pending_count는 격리 행 수의 부분집합이다.
 - 오류·대기 정보가 있는 데이터셋은 INCOMPLETE다. 후속 Gold A/저장 코드는 **모든 dq_results를 확인**해 영향 범위를 완전한 결과로 표시하지 않아야 한다. 정상 출력이 존재한다는 것만으로 전체 처리 완료로 판단하지 않는다.
-- `check_version=transactions.v4`는 이 계산 코드의 검사 버전이다. 공통 YAML 규칙 버전을 적용했다고 표시하지 않는다. 원본 파일/줄・실행 ID를 남기지만 파일 이름의 시작 offset에 줄 번호를 더해 Kafka 행 offset을 추정하지 않는다.
+- `check_version=transactions.v5`는 계산 코드 버전이다. 공통 YAML 버전/내용 해시는 별도 format_rules에 기록한다. 원본 파일/줄・실행 ID를 남기지만 파일 이름의 시작 offset에 줄 번호를 더해 Kafka 행 offset을 추정하지 않는다.
+
+### 공통 YAML 실행 연결
+
+`pipelines/format_rules.py`가 `docs/contracts/format_rules.yaml`의 source_rules만 읽는다. 실행 의존성은 `pipelines/requirements.txt`다. --rules-path로 별도 규칙 파일을 명시할 수 있고, 생략하면 실행 위치와 무관하게 저장소 기본 경로를 사용한다. 파일은 해당 작업 브랜치에도 함께 포함한다.
+
+CDC 형태 확인 → YAML 단일 행 검사 → 기존 정제/중복/참조/금액 검사 순서다. UUID, PG/결제 수단/상태 허용값, 취소/환불 사유 등 YAML의 23개 필드・7개 조건을 검사한다. Python 정제 함수에는 해당 허용 목록/조건을 중복 유지하지 않고 시각 변환・출력 계산을 남긴다.
+
+규칙 파일은 실행에 한 번 로드한다. dq_results와 current.json에 format_rules의 version・sha256・path・scope・consumer를 남긴다. 오류에는 rule_id를 추가한다. 규칙 파일 누락/문법 오류/지원하지 않는 규칙/미승인 연결은 행 격리로 숨기지 않고 실행 실패로 전달하며 이전 current.json을 유지한다. Gold B・리뷰에는 적용하지 않으며 proposed_changes는 실행하지 않는다.
 
 ### 실패 코드 검사: 현재 기준과 제안
 
 현재 FAILED는 INSUFFICIENT_BALANCE・CARD_LIMIT_EXCEEDED・CARD_DECLINED・PG_TIMEOUT・PG_ERROR만 허용한다. 누락/빈 문자열/공백은 MISSING_FIELD, 비문자열은 TYPE_MISMATCH, 비어 있지 않은 미등록 문자열은 INVALID_VALUE다. SUCCESS의 코드는 NULL이어야 한다. 코드의 대소문자/공백을 임의로 보정하거나 UNKNOWN으로 채우지 않는다.
 
-미등록 코드는 격리하고 결제 DQ를 INCOMPLETE로 남긴다. 정상 실패 코드는 정상 payment_attempts에 남으며 업무상 실패 자체를 데이터 오류로 취급하지 않는다. payments DQ에는 failure_code_policy=source-ddl-five-codes.v1을 기록한다. 영향 범위와 Gold A 처리에는 기존 품질/보류 규칙을 적용한다.
+미등록 코드는 격리하고 결제 DQ를 INCOMPLETE로 남긴다. 정상 실패 코드는 정상 payment_attempts에 남으며 업무상 실패 자체를 데이터 오류로 취급하지 않는다. payments DQ의 failure_code_policy는 format_rules:<버전>이고 정확한 규칙 내용은 format_rules.sha256으로 추적한다. 영향 범위와 Gold A 처리에는 기존 품질/보류 규칙을 적용한다.
 
-**제안・미적용:** 새 PG 코드가 도입될 때 실제 실패를 집계에서 누락하지 않도록 비어 있지 않은 미등록 문자열을 받아 원본 코드를 보존하고, Gold B의 원인 분류만 UNKNOWN으로 두는 안이다. 누락/비문자열까지 허용하는 안이 아니다. 오타/비정상 코드 포함 위험과 Gold B 정책을 공동 합의한 뒤 소비 규칙 버전을 함께 변경해야 한다. 원천 DDL 변경 여부는 별도이며 현재는 5개 허용 기준을 유지한다. 공통 계약 원본은 docs/data-contracts 브랜치의 docs/contracts/README.md와 format_rules.yaml에 있다.
+**제안・미적용:** 새 PG 코드가 도입될 때 실제 실패를 집계에서 누락하지 않도록 비어 있지 않은 미등록 문자열을 받아 원본 코드를 보존하고, Gold B의 원인 분류만 UNKNOWN으로 두는 안이다. 누락/비문자열까지 허용하는 안이 아니다. 오타/비정상 코드 포함 위험과 Gold B 정책을 공동 합의한 뒤 소비 규칙 버전을 함께 변경해야 한다. 원천 DDL 변경 여부는 별도이며 현재는 5개 허용 기준을 유지한다. 공통 계약 설명은 docs/contracts/README.md를 참고한다.
 
 ### 주문상품 금액 합계 검사
 

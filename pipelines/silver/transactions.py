@@ -8,22 +8,15 @@ import argparse
 from collections import defaultdict
 from zoneinfo import ZoneInfo
 
+from pipelines.format_rules import DEFAULT_RULES, FormatError, FormatRules
+
 from .common import RowError as _RowError
 from .common import integer as _integer
-from .common import required_text as _required_text
 from .common import run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v4"
-FAILURE_CODES = {
-    "INSUFFICIENT_BALANCE", "CARD_LIMIT_EXCEEDED", "CARD_DECLINED", "PG_TIMEOUT", "PG_ERROR",
-}
-FAILURE_CODE_POLICY = "source-ddl-five-codes.v1"
-ORDER_STATUSES = {
-    "PLACED", "PAID", "SHIPPED", "DELIVERED",
-    "PAYMENT_FAILED", "CANCELLED", "REFUNDED",
-}
+CHECK_VERSION = "transactions.v5"
 
 
 def _version(raw: dict, row: dict) -> tuple:
@@ -48,18 +41,11 @@ def _check_cdc(raw: dict, name: str) -> None:
 
 
 def _order(raw: dict) -> dict:
-    status = _required_text(raw, "status")
-    if status not in ORDER_STATUSES:
-        raise _RowError("status", "INVALID_VALUE", "지원하지 않는 주문 상태입니다")
     ordered, updated = _time(raw, "ordered_at"), _time(raw, "updated_at")
-    if updated < ordered:
-        raise _RowError("updated_at", "INVALID_VALUE", "주문 생성보다 변경 시각이 빠릅니다")
     return {
-        "order_id": _required_text(raw, "order_id"),
-        "member_id": _required_text(raw, "member_id"),
-        "session_id": _required_text(raw, "session_id"),
-        "status": status, "status_reason": raw.get("status_reason"),
-        "total_amount": _integer(raw, "total_amount", 1),
+        "order_id": raw["order_id"], "member_id": raw["member_id"], "session_id": raw["session_id"],
+        "status": raw["status"], "status_reason": raw.get("status_reason"),
+        "total_amount": raw["total_amount"],
         "ordered_at_utc": ordered.isoformat(),
         "ordered_at_kst": ordered.astimezone(KST).isoformat(),
         "updated_at_utc": updated.isoformat(),
@@ -68,36 +54,20 @@ def _order(raw: dict) -> dict:
 
 
 def _item(raw: dict) -> dict:
-    quantity, unit_price = _integer(raw, "quantity", 1), _integer(raw, "unit_price", 1)
+    quantity, unit_price = raw["quantity"], raw["unit_price"]
     return {
-        "order_item_id": _required_text(raw, "order_item_id"),
-        "order_id": _required_text(raw, "order_id"),
-        "article_id": _required_text(raw, "article_id"),
+        "order_item_id": raw["order_item_id"], "order_id": raw["order_id"], "article_id": raw["article_id"],
         "quantity": quantity, "unit_price": unit_price,
         "item_amount": quantity * unit_price,
     }
 
 
 def _payment(raw: dict) -> dict:
-    status = _required_text(raw, "status")
-    if status not in {"SUCCESS", "FAILED"}:
-        raise _RowError("status", "INVALID_VALUE", "지원하지 않는 결제 결과입니다")
-    code = raw.get("failure_code")
-    if status == "FAILED":
-        _required_text(raw, "failure_code")
-        if code not in FAILURE_CODES:
-            raise _RowError("failure_code", "INVALID_VALUE", "원천 허용 목록에 없는 실패 코드입니다")
-    elif code is not None:
-        raise _RowError("failure_code", "INVALID_VALUE", "성공 결제의 실패 코드는 NULL이어야 합니다")
     requested, completed = _time(raw, "requested_at"), _time(raw, "completed_at")
-    if completed < requested:
-        raise _RowError("completed_at", "INVALID_VALUE", "결과 시각이 요청 시각보다 빠릅니다")
     return {
-        "payment_id": _required_text(raw, "payment_id"),
-        "order_id": _required_text(raw, "order_id"),
-        "attempt_no": _integer(raw, "attempt_no", 1),
-        "method": _required_text(raw, "method"), "pg": _required_text(raw, "pg"),
-        "amount": _integer(raw, "amount", 1), "status": status, "failure_code": code,
+        "payment_id": raw["payment_id"], "order_id": raw["order_id"],
+        "attempt_no": raw["attempt_no"], "method": raw["method"], "pg": raw["pg"],
+        "amount": raw["amount"], "status": raw["status"], "failure_code": raw.get("failure_code"),
         "requested_at_utc": requested.isoformat(),
         "requested_at_kst": requested.astimezone(KST).isoformat(),
         "completed_at_utc": completed.isoformat(),
@@ -108,9 +78,13 @@ def _payment(raw: dict) -> dict:
 def build_silver(
     orders: list[dict], order_items: list[dict], payments: list[dict],
     input_complete: bool = False,
+    rules: FormatRules | None = None,
 ) -> dict[str, list[dict]]:
     """정상 상세 4개와 격리·품질 결과 반환. 입출력 실패는 호출자가 처리한다."""
     inputs = {"orders": orders, "order_items": order_items, "payments": payments}
+    rules = rules if rules is not None else FormatRules()
+    if not set(inputs) <= set(rules.datasets):
+        raise ValueError("거래 데이터셋의 공통 규칙이 부족합니다")
     keys = {"orders": "order_id", "order_items": "order_item_id", "payments": "payment_id"}
     normalizers = {"orders": _order, "order_items": _item, "payments": _payment}
     normalized: dict[str, dict[int, dict]] = {name: {} for name in inputs}
@@ -149,9 +123,12 @@ def build_silver(
                 continue
             try:
                 _check_cdc(raw, name)
+                rules.validate(name, raw)
                 normalized[name][index] = normalizers[name](raw)
-            except _RowError as exc:
+            except (_RowError, FormatError) as exc:
                 reject(name, index, exc.field, exc.code, str(exc))
+                if isinstance(exc, FormatError):
+                    errors[name][index]["rule_id"] = exc.rule_id
 
     groups: dict[str, dict[str, list[int]]] = {}
     for name, rows in inputs.items():
@@ -323,6 +300,7 @@ def build_silver(
         quality.append({
             "source_dataset": name, "check_name": "transaction_processing",
             "check_version": CHECK_VERSION, "status": "INCOMPLETE" if issues else "PASS",
+            "format_rules": rules.reference(),
             "input_count": len(rows), "accepted_count": accepted,
             "quarantined_count": len(issues),
             "duplicate_count": len(rows) - len(issues) - accepted,
@@ -336,7 +314,7 @@ def build_silver(
             quality[-1]["amount_checks"] = amount_checks
             quality[-1]["amount_check_policy"] = "items-sum-v1; requires-declared-complete-input"
         elif name == "payments":
-            quality[-1]["failure_code_policy"] = FAILURE_CODE_POLICY
+            quality[-1]["failure_code_policy"] = "format_rules:" + rules.version
     output["quarantined_records"], output["dq_results"] = quarantine, quality
     # 정상 결과에서 사라진 후보도 추적한다. 회원 정보·원문 대신 집계 연결 최소값만 보존.
     candidates = []
@@ -363,12 +341,14 @@ def build_silver(
 
 
 def run(orders_input: str, order_items_input: str, payments_input: str,
-        output_root: str, input_complete: bool = False) -> dict:
+        output_root: str, input_complete: bool = False, rules_path: str | None = None) -> dict:
+    rules = FormatRules(rules_path if rules_path is not None else DEFAULT_RULES)
     return run_local(
         {"orders": orders_input, "order_items": order_items_input, "payments": payments_input},
         output_root, "transactions", CHECK_VERSION,
-        lambda rows: build_silver(rows["orders"], rows["order_items"], rows["payments"], input_complete),
+        lambda rows: build_silver(rows["orders"], rows["order_items"], rows["payments"], input_complete, rules),
         input_complete=input_complete,
+        rule_metadata=rules.reference(),
     )
 
 
@@ -380,9 +360,10 @@ def main() -> None:
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--input-complete", action="store_true",
                         help="필요한 전체 이력과 참조 입력을 준비했음을 실행자가 확인. 자동 입수 검증 아님")
+    parser.add_argument("--rules-path", help="공통 규칙 YAML. 생략 시 저장소 docs/contracts/format_rules.yaml")
     args = parser.parse_args()
     manifest = run(args.orders_input, args.order_items_input, args.payments_input, args.output_root,
-                   args.input_complete)
+                   args.input_complete, args.rules_path)
     print(f"거래 Silver {manifest['status']}: {manifest['output_counts']}")
     print(f"대표 결과: {manifest['manifest_path']}")
 
