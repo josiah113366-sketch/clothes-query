@@ -263,6 +263,30 @@ def test_order_total_mismatch_blocks_trade_and_funnel_then_reprocessing_recovers
     assert gold_funnels(silver, silver, silver, gold, scope_aware=True)["status"] == "PASS"
 
 
+def test_unknown_failure_code_is_quarantined_and_gold_stays_previous_until_corrected(tmp_path):
+    example = make_example(tmp_path)
+    source, silver, gold = example["source"], str(example["silver"]), str(example["gold"])
+    payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
+    failed = next(row for row in payments if row["status"] == "FAILED")
+    failed["failure_code"] = "PG_NEW_ERROR"
+    write(source / "payments.jsonl", payments)
+    manifest = silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                                   str(source / "payments.jsonl"), silver, input_complete=True)
+    assert any(row["field"] == "failure_code" and row["error_code"] == "INVALID_VALUE"
+               for row in read_rows(manifest["outputs"]["quarantined_records"]))
+    pointer = Path(example["manifests"]["transactions"]["manifest_path"])
+    before = pointer.read_bytes()
+    with pytest.raises(ValueError, match="품질"):
+        gold_transactions(silver, gold, silver)
+    assert pointer.read_bytes() == before
+    failed["failure_code"] = "PG_TIMEOUT"
+    write(source / "payments.jsonl", payments)
+    silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                        str(source / "payments.jsonl"), silver, input_complete=True)
+    recovered = gold_transactions(silver, gold, silver, scope_aware=True)
+    assert recovered["status"] == "PASS"
+
+
 def test_all_six_datasets_and_late_payment(tmp_path):
     example = make_example(tmp_path)
     output = {name: read_outputs(value) for name, value in example["manifests"].items()}

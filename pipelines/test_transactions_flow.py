@@ -42,7 +42,7 @@ class TransactionFlowTest(unittest.TestCase):
             {
                 "payment_id": "P-1", "order_id": "O-1", "attempt_no": 1,
                 "method": "CARD", "pg": "PG-1", "amount": 3000,
-                "status": "FAILED", "failure_code": "TEMP",
+                "status": "FAILED", "failure_code": "PG_TIMEOUT",
                 "requested_at": "2026-10-14T00:40:00+09:00",
                 "completed_at": "2026-10-14T00:41:00+09:00",
             },
