@@ -1,28 +1,27 @@
 """거래 Silver → Gold A 연결에서 계산 기준이 유지되는지 확인한다."""
 
-import unittest
 import json
 import tempfile
+import unittest
 from pathlib import Path
 
-from pipelines.silver.transactions import run as run_silver
-from pipelines.gold_a.transactions import run as run_gold
-
 from pipelines.gold_a.transactions import build_gold
+from pipelines.gold_a.transactions import run as run_gold
 from pipelines.silver.transactions import build_silver
+from pipelines.silver.transactions import run as run_silver
 
 
 class TransactionFlowTest(unittest.TestCase):
     def test_retry_payment_and_product_totals_are_idempotent(self):
         orders = [
             {
-                "order_id": "O-1", "member_id": "M-1", "session_id": "S-1",
+                "order_id": "00000000-4000-8000-0000-000000000009", "member_id": "00000000-4000-8000-0000-000000000006", "session_id": "00000000-4000-8000-0000-00000000001e",
                 "status": "PLACED", "status_reason": None, "total_amount": 3000,
                 "ordered_at": "2026-10-14T00:30:00+09:00",
                 "updated_at": "2026-10-14T00:30:00+09:00",
             },
             {
-                "order_id": "O-1", "member_id": "M-1", "session_id": "S-1",
+                "order_id": "00000000-4000-8000-0000-000000000009", "member_id": "00000000-4000-8000-0000-000000000006", "session_id": "00000000-4000-8000-0000-00000000001e",
                 "status": "PAID", "status_reason": None, "total_amount": 3000,
                 "ordered_at": "2026-10-14T00:30:00+09:00",
                 "updated_at": "2026-10-14T01:10:00+09:00",
@@ -30,25 +29,25 @@ class TransactionFlowTest(unittest.TestCase):
         ]
         items = [
             {
-                "order_item_id": "I-1", "order_id": "O-1", "article_id": "A-1",
+                "order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1",
                 "quantity": 2, "unit_price": 1000,
             },
             {
-                "order_item_id": "I-2", "order_id": "O-1", "article_id": "A-2",
+                "order_item_id": "00000000-4000-8000-0000-000000000002", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-2",
                 "quantity": 1, "unit_price": 1000,
             },
         ]
         payments = [
             {
-                "payment_id": "P-1", "order_id": "O-1", "attempt_no": 1,
-                "method": "CARD", "pg": "PG-1", "amount": 3000,
+                "payment_id": "00000000-4000-8000-0000-000000000011", "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1,
+                "method": "CARD", "pg": "PG_A", "amount": 3000,
                 "status": "FAILED", "failure_code": "PG_TIMEOUT",
                 "requested_at": "2026-10-14T00:40:00+09:00",
                 "completed_at": "2026-10-14T00:41:00+09:00",
             },
             {
-                "payment_id": "P-2", "order_id": "O-1", "attempt_no": 2,
-                "method": "CARD", "pg": "PG-1", "amount": 3000,
+                "payment_id": "00000000-4000-8000-0000-000000000012", "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 2,
+                "method": "CARD", "pg": "PG_A", "amount": 3000,
                 "status": "SUCCESS", "failure_code": None,
                 "requested_at": "2026-10-14T01:00:00+09:00",
                 "completed_at": "2026-10-14T01:10:00+09:00",
@@ -101,11 +100,11 @@ class TransactionFlowTest(unittest.TestCase):
             root = Path(temporary)
             source = root / "input"
             source.mkdir()
-            order = {"order_id": "O-1", "member_id": "M-1", "session_id": "S-1", "status": "PAID",
+            order = {"order_id": "00000000-4000-8000-0000-000000000009", "member_id": "00000000-4000-8000-0000-000000000006", "session_id": "00000000-4000-8000-0000-00000000001e", "status": "PAID",
                      "status_reason": None, "total_amount": 2000,
                      "ordered_at": "2026-10-14T00:30:00+09:00", "updated_at": "2026-10-14T01:00:00+09:00"}
-            item = {"order_item_id": "I-1", "order_id": "O-1", "article_id": "0001", "quantity": 2, "unit_price": 1000}
-            payment = {"payment_id": "P-1", "order_id": "O-1", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
+            item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001", "quantity": 2, "unit_price": 1000}
+            payment = {"payment_id": "00000000-4000-8000-0000-000000000011", "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
                        "amount": 2000, "status": "SUCCESS", "failure_code": None,
                        "requested_at": "2026-10-14T00:59:00+09:00", "completed_at": "2026-10-14T01:00:00+09:00"}
             locations = {}

@@ -2,6 +2,7 @@
 import json
 from datetime import date
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
@@ -49,16 +50,16 @@ def make_example(root):
     write(source / "variants.jsonl", variants)
     silver_products(str(source / "designs.jsonl"), str(source / "variants.jsonl"), str(silver))
     orders, items, payments = [], [], []
-    specifications = [("O1", "S1", "0001", 2, 10000, "2026-10-18T23:50:00+09:00", "2026-10-19T00:10:00+09:00", "SUCCESS"),
-                      ("O2", "S3", "0001", 1, 10000, "2026-10-18T11:00:00+09:00", "2026-10-18T11:01:00+09:00", "SUCCESS"),
-                      ("O3", "S4", "0002", 1, 5000, "2026-10-18T12:00:00+09:00", "2026-10-18T12:01:00+09:00", "FAILED")]
+    specifications = [("00000000-4000-8000-0000-00000000000e", "00000000-4000-8000-0000-000000000020", "0001", 2, 10000, "2026-10-18T23:50:00+09:00", "2026-10-19T00:10:00+09:00", "SUCCESS"),
+                      ("00000000-4000-8000-0000-00000000000f", "00000000-4000-8000-0000-000000000022", "0001", 1, 10000, "2026-10-18T11:00:00+09:00", "2026-10-18T11:01:00+09:00", "SUCCESS"),
+                      ("00000000-4000-8000-0000-000000000010", "00000000-4000-8000-0000-000000000023", "0002", 1, 5000, "2026-10-18T12:00:00+09:00", "2026-10-18T12:01:00+09:00", "FAILED")]
     for order_id, session, article, quantity, price, ordered, completed, status in specifications:
-        orders.append({"order_id": order_id, "member_id": "M-DEMO", "session_id": session,
+        orders.append({"order_id": order_id, "member_id": "00000000-4000-8000-0000-000000000007", "session_id": session,
                        "status": "PAID" if status == "SUCCESS" else "PAYMENT_FAILED", "status_reason": None,
                        "total_amount": quantity * price, "ordered_at": ordered, "updated_at": completed})
-        items.append({"order_item_id": "I" + order_id, "order_id": order_id, "article_id": article,
+        items.append({"order_item_id": str(uuid5(NAMESPACE_URL, "item:" + order_id)), "order_id": order_id, "article_id": article,
                       "quantity": quantity, "unit_price": price})
-        payments.append({"payment_id": "P" + order_id, "order_id": order_id, "attempt_no": 1,
+        payments.append({"payment_id": str(uuid5(NAMESPACE_URL, "payment:" + order_id)), "order_id": order_id, "attempt_no": 1,
                          "method": "CARD", "pg": "PG_A", "amount": quantity * price, "status": status,
                          "failure_code": None if status == "SUCCESS" else "PG_TIMEOUT",
                          "requested_at": ordered, "completed_at": completed})
@@ -66,14 +67,14 @@ def make_example(root):
         write(source / (name + ".jsonl"), rows)
     silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"), str(source / "payments.jsonl"), str(silver))
     clicks = []
-    for session, article, kind, at in (("S1", "0001", "view", "2026-10-18T10:00:00+09:00"),
-                                     ("S1", "0001", "view", "2026-10-18T10:01:00+09:00"),
-                                     ("S1", "0001", "cart_add", "2026-10-18T10:02:00+09:00"),
-                                     ("S2", "0001", "view", "2026-10-18T10:00:00+09:00"),
-                                     ("S3", "0001", "view", "2026-10-18T10:30:00+09:00"),
-                                     ("S4", "0002", "view", "2026-10-18T11:00:00+09:00"),
-                                     ("S4", "0002", "cart_add", "2026-10-18T11:02:00+09:00")):
-        clicks.append({"event_id": "E" + str(len(clicks)), "event_type": kind, "member_id": "M-DEMO",
+    for session, article, kind, at in (("00000000-4000-8000-0000-000000000020", "0001", "view", "2026-10-18T10:00:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000020", "0001", "view", "2026-10-18T10:01:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000020", "0001", "cart_add", "2026-10-18T10:02:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000021", "0001", "view", "2026-10-18T10:00:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000022", "0001", "view", "2026-10-18T10:30:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000023", "0002", "view", "2026-10-18T11:00:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000023", "0002", "cart_add", "2026-10-18T11:02:00+09:00")):
+        clicks.append({"event_id": "E" + str(len(clicks)), "event_type": kind, "member_id": "00000000-4000-8000-0000-000000000007",
                        "article_id": article, "session_id": session, "event_time": at})
     write(source / "clicks.jsonl", clicks)
     silver_clicks(str(source / "clicks.jsonl"), str(silver))
@@ -114,12 +115,12 @@ def write_reviews(source, rows):
 def prepare_scoped_trade(example, conflict=True, complete=True):
     source, silver = example["source"], example["silver"]
     payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
-    payments = [row for row in payments if row["payment_id"] != "PO1" or row["amount"] == 20000]
+    payments = [row for row in payments if row["payment_id"] != "e6e94ad2-c079-5128-aa8c-5210ed303bbf" or row["amount"] == 20000]
     for row in payments:
-        if row["order_id"] == "O3":
+        if row["order_id"] == "00000000-4000-8000-0000-000000000010":
             row["status"], row["failure_code"] = "SUCCESS", None
     if conflict:
-        original = next(row for row in payments if row["payment_id"] == "PO1")
+        original = next(row for row in payments if row["payment_id"] == "e6e94ad2-c079-5128-aa8c-5210ed303bbf")
         payments.append({**original, "amount": 99999, "completed_at": "2026-10-19T01:10:00+09:00"})
     write(source / "payments.jsonl", payments)
     silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
@@ -172,8 +173,8 @@ def test_scoped_changed_order_key_also_finds_previously_published_order(tmp_path
     source = example["source"]
     payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
     # 이번 입력에 O1 결제 후보가 없어도 이전 공개에 반영한 P/O1을 따라가야 한다.
-    changed = next(row for row in payments if row["payment_id"] == "PO1")
-    changed.update(order_id="O3", amount=5000, requested_at="2026-10-18T12:00:00+09:00",
+    changed = next(row for row in payments if row["payment_id"] == "e6e94ad2-c079-5128-aa8c-5210ed303bbf")
+    changed.update(order_id="00000000-4000-8000-0000-000000000010", amount=5000, requested_at="2026-10-18T12:00:00+09:00",
                    completed_at="2026-10-18T12:01:00+09:00")
     write(source / "payments.jsonl", payments)
     silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
@@ -237,10 +238,10 @@ def test_order_total_mismatch_blocks_trade_and_funnel_then_reprocessing_recovers
     source, silver, gold = example["source"], str(example["silver"]), str(example["gold"])
     orders = [json.loads(line) for line in (source / "orders.jsonl").read_text().splitlines()]
     payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
-    original = next(row for row in orders if row["order_id"] == "O1")["total_amount"]
+    original = next(row for row in orders if row["order_id"] == "00000000-4000-8000-0000-00000000000e")["total_amount"]
     # 주문 총액과 성공 결제만 바꿔 상품 합계 오류를 독립적으로 검출한다.
-    next(row for row in orders if row["order_id"] == "O1")["total_amount"] += 1000
-    next(row for row in payments if row["order_id"] == "O1")["amount"] += 1000
+    next(row for row in orders if row["order_id"] == "00000000-4000-8000-0000-00000000000e")["total_amount"] += 1000
+    next(row for row in payments if row["order_id"] == "00000000-4000-8000-0000-00000000000e")["amount"] += 1000
     write(source / "orders.jsonl", orders)
     write(source / "payments.jsonl", payments)
     manifest = silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
@@ -253,8 +254,8 @@ def test_order_total_mismatch_blocks_trade_and_funnel_then_reprocessing_recovers
     assert held_trade["status"] == held_funnel["status"] == "PARTIAL"
     assert all(row["key"] == {} for row in held_trade["held_scopes"])
     assert read_outputs(held_trade) == read_outputs(example["manifests"]["transactions"])
-    next(row for row in orders if row["order_id"] == "O1")["total_amount"] = original
-    next(row for row in payments if row["order_id"] == "O1")["amount"] = original
+    next(row for row in orders if row["order_id"] == "00000000-4000-8000-0000-00000000000e")["total_amount"] = original
+    next(row for row in payments if row["order_id"] == "00000000-4000-8000-0000-00000000000e")["amount"] = original
     write(source / "orders.jsonl", orders)
     write(source / "payments.jsonl", payments)
     silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
@@ -299,9 +300,9 @@ def test_all_six_datasets_and_late_payment(tmp_path):
     assert first["view_to_paid_rate"] == 0.666667
     assert first["cart_order_sessions"] == 1
     detail = output["funnels"]["funnel_session_product.jsonl"]
-    late = next(row for row in detail if row["session_id"] == "S1")
+    late = next(row for row in detail if row["session_id"] == "00000000-4000-8000-0000-000000000020")
     assert late["first_view_at_kst"].startswith("2026-10-18") and late["first_paid_at_kst"].startswith("2026-10-19")
-    direct = next(row for row in detail if row["session_id"] == "S3")
+    direct = next(row for row in detail if row["session_id"] == "00000000-4000-8000-0000-000000000022")
     assert direct["has_paid"] and not direct["has_cart"]
     reviews = output["reviews"]["year=2026/month=10/day=19/part-00000.jsonl"]
     first_review = next(row for row in reviews if row["article_id"] == "0001")
@@ -362,16 +363,16 @@ def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
     orders = read_rows(str(example["source"] / "orders.jsonl"))
     items = read_rows(str(example["source"] / "items.jsonl"))
     payments = read_rows(str(example["source"] / "payments.jsonl"))
-    orders = [dict(row, total_amount=30000) if row["order_id"] == "O1" else row for row in orders]
-    items = [dict(row, quantity=3) if row["order_id"] == "O1" else row for row in items]
-    payments = [dict(row, amount=30000) if row["order_id"] == "O1" else
-                dict(row, status="SUCCESS", failure_code=None) if row["order_id"] == "O3" else row for row in payments]
+    orders = [dict(row, total_amount=30000) if row["order_id"] == "00000000-4000-8000-0000-00000000000e" else row for row in orders]
+    items = [dict(row, quantity=3) if row["order_id"] == "00000000-4000-8000-0000-00000000000e" else row for row in items]
+    payments = [dict(row, amount=30000) if row["order_id"] == "00000000-4000-8000-0000-00000000000e" else
+                dict(row, status="SUCCESS", failure_code=None) if row["order_id"] == "00000000-4000-8000-0000-000000000010" else row for row in payments]
     for name, rows in (("orders", orders), ("items", items), ("payments", payments)):
         write(example["source"] / (name + ".jsonl"), rows)
     silver_transactions(str(example["source"] / "orders.jsonl"), str(example["source"] / "items.jsonl"),
                         str(example["source"] / "payments.jsonl"), str(example["silver"]))
     clicks = read_rows(str(example["source"] / "clicks.jsonl"))
-    write(example["source"] / "clicks.jsonl", [row for row in clicks if not (row["session_id"] == "S1" and row["event_type"] == "cart_add")])
+    write(example["source"] / "clicks.jsonl", [row for row in clicks if not (row["session_id"] == "00000000-4000-8000-0000-000000000020" and row["event_type"] == "cart_add")])
     silver_clicks(str(example["source"] / "clicks.jsonl"), str(example["silver"]))
     trade = gold_transactions(str(example["silver"]), str(example["gold"]), str(example["silver"]), scope)
     funnels = gold_funnels(str(example["silver"]), str(example["silver"]), str(example["silver"]), str(example["gold"]), scope)
@@ -381,8 +382,8 @@ def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
     # 전체 주문 시간 지표는 상품 필터와 관계없이 해당 날짜 전체를 다시 계산한다.
     assert sum(row["approved_amount"] for row in output["order_sales_hourly.jsonl"]) == 45000
     details = read_outputs(funnels)["funnel_session_product.jsonl"]
-    assert not next(row for row in details if row["session_id"] == "S1")["has_cart"]
-    assert not next(row for row in details if row["session_id"] == "S4")["has_paid"]
+    assert not next(row for row in details if row["session_id"] == "00000000-4000-8000-0000-000000000020")["has_cart"]
+    assert not next(row for row in details if row["session_id"] == "00000000-4000-8000-0000-000000000023")["has_paid"]
     assert trade["previous_result"] and funnels["previous_result"]
     # 조회만 한 방문은 0/0 비율을 0이 아니라 NULL로 표현한다.
     check = [{"status": "PASS", "quarantined_count": 0}]
