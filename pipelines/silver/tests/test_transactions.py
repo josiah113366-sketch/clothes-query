@@ -1,7 +1,7 @@
 """행 오류 격리, 충돌 그룹, 연결 대기와 기존 정상 결과를 확인한다."""
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -30,6 +30,80 @@ def payment(identifier="P-1", **changes):
 
 def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
+
+
+def test_cdc_uses_source_time_and_holds_equal_time_conflicts():
+    first = order(status="PLACED", updated_at="2026-10-14T02:00:00+09:00",
+                  __op="c", __source_ts_ms=1000, __source_snapshot=None)
+    later = order(status="PAID", updated_at="2026-10-14T01:00:00+09:00",
+                  __op="u", __source_ts_ms=2000, __source_snapshot=None)
+    result = build_silver([later, first, dict(later)], [], [])
+    assert result["orders_current"][0]["status"] == "PAID"
+    assert [row["status"] for row in result["order_status_history"]] == ["PLACED", "PAID"]
+    assert summary(result, "orders")["duplicate_count"] == 1
+    clash = {**later, "__source_ts_ms": 1000}
+    blocked = build_silver([first, clash], [], [])
+    assert not blocked["orders_current"]
+    assert {row["error_code"] for row in blocked["quarantined_records"]} == {"CONTENT_CONFLICT"}
+    deleted = build_silver([{**first, "__op": "d"}], [], [])
+    assert deleted["quarantined_records"][0]["error_code"] == "UNSUPPORTED_CDC"
+
+
+def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
+    source, target = tmp_path / "input", tmp_path / "silver"
+    source.mkdir()
+    rows = {
+        "orders": [order(__op="r", __source_ts_ms=1000)],
+        "items": [{"order_item_id": "I1", "order_id": "O-1", "article_id": "0001",
+                   "quantity": 1, "unit_price": 1000, "__op": "r", "__source_ts_ms": 1000}],
+        "payments": [payment(__op="c", __source_ts_ms=2000),
+                     payment(amount=2000, __op="c", __source_ts_ms=2000)],
+    }
+    for name, values in rows.items():
+        (source / (name + ".json")).write_text(
+            "".join(json.dumps(row) + "\n" for row in values), encoding="utf-8")
+    manifest = run(*(str(source / (name + ".json")) for name in rows), str(target), input_complete=True)
+    assert manifest["status"] == "INCOMPLETE"
+    assert manifest["input_completeness"] == "DECLARED_COMPLETE"
+    candidates = [json.loads(line) for line in Path(manifest["outputs"]["impact_candidates"]).read_text(
+        encoding="utf-8").splitlines()]
+    assert len([row for row in candidates if row["source_dataset"] == "payments"]) == 2
+    assert all("member_id" not in row for row in candidates)
+    assert all("source" in row for row in candidates)
+
+
+def test_order_item_sum_requires_complete_input_and_counts_duplicates_once():
+    item = {"order_item_id": "I1", "order_id": "O-1", "article_id": "0001",
+            "quantity": 2, "unit_price": 500}
+    unchecked = build_silver([order(total_amount=1200)], [item], [], input_complete=False)
+    assert summary(unchecked, "orders")["amount_checks"][0]["status"] == "UNVERIFIED"
+    assert not unchecked["quarantined_records"]
+    passed = build_silver([order()], [item, dict(item)], [payment()], input_complete=True)
+    assert summary(passed, "orders")["amount_checks"][0]["item_total_amount"] == 1000
+    assert summary(passed, "orders")["amount_checks"][0]["status"] == "PASS"
+    assert len(passed["orders_current"]) == 1
+    result = build_silver([order(total_amount=1200), order("O-2")],
+                         [item, {**item, "order_item_id": "I2", "order_id": "O-2"}],
+                         [payment(amount=1200), payment("P2", order_id="O-2")], input_complete=True)
+    assert [row["order_id"] for row in result["orders_current"]] == ["O-2"]
+    assert [row["order_id"] for row in result["order_status_history"]] == ["O-2"]
+    assert [row["payment_id"] for row in result["payment_attempts"]] == ["P2"]
+    issue = next(row for row in result["quarantined_records"] if row["error_code"] == "ORDER_TOTAL_MISMATCH")
+    assert (issue["order_total_amount"], issue["item_total_amount"], issue["amount_difference"]) == (1200, 1000, -200)
+
+
+def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches():
+    missing = build_silver([order()], [], [payment()], input_complete=True)
+    assert not missing["orders_current"] and not missing["payment_attempts"]
+    assert summary(missing, "orders")["amount_checks"][0]["status"] == "PENDING_REFERENCE"
+    assert all(row["error_code"] != "ORDER_TOTAL_MISMATCH" for row in missing["quarantined_records"])
+    item = {"order_item_id": "I1", "order_id": "O-1", "article_id": "0001",
+            "quantity": 1, "unit_price": 500}
+    broken = build_silver([order()], [item, {**item, "order_item_id": "I2", "unit_price": 0}],
+                          [payment()], input_complete=True)
+    check = summary(broken, "orders")["amount_checks"][0]
+    assert check["status"] == "ITEM_ERROR" and "item_total_amount" not in check
+    assert not broken["orders_current"]
 
 
 def test_bad_payment_does_not_stop_normal_orders_and_reexecution():
