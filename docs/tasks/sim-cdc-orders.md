@@ -97,7 +97,7 @@ payments ─┘                          │ payments       │
 | publication 컬럼 목록 | 쓰지 않는다 (네 테이블 전체) | 사용자가 `column.include.list` 방식을 고름. 필요해지면 PostgreSQL 16 컬럼 목록 publication으로 한 겹 더 막을 수 있다 |
 | `topic.prefix` | `cdc` | 로컬과 같다. Debezium 기본 토픽은 `cdc.public.<테이블>` |
 | 토픽 이름 바꾸기 | `RegexRouter` 3개: `cdc\.public\.members` → `members-events`, `cdc\.public\.order_items` → `order-items`, `cdc\.public\.(orders\|payments)` → `$1` | 계약 이름과 Debezium 기본 이름이 다르다 |
-| heartbeat | `heartbeat.interval.ms=10000`. 토픽 `__debezium-heartbeat.cdc`(파티션 1)를 **미리 만든다** | 주문이 없는 시간에도 slot의 확인 위치가 앞으로 가서 WAL이 쌓이지 않는다 |
+| heartbeat | `heartbeat.interval.ms=10000`, `topic.heartbeat.prefix=debezium-heartbeat`. 토픽 `debezium-heartbeat.cdc`(파티션 1)를 **미리 만든다** (chart 토픽 이름 규칙이 `_`로 시작하는 이름을 받지 않는다) | 주문이 없는 시간에도 slot의 확인 위치가 앞으로 가서 WAL이 쌓이지 않는다 |
 | 토픽 만들기 | 모두 KafkaTopic(Helm values)으로 **미리** 만든다. 커넥터의 `topic.creation.*`는 쓰지 않는다 | chart의 Connect 설정이 `topic.creation.enable: false`이고 ACL이 이름을 하나하나 허용한다 |
 | Connect | **1대**, ECR에 있는 이미지(Debezium PostgreSQL 3.7.0.Final + Confluent S3 Sink 12.1.13), digest는 `runtime.local.yaml`에만 | chart가 같은 노드에 Connect 두 대를 두지 못하게 막는데 노드가 1대다 |
 | 변환기 | 커넥터에서 `key/value.converter.schemas.enable=false` | worker 기본값은 `true`다. 로컬 Bronze 모양(스키마 없는 JSON)과 맞춘다 |
@@ -117,7 +117,7 @@ payments ─┘                          │ payments       │
 `single-node-values.yaml` **뒤에** 병합하는 파일이다. `measurement-values.yaml`은 넣지 않는다(그래서 `infra-smoke` 토픽과 계정이 빠진다). 비밀값은 없다.
 
 - `kafka.enabled: true`
-- `topics`: 위 5개(파티션 3, `retentionMs: 259200000`) + `__debezium-heartbeat.cdc`(파티션 1, `resourceName: debezium-heartbeat-cdc`. K8s 이름에 `_`를 쓸 수 없다)
+- `topics`: 위 5개(파티션 3, `retentionMs: 259200000`) + `debezium-heartbeat.cdc`(파티션 1)
 - `connect.enabled: true`, `replicas: 1`
   - `produceTopics`: CDC 토픽 4개 + heartbeat 토픽
   - `consumeTopics`: 5개 토픽 전부(S3 Sink)
@@ -297,7 +297,7 @@ plan에서 **삭제나 교체가 하나라도 나오면** apply하지 않고 알
 - Helm diff에 `infra-smoke` 말고 지워지거나 바뀌는 것(브로커, NodePool, PVC, Connect 내부 토픽)이 있으면 **멈춘다.**
 - Terraform plan에 삭제나 교체가 있으면 apply하지 않는다.
 - snapshot이 컬럼 권한 오류로 실패하면 권한을 넓히지 말고 알린다.
-- Connect나 Kafka UI가 노드 자원 부족으로 `Pending`이면 노드 상한을 올리지 말고 알린다(비용이 늘어난다).
+- **EKS Auto Mode는 자리가 없으면 `Pending`으로 기다리지 않고 노드를 새로 띄운다**(t3a.large 1대 추가 ≈ 월 65달러). upgrade 전에 노드의 CPU 요청량 여유(이번에 더하는 요청 합계: Connect 250m + Kafka UI 100m)를 확인하고, upgrade 뒤 `kubectl get nodes`가 1대인지 본다. 늘었으면 바로 알린다. 노드 상한은 올리지 않는다.
 - slot의 밀린 WAL이 256 MB(`max_slot_wal_keep_size`)에 가까워지면 알린다. 넘으면 slot이 무효가 되어 snapshot을 다시 해야 한다.
 - Kafka UI를 NetworkPolicy로 막을 수 없거나 읽기 전용이 되지 않으면 배포하지 말고 알린다.
 
