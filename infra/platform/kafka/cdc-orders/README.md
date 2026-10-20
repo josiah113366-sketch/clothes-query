@@ -72,20 +72,21 @@ terraform apply "$env:TEMP\<스택>.tfplan"
 
 ## 3. K8s Secret (`kafka` namespace)
 
-값을 명령행에 쓰지 않도록 임시 폴더 파일을 거쳐 만들고 바로 지운다. **임시 폴더 경로에 한글이 없어야 한다.** Windows 사용자 이름이 한글이면 `$env:TEMP` 경로가 kubectl에 깨져 넘어가 `cannot find the file`이 난다.
+값을 명령행에 쓰지 않도록 임시 폴더 파일을 거쳐 만들고 바로 지운다. 파일은 `[IO.File]::WriteAllText`로 쓴다. `Set-Content`는 여러 줄을 한꺼번에 붙여 넣을 때 실패하면 **값을 파일 이름으로 착각해 레포 루트에 만들 수 있다**(비밀번호가 파일 이름이 된다). 끝나면 `git status`에 낯선 파일이 없는지 본다. **임시 폴더 경로에 한글이 없어야 한다.** Windows 사용자 이름이 한글이면 `$env:TEMP` 경로가 kubectl에 깨져 넘어가 `cannot find the file`이 난다.
 
 ```powershell
 $cdc = aws secretsmanager get-secret-value --secret-id clothes-query-dev-cdc-db --query SecretString --output text --region ap-northeast-1 | ConvertFrom-Json
 $rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text --region ap-northeast-1
 $d = New-Item -ItemType Directory -Path ("E:\cdc-tmp-" + [guid]::NewGuid())   # 레포 밖, 한글 없는 경로
-Set-Content -NoNewline "$d\hostname" $rdsHost
-Set-Content -NoNewline "$d\database" "postgres"   # 업무 테이블이 있는 DB (clothes 아님)
-Set-Content -NoNewline "$d\username" $cdc.username
-Set-Content -NoNewline "$d\password" $cdc.password
-kubectl create secret generic cdc-database -n kafka --from-file="$d\hostname" --from-file="$d\database" --from-file="$d\username" --from-file="$d\password"
+[IO.File]::WriteAllText("$d\hostname", $rdsHost)
+[IO.File]::WriteAllText("$d\database", "postgres")   # RDS 업무 DB (로컬 Docker는 clothes)
+[IO.File]::WriteAllText("$d\username", $cdc.username)
+[IO.File]::WriteAllText("$d\password", $cdc.password)
 Invoke-WebRequest https://truststore.pki.rds.amazonaws.com/ap-northeast-1/ap-northeast-1-bundle.pem -OutFile "$d\bundle.pem"
+Get-ChildItem $d   # 파일 5개, password Length 32 인지 확인
+kubectl create secret generic cdc-database -n kafka --from-file="$d\hostname" --from-file="$d\database" --from-file="$d\username" --from-file="$d\password"
 kubectl create secret generic rds-ca -n kafka --from-file="$d\bundle.pem"
-Remove-Item -Recurse -Force $d; Remove-Variable cdc, rdsHost
+Remove-Item -Recurse -Force $d; Remove-Variable cdc, rdsHost, d
 ```
 
 ## 4. Helm upgrade (같은 release `cq-kafka`)
