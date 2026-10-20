@@ -1,6 +1,6 @@
 # 업무 API(WAS) 설계
 
-상태: 제안 · 2026-10-20 · 담당: WAS 담당(사용자) · 관련: `sim/cdc-orders`(PR 대기), `simulator/`
+상태: 제안(일부 결정) · 2026-10-20 · 담당: WAS 담당(사용자) · 관련: `sim/cdc-orders`(PR 대기), `simulator/`
 
 이 문서의 상태 표현은 **결정 / 제안 / 미정**이다(루트 `CLAUDE.md`). **결정**만 구현한다. **제안**과 **미정**은 사용자가 고른 뒤 결정으로 옮기고, 그다음 작업 지시서(`docs/tasks/api-*.md`)를 쓴다.
 
@@ -25,6 +25,13 @@ API를 거치면:
 | 실행 위치 | **EKS에 새 Pod**로 띄운다 |
 | 리뷰 시뮬레이터 | 리뷰 시뮬레이터 ECS와는 **따로** 운영한다 (이 API를 쓰지 않는다) |
 | 웹 관리 화면 | 나중에 ECS에서 돌린다 (이 문서 범위 밖, `sim/console`) |
+| 책임 나누기 (Q1) | **A. 얇은 API.** 확률·배속·폭주, ID, 시각, 결제 결과는 모두 ECS 시뮬레이터가 정하고, API는 검증하고 저장만 한다 (4절) |
+| namespace (Q3) | 새 namespace **`api`**. Kafka 인증서는 `kafka` namespace에서 복사하는 절차를 만든다 (7절) |
+| 인증 (Q4) | **없음** (MVP). 내부 ALB와 SG로만 막는다 (10절) |
+| 데이터 오염 주입 (Q5) | 컨트롤러가 **DB에 직접** 쓴다(지금 유지). 오염 전용 DB 계정을 따로 둔다 (11절) |
+| 배포 도구 (Q6) | **Helm** (9절) |
+| replica (Q7) | **1개**로 시작한다. 부하는 ECS 시뮬레이터가 정하고 API는 버티기만 한다. burst 부하는 `api/skeleton`에서 측정해 늘릴지 정한다 (9절) |
+| 기존 `apps` 스택 (Q8) | **쓰지 않는다.** 공개 HTTPS(도메인·인증서 필수)와 WEB이 묶여 있다. api Helm chart가 **내부 HTTP(80) ALB**를 만든다. ALB는 HTTPS가 필수가 아니다 (9절) |
 
 ## 3. 전체 구조 (제안)
 
@@ -53,7 +60,7 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 | B. 실제 API | API가 ID, 시각(서버 시각)을 정하고, WAS 안의 **가짜 PG**가 결제 결과를 정한다. PG 장애도 WAS에 주입한다 | 더 실제 같다. 장애가 API 지표(결제 API 실패율)로 자연스럽게 드러난다 | 배속을 쓰면 시각이 실제 시각과 어긋난다. 재현성과 기존 테스트 기준값이 깨진다. 장애 주입 경로를 새로 만들어야 한다 |
 | C. 섞기 | ID와 시각은 시뮬레이터(A), **결제만** WAS의 가짜 PG(B) | 결제 장애가 API 쪽 지표로 드러난다 | 두 방식이 섞여 복잡하다. 결제 결과의 재현성이 깨진다 |
 
-**제안은 A로 시작하는 것이다.** 지금 시뮬레이터, 컨트롤러, 테스트를 그대로 쓰면서 API 경로부터 만든다. 필요해지면 결제만 C로 옮길 수 있게 엔드포인트를 나눠 둔다.
+**결정: A** (2026-10-20). 이전 제안 근거: 지금 시뮬레이터, 컨트롤러, 테스트를 그대로 쓰면서 API 경로부터 만든다. 필요해지면 결제만 C로 옮길 수 있게 엔드포인트를 나눠 둔다.
 
 ## 5. 엔드포인트 (제안, 4절 A 기준)
 
@@ -96,9 +103,7 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 - **KafkaUser `api`**: `clickstream` 쓰기만(`clients`에 한 줄). `acks=all`, idempotent.
 - 발행 실패 정책: 지금 시뮬레이터처럼 **버리고 센다**(주문 흐름을 막지 않는다). 대신 실패 수를 지표로 낸다.
 - **인증서 전달 (미정)**: Strimzi는 KafkaUser Secret을 `kafka` namespace에만 만든다. WAS가 다른 namespace(`api`)에 있으면 Secret을 옮기는 절차가 필요하다. 인프라 chart도 이 부분을 비워 뒀다.
-  - ① WAS를 `kafka` namespace에 둔다 (간단, 대신 namespace가 섞인다)
-  - ② `api` namespace를 두고 Secret 복사 절차를 만든다 (인증서 갱신 때 다시 복사해야 함)
-  - ③ 다른 방법(External Secrets 등)
+  - **결정: ② `api` namespace + Secret 복사 절차.** 인증서가 갱신되면 다시 복사해야 하므로 절차를 문서화한다. (버린 대안: `kafka` namespace에 두기, External Secrets)
 - Kafka 브로커 NetworkPolicy에 WAS를 허용 대상으로 더한다(`kafka.clientNamespaces` 또는 Pod 선택).
 
 ## 8. 관제 (제안)
@@ -114,22 +119,22 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 
 | 항목 | 제안 | 근거·주의 |
 |---|---|---|
-| 위치 | EKS, namespace `api` (7절 Kafka 인증서 결정에 따라 바뀔 수 있음) | 사용자 결정(EKS Pod) |
-| replica | 처음 **1개**, 나중에 2개 이상 + HPA | 지금 노드 1대(t3a.large) CPU 요청 약 76%. WAS 250m를 더하면 약 90%라 노드 추가 없이 들어갈 수 있다. 2개면 노드가 늘 가능성이 크다(월 약 65달러) |
+| 위치 | EKS, namespace **`api`** (결정) | 사용자 결정(EKS Pod, 새 namespace) |
+| replica | **1개로 시작 (결정)**, 부하를 보고 늘린다 | 지금 노드 1대(t3a.large) CPU 요청 약 76%. WAS 250m를 더하면 약 90%라 노드 추가 없이 들어갈 수 있다. 2개면 노드가 늘 가능성이 크다(월 약 65달러) |
 | 리소스 | requests 250m / 256Mi, limits 500m / 512Mi | 시작값. 부하를 본 뒤 조정 |
 | 이미지 | 새 ECR 저장소, digest 고정, 비root 실행 | `infra/stacks/ecr`에 저장소 추가가 필요하다 |
-| 노출 | **내부 ALB** (Ingress, `scheme: internal`), HTTP 80, 대상은 WAS Service | 인증서·도메인 불필요. 월 약 20달러. ALB SG는 ECS 시뮬레이터 태스크 SG만 허용 |
-| 배포 도구 | Helm chart 또는 매니페스트 (미정) | Kafka처럼 Helm으로 하면 values로 환경을 나누기 쉽다 |
-| 기존 `apps` 스택 | 이번에는 쓰지 않는다 (제안) | 공개 HTTPS Ingress와 WEB이 함께 묶여 있다. 재사용할지 재영과 확인 |
+| 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service | 인증서·도메인 불필요. 월 약 20달러. ALB SG는 ECS 시뮬레이터 태스크 SG만 허용 |
+| 배포 도구 | **Helm chart (결정)** | Kafka와 같은 방식. values로 환경을 나눈다 |
+| 기존 `apps` 스택 | **쓰지 않는다 (결정)** | 공개 HTTPS Ingress(도메인·인증서 필수)와 WEB이 묶여 있다. 재영에게 api 전용으로 따로 간다고 알린다 |
 
 ## 10. 보안 (제안)
 
 - 인터넷에 열지 않는다(내부 ALB + SG).
-- **인증 (미정)**: ① 없음(네트워크로만 막음) ② **API 키 헤더**(Secrets Manager에 두고 ECS와 WAS에 공급, 제안) ③ IAM 서명 등.
-- TLS(ALB → 클라이언트 구간): 내부 통신이라 처음에는 HTTP로 시작하고, 필요하면 내부 인증서를 붙인다(미정).
+- **인증: 없음 (결정, MVP).** 내부 ALB와 SG(ECS 시뮬레이터 태스크 SG만 허용)로 막는다. 나중에 필요하면 API 키 헤더를 더한다.
+- TLS: **HTTP 80으로 시작한다 (결정, MVP).** 내부 통신이고 ALB는 HTTPS가 필수가 아니다. 필요하면 나중에 인증서를 붙인다.
 - 비밀값(DB 비밀번호, API 키, Kafka 인증서)은 Git, 이미지, 로그에 넣지 않는다.
 
-## 11. 장애 주입과의 관계 (미정)
+## 11. 장애 주입과의 관계
 
 컨트롤러의 사건 종류(`controller/model.py`): `PG_OUTAGE`, `TRAFFIC_SURGE`(medium), `INGEST_LAG`(burst), `DATA_POLLUTION`(금액 불일치, 중복 결제), `OPERATOR_PAUSE`.
 
@@ -137,7 +142,7 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 |---|---|---|
 | PG 장애 | 지금처럼 시뮬레이터가 결제 결과를 바꿔 API로 보낸다 | API 지표에는 "결제 FAILED 비율 증가"로 보인다 |
 | 트래픽 급증, 적재 지연 | 시뮬레이터가 요청을 더 많이 보낸다 | API 응답 시간, ALB 지표에도 드러난다 (좋은 단서) |
-| **데이터 오염** | **미정**: ① 컨트롤러가 지금처럼 DB에 직접 쓴다(관리자 작업) ② API에 관리용 엔드포인트를 둔다(버그 흉내) | ①이면 컨트롤러에 DB 계정이 남는다. ②면 관리 엔드포인트를 외부에 노출하지 않게 막아야 한다 |
+| **데이터 오염** | **결정: 컨트롤러가 지금처럼 DB에 직접 쓴다** | 컨트롤러에 **오염 전용 DB 계정**(예: `clothes_sim_admin`, `orders` UPDATE·SELECT, `payments` INSERT·SELECT만)을 둔다. 앱 계정·CDC 계정과 나눈다 |
 
 ## 12. 범위 밖 (다음 문서·브랜치)
 
@@ -157,15 +162,10 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | 5 | `sim/ecs-image` | sim | 시뮬레이터 이미지, Fargate (ECS는 사용자) |
 | 6 | `sim/console` | sim | 웹 관리 화면 |
 
-## 14. 사용자가 정할 것 (요약)
+## 14. 남은 결정
 
 | # | 질문 | 선택지 | 제안 |
 |---|---|---|---|
-| Q1 | 책임 나누기 (4절) | A 얇은 API / B 실제 API / C 결제만 API | **A** |
-| Q2 | 읽기(활성 회원, 상품 가격)도 API로? (5절) | API / 시뮬레이터가 DB 직접 | **API** (시뮬레이터에 DB 계정 불필요) |
-| Q3 | WAS namespace와 Kafka 인증서 (7절) | ① `kafka` ns ② `api` ns + Secret 복사 ③ 기타 | ② (namespace 분리, 복사 절차는 문서화) |
-| Q4 | API 인증 (10절) | 없음 / API 키 / IAM | **API 키** |
-| Q5 | 데이터 오염 주입 (11절) | 컨트롤러가 DB 직접 / API 관리 엔드포인트 | 컨트롤러 DB 직접 (지금 유지) |
-| Q6 | 배포 도구 (9절) | Helm / 매니페스트 | Helm (Kafka와 같은 방식) |
-| Q7 | 시작 replica (9절) | 1 / 2 | **1** (노드 추가 없이 시작) |
-| Q8 | 기존 `apps` 스택 재사용 (9절) | 재사용 / 새로 | 새로 (재영과 확인) |
+| Q2 | 시뮬레이터가 "고를 재료"(활성 회원 목록, 상품 가격)를 어디서 읽나 (5절) | API(`GET /v1/members/active`, `GET /v1/catalog`) / 지금처럼 DB 직접 | **API** (주문·가입을 만드는 시뮬레이터에 DB 계정이 필요 없다) |
+
+Q1, Q3~Q8은 2026-10-20 결정(2절 표).
