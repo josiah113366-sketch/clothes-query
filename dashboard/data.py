@@ -618,3 +618,81 @@ def get_reliability_checks() -> pd.DataFrame:
             },
         ]
     )
+
+
+@dataset(_TTL_B)
+def get_rca_reports() -> pd.DataFrame:
+    """조사 에이전트의 원인 리포트(더미). 이상(anomaly) 한 건 = 리포트 한 건.
+
+    ※ 노션에는 리포트에 무엇을 넣을지 정해진 내용이 없다 (추후 작업). 아래 컬럼은 제안이며
+      조사 에이전트 담당과 맞춘 뒤 바뀔 수 있다.
+    컬럼: anomaly_id, rule(R1~R4), scenario, target, detected_at(UTC), summary(원인 요약),
+          facts(확인된 사실 목록), assumptions(추정 목록), impact(영향 범위), evidence(근거 목록: 표, 확인 내용),
+          action_step(조치 진행: 승인 대기/승인/재처리/재판정/검증), action_at(UTC)
+    확인된 사실과 추정을 분리해 보여주는 것이 핵심이다 (노션: 지표 동시 변화는 조사 단서일 뿐 원인 단정 금지).
+    """
+    end = pd.Timestamp.now(tz="UTC").floor("min")
+    return pd.DataFrame(
+        [
+            {
+                "anomaly_id": "a-3f9c01",
+                "rule": "R1",
+                "scenario": "PG 장애",
+                "target": "PG_A",
+                "detected_at": end - pd.Timedelta(minutes=12),
+                "summary": "PG_A에서 PG 원인 실패(PG_TIMEOUT)가 최근 15분간 급증했습니다.",
+                "facts": [
+                    "최근 15분 PG_A 결제 중 PG 원인 실패 비율 61% (평소 약 1%)",
+                    "PG_B의 PG 원인 실패 비율은 평소 수준",
+                    "같은 시간 고객 원인 실패 비율에는 변화 없음",
+                ],
+                "assumptions": [
+                    "PG_A 쪽 장애일 가능성이 높으나 PG 사의 공지는 확인하지 못함",
+                    "실패한 주문이 다른 PG로 재시도되어 최종 성공했는지는 미확인",
+                ],
+                "impact": "실패 결제 시도 약 40건, 영향 주문 약 35건. 같은 시간 승인 금액 감소 여부는 Gold A 주문·매출에서 확인 필요",
+                "evidence": [
+                    {
+                        "table": "gold_b.payment_attempts",
+                        "finding": "PG_A 실패 코드 분포: PG_TIMEOUT 대부분",
+                    },
+                    {
+                        "table": "gold_b.bronze_lag_snapshots",
+                        "finding": "같은 시간 적재 지연은 평소 범위 (데이터 지연 아님)",
+                    },
+                    {
+                        "table": "gold_b.malformed_messages",
+                        "finding": "같은 시간 깨진 메시지 증가 없음",
+                    },
+                ],
+                "action_step": "승인 대기",
+                "action_at": end - pd.Timedelta(minutes=10),
+            },
+            {
+                "anomaly_id": "a-81be77",
+                "rule": "R4",
+                "scenario": "스키마 오염",
+                "target": "clickstream",
+                "detected_at": end - pd.Timedelta(minutes=95),
+                "summary": "clickstream 메시지에서 session_id 누락이 증가했습니다.",
+                "facts": [
+                    "최근 2시간 clickstream 깨진 메시지 중 MISSING_FIELD(session_id)가 대부분",
+                    "오염 시작 시점은 가장 이른 kafka_timestamp 기준 약 2시간 전",
+                ],
+                "assumptions": ["보내는 쪽(시뮬레이터) 변경이 원인일 수 있으나 변경 이력은 미확인"],
+                "impact": "구매 퍼널 집계(첫 조회→주문 연결)에 영향 가능. 재처리 범위는 오염 시작~원인 수정 시각",
+                "evidence": [
+                    {
+                        "table": "gold_b.malformed_events",
+                        "finding": "field=session_id, reason=MISSING_FIELD 집중",
+                    },
+                    {
+                        "table": "gold_b.topic_messages",
+                        "finding": "유입량은 평소와 같음 (폭주 아님)",
+                    },
+                ],
+                "action_step": "재처리",
+                "action_at": end - pd.Timedelta(minutes=30),
+            },
+        ]
+    )
