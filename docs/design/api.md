@@ -1,6 +1,6 @@
 # 업무 API(WAS) 설계
 
-상태: 제안(일부 결정) · 2026-10-20 · 담당: WAS 담당(사용자) · 관련: `sim/cdc-orders`(PR 대기), `simulator/`
+상태: 결정(구조·범위) / 제안(세부 수치) · 2026-10-20 · 담당: WAS 담당(사용자) · 관련: `sim/cdc-orders`(PR 대기), `simulator/`
 
 이 문서의 상태 표현은 **결정 / 제안 / 미정**이다(루트 `CLAUDE.md`). **결정**만 구현한다. **제안**과 **미정**은 사용자가 고른 뒤 결정으로 옮기고, 그다음 작업 지시서(`docs/tasks/api-*.md`)를 쓴다.
 
@@ -31,6 +31,7 @@ API를 거치면:
 | 데이터 오염 주입 (Q5) | 컨트롤러가 **DB에 직접** 쓴다(지금 유지). 오염 전용 DB 계정을 따로 둔다 (11절) |
 | 배포 도구 (Q6) | **Helm** (9절) |
 | replica (Q7) | **1개**로 시작한다. 부하는 ECS 시뮬레이터가 정하고 API는 버티기만 한다. burst 부하는 `api/skeleton`에서 측정해 늘릴지 정한다 (9절) |
+| 목록 읽기 (Q2) | 시뮬레이터는 회원·상품 목록을 **API로** 읽는다(DB 계정 없음). 상품은 시작 때 한 번, 회원은 시작 때 전체 한 번 + **5초마다 변경분**만. 주문 API는 회원이 `ACTIVE`인지 확인한다 (5절) |
 | 기존 `apps` 스택 (Q8) | **쓰지 않는다.** 공개 HTTPS(도메인·인증서 필수)와 WEB이 묶여 있다. api Helm chart가 **내부 HTTP(80) ALB**를 만든다. ALB는 HTTPS가 필수가 아니다 (9절) |
 
 ## 3. 전체 구조 (제안)
@@ -69,18 +70,22 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 | 메서드·경로 | 지금 시뮬레이터가 하는 일 | 내용 | 응답 |
 |---|---|---|---|
 | `POST /v1/members` | `member live`의 `INSERT INTO members` | 신규 가입 1건. 요청에 PII(`name`, `email`, `phone`, `birth_date`, `password_hash`)가 들어 있다 | 201 생성 / 200 같은 `member_id`가 이미 있음(멱등) / 409 이메일·전화 중복 |
-| `POST /v1/orders` | `create_order`: `orders` + `order_items` 한 트랜잭션 | 주문 1건과 항목 N개. `total_amount` = Σ(수량×단가) 검증 | 201 / 200 이미 있음 / 422 검증 실패 |
+| `POST /v1/orders` | `create_order`: `orders` + `order_items` 한 트랜잭션 | 주문 1건과 항목 N개. `total_amount` = Σ(수량×단가) 검증. **회원이 `ACTIVE`가 아니면 거절** | 201 / 200 이미 있음 / 409 회원 비활성 / 422 검증 실패 |
 | `POST /v1/orders/{order_id}/payments` | `add_payment` | 결제 시도 1건(`attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, 시각) | 201 / 200 이미 있음 / 404 주문 없음 |
 | `PATCH /v1/orders/{order_id}` | `update_order_status` | 상태 전이(`status`, `status_reason`, `updated_at`) | 200 / 404 / 409 허용되지 않는 전이 |
-| `POST /v1/events/clicks` | `KafkaClickSink.publish` | 클릭 여러 건(배치, 상한 미정). 키 `session_id`로 `clickstream`에 발행 | 202 받음 |
-| `GET /v1/members/active` | `pool.py`의 활성 회원 목록 | `member_id`만, 커서 페이지 | 200 |
-| `GET /v1/catalog` | `pool.py`의 상품 가격 | `article_id`, `price`, 커서 페이지 | 200 |
+| `POST /v1/events/clicks` | `KafkaClickSink.publish` | 클릭 **묶음**(시뮬레이터가 약 1초씩 모아 보냄, 한 번에 최대 500건 제안). 키 `session_id`로 `clickstream`에 발행 | 202 받음 |
+| `GET /v1/members/active` | `pool.py`의 활성 회원 목록 (시작 때 한 번) | `member_id`만, 커서 페이지. 응답에 변경분 시작 커서를 같이 준다 | 200 |
+| `GET /v1/members/changes?after=<커서>` | (새로 생김) 지금은 60초마다 10만 명을 통째로 다시 읽는다 | 커서 이후 **가입한 회원**(나중에 탈퇴한 회원도)만. 커서는 DB가 기록하는 실제 시각(`created_at`)과 `member_id`로 만든다(시뮬레이터 배속 시각과 섞지 않음) | 200 |
+| `GET /v1/catalog` | `pool.py`의 상품 가격 (시작 때 한 번) | `article_id`, `price`, 커서 페이지 | 200 |
 | `GET /healthz`, `GET /readyz` | – | 살아 있음 / DB·Kafka 연결 준비 | 200 / 503 |
 | `GET /metrics` | – | Prometheus 지표 (8절) | 200 |
 
 - **멱등성**: ID를 시뮬레이터가 정하므로, 같은 ID로 다시 보내면 새로 만들지 않고 200을 준다. 지금의 "`23505`면 건너뜀"과 같은 효과다. 네트워크 재시도에도 안전하다.
 - **탈퇴**(`POST /v1/members/{member_id}/withdraw`, `members_archive` 이동)는 탈퇴 작업이 정해질 때 더한다. 지금 시뮬레이터에 탈퇴가 없다.
-- **읽기 두 개**(활성 회원, 상품 가격)를 API로 할지, 시뮬레이터가 지금처럼 DB에서 직접 읽을지는 **미정**이다. API로 하면 시뮬레이터가 DB 계정을 아예 갖지 않아도 된다(제안).
+- **목록 읽기 (결정, Q2)**: 시뮬레이터는 API로 읽는다. 주문마다 읽지 않고 메모리 목록에서 뽑는다.
+  - 목록이 늦어도 오류는 없다. 새 회원은 다음 변경분(최대 약 5초)부터 주문자에 들어간다. 목록에 있는 회원은 모두 DB에 있다.
+  - 위험은 (나중에 생길) **탈퇴한 회원이 목록에 남는 것**이다. 그래서 주문 API가 `ACTIVE`를 확인해 `409`로 거절하고, 시뮬레이터는 409를 받으면 그 회원을 목록에서 뺀다.
+  - 시뮬레이터 코드에는 이미 `MemberSource`, `CatalogSource` 인터페이스가 있어 `ApiMemberSource`, `ApiCatalogSource`만 더하면 된다.
 - 지금 시뮬레이터 코드에서 `ApiOrderSink`, `ApiClickSink`로 바꿀 곳: `behavior/sink.py`(`OrderSink`, `ClickSink`), `member/live.py`(`INSERT`), `behavior/pool.py`(읽기).
 
 ## 6. 데이터 규칙 (제안)
@@ -115,6 +120,21 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 - ALB 지표(CloudWatch): 5xx, 대상 응답 시간, 정상 대상 수
 - 지표 수집 서버는 아직 없다(인프라 `metrics/`에 예시만). 수집 연결은 별도 작업이다.
 
+## 8.5 예상 부하와 안전장치 (제안)
+
+배속 1 기준(하루 방문 11만, 방문당 조회 평균 5, 주문 전환 4.5%, 주문당 API 약 5번, `burst` = 피크의 10배).
+
+| 상황 | 방문/초 | 클릭/초 | 주문 관련 API/초 |
+|---|---|---|---|
+| 하루 평균 | 약 1.3 | 약 7 | 약 0.3 |
+| 피크 시간대 | 약 2.6 | 약 13 | 약 0.7 |
+| burst (15분) | 약 26 | 약 135 | 약 6 |
+
+- 클릭을 묶어 보내면 burst 때도 API 요청은 초당 수 건~수십 건이다. Pod 1개와 db.t4g.small로 충분할 것으로 본다. **`api/skeleton`에서 초당 200 요청으로 실제 측정한다.**
+- **배속(`--speed`)을 올리면 위 숫자가 그 배수로 늘어난다.** ECS 기본은 배속 1로 두고, 배속을 올릴 수 있는 한계를 측정으로 정한다.
+- 시뮬레이터: 주문·결제·가입 요청이 실패하면 **간격을 늘려 가며 다시 보낸다**(ID가 고정이라 중복 없음). 클릭은 지금처럼 버리고 센다.
+- API: DB 연결이 꽉 차면 기다리지 않고 **503**으로 빨리 거절한다. `/readyz`가 실패하면 ALB가 그 Pod로 보내지 않는다.
+
 ## 9. 배포 (제안)
 
 | 항목 | 제안 | 근거·주의 |
@@ -123,7 +143,7 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | replica | **1개로 시작 (결정)**, 부하를 보고 늘린다 | 지금 노드 1대(t3a.large) CPU 요청 약 76%. WAS 250m를 더하면 약 90%라 노드 추가 없이 들어갈 수 있다. 2개면 노드가 늘 가능성이 크다(월 약 65달러) |
 | 리소스 | requests 250m / 256Mi, limits 500m / 512Mi | 시작값. 부하를 본 뒤 조정 |
 | 이미지 | 새 ECR 저장소, digest 고정, 비root 실행 | `infra/stacks/ecr`에 저장소 추가가 필요하다 |
-| 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service | 인증서·도메인 불필요. 월 약 20달러. ALB SG는 ECS 시뮬레이터 태스크 SG만 허용 |
+| 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service. Helm chart에 `IngressClassParams`(scheme internal) + `IngressClass`(`controller: eks.amazonaws.com/alb`) + `Ingress`를 넣으면 EKS Auto Mode가 ALB를 만든다(`infra/modules/apps/main.tf`의 예시를 internal·HTTP로 바꿔 쓴다). `app-a`·`app-c` 서브넷에 `kubernetes.io/role/internal-elb=1` 태그가 이미 있다(2026-10-20 확인). 헬스체크 `/readyz` | 인증서·도메인 불필요. 월 약 20달러. ALB SG는 ECS 시뮬레이터 태스크 SG만 허용 |
 | 배포 도구 | **Helm chart (결정)** | Kafka와 같은 방식. values로 환경을 나눈다 |
 | 기존 `apps` 스택 | **쓰지 않는다 (결정)** | 공개 HTTPS Ingress(도메인·인증서 필수)와 WEB이 묶여 있다. 재영에게 api 전용으로 따로 간다고 알린다 |
 
@@ -164,8 +184,4 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 
 ## 14. 남은 결정
 
-| # | 질문 | 선택지 | 제안 |
-|---|---|---|---|
-| Q2 | 시뮬레이터가 "고를 재료"(활성 회원 목록, 상품 가격)를 어디서 읽나 (5절) | API(`GET /v1/members/active`, `GET /v1/catalog`) / 지금처럼 DB 직접 | **API** (주문·가입을 만드는 시뮬레이터에 DB 계정이 필요 없다) |
-
-Q1, Q3~Q8은 2026-10-20 결정(2절 표).
+없음. Q1~Q8 모두 2026-10-20 결정(2절 표). 구현 세부(커서 형식, 묶음 상한, 재시도 간격, 풀 크기)는 `api/skeleton` 작업 지시서에서 정한다.
