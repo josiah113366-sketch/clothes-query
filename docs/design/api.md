@@ -32,6 +32,7 @@ API를 거치면:
 | 배포 도구 (Q6) | **Helm** (9절) |
 | replica (Q7) | **1개**로 시작한다. 부하는 ECS 시뮬레이터가 정하고 API는 버티기만 한다. burst 부하는 `api/mvp`에서 측정해 늘릴지 정한다 (9절) |
 | 목록 읽기 (Q2) | 시뮬레이터는 회원·상품 목록을 **API로** 읽는다(DB 계정 없음). 상품은 시작 때 한 번, 회원은 시작 때 전체 한 번 + **5초마다 변경분**만. 주문 API는 회원이 `ACTIVE`인지 확인한다 (5절) |
+| 노드 (2026-10-21) | **API 전용 노드 풀**에 띄운다. 노드 한 대에 Kafka·Connect·UI·API를 다 올리지 않는다. 기존 노드 풀(Kafka 등)은 바꾸지 않는다 (9절) |
 | 기존 `apps` 스택 (Q8) | **쓰지 않는다.** 공개 HTTPS(도메인·인증서 필수)와 WEB이 묶여 있다. api Helm chart가 **내부 HTTP(80) ALB**를 만든다. ALB는 HTTPS가 필수가 아니다 (9절) |
 
 ## 3. 전체 구조 (결정)
@@ -140,7 +141,7 @@ RDS ──(Debezium, 기존)──▶ Kafka members-events / orders / order-item
 - 권한: `members` INSERT·SELECT, `orders` INSERT·UPDATE·SELECT, `order_items`·`payments` INSERT·SELECT, `product_variant` SELECT. `members_archive`는 탈퇴 작업 때 정한다.
 - 비밀번호는 Secrets Manager(도쿄) → K8s Secret으로 공급한다(CDC와 같은 방식). TLS `verify-full`, RDS CA 번들.
 - 연결 풀 크기와 계정 연결 한도는 replica 수에 맞춰 정한다.
-- RDS SG: 이미 EKS 클러스터 SG → 5432가 열려 있다(`sim/cdc-orders`). WAS Pod도 같은 노드라 추가 규칙은 필요 없을 것으로 본다. 적용 때 확인한다.
+- RDS SG: 이미 EKS 클러스터 SG → 5432가 열려 있다(`sim/cdc-orders`). API 전용 노드도 같은 NodeClass(클러스터 보안 그룹)를 쓰므로 추가 규칙은 필요 없다. 적용 때 확인한다.
 
 ### Kafka (클릭)
 - **KafkaUser `api`**: `clickstream` 쓰기만(`clients`에 한 줄). `acks=all`, idempotent.
@@ -168,7 +169,7 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | 피크 시간대 | 약 2.6 | 약 13 | 약 0.7 |
 | burst (15분) | 약 26 | 약 135 | 약 6 |
 
-- 클릭을 묶어 보내면 burst 때도 API 요청은 초당 수 건~수십 건이다. Pod 1개와 db.t4g.small로 충분할 것으로 본다. **`api/mvp`에서 초당 200 요청으로 실제 측정한다.**
+- 클릭을 묶어 보내면 burst 때도 API 요청은 초당 수 건~수십 건이다. Pod 1개와 db.t4g.small로 충분할 것으로 본다. **`api/mvp`에서 초당 200 요청으로 실제 측정한다.** (2026-10-21 로컬 측정: 프로세스 1개 초당 약 200 요청, 오류 0. 결과는 `docs/tasks/api-mvp.md`)
 - **배속(`--speed`)을 올리면 위 숫자가 그 배수로 늘어난다.** ECS 기본은 배속 1로 두고, 배속을 올릴 수 있는 한계를 측정으로 정한다.
 - 시뮬레이터: 주문·결제·가입 요청이 실패하면 **간격을 늘려 가며 다시 보낸다**(ID가 고정이라 중복 없음). 클릭은 지금처럼 버리고 센다.
 - API: DB 연결이 꽉 차면 기다리지 않고 **503**으로 빨리 거절한다. `/readyz`가 실패하면 ALB가 그 Pod로 보내지 않는다.
@@ -178,8 +179,9 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | 항목 | 제안 | 근거·주의 |
 |---|---|---|
 | 위치 | EKS, namespace **`api`** (결정) | 사용자 결정(EKS Pod, 새 namespace) |
-| replica | **1개로 시작 (결정)**, 부하를 보고 늘린다 | 지금 노드 1대(t3a.large) CPU 요청 약 76%. WAS 250m를 더하면 약 90%라 노드 추가 없이 들어갈 수 있다. 2개면 노드가 늘 가능성이 크다(월 약 65달러) |
-| 리소스 | requests 250m / 256Mi, limits 500m / 512Mi | 시작값. 부하를 본 뒤 조정 |
+| replica | **1개로 시작 (결정)**, 부하를 보고 늘린다 | |
+| 노드 | **API 전용 노드 풀 `clothes-query-dev-api` (결정, 2026-10-21)**: t3a.medium(2 vCPU, 4 GiB), taint `clothes-query/dedicated=api:NoSchedule`(API Pod만 허용), CPU 한도 2(= 최대 1대). API Helm chart가 Karpenter `NodePool`을 만들고 기존 NodeClass `clothes-query-dev-compute`를 같이 쓴다 | 기존 풀(t3a.large 1대, CPU 요청 약 76%)에 API까지 올리면 약 90%라 빡빡하다. **기존 풀은 바꾸지 않으므로 Kafka 쪽 Pod는 옮겨지거나 줄지 않는다**(그 Pod들은 기존 풀에만 가도록 지정돼 있다). 같은 NodeClass라 서브넷·클러스터 보안 그룹이 같고 RDS 5432 규칙도 그대로다. Terraform(`compute` 스택)은 바꾸지 않는다. 비용: t3a.medium 1대분(도쿄 온디맨드 대략 월 35달러) + Auto Mode 관리비. `helm uninstall`하면 풀과 노드도 지워진다 |
+| 리소스 | requests 500m / 256Mi, limits 1500m / 1Gi | 전용 노드를 거의 혼자 쓴다. Python 프로세스 하나는 약 1코어까지만 쓰므로 그 이상은 replica·worker로 늘린다. 로컬 측정(2026-10-21): 프로세스 1개 약 초당 200 요청, p95 77ms |
 | 이미지 | 기존 ECR **`clothes-query-dev/was`** 저장소 재사용, digest 고정, 비root 실행 | 2026-10-20 확인: 저장소가 이미 있고 비어 있으며 태그 덮어쓰기 불가(IMMUTABLE). Terraform 변경 없음 |
 | 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service. Helm chart에 `IngressClassParams`(scheme internal) + `IngressClass`(`controller: eks.amazonaws.com/alb`) + `Ingress`를 넣으면 EKS Auto Mode가 ALB를 만든다(`infra/modules/apps/main.tf`의 예시를 internal·HTTP로 바꿔 쓴다). `app-a`·`app-c` 서브넷에 `kubernetes.io/role/internal-elb=1` 태그가 이미 있다(2026-10-20 확인). 헬스체크 `/readyz` | 인증서·도메인 불필요. 월 약 20달러. **접근 제한**: `api/mvp`에서는 ECS 태스크 SG가 아직 없으므로 처음에는 **VPC 대역만** 허용하고, `sim/ecs-image`에서 ECS SG가 생기면 그 SG만 허용하도록 좁힌다 |
 | 배포 도구 | **Helm chart (결정)** | Kafka와 같은 방식. values로 환경을 나눈다 |
