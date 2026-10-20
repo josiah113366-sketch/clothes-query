@@ -1,0 +1,93 @@
+{{- include "api.check" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.name }}
+  template:
+    metadata:
+      labels:
+        {{- include "api.labels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: [{{ .Values.nodePool | quote }}]
+      containers:
+        - name: api
+          image: {{ .Values.image | quote }}
+          ports:
+            - {name: http, containerPort: 8000}
+          env:
+            # DB: libpq 표준 변수 (DATABASE_URL 을 쓰지 않는다)
+            - name: PGHOST
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.database }}, key: host}}
+            - name: PGDATABASE
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.database }}, key: database}}
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.database }}, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.database }}, key: password}}
+            - {name: PGPORT, value: "5432"}
+            - {name: PGSSLMODE, value: verify-full}
+            - {name: PGSSLROOTCERT, value: /mnt/rds-ca/bundle.pem}
+            - {name: PGAPPNAME, value: clothes-query-api}
+            - {name: API_DB_POOL_MAX, value: {{ .Values.env.poolMax | quote }}}
+            - {name: API_DB_POOL_TIMEOUT, value: {{ .Values.env.poolTimeoutSeconds | quote }}}
+            # Kafka: mTLS (KafkaUser api, kafka namespace 에서 복사한 인증서)
+            - {name: KAFKA_BOOTSTRAP, value: {{ .Values.env.kafkaBootstrap | quote }}}
+            - {name: KAFKA_SECURITY_PROTOCOL, value: SSL}
+            - {name: KAFKA_SSL_CA_FILE, value: /mnt/kafka-client/ca.crt}
+            - {name: KAFKA_SSL_CERT_FILE, value: /mnt/kafka-client/user.crt}
+            - {name: KAFKA_SSL_KEY_FILE, value: /mnt/kafka-client/user.key}
+            - {name: CLICK_TOPIC, value: {{ .Values.env.clickTopic | quote }}}
+            - {name: LOG_LEVEL, value: {{ .Values.env.logLevel | quote }}}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: rds-ca, mountPath: /mnt/rds-ca, readOnly: true}
+            - {name: kafka-client, mountPath: /mnt/kafka-client, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: rds-ca
+          secret: {secretName: {{ .Values.secrets.rdsCa }}, items: [{key: bundle.pem, path: bundle.pem}]}
+        - name: kafka-client
+          secret:
+            secretName: {{ .Values.secrets.kafkaClient }}
+            defaultMode: 0400
+            items:
+              - {key: ca.crt, path: ca.crt}
+              - {key: user.crt, path: user.crt}
+              - {key: user.key, path: user.key}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
