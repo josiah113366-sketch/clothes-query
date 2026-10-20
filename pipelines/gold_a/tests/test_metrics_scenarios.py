@@ -5,14 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from pipelines.silver.products import run as silver_products
-from pipelines.silver.transactions import run as silver_transactions
-from pipelines.silver.clicks import run as silver_clicks
-from pipelines.silver.reviews import run as silver_reviews
+from pipelines.gold_a import connect_reviews, read_rows, replacement
+from pipelines.gold_a.funnels import build_funnels
+from pipelines.gold_a.funnels import run as gold_funnels
+from pipelines.gold_a.reviews import (
+    aggregate_aspects,
+    load_analysis,
+    run_aggregate,
+    run_aspects,
+)
 from pipelines.gold_a.transactions import run as gold_transactions
-from pipelines.gold_a.reviews import run_aggregate, run_aspects, aggregate_aspects, load_analysis
-from pipelines.gold_a.funnels import run as gold_funnels, build_funnels
-from pipelines.gold_a import connect_reviews, replacement, read_rows
+from pipelines.silver.clicks import run as silver_clicks
+from pipelines.silver.products import run as silver_products
+from pipelines.silver.reviews import run as silver_reviews
+from pipelines.silver.transactions import run as silver_transactions
 
 START, END = date(2026, 10, 18), date(2026, 10, 19)
 
@@ -103,6 +109,158 @@ def write_reviews(source, rows):
     for day in (START, END):
         write(source / f"reviews/year={day:%Y}/month={day:%m}/day={day:%d}/part-00000.jsonl",
               [row for row in rows if row["created_at"][:10] == str(day)])
+
+
+def prepare_scoped_trade(example, conflict=True, complete=True):
+    source, silver = example["source"], example["silver"]
+    payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
+    payments = [row for row in payments if row["payment_id"] != "PO1" or row["amount"] == 20000]
+    for row in payments:
+        if row["order_id"] == "O3":
+            row["status"], row["failure_code"] = "SUCCESS", None
+    if conflict:
+        original = next(row for row in payments if row["payment_id"] == "PO1")
+        payments.append({**original, "amount": 99999, "completed_at": "2026-10-19T01:10:00+09:00"})
+    write(source / "payments.jsonl", payments)
+    silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                        str(source / "payments.jsonl"), str(silver), input_complete=complete)
+    silver_clicks(str(source / "clicks.jsonl"), str(silver), input_complete=complete)
+
+
+def test_scoped_hold_preserves_bad_product_updates_good_and_recovers(tmp_path):
+    example = make_example(tmp_path)
+    prepare_scoped_trade(example)
+    silver, gold = str(example["silver"]), str(example["gold"])
+    manifest = gold_transactions(silver, gold, silver, scope_aware=True)
+    assert manifest["status"] == "PARTIAL"
+    rows = read_outputs(manifest)["product_sales_daily.jsonl"]
+    assert next(row for row in rows if row["sales_date_kst"] == "2026-10-19")["item_sales_amount"] == 20000
+    assert next(row for row in rows if row["article_id"] == "0002")["item_sales_amount"] == 5000
+    hours = [scope["key"].get("hour_start_kst") for scope in manifest["held_scopes"]]
+    assert "2026-10-19T00:00:00+09:00" in hours and "2026-10-19T01:00:00+09:00" in hours
+    repeated = gold_transactions(silver, gold, silver, scope_aware=True)
+    assert read_outputs(repeated) == read_outputs(manifest)
+    assert [row["last_normal_result"] for row in repeated["held_scopes"]] == [
+        row["last_normal_result"] for row in manifest["held_scopes"]]
+    with pytest.raises(ValueError, match="scope-aware"):
+        gold_transactions(silver, gold, silver)
+    prepare_scoped_trade(example, conflict=False)
+    recovered = gold_transactions(silver, gold, silver, scope_aware=True)
+    assert recovered["status"] == "PASS" and not recovered["held_scopes"]
+    assert read_outputs(recovered) == read_outputs(gold_transactions(silver, gold, silver, scope_aware=True))
+
+
+def test_scoped_funnel_holds_first_view_day_and_restores_paid(tmp_path):
+    example = make_example(tmp_path)
+    prepare_scoped_trade(example)
+    silver, gold = str(example["silver"]), str(example["gold"])
+    manifest = gold_funnels(silver, silver, silver, gold, scope_aware=True)
+    assert manifest["status"] == "PARTIAL"
+    scopes = manifest["held_scopes"]
+    assert any(scope["table"] == "funnel_daily" and scope["key"] == {
+        "funnel_date_kst": "2026-10-18", "article_id": "0001"} for scope in scopes)
+    daily = read_outputs(manifest)["funnel_daily.jsonl"]
+    assert next(row for row in daily if row["article_id"] == "0001")["paid_sessions"] == 2
+    assert next(row for row in daily if row["article_id"] == "0002")["paid_sessions"] == 1
+    prepare_scoped_trade(example, conflict=False)
+    recovered = gold_funnels(silver, silver, silver, gold, scope_aware=True)
+    assert recovered["status"] == "PASS" and not recovered["held_scopes"]
+
+
+def test_scoped_changed_order_key_also_finds_previously_published_order(tmp_path):
+    example = make_example(tmp_path)
+    source = example["source"]
+    payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
+    # 이번 입력에 O1 결제 후보가 없어도 이전 공개에 반영한 P/O1을 따라가야 한다.
+    changed = next(row for row in payments if row["payment_id"] == "PO1")
+    changed.update(order_id="O3", amount=5000, requested_at="2026-10-18T12:00:00+09:00",
+                   completed_at="2026-10-18T12:01:00+09:00")
+    write(source / "payments.jsonl", payments)
+    silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                        str(source / "payments.jsonl"), str(example["silver"]), input_complete=True)
+    manifest = gold_transactions(str(example["silver"]), str(example["gold"]),
+                                 str(example["silver"]), scope_aware=True)
+    assert manifest["status"] == "PARTIAL"
+    scopes = [row for row in manifest["held_scopes"] if row["table"] == "product_sales_daily"]
+    assert any(row["key"] == {"sales_date_kst": "2026-10-19", "article_id": "0001"} for row in scopes)
+    assert any(row["key"] == {"sales_date_kst": "2026-10-18", "article_id": "0002"} for row in scopes)
+
+
+def test_scoped_no_baseline_is_missing_not_zero_and_requires_complete_input(tmp_path):
+    example = make_example(tmp_path)
+    prepare_scoped_trade(example, complete=False)
+    silver = str(example["silver"])
+    with pytest.raises(ValueError, match="input-complete"):
+        gold_transactions(silver, str(tmp_path / "fresh-gold"), silver, scope_aware=True)
+    prepare_scoped_trade(example, complete=True)
+    manifest = gold_transactions(silver, str(tmp_path / "fresh-gold"), silver, scope_aware=True)
+    assert manifest["status"] == "PARTIAL"
+    assert not any(row["sales_date_kst"] == "2026-10-19" for row in read_outputs(manifest)["product_sales_daily.jsonl"])
+    assert all(not scope["previous_result_available"] for scope in manifest["held_scopes"])
+
+
+def test_scoped_unknown_error_holds_whole_bundle_and_publish_failure_keeps_pointer(tmp_path, monkeypatch):
+    example = make_example(tmp_path)
+    source = example["source"]
+    with (source / "payments.jsonl").open("a") as handle:
+        handle.write("{broken json\n")
+    silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                        str(source / "payments.jsonl"), str(example["silver"]), input_complete=True)
+    silver, gold = str(example["silver"]), str(example["gold"])
+    held = gold_transactions(silver, gold, silver, scope_aware=True)
+    assert held["status"] == "PARTIAL" and all(scope["key"] == {} for scope in held["held_scopes"])
+    assert read_outputs(held) == read_outputs(example["manifests"]["transactions"])
+    import pipelines.gold_a as module
+    original = module._write_text
+    before = Path(held["manifest_path"]).read_bytes()
+
+    def fail_pointer(uri, body):
+        if uri.endswith("current.json"):
+            raise OSError("simulated publish failure")
+        original(uri, body)
+
+    monkeypatch.setattr(module, "_write_text", fail_pointer)
+    with pytest.raises(OSError):
+        gold_transactions(silver, gold, silver, scope_aware=True)
+    assert Path(held["manifest_path"]).read_bytes() == before
+    assert list(Path(held["manifest_path"]).parent.glob("failed-runs/*.json"))
+    lock = Path(held["manifest_path"]).parent / ".writer.lock"
+    lock.write_text("another writer", encoding="utf-8")
+    with pytest.raises(ValueError, match="잠금"):
+        gold_transactions(silver, gold, silver, scope_aware=True)
+    assert Path(held["manifest_path"]).read_bytes() == before
+    lock.unlink()
+
+
+def test_order_total_mismatch_blocks_trade_and_funnel_then_reprocessing_recovers(tmp_path):
+    example = make_example(tmp_path)
+    source, silver, gold = example["source"], str(example["silver"]), str(example["gold"])
+    orders = [json.loads(line) for line in (source / "orders.jsonl").read_text().splitlines()]
+    payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
+    original = next(row for row in orders if row["order_id"] == "O1")["total_amount"]
+    # 주문 총액과 성공 결제만 바꿔 상품 합계 오류를 독립적으로 검출한다.
+    next(row for row in orders if row["order_id"] == "O1")["total_amount"] += 1000
+    next(row for row in payments if row["order_id"] == "O1")["amount"] += 1000
+    write(source / "orders.jsonl", orders)
+    write(source / "payments.jsonl", payments)
+    manifest = silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                                   str(source / "payments.jsonl"), silver, input_complete=True)
+    checks = read_rows(manifest["outputs"]["dq_results"])
+    assert next(row for row in checks if row["source_dataset"] == "orders")["amount_checks"][0]["status"] == "MISMATCH"
+    silver_clicks(str(source / "clicks.jsonl"), silver, input_complete=True)
+    held_trade = gold_transactions(silver, gold, silver, scope_aware=True)
+    held_funnel = gold_funnels(silver, silver, silver, gold, scope_aware=True)
+    assert held_trade["status"] == held_funnel["status"] == "PARTIAL"
+    assert all(row["key"] == {} for row in held_trade["held_scopes"])
+    assert read_outputs(held_trade) == read_outputs(example["manifests"]["transactions"])
+    next(row for row in orders if row["order_id"] == "O1")["total_amount"] = original
+    next(row for row in payments if row["order_id"] == "O1")["amount"] = original
+    write(source / "orders.jsonl", orders)
+    write(source / "payments.jsonl", payments)
+    silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
+                        str(source / "payments.jsonl"), silver, input_complete=True)
+    assert gold_transactions(silver, gold, silver, scope_aware=True)["status"] == "PASS"
+    assert gold_funnels(silver, silver, silver, gold, scope_aware=True)["status"] == "PASS"
 
 
 def test_all_six_datasets_and_late_payment(tmp_path):

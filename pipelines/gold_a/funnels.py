@@ -2,11 +2,27 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from . import load_silver, load_products, product_index, require_pass, save_gold, _uri, replacement
+from . import (
+    _read_text,
+    _uri,
+    exclusive_output,
+    healthy_trade,
+    load_products,
+    load_scoped_trade,
+    load_silver,
+    plan_trade_holds,
+    previous_gold,
+    product_index,
+    replacement,
+    require_pass,
+    save_gold,
+    save_scoped_gold,
+)
 from .reviews import ratio
 
 KST = ZoneInfo("Asia/Seoul")
@@ -19,9 +35,11 @@ def _time(value: str) -> datetime:
     return parsed.astimezone(KST)
 
 
-def build_funnels(clicks: dict, transactions: dict, products: list[dict]) -> dict[str, list[dict]]:
+def build_funnels(clicks: dict, transactions: dict, products: list[dict],
+                  _scoped: bool = False) -> dict[str, list[dict]]:
     require_pass(clicks)
-    require_pass(transactions)
+    if not _scoped:
+        require_pass(transactions)
     catalog = product_index(products)
     events = defaultdict(lambda: {"view": [], "cart_add": []})
     seen = set()
@@ -96,9 +114,29 @@ def build_funnels(clicks: dict, transactions: dict, products: list[dict]) -> dic
     return {"funnel_session_product": detail, "funnel_daily": [daily[key] for key in sorted(daily)]}
 
 
+@exclusive_output("funnels")
 def run(clicks_root: str, transactions_root: str, products_root: str, output_root: str,
-        reprocess: dict | None = None) -> dict:
+        reprocess: dict | None = None, scope_aware: bool = False) -> dict:
     clicks, click_ref = load_silver(_uri(clicks_root, "silver", "clicks", "current.json"), {}, ["click_events", "dq_results"])
+    base = _uri(output_root, "gold_a", "funnels")
+    previous = previous_gold(base) if not output_root.startswith("s3://") else None
+    if previous and previous.get("status") == "PARTIAL" and not scope_aware:
+        raise ValueError("보류 중인 퍼널은 --scope-aware와 완전한 입력으로 복구해야 합니다")
+    if scope_aware:
+        if reprocess or any("://" in root for root in (clicks_root, transactions_root, products_root, output_root)):
+            raise ValueError("범위별 퍼널은 로컬 전체 입력만 지원하며 --replace 옵션과 함께 쓸 수 없습니다")
+        click_manifest = json.loads(_read_text(_uri(clicks_root, "silver", "clicks", "current.json")))
+        if click_manifest.get("input_completeness") != "DECLARED_COMPLETE":
+            raise ValueError("퍼널 범위별 갱신에는 클릭 Silver --input-complete 확인도 필요합니다")
+        trade, trade_ref = load_scoped_trade(transactions_root)
+        products, catalog_ref = load_products(products_root)
+        tables = ["funnel_session_product", "funnel_daily"]
+        holds, affected, context = plan_trade_holds(trade, previous, tables, clicks["click_events"])
+        result = ({name: [] for name in tables} if any(not row["key"] for row in holds)
+                  else build_funnels(clicks, healthy_trade(trade, affected), products, _scoped=True))
+        return save_scoped_gold(base, {name + ".jsonl": rows for name, rows in result.items()},
+            {"silver_transactions": trade_ref, "silver_clicks": click_ref, "silver_products": catalog_ref},
+            holds, context, previous)
     trade, trade_ref = load_silver(_uri(transactions_root, "silver", "transactions", "current.json"), {},
                                   ["orders_current", "silver_order_items", "payment_attempts", "dq_results"])
     products, catalog_ref = load_products(products_root)
@@ -116,9 +154,10 @@ def main():
     parser.add_argument("--replace-start-date")
     parser.add_argument("--replace-end-date")
     parser.add_argument("--article-id", action="append")
+    parser.add_argument("--scope-aware", action="store_true", help="거래 오류의 퍼널 영향 범위만 갱신 보류")
     args = parser.parse_args()
     scope = replacement(args.replace_start_date, args.replace_end_date, args.article_id)
-    result = run(args.clicks_root, args.transactions_root, args.products_root, args.output_root, scope)
+    result = run(args.clicks_root, args.transactions_root, args.products_root, args.output_root, scope, args.scope_aware)
     print("퍼널 결과: " + result["manifest_path"])
 
 
