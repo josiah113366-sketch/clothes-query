@@ -14,6 +14,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[2]
+# Kafka UI (ui.enabled) renders plain Kubernetes objects next to the Strimzi CRs.
+UI_KINDS = {"Deployment": "apps/v1", "Service": "v1", "NetworkPolicy": "networking.k8s.io/v1"}
+BUSINESS_TOPICS = {"clickstream", "members-events", "orders", "order-items", "payments"}
 
 
 def artifact(name, cache):
@@ -39,6 +42,80 @@ def strict_schema(schema):
     elif isinstance(schema, list):
         for value in schema:
             strict_schema(value)
+
+
+def check_business_connectors(connector_schema, values):
+    """connectors/cdc-source.yaml, bronze-s3-sink.yaml: CRD, topic contract, PII allowlist, secrets."""
+    pii = {"name", "email", "phone", "birth_date", "password_hash"}
+    ddl = (REPO / "db" / "schema" / "004_orders.sql").read_text(encoding="utf-8")
+    order_columns = {}
+    for table, body in re.findall(r"CREATE TABLE (\w+) \((.*?)\n\);", ddl, re.S):
+        order_columns[table] = {m for m in re.findall(r"^\s{4}(\w+)\s+(?:uuid|text|bigint|integer|timestamptz)", body, re.M)}
+    assert set(order_columns) == {"orders", "order_items", "payments"}
+    docs = {}
+    for name in ("cdc-source", "bronze-s3-sink"):
+        text = (REPO / "connectors" / f"{name}.yaml").read_text(encoding="utf-8")
+        assert not re.search(r"AKIA[0-9A-Z]{16}|amazonaws\.com|[0-9]{12}", text), name
+        doc = yaml.safe_load(text)
+        jsonschema.Draft7Validator(connector_schema).validate(doc)
+        assert doc["metadata"]["labels"]["strimzi.io/cluster"] == "clothes-query-dev-connect"
+        docs[name] = doc["spec"]["config"]
+    source, sink = docs["cdc-source"], docs["bronze-s3-sink"]
+    for key in ("database.hostname", "database.dbname", "database.user", "database.password"):
+        assert source[key].startswith("${directory:/mnt/cdc-database:"), key
+    assert source["database.sslmode"] == "verify-full"
+    assert source["publication.autocreate.mode"] == "disabled"
+    # Heartbeat must not write tables or publish messages (nothing may reach Bronze).
+    assert source["heartbeat.action.query"].startswith("SELECT pg_logical_emit_message(true, 'heartbeat'")
+    # Excluding the prefix drops the message before its LSN is recorded; the slot then never advances.
+    assert "message.prefix.exclude.list" not in source
+    assert source["transforms"].split(",")[0] == "dropMessage"
+    assert source["transforms.dropMessage.type"] == "org.apache.kafka.connect.transforms.Filter"
+    assert source[f'predicates.{source["transforms.dropMessage.predicate"]}.pattern'] == "cdc\\.message"
+    tables = source["table.include.list"].split(",")
+    assert tables == ["public.members", "public.orders", "public.order_items", "public.payments"]
+    columns = {}
+    for item in source["column.include.list"].split(","):
+        schema, table, column = item.split(".")
+        assert schema == "public"
+        columns.setdefault(table, set()).add(column)
+    assert set(columns) == {"members", "orders", "order_items", "payments"}
+    assert not columns["members"] & pii and len(columns["members"]) == 10
+    member_source = json.loads((REPO / "connectors" / "member-source.json").read_text(encoding="utf-8"))
+    assert columns["members"] == {c.split(".")[-1] for c in member_source["column.include.list"].split(",")}
+    for table, expected in order_columns.items():
+        assert columns[table] == expected, table
+    routes = {}
+    for transform in source["transforms"].split(","):
+        if source[f"transforms.{transform}.type"].endswith("RegexRouter"):
+            routes[source[f"transforms.{transform}.regex"]] = source[f"transforms.{transform}.replacement"]
+    routed = set()
+    for table in ("members", "orders", "order_items", "payments"):
+        topic = "cdc.public." + table
+        for regex, replacement in routes.items():
+            if re.fullmatch(regex, topic):
+                topic = re.sub(regex, replacement.replace("$", "\\"), topic)
+        routed.add(topic)
+    assert routed == BUSINESS_TOPICS - {"clickstream"}
+    heartbeat = f'{source["topic.heartbeat.prefix"]}.{source["topic.prefix"]}'
+    assert set(values["connect"]["produceTopics"]) == routed | {heartbeat}
+    assert {t["name"] for t in values["topics"]} == BUSINESS_TOPICS | {heartbeat}
+    assert set(sink["topics"].split(",")) == BUSINESS_TOPICS == set(values["connect"]["consumeTopics"])
+    assert values["connect"]["consumerGroups"] == ["connect-bronze-s3-sink"]
+    assert sink["topics.dir"] == "bronze" and sink["timezone"] == "UTC"
+    assert sink["path.format"] == "'year'=YYYY/'month'=MM/'day'=dd"
+    assert not any(k.startswith(("aws.", "s3.credentials")) for k in sink), "S3 credentials come from Pod Identity"
+    prepare = (REPO / "connectors" / "cdc-prepare.sql").read_text(encoding="utf-8")
+    publication = re.search(r"CREATE PUBLICATION cdc_pub FOR TABLE ([^;]+);", prepare).group(1)
+    assert [t.strip() for t in publication.split(",")] == tables
+    member_grant = re.search(r"GRANT SELECT \(([^)]*)\) ON public\.members", prepare).group(1)
+    assert {c.strip() for c in member_grant.split(",")} == columns["members"]
+    assert "members_archive" not in publication and "PASSWORD '" not in prepare
+    role_example = (ROOT / "cdc-orders" / "workload-access.tfvars.example").read_text(encoding="utf-8")
+    assert f'service_account = "{values["connect"].get("name", "clothes-query-dev-connect")}-connect"' in role_example
+    assert f'"{sink["topics.dir"]}/" =' in role_example, "S3 Sink output and IAM prefix must match"
+    network_example = (ROOT / "cdc-orders" / "network.tfvars.example").read_text(encoding="utf-8")
+    assert "s3:AbortMultipartUpload" in role_example and "s3:AbortMultipartUpload" in network_example
 
 
 def main():
@@ -84,6 +161,9 @@ def main():
                     assert doc["apiVersion"] == "v1" and set(doc["data"]) == {"kafka.yml", "connect.yml"}
                     for config in doc["data"].values():
                         assert yaml.safe_load(config)["rules"]
+                    continue
+                if doc["kind"] in UI_KINDS:
+                    assert doc["apiVersion"] == UI_KINDS[doc["kind"]]
                     continue
                 assert doc["apiVersion"] == "kafka.strimzi.io/v1"
                 jsonschema.Draft7Validator(schemas[doc["kind"]]).validate(doc)
@@ -176,6 +256,55 @@ def main():
                            if doc["spec"]["class"] == "io.confluent.connect.s3.S3SinkConnector")
         role_example = (ROOT / "pipeline-smoke/workload-access.tfvars.example").read_text(encoding="utf-8")
         assert f'"{sink_prefix}/" =' in role_example, "Trial S3 Sink output and IAM prefix must match"
+        business = copy.deepcopy(compact_profile)
+        for key, value in yaml.safe_load((ROOT / "cdc-orders-values.yaml").read_text(encoding="utf-8")).items():
+            if isinstance(value, dict):
+                business.setdefault(key, {}).update(value)
+            else:
+                business[key] = value
+        render(business, error="connect.image digest is required")  # digest comes from runtime.local.yaml
+        business["connect"]["image"] = full["connect"]["image"]
+        business_docs = render(business)
+        business_topics = {d["spec"]["topicName"]: d["spec"] for d in business_docs if d["kind"] == "KafkaTopic"}
+        assert set(business_topics) == BUSINESS_TOPICS | {"debezium-heartbeat.cdc"} | {
+            "clothes-query-dev-connect-" + s for s in ("configs", "offsets", "status")}
+        assert "infra-smoke" not in business_topics
+        for name in BUSINESS_TOPICS:
+            assert business_topics[name]["partitions"] == 3 and business_topics[name]["replicas"] == 1
+            assert business_topics[name]["config"]["retention.ms"] == 259200000
+        assert not any(d["kind"] == "KafkaUser" and d["metadata"]["name"] == "infra-smoke-client" for d in business_docs)
+        business_pool = next(d["spec"] for d in business_docs if d["kind"] == "KafkaNodePool")
+        measurement_pool_doc = next(d for d in measurement_docs if d["kind"] == "KafkaNodePool")
+        assert business_pool == measurement_pool_doc["spec"], "Business upgrade must not change the broker pool/PVC"
+        business_connect = next(d["spec"] for d in business_docs if d["kind"] == "KafkaConnect")
+        assert business_connect["replicas"] == 1
+        ui_user = next(d for d in business_docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "kafka-ui")
+        for acl in ui_user["spec"]["authorization"]["acls"]:
+            assert not set(acl["operations"]) & {"Write", "Create", "Delete", "Alter", "AlterConfigs", "All"}
+        ui_deploy = next(d for d in business_docs if d["kind"] == "Deployment")
+        ui_env = {e["name"]: e.get("value") for e in ui_deploy["spec"]["template"]["spec"]["containers"][0]["env"]}
+        assert ui_env["KAFKA_CLUSTERS_0_READONLY"] == "true"
+        assert ui_env["KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL"] == "SSL"
+        assert "@sha256:" in ui_deploy["spec"]["template"]["spec"]["containers"][0]["image"]
+        assert ui_deploy["spec"]["template"]["spec"]["securityContext"]["runAsNonRoot"] is True
+        assert next(d for d in business_docs if d["kind"] == "Service")["spec"]["type"] == "ClusterIP"
+        ui_policy = next(d for d in business_docs if d["kind"] == "NetworkPolicy")
+        assert ui_policy["spec"]["ingress"][0]["ports"] == [{"protocol": "TCP", "port": 8083}]
+        business_listener = next(d["spec"] for d in business_docs if d["kind"] == "Kafka")["kafka"]["listeners"][0]
+        assert {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "kafka-ui"}}} in business_listener["networkPolicyPeers"]
+        assert not any(d["kind"] in UI_KINDS for d in compact_docs)  # ui is off by default
+        bad = copy.deepcopy(business); bad["ui"]["image"] = ""
+        render(bad, error="ui.image digest is required")
+        bad = copy.deepcopy(business); bad["ui"]["image"] = "ghcr.io/kafbat/kafka-ui:latest"
+        render(bad, error="image")
+        bad = copy.deepcopy(business); bad["ui"]["topics"] = ["unknown"]
+        render(bad, error="UI ACL references an undefined")
+        bad = copy.deepcopy(business); bad["ui"]["topics"] = []
+        render(bad, error="ui.topics requires")
+        bad = copy.deepcopy(business); bad["ui"]["name"] = "clothes-query-dev-connect"
+        render(bad, error="Duplicate or reserved ui name")
+        render({"ui": {"enabled": True}}, error="ui requires kafka.enabled")
+        check_business_connectors(schemas["KafkaConnector"], business)
         budget = [compact_pool["resources"], compact_connect["resources"],
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],
@@ -330,7 +459,7 @@ def main():
                 assert bool(selected(labels)) == (index == other)
                 assert not selected({**labels, "__meta_kubernetes_pod_container_port_name": "rest-api"})
                 assert not selected({**labels, "__meta_kubernetes_pod_phase": "Pending"})
-    print(f"PASS: lint, standard/single-node/CDC/Sink/pipeline/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 28 rejected inputs, operator/storage checks")
+    print(f"PASS: lint, standard/single-node/CDC/Sink/pipeline/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, business CDC/UI values, 35 rejected inputs, operator/storage checks")
     print("Single-node Kafka/Connect/operator budget: requests 3456Mi, limits 3840Mi; excludes Kubernetes/CSI/app/Spark resources.")
     print("No Kubernetes/AWS connection, apply, push or runtime claim.")
 

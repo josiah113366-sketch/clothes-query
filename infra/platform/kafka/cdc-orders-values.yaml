@@ -1,0 +1,38 @@
+# Business CDC runtime (sim/cdc-orders). Merge AFTER single-node-values.yaml.
+# Do NOT merge measurement-values.yaml: leaving it out removes the infra-smoke topic/client.
+# Order: single-node-values.yaml -> cdc-orders-values.yaml -> runtime.local.yaml (ignored; connect.image digest).
+# Topic contract: docs/tasks/sim-cdc-orders.md. No credentials or endpoints here.
+kafka:
+  enabled: true
+  clientNamespaces: []
+topics:
+  - {name: clickstream, partitions: 3, retentionMs: 259200000}
+  - {name: members-events, partitions: 3, retentionMs: 259200000}
+  - {name: orders, partitions: 3, retentionMs: 259200000}
+  - {name: order-items, partitions: 3, retentionMs: 259200000}
+  - {name: payments, partitions: 3, retentionMs: 259200000}
+  # Debezium heartbeat (topic.heartbeat.prefix=debezium-heartbeat, topic.prefix=cdc).
+  - {name: debezium-heartbeat.cdc, partitions: 1, retentionMs: 259200000}
+# clickstream producer (ECS simulator) is added in sim/ecs-image.
+clients: []
+connect:
+  enabled: true
+  # Set the ECR digest in runtime.local.yaml.
+  image: ""
+  produceTopics: [members-events, orders, order-items, payments, debezium-heartbeat.cdc]
+  # bronze-s3-sink reads all five business topics.
+  consumeTopics: [clickstream, members-events, orders, order-items, payments]
+  consumerGroups: [connect-bronze-s3-sink]
+ui:
+  enabled: true
+  image: ghcr.io/kafbat/kafka-ui@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1  # v1.5.0
+  topics: [clickstream, members-events, orders, order-items, payments, debezium-heartbeat.cdc]
+  # infra-smoke-*: 10-18 시험이 남긴 빈 그룹. UI는 클러스터 Describe로 모든 그룹을 받는데 하나라도 못 읽으면
+  # 상태 수집 전체가 실패한다(빨간불). 그룹이 만료되면(offsets.retention 7일, 2026-10-25 무렵) 세 이름을 지운다.
+  consumerGroups: [connect-bronze-s3-sink, clothes-query-dev-connect-cluster, infra-smoke-group, connect-infra-smoke-s3, infra-smoke-connect-cluster]
+metrics:
+  enabled: true
+  lagExporter:
+    enabled: true
+    topicRegex: "^(clickstream|members-events|orders|order-items|payments)$"
+    groupRegex: "^connect-bronze-s3-sink$"

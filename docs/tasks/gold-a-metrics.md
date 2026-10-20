@@ -10,6 +10,8 @@
 
 - **추가 승인: 금액 검사와 조사 에이전트 접점.** 선행 Silver에 주문상품 합계 검사를 연결한다. 불일치에서 기존 거래/퍼널 전체 보류, 수정 후 PASS 복구를 검증한다. Gold A README에 Gold B 기반 탐지 → 조사 에이전트 → Gold A/상세 Silver 각각 조회하는 계약 제안을 남긴다. Gold A가 Gold B를 읽는 함수는 추가하지 않는다. Gold B order_id 보존・사건 필드・관찰 종료/입수 범위・부분 시간대 조회는 담당자 합의 대상이다.
 - **금액 검사 결과:** Silver・Gold A・거래 연결 테스트 40개 통과(7.12초), 변경 파일 import 정렬・diff 공백 검사 통과. 기존 테스트 파일에만 사례를 추가했다. 합성 입력으로 20,000/20,000/20,000 정상 → 주문/결제 21,000・상품 합계 20,000 불일치 → 수정 후 PASS 복구를 실행했다. 보고서는 pipelines/gold_a/.local/amount-demo-20261020-22ef20/report.md다. 입력 완전성 확인은 실행자 선언이며 실제 AWS 검증이 아니다. 코드와 문서는 로컬 수정 상태이고 push하지 않았다.
+- **커밋/최신 main 반영:** 사용자 요청으로 Silver 구현・Gold A 구현・Gold A 실행/조회 계약 문서를 세 커밋으로 분리했다. Silver 변경은 pipelines/silver에도 별도 보존했다. main을 PR #32 병합 커밋 4c55fbc까지 fast-forward pull한 뒤 Gold A에 병합한다. BRANCHES.md 구조도 충돌은 시뮬레이터 이력과 두 파이프라인 항목을 함께 보존하고 합의된 브랜치명으로 해결한다. 원격 push는 하지 않는다. 병합 후 파이프라인 회귀 검증 결과는 아래 기록한다.
+- **병합 검증:** 최신 main 파일과 충돌 해결 내용을 반영한 작업 폴더에서 Silver・Gold A・거래 연결 테스트 40개 통과(7.81초). 문서 충돌 표식 없음・diff 공백 검사 통과. 로컬 실행 자료는 ignored .local에 유지했다.
 
 - **입력:** 원격 sim/cdc-orders의 펼쳐진 CDC 설정과 기존 로컬 Silver 계약을 비교한 뒤 선행 Silver와 후행 Gold A를 pipelines/gold-a 작업 폴더에서 함께 수정했다. 원격 브랜치 병합・push・PR 갱신은 하지 않았다.
 - **구현:** 거래/퍼널 --scope-aware, 명시적 전체 입력 선언 검사, 현재/이전 후보와 미해결 후보의 영향 범위 합집합, 정상 범위 교체・보류 범위 이전 결과 유지, PARTIAL/held_scopes/held_context, 복구 후 전체 재계산・보류 해제. 기존 일반 실행은 엄격한 PASS 검사를 유지한다.

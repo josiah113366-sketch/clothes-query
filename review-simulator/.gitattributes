@@ -1,0 +1,2 @@
+# 컨테이너 안에서 sh 로 실행하는 파일은 Windows 에서 받아도 LF 로 둔다 (CRLF 면 sh 가 실패)
+*.sh text eol=lf

@@ -5,6 +5,7 @@
 회원 값(PII)은 읽지도 출력하지도 않는다. 오류는 sqlstate와 제약 이름만 다룬다.
 """
 
+import json
 import math
 import signal
 from collections import Counter
@@ -12,7 +13,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from types import FrameType
+from types import FrameType, MappingProxyType
 
 import psycopg
 
@@ -148,7 +149,7 @@ class BehaviorRunner:
         self.visits_daily = visits_daily
         self.duration = duration
         self.max_visits = max_visits
-        self.pg_extra_fail = pg_extra_fail  # 장애 주입 자리. 이 브랜치에서는 채우지 않는다
+        self.pg_extra_fail = pg_extra_fail  # PG 장애 주입. 제어 신호(pg_extra_fail)로 바뀐다
         self.out = out
         self.running = True
         self.summary = BehaviorSummary()
@@ -292,6 +293,16 @@ class BehaviorRunner:
         self.running = state.running
         if redraw:
             self.visit_due = None  # 지금부터 다시 뽑는다 (지수분포는 기억이 없다)
+        self._apply_pg_extra_fail(state.pg_extra_fail)
+
+    def _apply_pg_extra_fail(self, requested: Mapping[str, float]) -> None:
+        """알 수 없는 PG 이름은 무시한다. 결제 시도는 시작 시점의 값을 쓴다."""
+        extra = {pg: float(v) for pg, v in sorted(requested.items()) if pg in params.PGS}
+        if extra == dict(self.pg_extra_fail):
+            return
+        before = json.dumps(dict(sorted(self.pg_extra_fail.items())))
+        self.out(f"pg_extra_fail: {before} → {json.dumps(extra)}")
+        self.pg_extra_fail = MappingProxyType(extra)
 
     def _refresh_pool(self) -> None:
         assert self._ctx is not None

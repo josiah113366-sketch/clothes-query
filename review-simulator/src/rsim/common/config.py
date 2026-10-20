@@ -35,6 +35,15 @@ def _path(name: str, default: str) -> Path:
     return p if p.is_absolute() else Path.cwd() / p
 
 
+def _path_or_s3(name: str, default: str) -> Path | str:
+    """로컬 경로 또는 s3://버킷/키. S3 면 문자열 그대로 둔다(Path 로 바꾸면 s3:/ 로 깨진다).
+
+    ECS 태스크는 PC 파일을 못 읽으므로 입력 파일(incidents JSON 등)을 S3 에 두고 경로만 넘긴다(2026-10-18 sim/review-ecs).
+    """
+    value = _env(name, default)
+    return value if value.startswith("s3://") else _path(name, default)
+
+
 @dataclass
 class Settings:
     # ---------------------------------------------------------------- Bedrock
@@ -104,8 +113,9 @@ class Settings:
     # 상품 목록 CSV (선택). 없으면 시드의 상품명으로 자동 생성한다. 형식은 catalog.py 참고.
     products_path: Path = field(default_factory=lambda: _path("PRODUCTS_PATH", "data/products.csv"))
     # 이상 상황(불만 급증) 시나리오 JSON (선택). 형식은 scenario.py 와 incidents.example.json 참고.
-    incidents_path: Path = field(
-        default_factory=lambda: _path("INCIDENTS_PATH", "data/incidents.json")
+    # 로컬 경로 또는 s3://버킷/키 (ECS 에서는 deploy/run_incident.py 가 S3 에 올리고 이 값을 바꿔 실행한다)
+    incidents_path: Path | str = field(
+        default_factory=lambda: _path_or_s3("INCIDENTS_PATH", "data/incidents.json")
     )
 
     # ---------------------------------------------------------------- 주문 기반 리뷰 (rsim run --source orders)

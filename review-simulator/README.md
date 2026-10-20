@@ -49,6 +49,9 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 | `docs/review-columns.md` | 리뷰·정답 이벤트 컬럼 설명 |
 | `docs/examples-scorecard.md` | 예시 세트 버전별 성능 점검표 |
 | `.local/` | 시드, 실행 결과, 벤치 결과. **커밋하지 않는다** (AI Hub 원문·생성 리뷰 원문) |
+| `deploy/` | ECS 배포·운영 스크립트 (secret, deploy, onoff, switch, status, run_incident, run_inject, check_access). 사용법은 [deploy/README.md](deploy/README.md) |
+| `deploy/container/entrypoint.sh` | ECS 태스크 진입점. 인자 없으면 가짜 주문 → 하루치 리뷰, 인자 있으면 `rsim <인자>` |
+| `CHANGELOG.md` | 버전별 바뀐 내용 (패치노트) |
 
 ## 실행 방법 (Windows PowerShell, `review-simulator/` 폴더에서)
 
@@ -182,11 +185,26 @@ product_id, product_name, category, member_id, age_group 은 임시 값이다. �
 - `.local/` 과 `.env` 는 커밋하지 않는다. 시드에는 AI Hub 원문(재배포 금지)이 들어 있다.
 - Docker 이미지에는 `.local/seeds.jsonl` 이 들어간다. 이미지는 비공개 레지스트리(ECR)에만 올린다.
 
-## 컨테이너로 실행 (ECS 이전 확인)
+## 컨테이너로 실행 (로컬)
 
 ```powershell
 docker compose --profile sim up --build simulator
 ```
 컨테이너 안에서는 `kafka:29092` 로 접속하고, Bedrock 은 `.env` 의 API 키로 부른다.
-ECS 에서는 API 키를 Secrets Manager 등으로 넣고(태스크 역할만 쓰려면 SigV4 서명 작업이 따로 필요),
-`KAFKA_BOOTSTRAP` 을 실제 브로커 주소로 바꾼다.
+
+## ECS 에서 실행 (2026-10-18, v0.2.0)
+
+로컬과 같은 이미지·같은 `rsim` 명령을 ECS Fargate 에서 돌린다(기능 차이 없음). 하루치 실행은
+`rsim orders-fake`(가짜 주문) → `rsim run --source orders --sink lake` 이고 결과는 팀 S3 `bronze/reviews/` 날짜 파티션이다.
+AWS 리소스는 `infra/stacks/ecs-review-simulator`(Terraform, 담당자가 apply), 배포·운영은 `deploy/*.py` 스크립트다.
+예약 실행은 꺼진 상태로 만들어 두었다(2026-10-18 lemin: 계속 실행은 보류).
+
+```powershell
+python deploy/check_access.py        # 내 AWS 권한 확인 (읽기 전용)
+python deploy/secret.py --from-env   # .env 의 Bedrock API 키를 Secrets Manager 에 넣기
+python deploy/deploy.py              # 이미지 빌드 → ECR → 태스크 정의 등록
+python deploy/onoff.py once --fake   # 한 번 실행 (비용 0원)
+python deploy/status.py              # 상태·최근 실행·추정 비용
+```
+처음 설정 순서, 실행 옵션(특정 상품 긍정·부정 비율 올리기, 직접 쓴 리뷰 넣기), 관제는 [deploy/README.md](deploy/README.md).
+PowerShell 에서는 같은 기능을 `scripts\*.ps1` 로 부를 수 있다([scripts/README.md](scripts/README.md)).

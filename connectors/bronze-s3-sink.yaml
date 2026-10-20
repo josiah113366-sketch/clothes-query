@@ -1,0 +1,37 @@
+# 업무 토픽 5개 → S3 Bronze. cdc-source 의 회원 snapshot 이 끝난 뒤 kubectl apply 로 등록한다.
+# 선행: workload-access 의 bronze-s3-sink Pod Identity(bronze/ 만), network 의 AbortMultipartUpload.
+# 값마다 이유: connectors/README.md 의 "bronze-s3-sink.yaml". 로컬 member-s3-sink.json 과 경로 규칙이 같다.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: bronze-s3-sink
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: clothes-query-dev-connect
+spec:
+  class: io.confluent.connect.s3.S3SinkConnector
+  tasksMax: 1
+  config:
+    topics: clickstream,members-events,orders,order-items,payments
+    s3.bucket.name: clothes-query-datalake
+    s3.region: ap-northeast-1
+    topics.dir: bronze
+    storage.class: io.confluent.connect.s3.storage.S3Storage
+    format.class: io.confluent.connect.s3.format.json.JsonFormat
+    # clickstream 키는 JSON이 아닌 session_id 문자열이다. 키는 파일에 쓰지 않으므로 문자열로 읽는다.
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: "false"
+    schema.compatibility: NONE
+    behavior.on.null.values: ignore
+    partitioner.class: io.confluent.connect.storage.partitioner.TimeBasedPartitioner
+    path.format: "'year'=YYYY/'month'=MM/'day'=dd"
+    partition.duration.ms: "86400000"
+    timezone: UTC
+    locale: en-US
+    timestamp.extractor: Record
+    flush.size: "10000"
+    rotate.schedule.interval.ms: "900000"
+    s3.compression.type: none
+    # 열린 파티션(5토픽 x 3 = 15개)마다 이 크기의 버퍼를 잡는다. 기본 25MB면 Connect 힙(512MB)에 너무 크다. 5MB는 최소값.
+    s3.part.size: "5242880"

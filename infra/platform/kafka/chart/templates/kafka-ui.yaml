@@ -1,0 +1,143 @@
+{{- if and .Values.kafka.enabled .Values.ui.enabled }}
+# Read-only browser for business topics. ClusterIP only: reach it with kubectl port-forward.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ .Values.ui.name }}
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.name }}
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      {{- range .Values.ui.topics }}
+      - resource: {type: topic, name: {{ . | quote }}, patternType: literal}
+        operations: [Read, Describe, DescribeConfigs]
+      {{- end }}
+      {{- range .Values.ui.consumerGroups }}
+      - resource: {type: group, name: {{ . | quote }}, patternType: literal}
+        operations: [Describe, Read]
+      {{- end }}
+      - resource: {type: cluster}
+        operations: [Describe, DescribeConfigs]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.ui.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.ui.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.ui.name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.ui.name }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image user kafkaui is uid 100 / gid 101.
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values: [{{ .Values.kafka.nodePool | quote }}]
+      containers:
+        - name: kafka-ui
+          image: {{ .Values.ui.image | quote }}
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: AUTH_TYPE, value: DISABLED}
+            - {name: DYNAMIC_CONFIG_ENABLED, value: "false"}
+            - {name: JAVA_OPTS, value: "-XX:MaxRAMPercentage=60"}
+            - {name: KAFKA_CLUSTERS_0_NAME, value: {{ .Values.kafka.name | quote }}}
+            - {name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS, value: {{ printf "%s-kafka-bootstrap:9093" .Values.kafka.name | quote }}}
+            - {name: KAFKA_CLUSTERS_0_READONLY, value: "true"}
+            - {name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL, value: SSL}
+            - {name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_TYPE, value: PKCS12}
+            - {name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_LOCATION, value: /mnt/cluster-ca/ca.p12}
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ printf "%s-cluster-ca-cert" .Values.kafka.name }}, key: ca.password}
+            - {name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_TYPE, value: PKCS12}
+            - {name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_LOCATION, value: /mnt/user/user.p12}
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.ui.name }}, key: user.password}
+            {{- if .Values.connect.enabled }}
+            - {name: KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME, value: {{ .Values.connect.name | quote }}}
+            - {name: KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS, value: {{ printf "http://%s-connect-api:8083" .Values.connect.name | quote }}}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /actuator/health, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: user, mountPath: /mnt/user, readOnly: true}
+            - {name: cluster-ca, mountPath: /mnt/cluster-ca, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: user
+          secret:
+            secretName: {{ .Values.ui.name }}
+            items: [{key: user.p12, path: user.p12}]
+        - name: cluster-ca
+          secret:
+            secretName: {{ printf "%s-cluster-ca-cert" .Values.kafka.name }}
+            items: [{key: ca.p12, path: ca.p12}]
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.ui.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.ui.name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Values.ui.name }}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+{{- if .Values.connect.enabled }}
+---
+# Strimzi limits Connect REST to its own pods and the operator; add only the UI pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-to-connect-rest" .Values.ui.name }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: {{ .Values.connect.name }}
+      strimzi.io/kind: KafkaConnect
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Values.ui.name }}
+      ports:
+        - {protocol: TCP, port: 8083}
+{{- end }}
+{{- end }}
