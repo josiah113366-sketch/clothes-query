@@ -1,6 +1,6 @@
 # 작업 지시서: api/mvp
 
-> 상태: 진행 전 · 브랜치: `api/mvp` (분기 기준: **`sim/cdc-orders`**, PR base도 `sim/cdc-orders`로 쌓는다) · 설계: `docs/design/api.md`(`docs/api-design` PR) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
+> 상태: 진행 중 · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design` PR) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
 
 ## 목표
 
@@ -23,7 +23,7 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 ## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
 
 - **한 브랜치에 여러 영역**: `api/`(새 폴더), `simulator/`, `infra/platform/kafka/`(values 한두 줄), `docs/`. "PR 하나에 한 영역"의 예외이며 PR 설명에 적는다(2026-10-20 사용자 결정: 브랜치 수를 줄인다).
-- **`sim/cdc-orders` 위에 쌓는다.** Kafka values(`cdc-orders-values.yaml`)가 그 브랜치에만 있다. PR은 base를 `sim/cdc-orders`로 열고, cdc-orders가 머지되면 base를 `main`으로 바꾼다.
+- **`sim/cdc-orders` 위에서 시작했다.** Kafka values(`cdc-orders-values.yaml`)가 그 브랜치에만 있었다. cdc-orders는 2026-10-21 `main`에 머지됐다(merge commit, PR #32). 그래서 rebase 없이 PR base를 `main`으로 연다.
 - **역할**
   - **Claude**: 코드(`api/`, `simulator/`), Dockerfile, Helm chart, SQL, values, 테스트, 문서. 로컬 Docker 검증과 정적 검사. 커밋까지.
   - **사용자**: 이미지 빌드·ECR push, DB SQL 실행(DBeaver), Secrets Manager, `kubectl`/`helm` 적용, port-forward 시험. Claude는 **명령과 순서**만 준다. push·PR도 사용자.

@@ -104,7 +104,7 @@ gitGraph
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `api/mvp` | `docs/tasks/api-mvp.md` (base `sim/cdc-orders`) | 진행 중 | |
+| `api/mvp` | `docs/tasks/api-mvp.md` | 진행 중 | |
 
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
