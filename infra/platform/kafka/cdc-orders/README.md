@@ -2,7 +2,7 @@
 
 `RDS → Debezium → Kafka(EKS) → S3 Sink → S3 bronze/` 를 업무 토픽 5개로 띄우는 순서다. 작업 기록과 확정값은 [작업 지시서](../../../../docs/tasks/sim-cdc-orders.md)를 따른다.
 
-**사람이 실행한다.** Claude는 이 문서와 파일을 만들고 정적 검사만 한다. 명령은 Windows PowerShell, 레포 루트 기준이다. 비밀값(DB 비밀번호, RDS 주소, 계정 ID)은 이 문서·명령행·Git에 남기지 않는다.
+**사람이 실행한다.** Claude는 이 문서와 파일을 만들고 정적 검사만 한다. 명령은 Windows PowerShell, 레포 루트 기준이다. **`aws` 명령에는 `--region ap-northeast-1`을 붙인다**(CLI 기본 리전이 다르면 다른 리전에 만들어진다). 비밀값(DB 비밀번호, RDS 주소, 계정 ID)은 이 문서·명령행·Git에 남기지 않는다.
 
 ## 이 폴더
 
@@ -58,10 +58,10 @@ terraform apply "$env:TEMP\<스택>.tfplan"
 1. 비밀번호를 만들어 Secrets Manager에 저장한다(한 번만).
 
    ```powershell
-   $pw = aws secretsmanager get-random-password --password-length 32 --exclude-punctuation --query RandomPassword --output text
+   $pw = aws secretsmanager get-random-password --password-length 32 --exclude-punctuation --query RandomPassword --output text --region ap-northeast-1
    $tmp = New-TemporaryFile
    @{ username = "clothes_cdc"; password = $pw } | ConvertTo-Json -Compress | Set-Content -NoNewline $tmp
-   aws secretsmanager create-secret --name clothes-query-dev-cdc-db --secret-string "file://$tmp"
+   aws secretsmanager create-secret --name clothes-query-dev-cdc-db --secret-string "file://$tmp" --region ap-northeast-1
    Remove-Item $tmp; Remove-Variable pw
    ```
 
@@ -75,8 +75,8 @@ terraform apply "$env:TEMP\<스택>.tfplan"
 값을 명령행에 쓰지 않도록 임시 폴더 파일을 거쳐 만들고 바로 지운다.
 
 ```powershell
-$cdc = aws secretsmanager get-secret-value --secret-id clothes-query-dev-cdc-db --query SecretString --output text | ConvertFrom-Json
-$rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text
+$cdc = aws secretsmanager get-secret-value --secret-id clothes-query-dev-cdc-db --query SecretString --output text --region ap-northeast-1 | ConvertFrom-Json
+$rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text --region ap-northeast-1
 $d = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ("cdc-" + [guid]::NewGuid()))
 Set-Content -NoNewline "$d\hostname" $rdsHost
 Set-Content -NoNewline "$d\database" "clothes"
