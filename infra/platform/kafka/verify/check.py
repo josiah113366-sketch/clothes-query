@@ -104,6 +104,11 @@ def check_business_connectors(connector_schema, values):
     member_grant = re.search(r"GRANT SELECT \(([^)]*)\) ON public\.members", prepare).group(1)
     assert {c.strip() for c in member_grant.split(",")} == columns["members"]
     assert "members_archive" not in publication and "PASSWORD '" not in prepare
+    role_example = (ROOT / "cdc-orders" / "workload-access.tfvars.example").read_text(encoding="utf-8")
+    assert f'service_account = "{values["connect"].get("name", "clothes-query-dev-connect")}-connect"' in role_example
+    assert f'"{sink["topics.dir"]}/" =' in role_example, "S3 Sink output and IAM prefix must match"
+    network_example = (ROOT / "cdc-orders" / "network.tfvars.example").read_text(encoding="utf-8")
+    assert "s3:AbortMultipartUpload" in role_example and "s3:AbortMultipartUpload" in network_example
 
 
 def main():

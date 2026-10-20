@@ -1,0 +1,3 @@
+# Merge into the existing private stacks/rds/deployment.local.tfvars; don't replace it with this file.
+# Opens PostgreSQL 5432 from the EKS cluster security group (Connect pod). Keep logical_replication as-is.
+use_eks_security_group = true
