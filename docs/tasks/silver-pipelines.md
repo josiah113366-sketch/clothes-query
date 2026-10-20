@@ -2,7 +2,18 @@
 
 # Silver 파이프라인 통합
 
-브랜치: `silver/pipelines`. `main`을 기준으로 이미 검증한 회원·리뷰·거래 Silver 파일만 모은다. Gold A 코드와 테스트는 `gold-a/metrics` 브랜치로 분리한다.
+브랜치: `pipelines/silver` (기존 `silver/pipelines`에서 이름 변경). Gold A 브랜치는 `pipelines/gold-a`다. 최초 분리 후 선행 Silver와 Gold A 연결 작업의 로컬 포함 관계는 각 브랜치 커밋을 확인한다.
+
+## 2026-10-20 승인된 연결 작업
+
+- **추가 승인: 주문상품 합계 검사.** 전체 입력 확인 시 고유 order_item_id의 수량×단가 합과 현재 주문 total_amount를 비교한다. 불일치 시 주문/이력/연결 결과를 보류하고 세 금액을 오류 기록에 남긴다. 미확인 입력은 UNVERIFIED, 상품 미도착은 PENDING_REFERENCE, 상품 오류는 ITEM_ERROR로 구분한다. 검사 버전은 transactions.v3이며 별도 결과 파일을 만들지 않고 orders DQ의 amount_checks에 남긴다. 수정 후 재처리와 Gold A 복구를 기존 테스트에서 확인한다.
+
+- 사용자 승인으로 Gold A 작업 폴더에서 선행 Silver 입력 연결과 후행 Gold A 보류를 함께 검증한다. 아직 Silver 원격 브랜치・PR에 반영한 것은 아니다.
+- transactions.py: 펼쳐진 CDC r/c/u 및 원천 시각 검사. 주문은 원천 시각 정렬, 동시각 상충・지원하지 않는 삭제/변경은 보류. 업무 시각은 별도 유지. LSN 없는 동시각 순서를 추정하지 않는다.
+- common.py: 거래에 한해 펼쳐진 CDC 파일 입력을 허용하고 입력 파일/줄・실행 ID・입력 완전성 선언을 기록한다. before/after 봉투는 계속 거부한다.
+- 영향 후보 최소 키/시각을 impact_candidates로 반환한다. 이전 후보 참조는 후행 Gold A가 연결하며 자동 원천 수정은 하지 않는다.
+- 거래・클릭 --input-complete는 실행자의 입력 준비 확인이다. Kafka watermark 자동 검증이 아니다. S3 직접 입력・YAML 검사기・자동 시험 데이터 제외는 추가하지 않았다.
+- 기존 테스트 파일에 CDC 정렬/동시각 충돌・실제 형식 JSONL 읽기 사례를 추가했다. 전체 결과는 Gold A 작업 지시서에 기록한다.
 
 ## 입력과 남은 연결
 

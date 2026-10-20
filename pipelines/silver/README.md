@@ -33,10 +33,10 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 
 | 데이터 | 현재 연결 상태 | 구현 전 확인할 것 |
 |---|---|---|
-| 주문·주문상품·결제 CDC | 가상 입력용 계산 규칙 구현, 실제 Bronze 미연결 | 실제 Bronze 컬럼, CDC 순서·삭제 처리, 중복 식별값 |
-| 클릭 이벤트 | `main`에 실제 Bronze 출력 없음 | 세션·상품 키, 이벤트 시각과 중복 기준 |
+| 주문·주문상품·결제 CDC | `origin/sim/cdc-orders` 설정의 펼쳐진 JSONL 형식 지원. 로컬 합성 CDC로 검증 | 실제 S3 다운로드 입력 검증, LSN 및 행별 Kafka 위치, 동시각 변경 순서 |
+| 클릭 이벤트 | 6개 필드・UTC Z 시각 수용. 원격 CDC 브랜치에 Bronze 설정 있음 | 실제 출력과 입력 완전성 확인 |
 | 상품 기준정보 | 생성기는 H&M article_id를 product_id로 읽을 수 있고, 대체 임시 상품 모드도 있음 | 실제 입력의 상품 키 출처·상품 스냅샷 위치 확인 |
-| 리뷰 AI 분석 결과 | 전달 스키마 없음 | `review_id`, 속성, 감성, 모델 버전, 분석 시각 |
+| 리뷰 AI 분석 결과 | Gold A는 review_id/aspect/score CSV와 모델 버전을 지원 | 실제 모델 출력・완료/실패 목록 연결 |
 
 이 표는 구현 상태를 기록한다. 미정 항목의 키나 집계 기준을 임의로 확정하지 않는다.
 
@@ -58,16 +58,17 @@ Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 �
 
 `transactions.py`의 `build_silver(orders, order_items, payments)`를 사용한다.
 
-입력은 CDC의 변경 후 비즈니스 행 목록이다. 주문 상태 변경은 `updated_at` 순서로 복원한다. 결과는 `orders_current`, `order_status_history`, `silver_order_items`, `payment_attempts`다. 시각은 UTC와 KST를 함께 남긴다. 실제 CDC 변경 순서·삭제·재전송 처리와 Bronze 경로 연결은 원본 샘플 확인 후 추가한다.
+입력은 업무 행 또는 `sim/cdc-orders`의 펼쳐진 CDC JSONL이다. CDC 주문은 `__source_ts_ms`, 기존 업무 행은 `updated_at` 순서로 복원한다. CDC 시각이 같은데 업무 내용이 다르면 해당 주문 전체를 보류하며, 같은 주문에 두 입력 방식을 섞어 정렬하지 않는다. 결과는 `orders_current`, `order_status_history`, `silver_order_items`, `payment_attempts`다. 시각은 UTC와 KST를 함께 남긴다. source.ts_ms는 총순서 식별자가 아니므로 동일 시각 상충을 해소하는 LSN 연결은 남아 있다.
 
 ### 거래 오류 처리와 반환값
 
-`build_silver()`는 정상 상세 4개에 `quarantined_records`와 `dq_results`를 더한 딕셔너리를 반환한다. 아직 파일을 저장하거나 이전 실행의 격리 상태를 갱신하지 않는다.
+`build_silver()`는 정상 상세 4개에 `quarantined_records`, `dq_results`, `impact_candidates`를 더한 딕셔너리를 반환한다. 함수 자체는 파일을 저장하거나 이전 실행의 격리 상태를 갱신하지 않는다.
 
 | 결과 | 내용 |
 |---|---|
 | `quarantined_records` | 데이터셋, 입력 목록의 행 번호(1부터), 업무 키, 주문 키, 오류 필드·사유·구분, `check_version` |
 | `dq_results` | 원천 데이터셋별 입력·정상 채택·격리·중복·충돌·대기 건수, 출력별 행 수, 영향 주문·입력 행, PASS/INCOMPLETE |
+| `impact_candidates` | 정상·오류 후보 전체의 데이터셋・업무 키・주문/상품/세션・관련 업무 시각・원본 파일/줄 참조. 회원 식별값・리뷰 원문은 복사하지 않음. Gold A 영향 범위 계산용이며 정상 업무 행 수에 더하지 않음 |
 
 - 잘못된 행은 분리하고 다른 정상 행을 처리한다. 일반 프로그램 오류까지 잡아서 숨기지 않는다.
 - 같은 결제·주문상품 키에 다른 업무 내용이 있으면 그 키의 모든 행을 분리한다. 같은 키의 한 행이 형식 오류인 경우도 다른 행만 임의로 채택하지 않는다.
@@ -76,13 +77,31 @@ Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 �
 - 실패 코드 누락·성공 결제의 실패 코드, 0 이하 금액·단가를 분리한다. 현재 DB의 필수 정보·양수 제약을 반영했다. 미등록 실패 코드의 분류나 YAML의 전체 검사기는 이 함수에서 실행하지 않는다.
 - `input_count = accepted_count + duplicate_count + quarantined_count`다. accepted_count는 중복 제거 후 채택한 입력 기록 수이며 주문 현재 상태 출력 수와 다를 수 있다. 오류는 행당 첫 사유를 기록하고, conflict_count/pending_count는 격리 행 수의 부분집합이다.
 - 오류·대기 정보가 있는 데이터셋은 INCOMPLETE다. 후속 Gold A/저장 코드는 **모든 dq_results를 확인**해 영향 범위를 완전한 결과로 표시하지 않아야 한다. 정상 출력이 존재한다는 것만으로 전체 처리 완료로 판단하지 않는다.
-- `check_version=transactions.v1`은 이 계산 코드의 검사 버전이다. 공통 YAML 규칙 버전을 적용했다고 표시하지 않는다. 원본 파일/Kafka 위치·실행 ID는 실제 입력 연결 단계에서 추가한다. 현재 행 번호는 지속적인 원본 식별 키가 아니다.
+- `check_version=transactions.v3`는 이 계산 코드의 검사 버전이다. 공통 YAML 규칙 버전을 적용했다고 표시하지 않는다. 원본 파일/줄・실행 ID를 남기지만 파일 이름의 시작 offset에 줄 번호를 더해 Kafka 행 offset을 추정하지 않는다.
+
+### 주문상품 금액 합계 검사
+
+`build_silver(..., input_complete=True)` 또는 CLI의 `--input-complete`로 전체 입력 준비를 확인한 실행에서 검사한다. 주문별로 중복 제거한 주문상품의 `quantity × unit_price`를 합산해 현재 주문의 total_amount와 비교한다. 현재 상품 기준정보 가격을 사용하지 않는다. 현재 원천 계약의 할인・배송비 없는 상품 금액 기준이며, 향후 별도 금액 항목 도입 시 계약부터 수정한다.
+
+| 조건 | dq_results의 주문별 amount_checks 상태 | 처리 |
+|---|---|---|
+| 입력 완전성 미확인 | UNVERIFIED | 합계 판정 생략. 이 금액 검사를 통과한 것으로 표현하지 않음 |
+| 주문상품 자체 오류・충돌 | ITEM_ERROR | 정상 상품만 부분 합산하지 않고 주문과 연결 결과를 보류 |
+| 주문상품 없음 | PENDING_REFERENCE | 0원으로 비교하지 않고 MISSING_ORDER_ITEMS 기록・연결 보류 |
+| 합계 일치 | PASS | 정상 결과 유지 |
+| 합계 불일치 | MISMATCH | ORDER_TOTAL_MISMATCH 기록, 주문 현재 상태/이력과 관련 항목・결제를 정상 결과에서 보류 |
+
+amount_checks는 orders 품질 결과 안에 남기며 새 데이터셋을 만들지 않는다. 합계 검사 시 order_total_amount・item_total_amount・amount_difference(상품 합계 - 주문 총액)를 남기고, 불일치 오류 기록에도 금액과 기존 파일/줄 참조를 보존한다. 기존에 발견한 행 오류는 다른 오류로 덮어쓰지 않는다. 입력 완전성 미확인은 금액 일치와 다르며 품질 PASS 자체도 원천 완전성을 증명하지 않는다.
+
+주문당 성공 결제 1건 제한과 성공 결제 amount=주문 total_amount 검사는 기존대로 유지한다. 세 값이 맞는지 각각 검사하며 어느 금액도 임의로 수정하지 않는다. 오류 수정 후 전체 입력으로 Silver를 다시 실행하고 Gold A --scope-aware를 실행해 복구한다. 현재 Gold A는 주문 자체 오류이면 관련 거래/퍼널 묶음 전체를 보류한다. 별도 리뷰 작업까지 중단하지 않는다.
 
 이 함수는 제공된 입력 안에서만 중복·충돌을 확인한다. 이전 실행에서 이미 저장한 결제와의 충돌, 날짜·상품 부분 병합, Gold A의 품질 상태 사용은 후속 연결 작업에서 다룬다. 아래 로컬 실행기는 제공한 입력 전체의 결과 묶음을 저장한다.
 
 ### 문서 기준 거래 JSONL 실행
 
-문서의 업무 컬럼으로 만든 로컬 JSONL을 읽어 결과를 저장한다. 입력은 CDC 봉투나 실제 S3 경로를 추측한 것이 아니다. 세 입력 모두 파일 또는 폴더를 직접 지정한다. 폴더는 하위 `.json`/`.jsonl` 전체를 읽으며, 파일은 한 줄에 업무 객체 하나다. 시각은 시간대가 있는 ISO 문자열을 사용한다.
+문서의 업무 행 또는 내려받은 Bronze CDC JSONL을 읽어 결과를 저장한다. 세 입력 모두 파일 또는 폴더를 직접 지정한다. 폴더는 하위 `.json`/`.jsonl` 전체를 읽으며, 파일은 한 줄에 객체 하나다. 업무 시각은 시간대가 있는 ISO 문자열(UTC `Z` 포함)을 사용한다. S3 직접 읽기는 아직 지원하지 않는다.
+
+펼쳐진 CDC는 `__op`, 정수 `__source_ts_ms`를 검사한다. 주문은 r/c/u, 결제・주문상품은 r/c를 허용한다. 실시간 `__source_snapshot=null`을 허용하고 snapshot은 `__op=r`로 판단한다. 삭제・결제 UPDATE・before/after 봉투는 추정해서 처리하지 않는다. source.ts_ms가 다른 주문 변경은 정렬하며, 현재 상태와 상태 이력에 해당 원천 시각을 남긴다.
 
 ```powershell
 python -m pipelines.silver.transactions --orders-input <주문-JSONL-경로> --order-items-input <주문상품-JSONL-경로> --payments-input <결제-JSONL-경로> --output-root pipelines/silver/.local/transactions-output
@@ -92,7 +111,9 @@ python -m pipelines.silver.transactions --orders-input <주문-JSONL-경로> --o
 - `order_items`: `order_item_id`, `order_id`, `article_id`, `quantity`, `unit_price`.
 - `payments`: `payment_id`, `order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, `requested_at`, `completed_at`.
 
-정상 결과 4개와 격리·품질 결과 2개를 `<output-root>/silver/transactions/runs/run-.../`에 JSONL로 쓴다. 여섯 파일이 모두 저장된 뒤 `<output-root>/silver/transactions/current.json`을 교체한다. current.json에는 원본 파일 목록, 입력·출력 건수, PASS/INCOMPLETE 상태, 실제 결과 파일 경로가 있다. 오류 행에는 원본 파일과 줄 번호도 남긴다.
+정상 결과 4개와 격리・품질・영향 후보 결과 3개를 `<output-root>/silver/transactions/runs/run-.../`에 JSONL로 쓴다. 일곱 파일이 모두 저장된 뒤 `<output-root>/silver/transactions/current.json`을 교체한다. current.json에는 원본 파일 목록, 실행 ID, 입력・출력 건수, 품질 상태, 실제 결과 파일 경로가 있다.
+
+거래와 클릭 CLI의 `--input-complete`는 필요한 전체 이력과 참조 입력을 준비했다는 **실행자의 명시적 확인**을 manifest의 `input_completeness=DECLARED_COMPLETE`로 남긴다. 생략하면 UNVERIFIED다. 이것은 Kafka watermark 자동 검증이나 원천 입수 완전성의 기술적 증명이 아니다. 토픽별 도착 범위 확인 후에만 사용한다. Gold A의 `--scope-aware` 실행은 이 확인을 요구한다. 기존 시험 주문・옛 회원 데이터의 포함 여부도 입력을 준비할 때 정하며 자동 삭제/제외하지 않는다.
 
 **후속 조회는 current.json이 가리키는 결과만 읽는다.** runs/ 전체를 합치면 과거 실행을 중복 집계하게 된다. 같은 입력을 다시 실행하면 새 결과 묶음을 만들지만 대표 결과는 한 묶음만 가리킨다. 이전 묶음은 보존한다. 이번 변경은 지정 입력 전체의 스냅샷 저장이며, 날짜·상품 부분 재처리와 기존 저장 데이터 병합은 포함하지 않는다.
 

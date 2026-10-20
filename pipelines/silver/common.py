@@ -1,12 +1,12 @@
 """Silver 로컬 입력·단일 행 검사·완료된 결과 묶음 저장을 공유한다."""
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import UTC, datetime
 import json
 import os
-from pathlib import Path
 import tempfile
+from collections import defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
 
 
 class RowError(ValueError):
@@ -110,7 +110,7 @@ def collect_unique(rows: list[dict], name: str, key_field: str, normalize,
     return clean, issues, summary
 
 
-def load_jsonl(location: str) -> tuple[list[dict], list[str]]:
+def load_jsonl(location: str, allow_cdc: bool = False) -> tuple[list[dict], list[str]]:
     """지정한 파일/폴더를 읽고 원본 파일 위치와 줄 번호를 보존한다."""
     root = Path(location).resolve()
     files = sorted(path for path in root.rglob("*")
@@ -132,7 +132,9 @@ def load_jsonl(location: str) -> tuple[list[dict], list[str]]:
                 if not isinstance(raw, dict):
                     raw, error = {}, "TYPE_MISMATCH"
                 # 실제 CDC 해석이 연결된 것처럼 임의로 op/after를 처리하지 않는다.
-                if any(field in raw for field in ("after", "before", "payload", "__op", "op")):
+                if any(field in raw for field in ("after", "before", "payload", "op")) or (
+                    "__op" in raw and not allow_cdc
+                ):
                     raise ValueError("CDC 입력은 업무 행으로 변환한 뒤 전달해야 합니다")
                 rows.append({**raw, "_input_source": {"file": str(path), "line": number},
                              "_input_error": error})
@@ -140,7 +142,7 @@ def load_jsonl(location: str) -> tuple[list[dict], list[str]]:
 
 
 def run_local(locations: dict[str, str], output_root: str, dataset: str,
-              check_version: str, build) -> dict:
+              check_version: str, build, input_complete: bool = False) -> dict:
     """입력 전체를 계산하고, 결과 묶음 저장 완료 후 current.json만 원자적으로 교체한다."""
     if any("://" in location for location in (*locations.values(), output_root)):
         raise ValueError("이번 입출력은 로컬 경로만 지원합니다")
@@ -151,7 +153,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
             raise ValueError("입력과 출력 경로는 서로 겹치지 않아야 합니다")
     loaded, sources = {}, {}
     for name, location in locations.items():
-        loaded[name], sources[name] = load_jsonl(location)
+        loaded[name], sources[name] = load_jsonl(location, allow_cdc=dataset == "transactions")
     result = build(loaded)
 
     base = root / "silver" / dataset
@@ -169,6 +171,8 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
         manifest = {
             "status": "INCOMPLETE" if result["quarantined_records"] else "PASS",
             "check_version": check_version,
+            "input_completeness": "DECLARED_COMPLETE" if input_complete else "UNVERIFIED",
+            "run_id": snapshot.name,
             "input_files": sources,
             "input_counts": {name: len(rows) for name, rows in loaded.items()},
             "output_counts": {name: len(rows) for name, rows in result.items()},

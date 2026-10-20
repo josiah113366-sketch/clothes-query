@@ -28,17 +28,18 @@ def build_clicks(events: list[dict]) -> dict[str, list[dict]]:
     return {"click_events": clean, "quarantined_records": issues, "dq_results": [summary]}
 
 
-def run(input_root: str, output_root: str) -> dict:
+def run(input_root: str, output_root: str, input_complete: bool = False) -> dict:
     return run_local({"clickstream": input_root}, output_root, "clicks", CHECK_VERSION,
-                     lambda rows: build_clicks(rows["clickstream"]))
+                     lambda rows: build_clicks(rows["clickstream"]), input_complete=input_complete)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="문서 기준 클릭 JSONL → 로컬 Silver")
     parser.add_argument("--input-root", required=True)
     parser.add_argument("--output-root", required=True)
+    parser.add_argument("--input-complete", action="store_true", help="필요한 전체 클릭 이력을 준비했음을 실행자가 확인")
     args = parser.parse_args()
-    manifest = run(args.input_root, args.output_root)
+    manifest = run(args.input_root, args.output_root, args.input_complete)
     print(f"클릭 Silver {manifest['status']}: {manifest['output_counts']}")
     print(f"대표 결과: {manifest['manifest_path']}")
 
