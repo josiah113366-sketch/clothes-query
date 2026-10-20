@@ -27,6 +27,7 @@
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
 | `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 시작 전 |
 | `ci` | `.github/` | GitHub Actions | 시작 전 |
+| `api` | `api/` | 업무 API(WAS, FastAPI). 시뮬레이터 → API → RDS·Kafka(clickstream). 설계: `docs/design/api.md` | 시작 전 |
 
 새 영역이 필요하면 **이 표에 한 줄을 추가하는 `docs/` PR**을 먼저 올린다. 접두어는 소문자와 `-`만 쓴다.
 
@@ -86,6 +87,7 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `docs/branch-rules` | - | 진행 중 | |
+| `docs/api-design` | - (설계 문서 `docs/design/api.md`) | 진행 중 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
