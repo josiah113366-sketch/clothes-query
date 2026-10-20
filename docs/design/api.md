@@ -180,7 +180,7 @@ AI 관제 에이전트와 대시보드가 쓸 수 있게 처음부터 넣는다.
 | 위치 | EKS, namespace **`api`** (결정) | 사용자 결정(EKS Pod, 새 namespace) |
 | replica | **1개로 시작 (결정)**, 부하를 보고 늘린다 | 지금 노드 1대(t3a.large) CPU 요청 약 76%. WAS 250m를 더하면 약 90%라 노드 추가 없이 들어갈 수 있다. 2개면 노드가 늘 가능성이 크다(월 약 65달러) |
 | 리소스 | requests 250m / 256Mi, limits 500m / 512Mi | 시작값. 부하를 본 뒤 조정 |
-| 이미지 | 새 ECR 저장소, digest 고정, 비root 실행 | `infra/stacks/ecr`에 저장소 추가가 필요하다 |
+| 이미지 | 기존 ECR **`clothes-query-dev/was`** 저장소 재사용, digest 고정, 비root 실행 | 2026-10-20 확인: 저장소가 이미 있고 비어 있으며 태그 덮어쓰기 불가(IMMUTABLE). Terraform 변경 없음 |
 | 노출 | **내부 ALB** (Ingress, `scheme: internal`), **HTTP 80 (결정)**, 대상은 WAS Service. Helm chart에 `IngressClassParams`(scheme internal) + `IngressClass`(`controller: eks.amazonaws.com/alb`) + `Ingress`를 넣으면 EKS Auto Mode가 ALB를 만든다(`infra/modules/apps/main.tf`의 예시를 internal·HTTP로 바꿔 쓴다). `app-a`·`app-c` 서브넷에 `kubernetes.io/role/internal-elb=1` 태그가 이미 있다(2026-10-20 확인). 헬스체크 `/readyz` | 인증서·도메인 불필요. 월 약 20달러. **접근 제한**: `api/mvp`에서는 ECS 태스크 SG가 아직 없으므로 처음에는 **VPC 대역만** 허용하고, `sim/ecs-image`에서 ECS SG가 생기면 그 SG만 허용하도록 좁힌다 |
 | 배포 도구 | **Helm chart (결정)** | Kafka와 같은 방식. values로 환경을 나눈다 |
 | 기존 `apps` 스택 | **쓰지 않는다 (결정)** | 공개 HTTPS Ingress(도메인·인증서 필수)와 WEB이 묶여 있다. 재영에게 api 전용으로 따로 간다고 알린다 |
