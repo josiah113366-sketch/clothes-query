@@ -67,7 +67,11 @@ def check_business_connectors(connector_schema, values):
     assert source["publication.autocreate.mode"] == "disabled"
     # Heartbeat must not write tables or publish messages (nothing may reach Bronze).
     assert source["heartbeat.action.query"].startswith("SELECT pg_logical_emit_message(false, 'heartbeat'")
-    assert source["message.prefix.exclude.list"] == "heartbeat"
+    # Excluding the prefix drops the message before its LSN is recorded; the slot then never advances.
+    assert "message.prefix.exclude.list" not in source
+    assert source["transforms"].split(",")[0] == "dropMessage"
+    assert source["transforms.dropMessage.type"] == "org.apache.kafka.connect.transforms.Filter"
+    assert source[f'predicates.{source["transforms.dropMessage.predicate"]}.pattern'] == "cdc\\.message"
     tables = source["table.include.list"].split(",")
     assert tables == ["public.members", "public.orders", "public.order_items", "public.payments"]
     columns = {}

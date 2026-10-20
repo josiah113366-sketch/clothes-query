@@ -39,16 +39,20 @@ spec:
     # 업무 테이블에 변경이 없으면 slot 확인 위치가 멈춰 RDS WAL 이 쌓인다(5분마다 64MB 파일 전환).
     # 10초마다 WAL 에 논리 메시지만 남겨(테이블 쓰기 없음) Debezium 이 받고 위치를 확정하게 한다.
     heartbeat.action.query: "SELECT pg_logical_emit_message(false, 'heartbeat', now()::varchar)"
-    # 그 메시지는 Kafka 로 보내지 않는다(cdc.message 토픽 없음, Bronze 영향 없음).
-    message.prefix.exclude.list: heartbeat
+    # 메시지는 Debezium 이 이벤트(cdc.message)로 만든 뒤 아래 dropMessage 변환이 버린다(Kafka·Bronze 로 안 감).
+    # message.prefix.exclude.list 로 버리면 위치가 기록되지 않아 slot 이 움직이지 않는다(2026-10-20 실측).
     key.converter: org.apache.kafka.connect.json.JsonConverter
     key.converter.schemas.enable: "false"
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: "false"
-    predicates: isData
+    predicates: isData,isMessage
     predicates.isData.type: org.apache.kafka.connect.transforms.predicates.TopicNameMatches
     predicates.isData.pattern: 'cdc\.public\..*'
-    transforms: unwrap,routeMembers,routeItems,routeOrders
+    predicates.isMessage.type: org.apache.kafka.connect.transforms.predicates.TopicNameMatches
+    predicates.isMessage.pattern: 'cdc\.message'
+    transforms: dropMessage,unwrap,routeMembers,routeItems,routeOrders
+    transforms.dropMessage.type: org.apache.kafka.connect.transforms.Filter
+    transforms.dropMessage.predicate: isMessage
     transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
     transforms.unwrap.add.fields: op,source.ts_ms,source.snapshot
     transforms.unwrap.add.fields.prefix: __

@@ -129,7 +129,7 @@ Debezium(Kafka Connect) 커넥터 설정이다. 로컬 구성(`simulator/docker-
 | snapshot 잠금 | 기본 | `snapshot.locking.mode: none` | 회원 테이블은 컬럼 단위 `SELECT` 권한뿐이라 `LOCK TABLE`을 못 한다. slot을 만들 때의 exported snapshot이 일관성을 지킨다 |
 | 토픽 이름 | `RegexRouter` 1개 | 3개 (`members` → `members-events`, `order_items` → `order-items`, `orders`·`payments`는 그대로) | 계약 이름과 Debezium 기본 이름(`cdc.public.<테이블>`)이 다르다 |
 | heartbeat 토픽 | `__debezium-heartbeat.cdc` | `debezium-heartbeat.cdc` (`topic.heartbeat.prefix`) | chart의 토픽 이름 규칙이 `_`로 시작하는 이름을 받지 않는다 |
-| WAL 확인 위치 | (로컬은 계속 쓰기가 있어 문제 없음) | `heartbeat.action.query`: 10초마다 `pg_logical_emit_message(false, 'heartbeat', …)`, `message.prefix.exclude.list: heartbeat` | 업무 테이블에 변경이 없으면 slot 위치가 멈춰 RDS WAL이 5분마다 64MB씩 쌓인다(실측). 테이블에 쓰지 않고 WAL에 논리 메시지만 남겨 위치를 옮긴다. 메시지는 Kafka로 보내지 않아 Bronze에 영향이 없다 |
+| WAL 확인 위치 | (로컬은 계속 쓰기가 있어 문제 없음) | `heartbeat.action.query`: 10초마다 `pg_logical_emit_message(false, 'heartbeat', …)`, 그 메시지 이벤트(`cdc.message`)는 `dropMessage`(Filter) 변환이 버린다 | 업무 테이블에 변경이 없으면 slot 위치가 멈춰 RDS WAL이 5분마다 64MB씩 쌓인다(실측). 테이블에 쓰지 않고 WAL에 논리 메시지만 남겨 위치를 옮긴다. 메시지는 Kafka로 보내지 않아 Bronze에 영향이 없다. `message.prefix.exclude.list`로 버리면 위치가 기록되지 않아 slot이 움직이지 않는다(실측) |
 | S3 자격 증명 | `.env`의 키 | Pod Identity (ServiceAccount `clothes-query-dev-connect-connect`, `bronze/`만) | 키를 이미지·Secret에 넣지 않는다 |
 | Sink 키 변환기 | JSON | 문자열(`StringConverter`) | `clickstream` 키는 JSON이 아닌 `session_id` 문자열이다. 키는 파일에 쓰지 않는다 |
 | `s3.part.size` | 기본(25MB) | 5MB(최소값) | 열린 파티션 15개마다 버퍼를 잡는다. 25MB면 Connect 힙(512MB)이 모자란다 |
