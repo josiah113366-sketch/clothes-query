@@ -72,12 +72,12 @@ terraform apply "$env:TEMP\<스택>.tfplan"
 
 ## 3. K8s Secret (`kafka` namespace)
 
-값을 명령행에 쓰지 않도록 임시 폴더 파일을 거쳐 만들고 바로 지운다.
+값을 명령행에 쓰지 않도록 임시 폴더 파일을 거쳐 만들고 바로 지운다. **임시 폴더 경로에 한글이 없어야 한다.** Windows 사용자 이름이 한글이면 `$env:TEMP` 경로가 kubectl에 깨져 넘어가 `cannot find the file`이 난다.
 
 ```powershell
 $cdc = aws secretsmanager get-secret-value --secret-id clothes-query-dev-cdc-db --query SecretString --output text --region ap-northeast-1 | ConvertFrom-Json
 $rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text --region ap-northeast-1
-$d = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ("cdc-" + [guid]::NewGuid()))
+$d = New-Item -ItemType Directory -Path ("E:\cdc-tmp-" + [guid]::NewGuid())   # 레포 밖, 한글 없는 경로
 Set-Content -NoNewline "$d\hostname" $rdsHost
 Set-Content -NoNewline "$d\database" "clothes"
 Set-Content -NoNewline "$d\username" $cdc.username
