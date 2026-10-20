@@ -5,7 +5,7 @@
 | Role | 화면 | 데이터(노션 설계 기준) |
 |---|---|---|
 | product (상품 관리) | 통합 조회, 주문·매출, 상품 판매, 구매 퍼널, 리뷰·속성 분석 | Gold A: order_sales_hourly, product_sales_daily, funnel_daily/funnel_session_product, review_product_daily, review_aspect_daily |
-| data (데이터 관리) | 파이프라인 상태, 결제 관제, 형식 오류, 이상탐지, 재처리 이력 | Gold B: bronze_lag_snapshots, payment_attempts, malformed_events/messages, anomaly(탐지 담당 정의), reprocess_events |
+| data (데이터 관리) | 파이프라인 상태, 결제 관제, 형식 오류, 이상탐지, 원인 리포트(임시), 재처리 이력 | Gold B: bronze_lag_snapshots, payment_attempts, malformed_events/messages, anomaly(탐지 담당 정의), reprocess_events |
 
 두 Role을 모두 가진 사용자는 전체 화면을 본다.
 
@@ -95,6 +95,11 @@ streamlit run app.py
 3. 이메일 -> Role 표(`ROLES_JSON`)를 Secret으로 주입
 4. ALB 허용 IP, 도메인/HTTPS
 5. Athena/S3 읽기 권한(Pod Identity 역할). 연결 후 `data.py`의 `_REAL`에 조회 함수 등록
+
+## 추후 할 일
+baseline 이후 영역별 할 일(담당자·상태 기록용)은 [`TODO.md`](TODO.md)에 정리한다. 아래는 그중 핵심.
+- [ ] **원인 리포트에 담을 내용 정하기**: 지금 `원인 리포트` 화면은 임시 구성(제안)이다. 노션에 리포트 항목이 정해져 있지 않아, 조사 에이전트 담당과 맞춰 확정한 뒤 `data.get_rca_reports()`와 `pages_data/rca_report.py`를 고친다.
+- [ ] 슬랙 알림 연동 여부, 재처리 승인 화면 호출 방식(Airflow 결정 이후)
 
 ## 주의
 - 운영에서 `AUTH_MODE=dev` 금지 (누구나 Role 선택 가능).
