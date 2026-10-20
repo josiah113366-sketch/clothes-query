@@ -69,7 +69,7 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 | 시뮬레이터 재시도 | 주문·결제·상태·가입: 연결 실패·5xx·503에 **0.5 → 1 → 2 → … 최대 30초** 간격으로 계속 재시도(ID 고정이라 중복 없음). 422는 실패로 센다 | 설계 안전장치 |
 | 클릭 전송 | 시뮬레이터가 **1초 또는 500건**마다 묶어 보낸다. 실패하면 그 묶음은 버리고 센다(경고 1회) | 지금 `KafkaClickSink` 정책과 같다 |
 | 이미지 태그 | ECR가 IMMUTABLE이므로 **git 짧은 SHA**(`api-<sha>`), Helm에는 **digest**로 넣는다 | 덮어쓰기 불가 |
-| 리소스 | requests 250m/256Mi, limits 500m/512Mi | 노드 CPU 요청 약 76% → 약 90% |
+| 리소스·노드 | **API 전용 노드 풀**(`clothes-query-dev-api`, t3a.medium, taint, CPU 한도 2 = 최대 1대). requests 500m/256Mi, limits 1500m/1Gi | 2026-10-21 사용자 결정: 노드 한 대에 Kafka·Connect·UI·API를 다 올리지 않는다. 기존 풀은 바꾸지 않아 Kafka 영향 없음. 같은 NodeClass라 RDS SG 규칙 그대로 |
 
 ## 만드는 것
 
@@ -193,7 +193,7 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 - [ ] **내부 ALB 생성**(`kubectl get ingress -n api`의 주소가 `internal-…`), 대상 healthy
 - [ ] VPC 안에서 `/readyz` 200 (임시 Pod에서 ALB 주소로 요청)
 - [ ] 로컬 시뮬레이터 → `kubectl port-forward -n api svc/api` → 실제 RDS·Kafka: 짧게 돌려(예: 방문 300) 주문이 RDS에 들어가고 **CDC → `bronze/orders` 등**까지, 클릭이 **`bronze/clickstream/`**까지 가는지 확인
-- [ ] 노드 수 그대로(1대), API Pod 자원 사용량 보고
+- [ ] 노드 2대(기존 풀 1 + API 전용 풀 1), Kafka Pod 재시작 0, API Pod 자원 사용량 보고
 
 ## README 갱신
 
@@ -223,6 +223,7 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 - **결제 금액 = 주문 총액 검사를 뺐다.** 컨트롤러의 데이터 오염(`ORDER_TOTAL_MISMATCH`)이 DB에서 총액을 바꾸면, 그 뒤 시뮬레이터의 정상 결제가 API에서 거절돼 실험이 달라진다. DB에도 그런 제약은 없다
 - **`404 MEMBER_NOT_FOUND`** 추가(주문의 회원이 아예 없을 때)
 - **`--click-sink api`** 추가: `--backend api`와 따로 고를 수 있게 했다(클릭만 API로 보내기 등)
+- **API 전용 노드 풀**(2026-10-21 사용자 결정): 설계 문서 9절의 "replica 1개를 기존 노드에"를 바꿨다. chart가 Karpenter NodePool(t3a.medium, taint `clothes-query/dedicated=api`, CPU 한도 2)을 만들고, 기존 NodeClass를 같이 쓴다. Terraform(`compute` 스택)은 바꾸지 않았다(비공개 입력이 이 PC에 없음). 비용은 t3a.medium 1대분(도쿄 온디맨드 대략 월 35달러 + Auto Mode 관리비). 리소스 requests 500m / limits 1500m
 - HTTP 클라이언트는 **표준 라이브러리 `urllib`**(시뮬레이터 새 의존성 없음, 사용자 확인)
 - API dev 의존성에 `pyyaml`(chart 렌더 테스트)
 

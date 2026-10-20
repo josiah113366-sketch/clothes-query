@@ -3,10 +3,22 @@ name: api
 replicas: 1
 # 반드시 <저장소>@sha256:<digest> (ECR clothes-query-dev/was 는 IMMUTABLE)
 image: ""
+# 전용 노드(t3a.medium 2 vCPU)를 거의 혼자 쓴다. Python 프로세스 하나는 약 1코어까지만 쓴다.
 resources:
-  requests: {cpu: "250m", memory: "256Mi"}
-  limits: {cpu: "500m", memory: "512Mi"}
-nodePool: clothes-query-dev-compute
+  requests: {cpu: "500m", memory: "256Mi"}
+  limits: {cpu: "1500m", memory: "1Gi"}
+# API 전용 노드 풀. 기존 풀(clothes-query-dev-compute, Kafka 등)은 건드리지 않는다.
+# 기존 NodeClass(같은 app 서브넷·클러스터 보안 그룹)를 같이 쓰므로 RDS 5432 규칙이 그대로 적용된다.
+nodePool:
+  create: true
+  name: clothes-query-dev-api
+  nodeClass: clothes-query-dev-compute
+  instanceTypes: [t3a.medium]
+  zones: [ap-northeast-1a, ap-northeast-1c]
+  # cpu 한도 2 = t3a.medium 한 대. 노드가 2대 이상 생기지 않는다(비용 상한)
+  cpuLimit: "2"
+  memoryLimit: 4Gi
+  taintKey: clothes-query/dedicated
 env:
   logLevel: INFO
   poolMax: 10

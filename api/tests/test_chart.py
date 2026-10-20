@@ -50,6 +50,21 @@ def test_renders_internal_http_alb_and_secure_pod():
     assert env["KAFKA_SECURITY_PROTOCOL"]["value"] == "SSL"
     assert "DATABASE_URL" not in env
     assert docs["Service"]["spec"]["type"] == "ClusterIP"
+    # 전용 노드 풀: 기존 Kafka 풀과 다른 이름, taint, t3a.medium 한 대 상한
+    pool = docs["NodePool"]["spec"]
+    assert docs["NodePool"]["metadata"]["name"] == "clothes-query-dev-api"
+    assert pool["template"]["spec"]["nodeClassRef"]["name"] == "clothes-query-dev-compute"
+    assert pool["template"]["spec"]["taints"] == [
+        {"key": "clothes-query/dedicated", "value": "api", "effect": "NoSchedule"}
+    ]
+    types = next(r for r in pool["template"]["spec"]["requirements"]
+                 if r["key"] == "node.kubernetes.io/instance-type")  # fmt: skip
+    assert types["values"] == ["t3a.medium"] and pool["limits"]["cpu"] == "2"
+    terms = pod["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"]
+    assert terms["nodeSelectorTerms"][0]["matchExpressions"][0]["values"] == [
+        "clothes-query-dev-api"
+    ]
+    assert pod["tolerations"][0]["key"] == "clothes-query/dedicated"
 
 
 @pytest.mark.parametrize(
@@ -59,6 +74,14 @@ def test_renders_internal_http_alb_and_secure_pod():
         ((f"image={DIGEST}",), "inboundCIDRs is required"),
         ((f"image={DIGEST}", "ingress.inboundCIDRs={0.0.0.0/0}"), "not 0.0.0.0/0"),
         ((f"image={DIGEST}", "ingress.inboundCIDRs={10.0.0.0/16}", "replicas=0"), "replicas"),
+        (
+            (
+                f"image={DIGEST}",
+                "ingress.inboundCIDRs={10.0.0.0/16}",
+                "nodePool.name=clothes-query-dev-compute",
+            ),
+            "shared Kafka pool",
+        ),
     ],
 )
 def test_rejects_bad_values(sets, message):

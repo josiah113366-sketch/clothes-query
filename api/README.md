@@ -1,6 +1,6 @@
 # api/ — 업무 API (WAS)
 
-시뮬레이터가 보낸 **가입·주문·결제·상태 변경을 검증해 RDS(`postgres` DB)에 저장**하고, **클릭을 Kafka `clickstream`에 발행**하는 FastAPI 앱이다. EKS `api` namespace에 Pod로 뜨고, VPC 안에서만 닿는 **내부 ALB(HTTP 80)** 뒤에 있다. 설계는 `docs/design/api.md`, 작업 기록은 `docs/tasks/api-mvp.md`.
+시뮬레이터가 보낸 **가입·주문·결제·상태 변경을 검증해 RDS(`postgres` DB)에 저장**하고, **클릭을 Kafka `clickstream`에 발행**하는 FastAPI 앱이다. EKS `api` namespace에 Pod로 뜨고, VPC 안에서만 닿는 **내부 ALB(HTTP 80)** 뒤에 있다. Pod는 **API 전용 노드 풀**(`clothes-query-dev-api`, t3a.medium 1대, taint로 API만)에 올라가며, Kafka가 있는 기존 노드 풀은 건드리지 않는다. 설계는 `docs/design/api.md`, 작업 기록은 `docs/tasks/api-mvp.md`.
 
 ```
 시뮬레이터 ─HTTP─▶ 내부 ALB ─▶ api Pod ─▶ RDS postgres DB ─(Debezium)─▶ Kafka ─▶ S3 bronze/
@@ -163,7 +163,7 @@ kubectl get nodes
 
 - `inboundCIDRs`는 처음엔 VPC 대역(`10.70.0.0/16`)이다. `sim/ecs-image`에서 ECS 태스크 대역이 정해지면 좁힌다.
 - Ingress `ADDRESS`가 **`internal-`**로 시작해야 한다(내부 ALB). public이면 바로 `helm uninstall api -n api`하고 알린다. ALB가 뜨는 데 2~3분 걸린다.
-- 노드가 2대가 되면 알린다(API 요청량 250m를 더하면 CPU 약 90%).
+- 노드는 **2대가 정상**이다: 기존 풀 1대(Kafka 등) + API 전용 풀 1대(t3a.medium). `kubectl get nodes -L karpenter.sh/nodepool`로 풀을 본다. 전용 노드는 Pod가 생기면 1~2분 안에 뜬다. 전용 풀은 CPU 한도 2라 **2대 이상 생기지 않는다**(비용 상한). Kafka 쪽 Pod(`kubectl get pod -n kafka`)는 재시작 0이어야 한다.
 
 ### 7. 확인
 
@@ -179,6 +179,6 @@ port-forward를 켠 채로 다른 창에서 시뮬레이터를 짧게 돌린다(
 
 ## 되돌리기
 
-- API만 내리기: `helm uninstall api -n api` (내부 ALB도 지워진다). Secret과 DB 계정은 남는다.
+- API만 내리기: `helm uninstall api -n api` (내부 ALB와 **API 전용 노드 풀·노드도** 지워진다). Secret과 DB 계정은 남는다.
 - DB 계정: `api/deploy/sql/app-account.sql` 아래쪽 되돌리기 SQL.
 - Kafka 계정: `cdc-orders-values.yaml`에서 `clients`의 `api`와 `clientNamespaces`를 빼고 `cq-kafka` upgrade.

@@ -29,7 +29,12 @@ spec:
               - matchExpressions:
                   - key: karpenter.sh/nodepool
                     operator: In
-                    values: [{{ .Values.nodePool | quote }}]
+                    values: [{{ .Values.nodePool.name | quote }}]
+      tolerations:
+        - key: {{ .Values.nodePool.taintKey }}
+          operator: Equal
+          value: {{ .Values.name }}
+          effect: NoSchedule
       containers:
         - name: api
           image: {{ .Values.image | quote }}
