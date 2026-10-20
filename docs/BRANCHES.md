@@ -25,6 +25,7 @@
 | `silver` | `pipelines/silver/` | Bronze → Silver Spark 잡 | 시작 전 |
 | `gold-a` | `pipelines/gold_a/` | Gold A(대시보드용) 잡 | 시작 전 |
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
+| `dashboard` | `dashboard/` | 대시보드 앱(Streamlit, 상품 관리·데이터 관리 Role). 배포 소스는 `infra/platform/dashboard/`(infra 영역) | 사용 중 |
 | `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 시작 전 |
 | `ci` | `.github/` | GitHub Actions | 시작 전 |
 
@@ -90,6 +91,11 @@ gitGraph
 | `infra/deploy-result` | [infra-deploy-result.md](tasks/infra-deploy-result.md) | 머지됨 | 2026-10-16 |
 | `infra/pipeline-smoke` | [infra-pipeline-smoke.md](tasks/infra-pipeline-smoke.md) | 검토 대기 | |
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
+
+### dashboard
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `dashboard/dashboard-baseline` | [dashboard-dashboard-baseline.md](tasks/dashboard-dashboard-baseline.md) | 진행 중 | |
 
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
