@@ -277,6 +277,32 @@ sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
 - **시각:** 클릭 `event_time`은 UTC(`Z`로 끝남)로 나간다(`jsonl`도 같다). "Bronze는 UTC, Silver에서 KST로 한 번만 바꾼다" 규칙과 Debezium 시각 표기에 맞췄다(`sim/cdc-orders`, 이전에는 `+09:00`).
 - **알려진 한계:** 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
 
+## 업무 API로 쓰기 (`--backend api`)
+
+`sim member live`와 `sim behavior live`는 RDS에 직접 쓰는 대신 **업무 API(`api/`)**로 쓰고 읽을 수 있다. 이 경우 시뮬레이터에 DB 계정이 필요 없다(`DATABASE_URL` 불필요). 기본은 지금처럼 `--backend db`다.
+
+```bash
+export SIM_BACKEND=api                 # 또는 --backend api
+export SIM_API_URL=http://localhost:8000
+sim member live --speed 60
+sim behavior live --click-sink api --speed 60 --max-visits 300
+```
+
+| 무엇 | `--backend api`일 때 |
+|---|---|
+| 가입 | `POST /v1/members`. 시작 위치는 `GET /v1/members/signup-count`. 전화번호 중복(`PHONE_TAKEN`)이면 지금처럼 번호를 다시 뽑는다 |
+| 주문·결제·상태 | `POST /v1/orders`, `POST /v1/orders/{id}/payments`, `PATCH /v1/orders/{id}`. ID·시각·결제 결과는 시뮬레이터가 정해 보낸다 |
+| 회원 목록 | 시작 때 `GET /v1/members/active` 전체, 그다음 **5초마다** `GET /v1/members/changes` 변경분만 (지금의 60초마다 전체 다시 읽기 대신) |
+| 상품 목록 | 시작 때 `GET /v1/catalog` 한 번 |
+| 클릭 | `--click-sink api`: **1초 또는 500건**마다 `POST /v1/events/clicks`로 묶어 보낸다. API가 `clickstream`에 발행한다. 실패한 묶음은 버리고 센다(경고 1회). 종료 요약에 `클릭 전송(API)` 줄 |
+| API가 닿지 않음·5xx·503 | 그 항목부터 1, 2, 4, … 최대 30초 간격으로 다시 시도한다. ID가 고정이라 다시 보내도 중복이 생기지 않는다(같은 내용이면 API가 200) |
+| 회원 비활성(409 `MEMBER_NOT_ACTIVE`) | 그 주문을 버리고 회원을 목록에서 뺀다. 종료 요약의 `주문` 줄에 거절 수 |
+| 그 밖의 4xx(검증 실패, `ID_CONFLICT`) | 멈춘다(시뮬레이터 버그다). 오류 코드만 출력한다 |
+
+- 출력에는 API 호스트만 나오고 요청 본문(가입 PII)은 나오지 않는다.
+- 컨트롤러의 데이터 오염 주입은 지금처럼 DB에 직접 쓴다(API를 거치지 않는다).
+- **EKS의 API에 붙이기**: Windows PowerShell에서 `kubectl port-forward --address 0.0.0.0 -n api svc/api 8000:80`을 켜고, WSL에서는 Windows 호스트 주소로 접속한다(`SIM_API_URL=http://$(ip route show default | awk '{print $3}'):8000`). WSL을 mirrored 네트워킹으로 쓰면 `http://localhost:8000`도 된다. 이렇게 돌린 주문은 **실제 RDS에 남는 실제 시뮬레이션 데이터**다.
+
 ## 로컬 CDC
 
 로컬 `members` 테이블을 Debezium이 읽어 Kafka 토픽 `members-events`로 흘리고, 그 결과가 설계대로인지(특히 PII가 한 글자도 안 나가는지) `sim cdc verify`로 확인한다. `verify`가 토픽을 직접 읽어 "Bronze에 들어갈 모양"을 검증한다. 커넥터 설정은 `connectors/`에 있다 (`connectors/README.md`).
