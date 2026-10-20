@@ -14,6 +14,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[2]
+# Kafka UI (ui.enabled) renders plain Kubernetes objects next to the Strimzi CRs.
+UI_KINDS = {"Deployment": "apps/v1", "Service": "v1", "NetworkPolicy": "networking.k8s.io/v1"}
+BUSINESS_TOPICS = {"clickstream", "members-events", "orders", "order-items", "payments"}
 
 
 def artifact(name, cache):
@@ -84,6 +87,9 @@ def main():
                     assert doc["apiVersion"] == "v1" and set(doc["data"]) == {"kafka.yml", "connect.yml"}
                     for config in doc["data"].values():
                         assert yaml.safe_load(config)["rules"]
+                    continue
+                if doc["kind"] in UI_KINDS:
+                    assert doc["apiVersion"] == UI_KINDS[doc["kind"]]
                     continue
                 assert doc["apiVersion"] == "kafka.strimzi.io/v1"
                 jsonschema.Draft7Validator(schemas[doc["kind"]]).validate(doc)
@@ -176,6 +182,54 @@ def main():
                            if doc["spec"]["class"] == "io.confluent.connect.s3.S3SinkConnector")
         role_example = (ROOT / "pipeline-smoke/workload-access.tfvars.example").read_text(encoding="utf-8")
         assert f'"{sink_prefix}/" =' in role_example, "Trial S3 Sink output and IAM prefix must match"
+        business = copy.deepcopy(compact_profile)
+        for key, value in yaml.safe_load((ROOT / "cdc-orders-values.yaml").read_text(encoding="utf-8")).items():
+            if isinstance(value, dict):
+                business.setdefault(key, {}).update(value)
+            else:
+                business[key] = value
+        render(business, error="connect.image digest is required")  # digest comes from runtime.local.yaml
+        business["connect"]["image"] = full["connect"]["image"]
+        business_docs = render(business)
+        business_topics = {d["spec"]["topicName"]: d["spec"] for d in business_docs if d["kind"] == "KafkaTopic"}
+        assert set(business_topics) == BUSINESS_TOPICS | {"debezium-heartbeat.cdc"} | {
+            "clothes-query-dev-connect-" + s for s in ("configs", "offsets", "status")}
+        assert "infra-smoke" not in business_topics
+        for name in BUSINESS_TOPICS:
+            assert business_topics[name]["partitions"] == 3 and business_topics[name]["replicas"] == 1
+            assert business_topics[name]["config"]["retention.ms"] == 259200000
+        assert not any(d["kind"] == "KafkaUser" and d["metadata"]["name"] == "infra-smoke-client" for d in business_docs)
+        business_pool = next(d["spec"] for d in business_docs if d["kind"] == "KafkaNodePool")
+        measurement_pool_doc = next(d for d in measurement_docs if d["kind"] == "KafkaNodePool")
+        assert business_pool == measurement_pool_doc["spec"], "Business upgrade must not change the broker pool/PVC"
+        business_connect = next(d["spec"] for d in business_docs if d["kind"] == "KafkaConnect")
+        assert business_connect["replicas"] == 1
+        ui_user = next(d for d in business_docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "kafka-ui")
+        for acl in ui_user["spec"]["authorization"]["acls"]:
+            assert not set(acl["operations"]) & {"Write", "Create", "Delete", "Alter", "AlterConfigs", "All"}
+        ui_deploy = next(d for d in business_docs if d["kind"] == "Deployment")
+        ui_env = {e["name"]: e.get("value") for e in ui_deploy["spec"]["template"]["spec"]["containers"][0]["env"]}
+        assert ui_env["KAFKA_CLUSTERS_0_READONLY"] == "true"
+        assert ui_env["KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL"] == "SSL"
+        assert "@sha256:" in ui_deploy["spec"]["template"]["spec"]["containers"][0]["image"]
+        assert ui_deploy["spec"]["template"]["spec"]["securityContext"]["runAsNonRoot"] is True
+        assert next(d for d in business_docs if d["kind"] == "Service")["spec"]["type"] == "ClusterIP"
+        ui_policy = next(d for d in business_docs if d["kind"] == "NetworkPolicy")
+        assert ui_policy["spec"]["ingress"][0]["ports"] == [{"protocol": "TCP", "port": 8083}]
+        business_listener = next(d["spec"] for d in business_docs if d["kind"] == "Kafka")["kafka"]["listeners"][0]
+        assert {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "kafka-ui"}}} in business_listener["networkPolicyPeers"]
+        assert not any(d["kind"] in UI_KINDS for d in compact_docs)  # ui is off by default
+        bad = copy.deepcopy(business); bad["ui"]["image"] = ""
+        render(bad, error="ui.image digest is required")
+        bad = copy.deepcopy(business); bad["ui"]["image"] = "ghcr.io/kafbat/kafka-ui:latest"
+        render(bad, error="image")
+        bad = copy.deepcopy(business); bad["ui"]["topics"] = ["unknown"]
+        render(bad, error="UI ACL references an undefined")
+        bad = copy.deepcopy(business); bad["ui"]["topics"] = []
+        render(bad, error="ui.topics requires")
+        bad = copy.deepcopy(business); bad["ui"]["name"] = "clothes-query-dev-connect"
+        render(bad, error="Duplicate or reserved ui name")
+        render({"ui": {"enabled": True}}, error="ui requires kafka.enabled")
         budget = [compact_pool["resources"], compact_connect["resources"],
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],
@@ -330,7 +384,7 @@ def main():
                 assert bool(selected(labels)) == (index == other)
                 assert not selected({**labels, "__meta_kubernetes_pod_container_port_name": "rest-api"})
                 assert not selected({**labels, "__meta_kubernetes_pod_phase": "Pending"})
-    print(f"PASS: lint, standard/single-node/CDC/Sink/pipeline/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, 28 rejected inputs, operator/storage checks")
+    print(f"PASS: lint, standard/single-node/CDC/Sink/pipeline/metrics rendering, {len(docs)} base CRs and monitored CRs against Strimzi 1.3.0 schemas, business CDC/UI values, 35 rejected inputs, operator/storage checks")
     print("Single-node Kafka/Connect/operator budget: requests 3456Mi, limits 3840Mi; excludes Kubernetes/CSI/app/Spark resources.")
     print("No Kubernetes/AWS connection, apply, push or runtime claim.")
 
