@@ -157,7 +157,7 @@ sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink j
 - **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 11만 1천 방문이면 주문은 약 5,000건이다.
 - **값을 바꾸는 곳:** 확률, 분포, 지연은 모두 `src/sim/behavior/params.py` 한 곳에 있다. `[가정]` 표시는 팀과 맞추는 임시값이다.
 - **쓰는 방식:** 주문과 그 상품 줄은 한 트랜잭션, 결제 INSERT와 상태 UPDATE는 한 건씩 자동 커밋이다. `orders.updated_at`과 모든 전이 시각은 **예정된 시뮬레이터 시각**이다(실제 UPDATE 시각이 아니다). 결제는 INSERT만 하고 환불도 결제 행을 만들지 않는다.
-- **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink`, `JsonlClickSink`, `KafkaClickSink`)로 나간다. 나중에 쇼핑몰 API로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(`+09:00`), `session_id`다.
+- **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink`, `JsonlClickSink`, `KafkaClickSink`)로 나간다. 나중에 쇼핑몰 API로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(UTC, `Z`로 끝남), `session_id`다.
 - **제어 파일:** `member live`와 같은 파일을 약 1초마다 읽는다. 모드를 바꾸면 다음 방문 간격을 지금부터 다시 뽑고 `mode: normal → burst` 한 줄이 나온다. `{"running": false, ...}`는 **새 방문만 멈춘다.** 이미 예약된 클릭·결제·상태 전이는 계속 실행된다.
 - **run_salt:** 같은 시드 + 같은 `run_salt` + 같은 시계 + 같은 제어 순서이면 결과가 완전히 같다. 기본값이 시작 시각이라 재시작마다 달라지고, 그래서 `order_id`·`payment_id`가 이전 실행과 겹치지 않는다. 시작 출력에 항상 보인다.
 - **알려진 한계: 재시작하면 진행 중이던 주문이 멈춘다.** 예약된 결제·상태 전이는 메모리 큐에만 있고 DB에서 복구하지 않는다. 껐다 켜면 그때 `PLACED`, `PAID`, `SHIPPED`였던 주문은 그 상태로 남는다.
@@ -232,7 +232,7 @@ sim controller end                                     # 진행 중 사건 종�
 
 ## 클릭 로그 (clickstream)
 
-방문 중에 생기는 조회(`view`)와 장바구니 담기(`cart_add`)를 Kafka 토픽 `clickstream`에 직접 발행한다. 주문·결제·회원은 지금처럼 DB에만 쓰고(Debezium이 Kafka로 보낸다), **클릭만 예외**다. 클릭은 DB에 넣지 않는다. 토픽의 S3 적재(Bronze)는 아직 없다(`sim/cdc-orders`에서 다른 토픽과 함께 한다).
+방문 중에 생기는 조회(`view`)와 장바구니 담기(`cart_add`)를 Kafka 토픽 `clickstream`에 직접 발행한다. 주문·결제·회원은 지금처럼 DB에만 쓰고(Debezium이 Kafka로 보낸다), **클릭만 예외**다. 클릭은 DB에 넣지 않는다. EKS에서는 S3 Sink(`connectors/bronze-s3-sink.yaml`)가 다른 업무 토픽과 함께 `bronze/clickstream/`에 쌓는다(`sim/cdc-orders`). ECS에서 EKS Kafka로 보내는 경로는 아직 없다.
 
 ```bash
 docker compose --profile cdc up -d kafka
@@ -246,7 +246,7 @@ sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
 **메시지 모양:** 토픽 `clickstream`(파티션 3, 보관 72시간), 키는 `session_id`(UTF-8), 값은 한 건당 JSON 하나다. `--click-sink jsonl`의 한 줄과 **같은 6개 필드**다.
 
 ```json
-{"event_id":"<uuid>","event_type":"view","member_id":"<uuid>","article_id":"0108775015","event_time":"2026-10-19T15:20:01.123456+09:00","session_id":"<uuid>"}
+{"event_id":"<uuid>","event_type":"view","member_id":"<uuid>","article_id":"0108775015","event_time":"2026-10-19T06:20:01.123456Z","session_id":"<uuid>"}
 ```
 
 - 키가 `session_id`라서 같은 방문의 `view` → `cart_add` 순서가 한 파티션 안에서 지켜진다. PII는 없다(`member_id`, `article_id`뿐). 메시지 내용은 로그·콘솔에 출력하지 않는다.
@@ -274,7 +274,8 @@ sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
 
 - **TLS는 로컬에서 검증하지 않았다.** 환경 변수를 librdkafka 설정(`ssl.ca.location` 등)으로 연결하는 데까지만 했다.
 - **ECS에서 EKS 안 Kafka로 가는 경로는 아직 없다.** Kafka가 EKS 내부 전용이라 Fargate에서 닿지 않는다. 경로(내부 NLB, 클라이언트 인증서 공급, 네트워크 규칙)는 인프라와 `sim/ecs-image`에서 정한다.
-- **알려진 한계:** 클릭 `event_time`은 `+09:00`(KST) 표기로 나간다(`jsonl`과 같다). 시간대가 표기에 있어 값은 모호하지 않지만 "Bronze는 UTC" 규칙과 맞출지는 정해지지 않았다. 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
+- **시각:** 클릭 `event_time`은 UTC(`Z`로 끝남)로 나간다(`jsonl`도 같다). "Bronze는 UTC, Silver에서 KST로 한 번만 바꾼다" 규칙과 Debezium 시각 표기에 맞췄다(`sim/cdc-orders`, 이전에는 `+09:00`).
+- **알려진 한계:** 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
 
 ## 로컬 CDC
 
