@@ -3,24 +3,42 @@
 import json
 from copy import deepcopy
 from pathlib import Path
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
+import yaml
 
+from pipelines.format_rules import (
+    DEFAULT_RULES,
+    FormatError,
+    FormatRules,
+    RuleConfigError,
+)
 from pipelines.silver.transactions import build_silver, run
 
 
-def order(identifier="O-1", **changes):
+def fixture_id(label):
+    if not isinstance(label, str):
+        return label
+    try:
+        UUID(label)
+    except ValueError:
+        return str(uuid5(NAMESPACE_URL, label))
+    return label
+
+
+def order(identifier="00000000-4000-8000-0000-000000000009", **changes):
     return {
-        "order_id": identifier, "member_id": "M-test", "session_id": "S-test",
+        "order_id": fixture_id(identifier), "member_id": "00000000-4000-8000-0000-000000000008", "session_id": "00000000-4000-8000-0000-00000000001f",
         "status": "PLACED", "status_reason": None, "total_amount": 1000,
         "ordered_at": "2026-10-14T00:00:00+09:00",
         "updated_at": "2026-10-14T00:00:00+09:00", **changes,
     }
 
 
-def payment(identifier="P-1", **changes):
+def payment(identifier="00000000-4000-8000-0000-000000000011", **changes):
     return {
-        "payment_id": identifier, "order_id": "O-1", "attempt_no": 1,
+        "payment_id": fixture_id(identifier), "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1,
         "method": "CARD", "pg": "PG_A", "amount": 1000,
         "status": "SUCCESS", "failure_code": None,
         "requested_at": "2026-10-14T00:01:00+09:00",
@@ -32,6 +50,74 @@ def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
 
 
+def test_yaml_contract_validates_uuid_enums_reasons_and_times():
+    rules = FormatRules()
+    cases = [
+        ("orders", order(order_id="not-a-uuid"), "order_id", "INVALID_VALUE"),
+        ("orders", order(status="CANCELLED"), "status_reason", "INVALID_VALUE"),
+        ("orders", order(status="PLACED", status_reason="RETURN"), "status_reason", "INVALID_VALUE"),
+        ("payments", payment(pg="PG_NEW"), "pg", "INVALID_VALUE"),
+        ("payments", payment(method="CHEQUE"), "method", "INVALID_VALUE"),
+        ("payments", payment(amount=True), "amount", "TYPE_MISMATCH"),
+        ("payments", payment(completed_at="2026-10-14T00:00:00+09:00"), "completed_at", "INVALID_VALUE"),
+        ("payments", payment(completed_at="2026-10-14T00:02:00"), "completed_at", "INVALID_VALUE"),
+    ]
+    for dataset, row, field, code in cases:
+        with pytest.raises(FormatError) as caught:
+            rules.validate(dataset, row)
+        assert (caught.value.field, caught.value.code) == (field, code)
+        assert caught.value.rule_id
+    rules.validate("orders", order(status="CANCELLED", status_reason="USER_REQUEST"))
+    rules.validate("orders", order(status="REFUNDED", status_reason="RETURN"))
+
+
+def test_yaml_is_the_executed_rule_source_and_proposals_are_not_applied(tmp_path):
+    document = yaml.safe_load(DEFAULT_RULES.read_text(encoding="utf-8"))
+    item = {"order_item_id": fixture_id("rule-item"), "order_id": order()["order_id"],
+            "article_id": "0001", "quantity": 2, "unit_price": 500}
+    document["source_rules"]["order_items"]["fields"]["quantity"]["minimum"] = 3
+    custom = tmp_path / "rules.yaml"
+    custom.write_text(yaml.safe_dump(document), encoding="utf-8")
+    rules = FormatRules(custom)
+    result = build_silver([order()], [item], [], rules=rules)
+    issue = result["quarantined_records"][0]
+    assert (issue["error_code"], issue["rule_id"]) == ("INVALID_VALUE", "order_items.fields.quantity.minimum")
+    assert result["dq_results"][0]["format_rules"] == rules.reference()
+    assert rules.digest != FormatRules().digest
+    # YAML에 미등록 허용 제안이 있어도 실제 enum 검사는 계속 실행된다.
+    failed = build_silver([order()], [], [payment(status="FAILED", failure_code="PG_NEW_ERROR")], rules=rules)
+    assert failed["quarantined_records"][0]["rule_id"] == "payments.fields.failure_code.enum"
+
+
+def test_invalid_yaml_stops_run_preserves_previous_and_records_applied_hash(tmp_path):
+    source = tmp_path / "input"
+    source.mkdir()
+    for name, values in (("orders", [order()]), ("items", []), ("payments", [payment()])):
+        (source / (name + ".jsonl")).write_text("".join(json.dumps(row) + "\n" for row in values), encoding="utf-8")
+    args = [str(source / (name + ".jsonl")) for name in ("orders", "items", "payments")] + [str(tmp_path / "output")]
+    manifest = run(*args)
+    pointer = Path(manifest["manifest_path"])
+    previous = pointer.read_bytes()
+    assert manifest["format_rules"] == FormatRules().reference()
+    original = yaml.safe_load(DEFAULT_RULES.read_text(encoding="utf-8"))
+    unsupported = deepcopy(original)
+    unsupported["source_rules"]["orders"]["checks"][0]["rule"] = "unsupported"
+    disconnected = deepcopy(original)
+    disconnected["runtime_connected"]["silver"] = False
+    bad_condition = deepcopy(original)
+    bad_condition["source_rules"]["orders"]["checks"][1]["when"]["equals"] = "CANCLED"
+    custom = tmp_path / "rules.yaml"
+    for body in ("[broken", "version: first\nversion: second\n",
+                 yaml.safe_dump(unsupported), yaml.safe_dump(disconnected), yaml.safe_dump(bad_condition)):
+        custom.write_text(body, encoding="utf-8")
+        with pytest.raises(RuleConfigError):
+            run(*args, rules_path=str(custom))
+        assert pointer.read_bytes() == previous
+    with pytest.raises(FileNotFoundError):
+        run(*args, rules_path=str(tmp_path / "missing.yaml"))
+    assert pointer.read_bytes() == previous
+
+
 def test_failure_codes_follow_source_allowlist_and_preserve_valid_failed_attempts():
     codes = ["INSUFFICIENT_BALANCE", "CARD_LIMIT_EXCEEDED", "CARD_DECLINED", "PG_TIMEOUT", "PG_ERROR"]
     payments = [payment("P" + str(index), attempt_no=index + 1, status="FAILED", failure_code=code)
@@ -39,7 +125,7 @@ def test_failure_codes_follow_source_allowlist_and_preserve_valid_failed_attempt
     result = build_silver([order()], [], payments)
     assert not result["quarantined_records"]
     assert {row["failure_code"] for row in result["payment_attempts"]} == set(codes)
-    assert summary(result, "payments")["failure_code_policy"] == "source-ddl-five-codes.v1"
+    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.1.0"
 
 
 def test_missing_unknown_and_non_string_failure_codes_have_distinct_errors():
@@ -48,15 +134,15 @@ def test_missing_unknown_and_non_string_failure_codes_have_distinct_errors():
              ("UNKNOWN", "INVALID_VALUE"), (" PG_TIMEOUT ", "INVALID_VALUE")]
     rows = [payment("bad" + str(index), attempt_no=index + 1, status="FAILED", failure_code=code)
             for index, (code, _) in enumerate(cases)]
-    rows += [payment("good", attempt_no=20, status="FAILED", failure_code="PG_ERROR"),
-             payment("success-with-code", attempt_no=21, status="SUCCESS", failure_code="PG_ERROR"),
-             payment("success-without-code", attempt_no=22)]
+    rows += [payment("00000000-4000-8000-0000-000000000024", attempt_no=20, status="FAILED", failure_code="PG_ERROR"),
+             payment("00000000-4000-8000-0000-000000000025", attempt_no=21, status="SUCCESS", failure_code="PG_ERROR"),
+             payment("00000000-4000-8000-0000-000000000026", attempt_no=22)]
     result = build_silver([order()], [], rows)
     errors = {row["record_key"]: row for row in result["quarantined_records"]}
     for index, (_, expected) in enumerate(cases):
-        assert errors["bad" + str(index)]["error_code"] == expected
-    assert errors["success-with-code"]["error_code"] == "INVALID_VALUE"
-    assert {row["payment_id"] for row in result["payment_attempts"]} == {"good", "success-without-code"}
+        assert errors[fixture_id("bad" + str(index))]["error_code"] == expected
+    assert errors["00000000-4000-8000-0000-000000000025"]["error_code"] == "INVALID_VALUE"
+    assert {row["payment_id"] for row in result["payment_attempts"]} == {"00000000-4000-8000-0000-000000000024", "00000000-4000-8000-0000-000000000026"}
 
 
 def test_cdc_uses_source_time_and_holds_equal_time_conflicts():
@@ -81,7 +167,7 @@ def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
     source.mkdir()
     rows = {
         "orders": [order(__op="r", __source_ts_ms=1000)],
-        "items": [{"order_item_id": "I1", "order_id": "O-1", "article_id": "0001",
+        "items": [{"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
                    "quantity": 1, "unit_price": 1000, "__op": "r", "__source_ts_ms": 1000}],
         "payments": [payment(__op="c", __source_ts_ms=2000),
                      payment(amount=2000, __op="c", __source_ts_ms=2000)],
@@ -100,7 +186,7 @@ def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
 
 
 def test_order_item_sum_requires_complete_input_and_counts_duplicates_once():
-    item = {"order_item_id": "I1", "order_id": "O-1", "article_id": "0001",
+    item = {"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
             "quantity": 2, "unit_price": 500}
     unchecked = build_silver([order(total_amount=1200)], [item], [], input_complete=False)
     assert summary(unchecked, "orders")["amount_checks"][0]["status"] == "UNVERIFIED"
@@ -109,12 +195,12 @@ def test_order_item_sum_requires_complete_input_and_counts_duplicates_once():
     assert summary(passed, "orders")["amount_checks"][0]["item_total_amount"] == 1000
     assert summary(passed, "orders")["amount_checks"][0]["status"] == "PASS"
     assert len(passed["orders_current"]) == 1
-    result = build_silver([order(total_amount=1200), order("O-2")],
-                         [item, {**item, "order_item_id": "I2", "order_id": "O-2"}],
-                         [payment(amount=1200), payment("P2", order_id="O-2")], input_complete=True)
-    assert [row["order_id"] for row in result["orders_current"]] == ["O-2"]
-    assert [row["order_id"] for row in result["order_status_history"]] == ["O-2"]
-    assert [row["payment_id"] for row in result["payment_attempts"]] == ["P2"]
+    result = build_silver([order(total_amount=1200), order("00000000-4000-8000-0000-00000000000a")],
+                         [item, {**item, "order_item_id": "00000000-4000-8000-0000-000000000005", "order_id": "00000000-4000-8000-0000-00000000000a"}],
+                         [payment(amount=1200), payment("00000000-4000-8000-0000-00000000001c", order_id="00000000-4000-8000-0000-00000000000a")], input_complete=True)
+    assert [row["order_id"] for row in result["orders_current"]] == ["00000000-4000-8000-0000-00000000000a"]
+    assert [row["order_id"] for row in result["order_status_history"]] == ["00000000-4000-8000-0000-00000000000a"]
+    assert [row["payment_id"] for row in result["payment_attempts"]] == ["00000000-4000-8000-0000-00000000001c"]
     issue = next(row for row in result["quarantined_records"] if row["error_code"] == "ORDER_TOTAL_MISMATCH")
     assert (issue["order_total_amount"], issue["item_total_amount"], issue["amount_difference"]) == (1200, 1000, -200)
 
@@ -124,9 +210,9 @@ def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches()
     assert not missing["orders_current"] and not missing["payment_attempts"]
     assert summary(missing, "orders")["amount_checks"][0]["status"] == "PENDING_REFERENCE"
     assert all(row["error_code"] != "ORDER_TOTAL_MISMATCH" for row in missing["quarantined_records"])
-    item = {"order_item_id": "I1", "order_id": "O-1", "article_id": "0001",
+    item = {"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
             "quantity": 1, "unit_price": 500}
-    broken = build_silver([order()], [item, {**item, "order_item_id": "I2", "unit_price": 0}],
+    broken = build_silver([order()], [item, {**item, "order_item_id": "00000000-4000-8000-0000-000000000005", "unit_price": 0}],
                           [payment()], input_complete=True)
     check = summary(broken, "orders")["amount_checks"][0]
     assert check["status"] == "ITEM_ERROR" and "item_total_amount" not in check
@@ -134,38 +220,38 @@ def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches()
 
 
 def test_bad_payment_does_not_stop_normal_orders_and_reexecution():
-    orders = [order(), order("O-2")]
+    orders = [order(), order("00000000-4000-8000-0000-00000000000a")]
     payments = [
         payment(),
-        payment("P-2", order_id="O-2", status="FAILED"),  # 필수 실패 코드 없음
+        payment("00000000-4000-8000-0000-000000000012", order_id="00000000-4000-8000-0000-00000000000a", status="FAILED"),  # 필수 실패 코드 없음
     ]
     result = build_silver(orders, [], payments)
-    assert [row["payment_id"] for row in result["payment_attempts"]] == ["P-1"]
+    assert [row["payment_id"] for row in result["payment_attempts"]] == ["00000000-4000-8000-0000-000000000011"]
     assert len(result["orders_current"]) == 2
     issue = result["quarantined_records"][0]
     assert (issue["record_key"], issue["field"], issue["error_code"]) == (
-        "P-2", "failure_code", "MISSING_FIELD",
+        "00000000-4000-8000-0000-000000000012", "failure_code", "MISSING_FIELD",
     )
     quality = summary(result, "payments")
     assert (quality["input_count"], quality["accepted_count"], quality["quarantined_count"]) == (2, 1, 1)
     assert quality["status"] == "INCOMPLETE"
-    assert quality["affected_order_ids"] == ["O-2"]
+    assert quality["affected_order_ids"] == ["00000000-4000-8000-0000-00000000000a"]
     assert result == build_silver(deepcopy(orders), [], deepcopy(payments))
     assert "raw_data" not in issue
 
 
 def test_duplicate_conflict_retry_and_invalid_duplicate_are_distinct():
     first = payment()
-    clash = payment("P-conflict", order_id="O-2", status="FAILED", failure_code="PG_TIMEOUT")
-    invalid = payment("P-invalid", order_id="O-3")
+    clash = payment("00000000-4000-8000-0000-000000000016", order_id="00000000-4000-8000-0000-00000000000a", status="FAILED", failure_code="PG_TIMEOUT")
+    invalid = payment("00000000-4000-8000-0000-000000000017", order_id="00000000-4000-8000-0000-00000000000b")
     result = build_silver(
-        [order(), order("O-2"), order("O-3")], [],
+        [order(), order("00000000-4000-8000-0000-00000000000a"), order("00000000-4000-8000-0000-00000000000b")], [],
         [first, dict(first),
-         payment("P-retry", status="FAILED", failure_code="PG_ERROR", attempt_no=2),
+         payment("00000000-4000-8000-0000-000000000019", status="FAILED", failure_code="PG_ERROR", attempt_no=2),
          clash, {**clash, "failure_code": "PG_ERROR"},
          invalid, {**invalid, "status": "FAILED"}],
     )
-    assert [row["payment_id"] for row in result["payment_attempts"]] == ["P-1", "P-retry"]
+    assert [row["payment_id"] for row in result["payment_attempts"]] == ["00000000-4000-8000-0000-000000000011", "00000000-4000-8000-0000-000000000019"]
     quality = summary(result, "payments")
     assert quality["duplicate_count"] == 1
     assert quality["conflict_count"] == 2
@@ -178,33 +264,33 @@ def test_duplicate_conflict_retry_and_invalid_duplicate_are_distinct():
 def test_missing_order_is_pending_and_broken_order_does_not_publish_stale_state():
     result = build_silver(
         [order(), order(status="BAD", updated_at="2026-10-14T01:00:00+09:00")],
-        [], [payment(), payment("P-missing", order_id="O-missing")],
+        [], [payment(), payment("00000000-4000-8000-0000-000000000018", order_id="00000000-4000-8000-0000-00000000000d")],
     )
     assert result["orders_current"] == []
     assert result["order_status_history"] == []
     assert result["payment_attempts"] == []
     issues = {row["record_key"]: row for row in result["quarantined_records"] if row["source_dataset"] == "payments"}
-    assert issues["P-1"]["category"] == "DEPENDENCY_BLOCKED"
-    assert issues["P-missing"]["category"] == "PENDING_REFERENCE"
+    assert issues["00000000-4000-8000-0000-000000000011"]["category"] == "DEPENDENCY_BLOCKED"
+    assert issues["00000000-4000-8000-0000-000000000018"]["category"] == "PENDING_REFERENCE"
 
 
 def test_retry_sequence_and_amount_failures_do_not_remove_unrelated_success():
     result = build_silver(
-        [order(), order("O-2"), order("O-3"), order("O-4")], [],
-        [payment(), payment("P-a", order_id="O-2"), payment("P-b", order_id="O-2"),
-         payment("P-amount", order_id="O-3", amount=500),
-         payment("P-s1", order_id="O-4"), payment("P-s2", order_id="O-4", attempt_no=2)],
+        [order(), order("00000000-4000-8000-0000-00000000000a"), order("00000000-4000-8000-0000-00000000000b"), order("00000000-4000-8000-0000-00000000000c")], [],
+        [payment(), payment("00000000-4000-8000-0000-000000000013", order_id="00000000-4000-8000-0000-00000000000a"), payment("00000000-4000-8000-0000-000000000015", order_id="00000000-4000-8000-0000-00000000000a"),
+         payment("00000000-4000-8000-0000-000000000014", order_id="00000000-4000-8000-0000-00000000000b", amount=500),
+         payment("00000000-4000-8000-0000-00000000001a", order_id="00000000-4000-8000-0000-00000000000c"), payment("00000000-4000-8000-0000-00000000001b", order_id="00000000-4000-8000-0000-00000000000c", attempt_no=2)],
     )
-    assert [row["payment_id"] for row in result["payment_attempts"]] == ["P-1"]
+    assert [row["payment_id"] for row in result["payment_attempts"]] == ["00000000-4000-8000-0000-000000000011"]
     codes = {row["error_code"] for row in result["quarantined_records"]}
     assert codes == {"ATTEMPT_CONFLICT", "AMOUNT_MISMATCH", "MULTIPLE_SUCCESSES"}
 
 
 def test_history_item_totals_and_invalid_shapes():
-    item = {"order_item_id": "I-1", "order_id": "O-1", "article_id": "A-1", "quantity": 2, "unit_price": 500}
+    item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1", "quantity": 2, "unit_price": 500}
     result = build_silver(
         [order(), order(status="PAID", updated_at="2026-10-14T00:02:00+09:00")],
-        [item, dict(item), {**item, "order_item_id": "I-bad", "unit_price": 0}],
+        [item, dict(item), {**item, "order_item_id": "00000000-4000-8000-0000-000000000003", "unit_price": 0}],
         [payment(), "not-an-object"],
     )
     assert result["orders_current"][0]["status"] == "PAID"

@@ -6,6 +6,10 @@
 
 ## 2026-10-20 승인된 연결 작업
 
+- **추가 승인: 공통 YAML 실행 연결.** 공통 검사기 pipelines/format_rules.py와 PyYAML 의존성 파일 pipelines/requirements.txt를 추가한다. docs/data-contracts의 최신 계약 원본을 작업 브랜치에도 포함하고 source_rules만 실행한다. 거래 단일 행 타입/허용값/조건은 YAML에서 읽으며 중복・CDC 순서・금액 합계는 기존 코드에 둔다. 검사 버전 transactions.v5와 별도 YAML version/sha256을 기록한다. proposed_changes/Gold B/리뷰는 미연결이다.
+- **검증 범위:** 기존 정상 거래 예시를 UUID/허용 PG로 바꾸고 기존 매출・중복・보류/복구 결과를 유지한다. 기존 테스트 파일에 YAML 값 변경의 실제 반영, rule_id/버전/해시 기록, 잘못된 YAML 실행 중단과 이전 결과 보존을 추가한다. 실행 결과와 최종 확인은 작업 완료 후 기록한다.
+- **YAML 연결 결과:** 전체 파이프라인 테스트 46개 통과(11.19초), 신규 공통 검사기 및 변경 Silver 코드 Ruff・diff 공백 검사 통과. YAML 최소값 변경의 실제 적용, UUID/PG/결제 수단/사유/시각 검사, 잘못된 YAML/중복 키/지원하지 않는 연산자/조건 오타/미승인 연결의 실행 중단을 확인했다. 별도 테스트 파일은 추가하지 않았다. 로컬 실행 보고서는 pipelines/gold_a/.local/yaml-demo-20261020-4caf53/report.md다. 운영 배포/Gold B 적용 완료는 아니다.
+
 - **추가 승인: 실패 코드 불일치 정리.** 현재 원천 DDL/YAML의 5개 허용 코드 검사를 Silver에 추가했다. 누락・비문자열・미등록・성공 코드 오류를 구분하고 payments DQ에 source-ddl-five-codes.v1 정책을 남긴다. 검사 버전은 transactions.v4다. 미등록 문자열 수용/UNKNOWN 분류는 공통 계약 및 Silver README에 제안으로 유지하며 코드에는 적용하지 않는다. 기존 테스트 파일에서 허용 5개・잘못된 코드 구분을 검증한다. YAML 런타임 연결은 아직 아니다.
 - **실패 코드 검증 결과:** DDL・계약 브랜치 YAML・Silver의 5개 허용 목록 일치 확인. 전체 Silver/Gold A/거래 연결 테스트 43개 통과(7.49초). 기존 연결 시험의 임시 TEMP 코드는 PG_TIMEOUT으로 교체했다. 공백 검사 통과. 별도 테스트 파일・Gold B 분류 코드는 만들지 않았다.
 
