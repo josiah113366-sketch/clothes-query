@@ -1,0 +1,219 @@
+# 작업 지시서: api/mvp
+
+> 상태: 진행 전 · 브랜치: `api/mvp` (분기 기준: **`sim/cdc-orders`**, PR base도 `sim/cdc-orders`로 쌓는다) · 설계: `docs/design/api.md`(`docs/api-design` PR) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
+
+## 목표
+
+**업무 API(WAS, FastAPI)를 만들어 EKS에 띄우고, 시뮬레이터가 RDS·Kafka 대신 이 API로 쓰고 읽게 바꾼다.**
+
+이 브랜치가 끝나면:
+
+```
+시뮬레이터(로컬 또는 이후 ECS) ─HTTP─▶ 내부 ALB ─▶ WAS(api namespace, Pod 1) ─▶ RDS postgres DB
+                                                                             └─▶ Kafka clickstream
+RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
+```
+
+- `sim member live`와 `sim behavior live`가 `--backend api`로 돌면 **DB 계정 없이** API만 부른다. 기존 `--backend db`(로컬 직접 쓰기)는 그대로 남긴다.
+- 클릭이 API를 거쳐 `clickstream`에 들어가고 S3 Sink가 `bronze/clickstream/`에 쌓는다(이 브랜치에서 처음 실제로 흐른다).
+- ECS 배포는 하지 않는다(→ `sim/ecs-image`). 이 브랜치에서는 **로컬 시뮬레이터 → `kubectl port-forward` → EKS의 API**로 끝까지 확인한다.
+
+이 지시서는 **자기 완결형**이다. 설계 문서(`docs/design/api.md`)가 이 브랜치에 없을 수 있으므로(별도 PR) 필요한 결정은 아래에 옮겨 적었다. 어긋나면 추측하지 말고 묻는다.
+
+## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
+
+- **한 브랜치에 여러 영역**: `api/`(새 폴더), `simulator/`, `infra/platform/kafka/`(values 한두 줄), `docs/`. "PR 하나에 한 영역"의 예외이며 PR 설명에 적는다(2026-10-20 사용자 결정: 브랜치 수를 줄인다).
+- **`sim/cdc-orders` 위에 쌓는다.** Kafka values(`cdc-orders-values.yaml`)가 그 브랜치에만 있다. PR은 base를 `sim/cdc-orders`로 열고, cdc-orders가 머지되면 base를 `main`으로 바꾼다.
+- **역할**
+  - **Claude**: 코드(`api/`, `simulator/`), Dockerfile, Helm chart, SQL, values, 테스트, 문서. 로컬 Docker 검증과 정적 검사. 커밋까지.
+  - **사용자**: 이미지 빌드·ECR push, DB SQL 실행(DBeaver), Secrets Manager, `kubectl`/`helm` 적용, port-forward 시험. Claude는 **명령과 순서**만 준다. push·PR도 사용자.
+- Terraform 변경은 **없다**(ECR `clothes-query-dev/was` 재사용, RDS SG는 cdc-orders에서 연 EKS → 5432 그대로, ALB는 Ingress로 Auto Mode가 생성).
+- 커밋 메시지: `<타입>(api/mvp): <한국어 요약>`. 타입은 `feat`, `fix`, `test`, `docs`, `refactor`, `chore`.
+
+## 시작 전 확인 (Claude가 한다)
+
+- 현재 브랜치가 `api/mvp`이고 `sim/cdc-orders`의 끝(`022e2a5` 또는 그 이후)에서 갈라졌는지, `docs/api-design` 커밋이 **섞이지 않았는지** 확인한다.
+- `simulator/`의 `ruff`, `pytest`가 지금 통과하는지 확인한다(기준선).
+- 로컬 Docker(Postgres, Kafka 프로필)가 뜨는지 확인한다.
+
+## 결정된 사항 (설계 문서에서 옮김, 2026-10-20 사용자)
+
+| 항목 | 결정 |
+|---|---|
+| 기술 | **FastAPI**(Python 3.12), EKS namespace **`api`**, Pod **1개** |
+| 책임 | **얇은 API**: 확률·배속·폭주, **ID, 시각, 결제 결과는 시뮬레이터가 정해 보낸다.** API는 검증하고 저장·발행만 한다 |
+| 목록 읽기 | 시뮬레이터는 회원·상품 목록을 **API로** 읽는다. 상품은 시작 때 한 번, 회원은 시작 때 전체 + **5초마다 변경분** |
+| 회원 확인 | 주문 API는 회원이 `ACTIVE`인지 확인한다(아니면 409) |
+| 노출 | **내부 ALB, HTTP 80**, 인증 없음. 처음엔 VPC 대역만 허용 |
+| 배포 | **Helm**. 기존 `apps` 스택은 쓰지 않는다. 이미지는 ECR **`clothes-query-dev/was`**(IMMUTABLE) |
+| Kafka | KafkaUser **`api`**(`clickstream` 쓰기만). 인증서는 `kafka` → `api` namespace로 **복사** |
+| DB | 앱 전용 계정(`clothes_app`). 업무 DB는 RDS **`postgres`** |
+| 데이터 오염 주입 | 컨트롤러가 DB에 직접(이 브랜치에서 바꾸지 않는다) |
+
+## 기본값 (지시서가 정한 값. 바꾸려면 사용자에게 알린다)
+
+| 항목 | 기본값 | 이유 |
+|---|---|---|
+| 폴더 | `api/` (`pyproject.toml`, `src/clothes_api/`, `tests/`, `Dockerfile`, `deploy/chart/`, `deploy/sql/`, `README.md`, `CLAUDE.md`) | 영역 `api` = 폴더 `api/` |
+| 의존성 | `fastapi`, `uvicorn[standard]`, `pydantic`, `psycopg[binary,pool]`, `confluent-kafka`, `prometheus-client` / 개발 `pytest`, `httpx`, `ruff` | 시뮬레이터와 같은 드라이버(psycopg v3, confluent-kafka) |
+| DB 접근 | 동기 `psycopg_pool.ConnectionPool`(min 1, max 10), FastAPI 동기 엔드포인트(스레드풀). 풀에서 **2초** 안에 연결을 못 받으면 **503 `DB_BUSY`** | 부하가 작다(burst 주문 API 약 6/초). 단순함 우선 |
+| 시각 | 요청의 시각은 **시간대가 있는 ISO 8601**만 받는다(없으면 422). 저장은 `timestamptz`, 응답·Kafka는 UTC `…Z` | Bronze UTC 규칙 |
+| 멱등 | 같은 ID 재요청: 저장된 내용과 **같으면 200**, **다르면 409 `ID_CONFLICT`** | 재시도 안전 + 버그 노출 |
+| 클릭 묶음 | 한 요청 최대 **500건**. 넘으면 413. 각 이벤트를 키 `session_id`로 한 건씩 발행. 응답 202 `{accepted, failed}` | 설계 |
+| 클릭 발행 실패 | **버리고 센다**(지표). 시작 때 브로커에 못 닿으면 `/readyz` 503, `/healthz`는 200 | 주문 흐름을 막지 않는다 |
+| 회원 변경분 커서 | 불투명 문자열(base64 JSON `{created_at, member_id}`). 서버는 **커서보다 10초 앞부터** 겹쳐 돌려준다. 한 번에 최대 **5,000건**, 더 있으면 `has_more: true` | 늦게 커밋된 행을 놓치지 않는다. 시뮬레이터가 중복 제거 |
+| 목록 페이지 | `GET /v1/members/active`, `GET /v1/catalog`: 페이지당 **10,000건**, 커서 페이지 | 10만 명을 한 번에 보내지 않는다 |
+| 로그 | stdout JSON 한 줄(`request_id`, `method`, `route`(경로 템플릿), `status`, `ms`). **요청 본문·PII를 남기지 않는다** | 보안 |
+| 지표 | `api_requests_total{route,method,status}`, `api_request_seconds{route}`(히스토그램), `api_db_pool_*`, `api_db_errors_total{kind}`, `api_kafka_produced_total{result}`, `api_payments_total{status}` | 관제·콘솔 |
+| 시뮬레이터 백엔드 | 새 옵션 `--backend db|api`(환경 변수 `SIM_BACKEND`, 기본 `db`), `SIM_API_URL` | 로컬 직접 쓰기와 기존 테스트를 깨지 않는다 |
+| 시뮬레이터 재시도 | 주문·결제·상태·가입: 연결 실패·5xx·503에 **0.5 → 1 → 2 → … 최대 30초** 간격으로 계속 재시도(ID 고정이라 중복 없음). 422는 실패로 센다 | 설계 안전장치 |
+| 클릭 전송 | 시뮬레이터가 **1초 또는 500건**마다 묶어 보낸다. 실패하면 그 묶음은 버리고 센다(경고 1회) | 지금 `KafkaClickSink` 정책과 같다 |
+| 이미지 태그 | ECR가 IMMUTABLE이므로 **git 짧은 SHA**(`api-<sha>`), Helm에는 **digest**로 넣는다 | 덮어쓰기 불가 |
+| 리소스 | requests 250m/256Mi, limits 500m/512Mi | 노드 CPU 요청 약 76% → 약 90% |
+
+## 만드는 것
+
+### 1. API 앱 (`api/src/clothes_api/`)
+
+엔드포인트(모두 `/v1`, JSON). 필드 이름은 DB 컬럼 그대로(`db/schema/001_member.sql`, `004_orders.sql`).
+
+| 메서드·경로 | 동작 | 검증 | 응답 |
+|---|---|---|---|
+| `POST /v1/members` | `members` INSERT (`status=ACTIVE`, `withdrawn_at` 없음, `created_at`은 DB 기본값) | 성별·채널·연령대 값, 시간대 있는 `signup_at` | 201 / 200 같은 내용 / 409 `ID_CONFLICT` / **409 `PHONE_TAKEN`**(전화 UNIQUE 위반, 시뮬레이터가 번호를 다시 뽑는다) / 409 `EMAIL_TAKEN` / 422 |
+| `GET /v1/members/signup-count?from=<시각>` | `SELECT count(*) FROM members WHERE signup_at >= from` | 시간대 있는 시각 | 200 `{count}` |
+| `GET /v1/members/active?cursor=` | `ACTIVE` 회원 `member_id`, `member_id` 순 페이지 | – | 200 `{items, next_cursor, changes_cursor}` (`changes_cursor`는 첫 페이지 응답 시각 기준) |
+| `GET /v1/members/changes?after=<커서>` | 커서(10초 겹침) 이후 `created_at` 순으로 가입 회원. 탈퇴는 아직 없으므로 `removed`는 항상 빈 목록 | 커서 형식 | 200 `{added, removed, next_cursor, has_more}` |
+| `GET /v1/catalog?cursor=` | `product_variant`의 `article_id`, `price`, `article_id` 순 페이지 | – | 200 `{items, next_cursor}` |
+| `POST /v1/orders` | `orders`(`status=PLACED`) + `order_items` **한 트랜잭션** | 회원 `ACTIVE`(아니면 409 `MEMBER_NOT_ACTIVE`), `total_amount` = Σ(수량×단가), 항목 1개 이상, 한 주문 안 `article_id` 중복 없음, 상품 존재 | 201 / 200 / 409 `ID_CONFLICT` / 409 `MEMBER_NOT_ACTIVE` / 422 |
+| `POST /v1/orders/{order_id}/payments` | `payments` INSERT | 주문 존재(404), `amount` = 주문 총액, 상태·실패 코드 짝, `completed_at >= requested_at`, `(order_id, attempt_no)` 유일 | 201 / 200 / 404 / 409 `ID_CONFLICT` / 422 |
+| `PATCH /v1/orders/{order_id}` | `UPDATE orders SET status, status_reason, updated_at` | 주문 존재, 상태·사유 짝, 허용된 전이(아래), `updated_at >= ordered_at`. **같은 상태로의 재요청은 200**(재시도 안전) | 200 / 404 / 409 `INVALID_TRANSITION` / 422 |
+| `POST /v1/events/clicks` | 각 이벤트를 `clickstream`에 발행(키 `session_id`, 값은 6필드 JSON, 시각 `…Z`) | 최대 500건, `event_type` ∈ {view, cart_add}, 6필드 | 202 `{accepted, failed}` / 413 / 422 |
+| `GET /healthz` | 프로세스 살아 있음 | – | 200 |
+| `GET /readyz` | DB `SELECT 1` + Kafka 메타데이터 확인 | – | 200 / 503 |
+| `GET /metrics` | Prometheus | – | 200 |
+
+허용 전이: `PLACED → PAID | PAYMENT_FAILED | CANCELLED`, `PAID → SHIPPED | CANCELLED`, `SHIPPED → DELIVERED`, `DELIVERED → REFUNDED`. 2026-10-20 시뮬레이터 코드(`behavior/payment.py`의 `next_transition`, `behavior/runner.py`)와 같은 것을 확인했다. `CANCELLED`는 `USER_REQUEST`, `REFUNDED`는 `RETURN` 사유가 짝이다(`004_orders.sql`).
+
+오류 응답 형식: `{"error": "<코드>", "detail": "<PII 없는 설명>"}`. DB 오류는 sqlstate·제약 이름으로만 분류한다.
+
+모듈 구성(제안): `main.py`(앱·미들웨어·지표), `config.py`(환경 변수), `db.py`(풀), `kafka.py`(프로듀서, 시뮬레이터 `common/kafka.py`의 TLS 환경 변수 방식과 같게), `schemas.py`(pydantic), `routes/members.py`, `routes/orders.py`, `routes/events.py`, `routes/health.py`, `errors.py`.
+
+환경 변수: `DATABASE_URL`(또는 `PGHOST`·`PGDATABASE`·`PGUSER`·`PGPASSWORD`·`PGSSLMODE`·`PGSSLROOTCERT` 조합), `KAFKA_BOOTSTRAP`, `KAFKA_SECURITY_PROTOCOL`, `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE`, `CLICK_TOPIC`(기본 `clickstream`), `LOG_LEVEL`. **접속 정보는 출력하지 않는다.**
+
+### 2. 테스트 (`api/tests/`)
+
+- 단위(DB 없음): 스키마 검증(값·짝·시간대), 전이 규칙, 커서 인코딩·10초 겹침, 멱등 비교, 오류 코드 매핑, 클릭 묶음 상한, 로그에 본문·PII가 없음
+- 통합(`@pytest.mark.integration`, 로컬 Docker Postgres + Kafka): 각 엔드포인트 정상·중복·충돌·404·409, 주문 트랜잭션 원자성(항목 실패 시 주문도 없음), 클릭이 `clickstream`에 키·값 그대로 들어감, `/readyz`가 DB·Kafka가 끊기면 503
+
+### 3. 이미지 (`api/Dockerfile`)
+
+- 베이스 `python:3.12-slim`을 **digest로 고정**, 비root 사용자, `uvicorn clothes_api.main:app --host 0.0.0.0 --port 8000`, 비밀값 없음
+- RDS CA 번들은 이미지에 넣지 않고 Secret `rds-ca`(아래)로 붙인다
+
+### 4. DB 앱 계정 (`api/deploy/sql/app-account.sql`, 사용자가 마스터로 `postgres` DB에서 실행)
+
+- `CREATE ROLE clothes_app LOGIN … CONNECTION LIMIT 15` (풀 최대 10 + 재시작 겹침 여유)
+- `members` INSERT·SELECT, `orders` INSERT·UPDATE·SELECT, `order_items`·`payments` INSERT·SELECT, `product_variant` SELECT. `members_archive`·`product_design` 권한 없음
+- DBeaver용(비밀번호 자리 표시) 안내와 되돌리기 SQL을 함께 둔다
+
+### 5. Helm chart (`api/deploy/chart/`)
+
+- `Deployment`(replica 1, 리소스, `runAsNonRoot`, 읽기 전용 루트, `/healthz` liveness, `/readyz` readiness, 종료 유예), `Service`(ClusterIP 80 → 8000)
+- `IngressClassParams`(`scheme: internal`) + `IngressClass`(`controller: eks.amazonaws.com/alb`) + `Ingress`(HTTP 80, 헬스체크 `/readyz`, **인바운드 VPC 대역만**). `infra/modules/apps/main.tf`의 Auto Mode 예시를 internal·HTTP로 바꿔 쓴다
+- Secret 참조만: `api-database`(DB 접속), `rds-ca`(`bundle.pem`), `kafka-client`(`user.crt`, `user.key`, `ca.crt`). 값은 chart에 없다
+- values: 이미지(digest 필수), 리소스, 허용 CIDR, Kafka bootstrap(`clothes-query-dev-kafka-kafka-bootstrap.kafka.svc:9093`)
+- 정적 검사: `helm lint`, `helm template` 렌더 확인(테스트에서 실행, 기존 `infra/checks/install_helm.py`로 받은 Helm 사용)
+
+### 6. Kafka values (`infra/platform/kafka/cdc-orders-values.yaml`)
+
+- `clients`에 `{name: api, produceTopics: [clickstream], consumeTopics: [], consumerGroups: []}`
+- `kafka.clientNamespaces: [api]`
+- `verify/check.py`의 업무 values 검사에 이 두 가지를 반영한다(브로커 NodePool 불변 검사는 그대로 통과해야 한다)
+
+### 7. 인증서·Secret 절차 (`api/README.md`)
+
+- Secrets Manager `clothes-query-dev-api-db`(도쿄) 생성 → K8s Secret `api-database`
+- `rds-ca`를 `api` namespace에도 만든다
+- **Kafka 인증서 복사**: `kafka`의 Secret `api`(`user.crt`, `user.key`)와 `clothes-query-dev-kafka-cluster-ca-cert`(`ca.crt`)에서 키만 꺼내 `api` namespace의 `kafka-client`로 만든다. 값은 출력하지 않고, 한글 없는 레포 밖 임시 경로와 `[IO.File]::WriteAllBytes`를 쓴다(cdc-orders에서 겪은 PowerShell 함정 반영). **만료일 확인 명령**과 "갱신되면 다시 복사" 안내를 둔다
+
+### 8. 시뮬레이터 연동 (`simulator/`)
+
+- `common/api_client.py`: `SIM_API_URL` 기반 HTTP 클라이언트(표준 라이브러리 `urllib` 또는 `httpx` 중 의존성 추가를 최소화하는 쪽, 사용자에게 알린다), 재시도·백오프, 오류를 `ApiUnavailable`(일시)·`ApiRejected`(422 등)로 나눈다. **접속 주소 외 정보와 본문을 출력하지 않는다**
+- `member/live.py`: `ApiStore`(`MemberStore` 구현). `count_since` → `signup-count`, `insert` → `POST /v1/members`. **`PHONE_TAKEN`을 지금의 전화 UNIQUE 위반과 같게** 처리해 번호를 다시 뽑는다
+- `behavior/sink.py` 옆에 `ApiOrderSink`(`OrderSink` 구현), `ApiClickSink`(`ClickSink` 구현, 1초·500건 묶음)
+- `behavior/pool.py` 옆에 `ApiMemberSource`(전체 + 변경분, 중복 제거), `ApiCatalogSource`
+- `behavior/runner.py`: 회원 목록 갱신을 **5초마다 변경분 반영**으로(백엔드 api일 때). `MEMBER_NOT_ACTIVE`면 그 회원을 목록에서 뺀다. 재연결·재시도 처리를 `ApiUnavailable`에도 적용한다
+- CLI: `--backend db|api`(`SIM_BACKEND`), `api`일 때 `DATABASE_URL`을 요구하지 않는다. 시작 출력에 API 주소(호스트만)
+- 기존 테스트는 **그대로 통과**해야 한다(`--backend db` 기본). API 백엔드는 가짜 서버(FastAPI `TestClient` 대신 `http.server` 또는 의존성 없는 방식)로 단위 테스트
+
+### 9. 부하 측정
+
+- 로컬 Docker로 API를 띄우고, 시뮬레이터를 `--backend api --mode burst --speed N`으로 돌려 **초당 약 200 요청**을 만든다(별도 부하 도구 없이 시뮬레이터로)
+- `/metrics`에서 p95 응답 시간, 5xx 수, `DB_BUSY` 수를 보고한다. EKS Pod(500m 한도)에서 한 번 더 짧게 확인한다
+
+## 만들지 않는 것
+
+- ECS 배포, 시뮬레이터 이미지 변경(→ `sim/ecs-image`), 웹 관리 화면(→ `sim/console`)
+- 탈퇴 API, 리뷰 API, 인증(API 키)
+- 컨트롤러의 데이터 오염 경로 변경(지금처럼 DB 직접)
+- 지표 수집 서버(Prometheus 서버, Grafana), HPA
+- Terraform 변경, 기존 `apps` 스택 사용
+- `db/schema/` 변경
+
+## 작업 순서
+
+1. 시작 전 확인 → **계획을 먼저 제시해 사용자 확인을 받는다**
+2. 이 지시서와 `docs/BRANCHES.md`(`### api` 구역에 한 줄) → 커밋 `docs(api/mvp): 브랜치 등록과 작업 지시서 추가`
+3. API 뼈대(설정, 풀, 헬스, 지표, 로그) + 단위 테스트 → `feat(api/mvp): FastAPI 뼈대와 헬스·지표`
+4. 회원·상품 엔드포인트 → `feat(api/mvp): 회원·상품 API`
+5. 주문·결제·상태 엔드포인트 → `feat(api/mvp): 주문·결제·상태 API`
+6. 클릭 엔드포인트(Kafka) → `feat(api/mvp): 클릭 이벤트 API`
+7. 통합 테스트 → `test(api/mvp): 로컬 Postgres·Kafka 통합 테스트`
+8. Dockerfile, SQL, Helm chart, Kafka values, 검사 → `feat(api/mvp): 이미지·DB 계정·Helm chart·Kafka 계정`
+9. 시뮬레이터 API 백엔드 + 테스트 → `feat(api/mvp): 시뮬레이터 API 백엔드`
+10. 로컬 끝-끝·부하 측정 → 결과 보고
+11. README(`api/README.md`, `api/CLAUDE.md`, `simulator/README.md`) → `docs(api/mvp): README 갱신`
+12. 사용자가 EKS에 적용(명령 제공) → "완료 확인" 함께 진행
+13. `작업 결과` 작성, 상태 `완료` → `docs(api/mvp): 작업 결과 기록`
+
+## 완료 확인
+
+**로컬 (Claude가 실행)**
+- [ ] `api/`: `ruff check`, `ruff format --check`, `pytest`(단위), `pytest -m integration`(로컬 Docker) 통과
+- [ ] `simulator/`: 기존 테스트 **그대로 통과** + API 백엔드 테스트 통과
+- [ ] `helm lint`·`helm template` 통과, Kafka `verify/check.py` 통과(브로커 NodePool 불변)
+- [ ] 로컬 끝-끝: Docker Postgres·Kafka + API 컨테이너 + `sim member live --backend api` + `sim behavior live --backend api` 짧게 실행 → DB 행 수와 시뮬레이터 요약·API 지표가 맞고, `clickstream`에 클릭이 들어감
+- [ ] 멱등: 같은 주문을 두 번 보내면 200, 내용을 바꾸면 409. 탈퇴 상태로 바꾼 회원으로 주문하면 409
+- [ ] 부하: burst 상당(초당 약 200 요청)에서 5xx 0, p95 보고
+- [ ] 로그·출력에 PII·접속 정보 없음(`grep`)
+
+**EKS (사용자가 실행, 결과를 붙여 준다)**
+- [ ] `helm upgrade cq-kafka`: 바뀌는 것은 KafkaUser `api` 추가와 브로커 허용 대상(`api` namespace)뿐
+- [ ] DB 계정·Secret·인증서 복사 완료(값 출력 없음), `api` Pod Ready, 재시작 0
+- [ ] **내부 ALB 생성**(`kubectl get ingress -n api`의 주소가 `internal-…`), 대상 healthy
+- [ ] VPC 안에서 `/readyz` 200 (임시 Pod에서 ALB 주소로 요청)
+- [ ] 로컬 시뮬레이터 → `kubectl port-forward -n api svc/api` → 실제 RDS·Kafka: 짧게 돌려(예: 방문 300) 주문이 RDS에 들어가고 **CDC → `bronze/orders` 등**까지, 클릭이 **`bronze/clickstream/`**까지 가는지 확인
+- [ ] 노드 수 그대로(1대), API Pod 자원 사용량 보고
+
+## README 갱신
+
+- `api/README.md`: 목적, 엔드포인트 표, 로컬 실행, 테스트, 이미지 빌드·push(IMMUTABLE 태그), 배포 순서(DB 계정 → Secret → 인증서 복사 → Kafka values → Helm), 인증서 갱신, 되돌리기
+- `api/CLAUDE.md`: 폴더 규칙(PII 로그 금지, 접속 정보 출력 금지, 결정만 구현)
+- `simulator/README.md`: `--backend api`, `SIM_API_URL`, 재시도·묶음 정책
+
+## 막히면
+
+- 이 지시서·설계·코드가 어긋나면 **추측하지 말고 묻는다**(특히 상태 전이 표).
+- 새 의존성(시뮬레이터에 `httpx` 등)이 필요하면 이유를 먼저 설명한다.
+- `helm upgrade cq-kafka` diff에 `api` KafkaUser·허용 대상 말고 다른 변경(브로커, NodePool)이 보이면 멈춘다.
+- 노드가 늘어나면(`kubectl get nodes` 2대) 바로 알린다.
+- 내부 ALB가 안 생기거나 public으로 생기면 적용을 멈추고 알린다.
+
+## 작업 결과 (머지 전에 작성한다)
+
+- **한 줄 요약:**
+- **무엇을 만들었나:**
+- **왜 그렇게 했나:**
+- **입력과 출력:**
+- **확인한 결과:**
+- **알려진 한계·남은 일:**
