@@ -9,6 +9,7 @@
 
 import streamlit as st
 
+import auth
 import data
 from auth import current_user
 
@@ -27,11 +28,15 @@ DATA_PAGES = [
     st.Page("pages_data/payments.py", title="결제 관제", icon="💳"),
     st.Page("pages_data/malformed.py", title="형식 오류", icon="🧩"),
     st.Page("pages_data/anomaly.py", title="이상탐지", icon="🚨"),
+    st.Page("pages_data/rca_report.py", title="원인 리포트", icon="🕵️"),
     st.Page("pages_data/reprocess.py", title="재처리 이력", icon="♻️"),
 ]
 
 user, roles = current_user()
 st.sidebar.caption(f"사용자: {user}")
+if auth.AUTH_MODE in ("local", "oidc"):
+    # 계정을 바꿔 시험하려면 로그아웃이 필요하다.
+    st.sidebar.button("로그아웃", on_click=auth.logout)
 
 # 사용자가 가진 Role의 화면만 모은다. 두 Role이면 두 그룹이 모두 보인다.
 menu = {}
