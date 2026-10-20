@@ -66,7 +66,7 @@ def check_business_connectors(connector_schema, values):
     assert source["database.sslmode"] == "verify-full"
     assert source["publication.autocreate.mode"] == "disabled"
     # Heartbeat must not write tables or publish messages (nothing may reach Bronze).
-    assert source["heartbeat.action.query"].startswith("SELECT pg_logical_emit_message(false, 'heartbeat'")
+    assert source["heartbeat.action.query"].startswith("SELECT pg_logical_emit_message(true, 'heartbeat'")
     # Excluding the prefix drops the message before its LSN is recorded; the slot then never advances.
     assert "message.prefix.exclude.list" not in source
     assert source["transforms"].split(",")[0] == "dropMessage"
