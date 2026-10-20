@@ -27,7 +27,9 @@ ui:
   enabled: true
   image: ghcr.io/kafbat/kafka-ui@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1  # v1.5.0
   topics: [clickstream, members-events, orders, order-items, payments, debezium-heartbeat.cdc]
-  consumerGroups: [connect-bronze-s3-sink, clothes-query-dev-connect-cluster]
+  # infra-smoke-*: 10-18 시험이 남긴 빈 그룹. UI는 클러스터 Describe로 모든 그룹을 받는데 하나라도 못 읽으면
+  # 상태 수집 전체가 실패한다(빨간불). 그룹이 만료되면(offsets.retention 7일, 2026-10-25 무렵) 세 이름을 지운다.
+  consumerGroups: [connect-bronze-s3-sink, clothes-query-dev-connect-cluster, infra-smoke-group, connect-infra-smoke-s3, infra-smoke-connect-cluster]
 metrics:
   enabled: true
   lagExporter:
