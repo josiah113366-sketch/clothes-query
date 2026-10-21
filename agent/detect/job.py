@@ -37,8 +37,36 @@ def _seen(as_of, cfg):
     return f" AND loaded_at <= {_ts(as_of, cfg)}" if as_of else ""
 
 
-def judge(query, cfg: Config, tick: datetime, run_id: str, now: datetime, as_of=None):
-    """tick 시점의 원장을 읽어 이상 줄 목록을 돌려준다 (쓰지는 않는다)."""
+def _r3(query, cfg, run_id, now, tick, w3, as_of):
+    """R3: 최근 5분의 지연 측정, 측정 줄이 연속으로 없는지, 증거로 붙일 유입량(R2)."""
+    lag_rows = query(f"""SELECT topic, MAX(lag_sec) AS max_lag_sec FROM gold_b.bronze_lag_snapshots
+WHERE {_in('collected_at', tick - timedelta(minutes=2), tick, cfg)} GROUP BY topic""")
+    snap_rows = query(f"""SELECT topic, COUNT(*) AS snapshots FROM gold_b.bronze_lag_snapshots
+WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)} GROUP BY topic""")
+    vol_now = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w3, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+    vol_prev = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', w3[0] - timedelta(minutes=STEP_MIN), w3[0], cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+    ingest = {t: (next((r["n"] for r in vol_now if r["topic"] == t), 0), next((r["n"] for r in vol_prev if r["topic"] == t), 0)) for t in cfg.topics}
+    return r3_bronze_lag(cfg, run_id, now, w3, {r["topic"]: r["max_lag_sec"] for r in lag_rows},
+                         {r["topic"]: r["snapshots"] for r in snap_rows}, ingest)
+
+
+def _replaced_filter(query, cfg, tick):
+    """최근 5분 안에 교체가 끝난 시간대(LEDGER_REPLACED)의 줄 중, 교체 때 적재된 줄(loaded_at <= 교체 기록 시각)을 빼는 조건."""
+    events = query(f"""SELECT window_start, window_end, "at" AS replaced_at FROM gold_b.reprocess_events
+WHERE step = 'LEDGER_REPLACED' AND "at" >= {_ts(tick - timedelta(minutes=STEP_MIN), cfg)}""")
+    parts = []
+    for e in events:
+        ws, we, at = (datetime.fromisoformat(str(e[k]).replace("T", " ")) for k in ("window_start", "window_end", "replaced_at"))
+        parts.append(f" AND NOT (completed_at >= {_ts(ws, cfg)} AND completed_at < {_ts(we, cfg)} AND loaded_at <= {_ts(at, cfg)})")
+    return "".join(parts)
+
+
+def judge(query, cfg: Config, tick: datetime, run_id: str, now: datetime, as_of=None, bounds=None):
+    """tick 시점의 원장을 읽어 이상 줄 목록을 돌려준다 (쓰지는 않는다).
+
+    as_of=None이면 재판정이다. 재처리가 다시 만드는 원장(결제, 메시지, 깨진 메시지)로 만든 규칙만 돌린다(R3 제외).
+    bounds=(시작, 끝)이면 재판정할 교체 구간이다. 결제 완료 시각으로 보는 R5가 이 밖은 보지 않게 한다.
+    """
     wait = timedelta(minutes=cfg.ratio_wait_min)
     out = []
     # R1: 비율 조건이 있어 끝난 지 3분 지난 구간만 본다
@@ -49,17 +77,9 @@ FROM gold_b.payment_attempts
 WHERE {_in('completed_at', *w1, cfg)}{_seen(as_of, cfg)}
 GROUP BY pg""")
     out += r1_pg_failures(cfg, run_id, now, w1, per_pg)
-    # R3: 최근 5분의 지연 측정, 측정 줄이 연속으로 없는지, 증거로 붙일 유입량(R2)
     w3 = (tick - timedelta(minutes=STEP_MIN), tick)
-    lag_rows = query(f"""SELECT topic, MAX(lag_sec) AS max_lag_sec FROM gold_b.bronze_lag_snapshots
-WHERE {_in('collected_at', tick - timedelta(minutes=2), tick, cfg)} GROUP BY topic""")
-    snap_rows = query(f"""SELECT topic, COUNT(*) AS snapshots FROM gold_b.bronze_lag_snapshots
-WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)} GROUP BY topic""")
-    vol_now = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w3, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
-    vol_prev = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', w3[0] - timedelta(minutes=STEP_MIN), w3[0], cfg)}{_seen(as_of, cfg)} GROUP BY topic")
-    ingest = {t: (next((r["n"] for r in vol_now if r["topic"] == t), 0), next((r["n"] for r in vol_prev if r["topic"] == t), 0)) for t in cfg.topics}
-    out += r3_bronze_lag(cfg, run_id, now, w3, {r["topic"]: r["max_lag_sec"] for r in lag_rows},
-                         {r["topic"]: r["snapshots"] for r in snap_rows}, ingest)
+    if as_of is not None:   # R3: 지연 측정값(bronze_lag_snapshots)은 재처리가 다시 만들지 않는다(그때만 잴 수 있다). 재판정에서는 빼서 항상 STILL_OPEN이 되는 일을 막는다
+        out += _r3(query, cfg, run_id, now, tick, w3, as_of)
     # R4: 현재 형식 검사 규칙 버전의 깨진 메시지만 센다. 비율 조건이 있어 3분 대기
     w4 = (tick - wait - timedelta(minutes=cfg.r4_win_min), tick - wait)
     broken = query(f"""SELECT topic, COUNT(*) AS n FROM gold_b.malformed_messages
@@ -68,13 +88,18 @@ WHERE {_in('kafka_timestamp', *w4, cfg)} AND rule_version = '{cfg.format_rule_ve
     out += r4_malformed(cfg, run_id, now, w4, {r["topic"]: r["n"] for r in broken}, {r["topic"]: r["n"] for r in total})
     # R5: 한 주문에 성공 결제 2건. 비율 조건이 없어 기다리지 않는다.
     #   순찰은 "방금 적재된" 줄(loaded_at)을 본다. 중복 행의 completed_at은 원래 결제 시각이라 과거일 수 있다.
-    #   재판정은 교체된 시간대의 줄을 봐야 해서(교체된 줄의 loaded_at은 재처리 시각이다) 결제 완료 시각(completed_at)으로 본다.
-    col = "loaded_at" if as_of else "completed_at"
-    dup = query(f"""SELECT t.order_id, COUNT(*) AS success_count FROM gold_b.payment_attempts t
+    #   다만 재처리가 교체한 줄은 loaded_at이 재처리 시각이라 방금 적재된 것처럼 보인다. 그 줄은 빼고(재판정이 따로 본다), 교체 뒤에 새로 적재된 줄만 센다.
+    #   재판정은 교체된 시간대의 줄을 봐야 해서 결제 완료 시각(completed_at)으로, 교체 구간 안만 본다.
+    if as_of is not None:
+        col, w5, skip = "loaded_at", w3, _replaced_filter(query, cfg, tick)
+    else:
+        w5, skip = (max(w3[0], bounds[0]), min(w3[1], bounds[1])) if bounds else w3, ""
+        col = "completed_at"
+    dup = [] if w5[1] <= w5[0] else query(f"""SELECT t.order_id, COUNT(*) AS success_count FROM gold_b.payment_attempts t
 WHERE t.status = 'SUCCESS' AND t.order_id IN (SELECT order_id FROM gold_b.payment_attempts
-                                              WHERE status = 'SUCCESS' AND {_in(col, *w3, cfg)})
+                                              WHERE status = 'SUCCESS' AND {_in(col, *w5, cfg)}{skip})
 GROUP BY t.order_id HAVING COUNT(*) > 1""")
-    out += r5_duplicate_success(cfg, run_id, now, w3, dup)
+    out += r5_duplicate_success(cfg, run_id, now, w5, dup)
     return out
 
 
@@ -120,12 +145,14 @@ def redetect(query, write, cfg: Config, now: datetime, item):
     start, end = datetime.fromisoformat(str(ws)), datetime.fromisoformat(str(we))
     run_id = f"{floor_tick(now):%Y%m%dT%H%MZ}-RD-{rid}-{start:%H%M}"
     prior = query(f"""SELECT DISTINCT rule_id, scope_type, scope_key FROM gold_b.anomaly
-WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)}""")   # 교체된 시간대와 겹치는 옛 판정
+WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)} AND rule_id <> 'R3_BRONZE_LAG'""")   # 교체된 시간대와 겹치는 옛 판정 (R3는 재처리가 안 바꾸는 값이라 비교에서 뺀다)
     key = lambda r: (r["rule_id"], r["scope_type"], r["scope_key"])   # 규칙·대상이 같으면 같은 이상 (R5는 순찰·재판정의 시간 기준이 달라 id로 비교할 수 없다)
     prior_ids = {key(r) for r in prior}
     rows, tick = [], start + timedelta(minutes=STEP_MIN)
-    while tick <= end + timedelta(minutes=cfg.ratio_wait_min):   # 정규 순찰과 같은 5분 시각으로 훑는다
-        rows += judge(query, cfg, tick, run_id, now, as_of=None)
+    while True:   # 정규 순찰과 같은 5분 시각으로 훑는다. 비율 규칙은 구간이 끝난 지 3분 뒤를 보므로, 교체 구간의 끝까지 덮을 때까지 한 번 더 훑는다
+        rows += judge(query, cfg, tick, run_id, now, as_of=None, bounds=(start, end))
+        if tick - timedelta(minutes=cfg.ratio_wait_min) >= end:
+            break
         tick += timedelta(minutes=STEP_MIN)
     seen, unique = set(), []
     for r in rows:                                            # 겹치는 판정 구간의 같은 이상은 한 줄만
@@ -137,7 +164,8 @@ WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)}""")   # 
     write("detection_runs", [_run_record(run_id, "REDETECT", rid, start, end, now, len(unique))])
     remaining = prior_ids & new_ids
     result = "NO_ANOMALY_BEFORE" if not prior_ids else ("RESOLVED" if not remaining else "STILL_OPEN")
-    detail = json.dumps({"before": len(prior_ids), "after": len(new_ids), "still_open": len(remaining), "result": result})
+    detail = json.dumps({"before": len(prior_ids), "after": len(new_ids), "still_open": len(remaining), "result": result,
+                         "excluded_rules": ["R3_BRONZE_LAG"]})
     write("reprocess_events", [_event(rid, "REDETECTED", now, str(ws), str(we), f"run_id={run_id}", cfg),
                                _event(rid, "VERIFIED", now, str(ws), str(we), detail, cfg)])
     return {"request_id": rid, "run_id": run_id, "result": result}

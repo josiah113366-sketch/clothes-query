@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from job import floor_tick, pending_replacements, regular_run, run_once
+from rules import r3_bronze_lag
 from rules import Config, anomaly_id
 
 ok = True
@@ -18,7 +19,7 @@ def check(name, got, want):
     print(("통과 " if good else "실패 ") + name + ("" if good else f" | 결과: {got!r} | 기대: {want!r}"))
 
 
-CFG = Config(dialect="sqlite")
+CFG = Config(dialect="sqlite", lag_sec=60.0, format_rule_version="v1.0")   # 시험 데이터에 맞춘 값 (실제 기본값은 아래에서 따로 시험)
 F = "%Y-%m-%d %H:%M:%S"
 D0 = datetime(2026, 10, 20, 14, 0)
 
@@ -151,5 +152,78 @@ check("재처리로 원장이 바뀐 뒤 재판정: 이상이 사라짐 (RESOLVE
 check("옛 이상 줄은 지워지지 않음 (쌓기만 함)", len(anomalies()) >= before, True)
 check("재판정 순찰 기록 2건(REDETECT)", len(query("SELECT * FROM gold_b.detection_runs WHERE kind = 'REDETECT'")), 2)
 check("VERIFIED 내용에 해결 결과가 들어감", '"result": "RESOLVED"' in query("SELECT detail FROM gold_b.reprocess_events WHERE request_id='rq-1' AND step='VERIFIED'")[0]["detail"], True)
+
+# --- 은서 님 리뷰 반영 ---
+def blank():
+    """스키마만 있는 새 가짜 원장. (query, write, 연결)을 돌려준다."""
+    c = build()
+    for tb in ("payment_attempts", "topic_messages", "bronze_lag_snapshots", "malformed_messages", "reprocess_events", "anomaly", "detection_runs"):
+        c.execute(f"DELETE FROM gold_b.{tb}")
+
+    def q(sql):
+        return [dict(r) for r in c.execute(sql).fetchall()]
+
+    def w(table, rows):
+        for r in rows:
+            c.execute(f"INSERT INTO gold_b.{table} ({','.join(r)}) VALUES ({','.join('?' * len(r))})", list(r.values()))
+    return q, w, c
+
+
+def replaced(c, rid, ws, we, at_):
+    c.execute("INSERT INTO gold_b.reprocess_events (request_id, step, at, actor, window_start, window_end) VALUES (?, 'LEDGER_REPLACED', ?, 'reprocess_job', ?, ?)",
+              (rid, at_, ws, we))
+
+
+# 1. 교체 구간 끝의 3분(15:57~16:00)에 끝난 결제도 재판정이 본다
+q2, w2, c2 = blank()
+for i in range(5):
+    c2.execute("INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)", (f"e{i}", f"oe{i}", 1, "PG_A", "FAILED", "PG_TIMEOUT", "PG", "2026-10-20 15:58:30", "2026-10-20 16:30:00"))
+replaced(c2, "rq-a", "2026-10-20 15:00:00", "2026-10-20 16:00:00", "2026-10-20 16:30:00")
+run_once(q2, w2, CFG, at(16, 40))
+check("재판정이 교체 구간 끝 3분(15:58 결제)까지 봄", [(x["scope_key"], x["observed_value"]) for x in q2("SELECT * FROM gold_b.anomaly WHERE rule_id = 'R1_PG_FAILURES' ORDER BY anomaly_id")][:1], [("PG_A", 5)])
+
+# 2. 재판정 비교에서 R3는 뺀다 (재처리가 bronze_lag_snapshots를 다시 만들지 않는다)
+q2, w2, c2 = blank()
+base = dict(run_id="old", rule_version="v0.1", source_table="x", window_start="2026-10-20 15:10:00", window_end="2026-10-20 15:20:00", scope_type="topic", scope_key="orders", status="OPEN", detected_at="2026-10-20 15:21:00")
+w2("anomaly", [dict(base, anomaly_id="a-old-r3", rule_id="R3_BRONZE_LAG", anomaly_type="BRONZE_LAG_SPIKE"),
+               dict(base, anomaly_id="a-old-r1", rule_id="R1_PG_FAILURES", anomaly_type="PG_FAILURE_SPIKE", scope_type="pg", scope_key="PG_A")])
+replaced(c2, "rq-b", "2026-10-20 15:00:00", "2026-10-20 16:00:00", "2026-10-20 16:30:00")
+s = run_once(q2, w2, CFG, at(16, 40))
+check("R3 이상이 옛 기록에 있어도 R1이 사라졌으면 RESOLVED (R3는 비교 제외)", [x["result"] for x in s["redetected"]], ["RESOLVED"])
+check("VERIFIED 내용에 제외한 규칙이 적힘", "R3_BRONZE_LAG" in q2("SELECT detail FROM gold_b.reprocess_events WHERE step = 'VERIFIED'")[0]["detail"], True)
+check("재판정은 R3 이상 줄을 새로 만들지 않음", len(q2("SELECT * FROM gold_b.anomaly WHERE rule_id = 'R3_BRONZE_LAG' AND run_id LIKE '%-RD-%'")), 0)
+
+# 3. 재처리로 교체된 줄(loaded_at이 교체 때)은 R5 순찰이 새로 적재된 것으로 보지 않는다. 교체 뒤 새로 들어온 중복은 센다
+q2, w2, c2 = blank()
+ins = "INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)"
+c2.execute(ins, ("n9", "o9", 1, "PG_B", "SUCCESS", None, None, "2026-10-20 15:20:00", "2026-10-20 15:21:00"))
+c2.execute(ins, ("d9", "o9", 2, "PG_B", "SUCCESS", None, None, "2026-10-20 15:20:02", "2026-10-20 17:02:00"))      # 재처리로 다시 적재된 중복 (교체 기록 17:03 이전)
+c2.execute(ins, ("n10", "o10", 1, "PG_B", "SUCCESS", None, None, "2026-10-20 15:30:00", "2026-10-20 15:31:00"))
+c2.execute(ins, ("d10", "o10", 2, "PG_B", "SUCCESS", None, None, "2026-10-20 15:30:02", "2026-10-20 17:04:00"))    # 교체 뒤 새로 들어온 중복
+replaced(c2, "rq-c", "2026-10-20 15:00:00", "2026-10-20 16:00:00", "2026-10-20 17:03:00")
+regular_run(q2, w2, CFG, at(17, 5))
+r5 = q2("SELECT observed_value, evidence_ref FROM gold_b.anomaly WHERE rule_id = 'R5_DUPLICATE_SUCCESS'")
+check("재처리 직후 순찰: 교체로 다시 적재된 중복(o9)은 안 세고, 교체 뒤 새 중복(o10)만 셈", (len(r5), r5[0]["observed_value"], '"sample_order_ids": ["o10"]' in r5[0]["evidence_ref"]), (1, 1, True))
+
+# 4. 기본 설정값: 정상 톱니(900초)에서는 안 울리고, 실제 토픽 5개를 본다
+d = Config()
+check("기본 토픽은 실제 배포된 5개 (members-events 포함, reviews.raw 없음)", (len(d.topics), "members-events" in d.topics, "reviews.raw" in d.topics), (5, True, False))
+snaps = {t: 1 for t in d.topics}
+quiet = r3_bronze_lag(d, "r", at(16), (at(15, 55), at(16)), {"orders": 900.0}, snaps, {})
+loud = r3_bronze_lag(d, "r", at(16), (at(15, 55), at(16)), {"orders": 1300.0}, snaps, {})
+check("기본 R3: 정상 톱니 900초는 조용, 1300초는 울림", (len(quiet), len(loud)), (0, 1))
+
+# 5. write()가 받는 시각은 모두 'YYYY-MM-DD HH:MM:SS' (UTC). 실제 write는 이것을 TIMESTAMP 타입으로 바꿔 써야 한다
+bad = []
+for tb, cols in (("anomaly", ("window_start", "window_end", "detected_at")), ("detection_runs", ("judged_from", "judged_to", "started_at")),
+                 ("reprocess_events", ("at", "window_start", "window_end"))):
+    for r in query(f"SELECT * FROM gold_b.{tb}"):
+        for cname in cols:
+            if r[cname] is not None:
+                try:
+                    datetime.strptime(str(r[cname]), F)
+                except ValueError:
+                    bad.append((tb, cname, r[cname]))
+check("쓰는 줄의 시각 컬럼이 모두 'YYYY-MM-DD HH:MM:SS' 형식", bad, [])
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

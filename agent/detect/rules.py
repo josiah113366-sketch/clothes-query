@@ -13,16 +13,16 @@ class Config:
     r1_win_min: int = 15                  # R1: 최근 몇 분의 PG 원인 실패를 보나
     r1_k: int = 3                         # R1: PG 원인 실패가 몇 건 이상
     r1_rate: float = 0.2                  # R1: 그 PG 결제 시도 중 PG 원인 실패 비율이 얼마 이상 (제안, 시험으로 고른 값)
-    lag_sec: float = 60.0                 # R3: 적재 지연이 몇 초 이상
+    lag_sec: float = 1200.0               # R3: 적재 지연이 몇 초 이상. Bronze S3 Sink가 15분(900초)마다 파일을 써서 정상일 때도 0~900초를 오간다(Gold B 담당 리뷰) -> 900초 + 여유 5분 (임시, 팀 결정 필요)
     miss_min: int = 3                     # R3: 측정 줄이 연속으로 몇 분 없으면 (미정)
     r4_win_min: int = 5                   # R4: 최근 몇 분의 깨진 메시지를 보나
     r4_min: int = 5                       # R4: 깨진 메시지가 몇 개 이상
     r4_ratio: float = 0.05                # R4: 그 토픽 메시지 중 깨진 비율이 얼마 이상
     r5_min_orders: int = 1                # R5: 성공 결제가 2건 이상인 주문이 몇 개 이상 (평소 0이어야 하는 값이라 1로 둠, 제안)
     ratio_wait_min: int = 3               # 비율 규칙은 구간이 끝난 지 몇 분 지난 것만 본다 (Gold B 문서)
-    format_rule_version: str = "v1.0"     # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다)
+    format_rule_version: str = "0.1.0-draft"   # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다). 공통 형식 규칙 YAML의 version과 같아야 한다. 다르면 R4가 0건으로 나온다
     pgs: tuple = ("PG_A", "PG_B")
-    topics: tuple = ("payments", "orders", "order-items", "member-events", "clickstream", "reviews.raw")
+    topics: tuple = ("payments", "orders", "order-items", "members-events", "clickstream")   # 실제 배포된 업무 토픽 5개 (heartbeat 토픽, 아직 없는 reviews.raw는 뺀다)
     dialect: str = "athena"               # athena | sqlite (시각 표기만 다르다)
 
 
