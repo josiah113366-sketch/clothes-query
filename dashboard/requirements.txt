@@ -1,0 +1,7 @@
+# st.navigation / st.user(OIDC 로그인)을 쓰려면 1.66.0 이상 (st.dataframe width="stretch" 포함)이 필요하다.
+# 다음 메이저 버전에서 동작이 바뀔 수 있어 상한(<2)을 둔다. 운영 전에 정확한 버전으로 고정할 것.
+streamlit>=1.66.0,<2
+pandas>=2.0
+numpy>=1.26
+# OIDC 로그인(st.login)에 필요
+Authlib>=1.3
