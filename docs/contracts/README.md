@@ -124,7 +124,7 @@ YAML의 `source_rules`는 현재 DDL을 충실히 옮긴 기준이다. `proposed
 | 식별·제외 정보 | payment_id는 비교 키로 별도 유지. Kafka 위치·시각, CDC 정보, loaded_at 등 전달 정보는 지문 제외 |
 | 정수 | attempt_no/amount는 1 이상 Python 정수. bool·문자열·실수 변환 없음 |
 | 문자열 | 비어 있지 않은 문자열, trim/대소문자/유니코드 정규화 없음. 허용값 정책은 공통 입력 검사에서 적용 |
-| NULL | 9개 필드는 모두 전달. 성공은 failure_code=None, 실패는 비어 있지 않은 문자열. 누락/빈 값에서 NULL을 추정하지 않음 |
+| NULL | SUCCESS의 failure_code는 명시적 None과 필드 생략을 JSON null로 통일한다(기존 YAML 검사와 일치). FAILED의 누락/None/빈 문자열/공백은 오류. 나머지 8개 필드는 필수이며 임의 보충 없음 |
 | 시각 입력 | 시간대 포함 ISO 문자열: YYYY-MM-DDTHH:MM:SS[.1~6자리](Z 또는 ±HH:MM). datetime 객체·시간대 없는 값·7자리 이상 소수초는 거부 |
 | 시각 정규화 | UTC, 소수초 6자리, Z 고정. 반올림·절삭 없음 |
 | 직렬화 | 고정 순서 JSON 배열, ensure_ascii=False, 공백 없는 separators, UTF-8, NaN 금지 |
@@ -135,12 +135,13 @@ YAML의 `source_rules`는 현재 DDL을 충실히 옮긴 기준이다. `proposed
 ```python
 from pipelines.payment_fingerprint import payment_fingerprint
 
-# 호출 경로가 공통 업무 입력 검사를 통과시킨 9개 필드를 전달한다.
+# 호출 경로가 업무 입력 검사를 통과시킨 원천 행을 전달한다.
+# 시각 문자열은 datetime/Spark TIMESTAMP 등으로 바꾸기 전 값이어야 한다.
 # 이후 이 두 필드를 각 경로의 결과/원장에 보존하는 연결은 후속이다.
 fingerprint = payment_fingerprint(validated_payment)
 ```
 
-Silver 소비 연결 시 requested_at_utc/completed_at_utc를 요청/완료 원천 필드명에 매핑하거나 정규화 전 검증 행을 전달할 수 있다. 이 함수는 별칭을 자동 추측하지 않는다. 기존 KST 출력·집계는 유지한다. Spark TIMESTAMP를 쓰는 Gold B는 JVM/Python 경계의 시간대·정밀도 손실 없이 위 문자열 계약으로 전달해야 한다.
+양쪽 호출 순서는 원천 JSON 파싱 → 공통 업무 입력 검사 → 원천 시각 문자열 그대로 지문 계산 → Silver UTC/KST 출력 또는 Gold B TIMESTAMP 변환·저장이다. 업무 입력 검사기가 시각을 내부적으로 파싱하더라도 원천 문자열은 보존해야 한다. 기존 입력 검사는 7자리 이상 소수초를 허용할 수 있으므로 지문 함수가 정밀도를 확인하기 전에 datetime/Spark 변환을 하면 안 된다. Silver의 requested_at_utc/completed_at_utc를 재매핑하는 방식은 원천 정밀도 손실을 감출 수 있어 이 규약에서는 사용하지 않는다. 함수는 필드 별칭을 자동 추측하지 않는다. 기존 KST 출력·집계는 유지한다.
 
 입력 정책과 지문 규칙은 분리한다. 이 함수가 미등록 실패 코드 문자열의 지문을 만들 수 있어도 그 코드를 정상 입력으로 수용한다는 뜻은 아니다. FormatRules의 허용 목록·조건 검사는 먼저 적용해야 한다. method/pg의 enum, UUID 형식, 완료>=요청 등 정책을 지문 모듈에 중복 정의하지 않는다. 공통 YAML/DDL은 이번 작업에서 변경하지 않는다.
 

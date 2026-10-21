@@ -76,6 +76,9 @@ def test_payment_fingerprint_rejects_lossy_or_missing_inputs_without_policy_chan
     for field in CONTENT_FIELDS:
         missing = dict(base)
         missing.pop(field)
+        if field == "failure_code":
+            assert payment_fingerprint(missing) == payment_fingerprint(base)
+            continue
         with pytest.raises(FingerprintError) as caught:
             payment_fingerprint(missing)
         assert caught.value.field == field
@@ -87,6 +90,33 @@ def test_payment_fingerprint_rejects_lossy_or_missing_inputs_without_policy_chan
     with pytest.raises(FormatError):
         FormatRules().validate("payments", {**payment(), "status": "FAILED",
                                             "failure_code": "PG_NEW_ERROR"})
+
+
+def test_fingerprint_yaml_null_compatibility_and_original_time_precision():
+    rules = FormatRules()
+    success = payment()
+    omitted = dict(success)
+    omitted.pop("failure_code")
+    original = deepcopy(omitted)
+    rules.validate("payments", omitted)
+    assert canonical_payment_content(omitted) == canonical_payment_content(success)
+    assert payment_fingerprint(omitted) == payment_fingerprint(success)
+    assert omitted == original and "failure_code" not in omitted
+    for invalid in ({**omitted, "status": "FAILED"},
+                    {**success, "status": "FAILED"},
+                    {**success, "failure_code": ""}, {**success, "failure_code": " "}):
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(invalid)
+        assert caught.value.field == "failure_code"
+    for field in ("requested_at", "completed_at"):
+        raw = {**success, field: success[field].replace(":00+", ":00.1234567+")}
+        # 입력 검사 후에도 원문을 보존하고 시각 변환 전에 지문 정밀도를 검사한다.
+        before = deepcopy(raw)
+        rules.validate("payments", raw)
+        assert raw == before
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(raw)
+        assert caught.value.field == field
 
 
 def fixture_id(label):
