@@ -2,6 +2,7 @@
 {{- if and (eq .Values.profile "single-node") (or (ne (int .Values.kafka.replicas) 1) (ne (int .Values.connect.replicas) 1)) }}{{ fail "single-node profile requires one Kafka and one Connect replica" }}{{ end -}}
 {{- if ne .Release.Namespace "kafka" }}{{ fail "Install in namespace kafka; operator is scoped to this namespace" }}{{ end -}}
 {{- if and .Values.connect.enabled (not .Values.kafka.enabled) }}{{ fail "connect requires kafka.enabled" }}{{ end -}}
+{{- if and .Values.ui.enabled (not .Values.kafka.enabled) }}{{ fail "ui requires kafka.enabled" }}{{ end -}}
 {{- if and .Values.metrics.enabled (not .Values.kafka.enabled) }}{{ fail "metrics requires kafka.enabled" }}{{ end -}}
 {{- if .Values.metrics.lagExporter.enabled -}}
 {{- if not .Values.metrics.enabled }}{{ fail "lagExporter requires metrics.enabled" }}{{ end -}}
@@ -41,6 +42,14 @@
 {{- if not (hasKey $names .) }}{{ fail "Connect ACL references an undefined business topic" }}{{ end -}}
 {{- end -}}
 {{- if and (gt (len .Values.connect.consumeTopics) 0) (eq (len .Values.connect.consumerGroups) 0) }}{{ fail "Connect consumers require explicit consumerGroups" }}{{ end -}}
+{{- end -}}
+{{- if .Values.ui.enabled -}}
+{{- if not .Values.ui.image }}{{ fail "ui.image digest is required" }}{{ end -}}
+{{- if or (hasKey $users .Values.ui.name) (eq .Values.ui.name .Values.connect.name) }}{{ fail "Duplicate or reserved ui name" }}{{ end -}}
+{{- if eq (len .Values.ui.topics) 0 }}{{ fail "ui.topics requires explicit business topics" }}{{ end -}}
+{{- range .Values.ui.topics -}}
+{{- if not (hasKey $names .) }}{{ fail "UI ACL references an undefined business topic" }}{{ end -}}
+{{- end -}}
 {{- end -}}
 {{- else -}}
 {{- if or (gt (len .Values.topics) 0) (gt (len .Values.clients) 0) }}{{ fail "topics/clients require kafka.enabled" }}{{ end -}}

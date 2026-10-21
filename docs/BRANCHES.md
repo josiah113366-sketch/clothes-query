@@ -27,6 +27,7 @@
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
 | `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 시작 전 |
 | `ci` | `.github/` | GitHub Actions | 시작 전 |
+| `api` | `api/` | 업무 API(WAS, FastAPI). 시뮬레이터 → API → RDS·Kafka(clickstream). 설계: `docs/design/api.md` | 시작 전 |
 
 새 영역이 필요하면 **이 표에 한 줄을 추가하는 `docs/` PR**을 먼저 올린다. 접두어는 소문자와 `-`만 쓴다.
 
@@ -63,6 +64,12 @@ gitGraph
   commit id: "sim(clickstream)"
   checkout main
   merge sim/clickstream
+  branch sim/cdc-orders
+  commit id: "sim(cdc-orders)"
+  checkout main
+  merge sim/cdc-orders
+  branch pipelines/silver
+  commit id: "pipelines(silver)"
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -81,11 +88,14 @@ gitGraph
 | `sim/behavior-core` | `docs/tasks/sim-behavior-core.md` | 머지됨 | |
 | `sim/controller` | `docs/tasks/sim-controller.md` | 머지됨 | |
 | `sim/clickstream` | `docs/tasks/sim-clickstream.md` | 머지됨 | |
+| `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `docs/branch-rules` | - | 진행 중 | |
+| `docs/api-design` | - (설계 문서 `docs/design/api.md`) | 진행 중 | |
+| `docs/data-contracts` | [docs-data-contracts.md](tasks/docs-data-contracts.md) | 검토 대기 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -97,5 +107,15 @@ gitGraph
 | `infra/generator-was-access` | [infra-generator-was-access.md](tasks/infra-generator-was-access.md) | 실제 연결 완료·검토 대기 | |
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
 
+### agent
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `agent/detection-draft` | [agent-detection-draft.md](tasks/agent-detection-draft.md) | 진행 중 | |
+
 ### 그 밖의 영역
-`db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+`db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+
+### pipelines
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |

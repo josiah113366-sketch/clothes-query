@@ -421,6 +421,27 @@
         }
       }
     },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "name": {"type": "string", "maxLength": 63, "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"},
+        "image": {"anyOf": [{"const": ""}, {"type": "string", "pattern": "^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$"}]},
+        "topics": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,248}$", "maxLength": 249},
+          "uniqueItems": true
+        },
+        "consumerGroups": {
+          "type": "array",
+          "items": {"type": "string", "maxLength": 63, "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"},
+          "uniqueItems": true
+        },
+        "resources": {"type": "object", "additionalProperties": false, "properties": {"requests": {"type": "object", "additionalProperties": false, "properties": {"cpu": {"type": "string", "pattern": "^[1-9][0-9]*(m)?$"}, "memory": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$"}}, "required": ["cpu", "memory"]}, "limits": {"type": "object", "additionalProperties": false, "properties": {"cpu": {"type": "string", "pattern": "^[1-9][0-9]*(m)?$"}, "memory": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$"}}, "required": ["cpu", "memory"]}}, "required": ["requests", "limits"]}
+      },
+      "required": ["enabled", "name", "image", "topics", "consumerGroups", "resources"]
+    },
     "profile": {
       "type": "string",
       "enum": [
@@ -435,6 +456,7 @@
     "clients",
     "connect",
     "metrics",
+    "ui",
     "profile"
   ],
   "allOf": [
