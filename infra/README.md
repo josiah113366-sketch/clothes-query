@@ -18,6 +18,8 @@ clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별�
 
 ## 스택 순서와 의존 관계
 
+2026-10-21 후속: [Agent 개발 접근 스택](stacks/agent-development-access/README.md)은 기존 EKS 뒤에 독립 state로 추가한다. [판정·조사 이미지 등록/인증/협의 항목](platform/agent-development/README.md)을 따른다. 기존 EKS·관리자·업무 쓰기 권한을 변경하지 않는다.
+
 ```
 bootstrap → network → eks → compute → apps
                           └→ Kafka 운영자 → Kafka (Helm, 측정 배포 완료; Connect 비활성)
