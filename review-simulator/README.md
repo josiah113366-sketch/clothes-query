@@ -37,7 +37,7 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 | `src/rsim/review/examples.py` | 생성 프롬프트 예시 세트(`data/examples/ex-vN.md`) 읽기 |
 | `src/rsim/review/verifier.py` | 검수 프롬프트(`VERIFIER_PROMPT_VERSION`), 명세 비교, 정답 라벨 합치기 |
 | `src/rsim/review/bedrock.py` | Bedrock Converse 호출 (표준 라이브러리, SDK 없음) |
-| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~14일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
+| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~7일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
 | `src/rsim/review/options.py` | 구매 옵션(사이즈·색상)과 포토 리뷰 여부 |
 | `src/rsim/review/sinks.py`, `run.py` | Kafka / 콘솔 / 파일 전송, 실행 흐름 |
 | `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 예시 세트 점검표, 검수 모델 정확도 측정 |
@@ -85,11 +85,11 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-## 주문 기반 실행 (결제 후 1~14일 뒤 리뷰 → S3 날짜별 경로)
+## 주문 기반 실행 (결제 후 1~7일 뒤 리뷰 → S3 날짜별 경로)
 
-2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고, **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
+2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고(2026-10-21 에 1~7일로 좁힘), **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
 RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있으니 조인은 레이크(Athena 등)에서 한다.
-**주문은 지금 로컬 파일이다.** 레이크는 기본이 로컬 폴더(`.local/lake`)이고, `LAKE_ROOT` 에 `s3://` 경로를 주면 S3 에 쓴다.
+주문은 로컬 파일(`--source orders`, 가짜 주문) 또는 **RDS orders 테이블**(`--source rds`, 2026-10-21) 에서 읽는다. 레이크는 기본이 로컬 폴더(`.local/lake`)이고, `LAKE_ROOT` 에 `s3://` 경로를 주면 S3 에 쓴다.
 
 - 주문은 `.local/orders.jsonl` 에서 읽는다(`ORDERS_PATH`). 결제 데이터가 생기기 전에는 `rsim orders-fake` 로 만든다.
 - 주문마다 리뷰를 쓸지(`REVIEW_RATE`), 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`), review_id, 구매 옵션은
@@ -99,7 +99,7 @@ RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있�
   **그 날짜 파티션을 통째로 덮어쓴다.** 그래서 "이미 리뷰가 있는 주문"을 조회할 필요 없이, 같은 날짜를 다시 돌려도 주문당 리뷰는 하나다.
 - dt 는 UTC 날짜다(팀 규칙: Bronze 는 UTC, Silver 부터 KST). 하루 배치는 UTC 0시(KST 오전 9시) 이후에 전날을 돌린다.
 - 생성이 실패해서 버린 리뷰는 그 파티션에서 빠진다. 다시 채우려면 그 날짜를 다시 돌린다(그날 리뷰 문장은 새로 만들어진다).
-- 나중에 S3 결제 데이터를 읽을 때는 D-14 ~ D-1 결제 파티션만 읽으면 된다(`orders.due_orders` 설명 참고).
+- 결제 데이터를 읽을 때는 D-7 ~ D-1 결제만 보면 된다(`orders.due_orders` 설명 참고). `--source rds` 는 이 범위만 RDS 에서 읽는다.
 
 ```powershell
 # 가짜 주문 14일치 (하루 평균 1000건, Bedrock 호출 없음)
@@ -111,6 +111,21 @@ rsim run --source orders --llm fake --sink lake --date 2026-10-08
 
 # 다음 날
 rsim run --source orders --llm fake --sink lake --date 2026-10-09
+```
+
+### RDS orders 테이블에서 읽기 (`--source rds`, 0.3.0)
+
+업무 API 가 RDS 에 저장한 주문을 읽어 리뷰를 단다(2026-10-21 lemin 결정). `.env` 에 `ORDERS_DATABASE_URL` 을 넣는다(읽기 권한만 있으면 됨).
+
+- 대상: 주문 상태 PAID·SHIPPED·DELIVERED 이고 결제(payments) SUCCESS 가 있는 주문. 결제 시각 = 성공 결제의 completed_at.
+- **주문 항목(order_items) 하나에 리뷰 하나.** 작성 여부·텀·review_id 는 order_item_id 로 정한다(같은 항목이면 언제 돌려도 같은 값).
+- 프롬프트: 상품명(prod_name)과 product_info(상품 종류·색상·무늬, product_design·product_variant), 작성자 연령대(members.age_band).
+  리뷰 컬럼은 그대로이고 order_id·member_id·product_id 가 RDS 값이라 레이크에서 거래 데이터와 바로 조인된다.
+- 개인정보 컬럼(이름·이메일·전화)은 읽지 않는다. 연결은 읽기 전용으로 연다.
+
+```powershell
+# 10월 21일(UTC)에 리뷰 시각이 있는 RDS 주문 항목에 리뷰 (가짜 문장, 0원)
+rsim run --source rds --llm fake --sink stdout --date 2026-10-21
 ```
 
 ### 팀 S3 버킷에 쓰기
@@ -176,7 +191,7 @@ rsim inject --file .local\manual\size_spike_1008.csv             # LAKE_ROOT 에
 - `--sink lake` 이면 `<LAKE_ROOT>/reviews/year=YYYY/month=MM/day=DD/`, `<LAKE_ROOT>/reviews_truth/year=YYYY/month=MM/day=DD/` 에 날짜별로 저장한다(위 주문 기반 실행 참고)
 
 product_id, product_name, category, member_id, age_group 은 임시 값이다. 나중에 order·member 테이블에서 가져온다.
-주문 모드(`--source orders`)에서는 `order_id`, `member_id`, `product_id` 가 주문 파일 값이고, 무작위 모드에서는 `order_id` 가 null 이다.
+주문 모드(`--source orders`·`rds`)에서는 `order_id`, `member_id`, `product_id` 가 주문 파일(또는 RDS) 값이고, 무작위 모드에서는 `order_id` 가 null 이다.
 
 ## 데이터 주의
 

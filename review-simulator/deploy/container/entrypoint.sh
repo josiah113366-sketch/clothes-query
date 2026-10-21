@@ -19,7 +19,7 @@ fi
 
 DAY="${RUN_DATE:-$(date -u -d yesterday +%F)}"
 START="${ORDERS_FAKE_START:-2026-10-01T00:00:00+00:00}"
-# 시작일부터 DAY 까지 날짜 수 (DAY 당일 포함). 리뷰는 결제 1~14일 뒤라 DAY 이전 주문만 쓰인다
+# 시작일부터 DAY 까지 날짜 수 (DAY 당일 포함). 리뷰는 결제 1~7일 뒤라 DAY 이전 주문만 쓰인다
 DAYS=$(python -c "import datetime as d,sys; s=d.datetime.fromisoformat(sys.argv[1]).date(); print((d.date.fromisoformat(sys.argv[2])-s).days+1)" "$START" "$DAY")
 if [ "$DAYS" -lt 1 ]; then
     echo "RUN_DATE($DAY) 가 ORDERS_FAKE_START($START) 보다 앞입니다" >&2

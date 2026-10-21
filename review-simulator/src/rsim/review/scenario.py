@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -283,14 +283,26 @@ class ScenarioEngine:
         product = self._pick_product(now)
         return self._build_spec(now, product)
 
-    def spec_for_order(self, product: Product, created_at: datetime, member_id: str) -> ReviewSpec:
+    def spec_for_order(
+        self,
+        product: Product,
+        created_at: datetime,
+        member_id: str,
+        age_group: str | None = None,
+    ) -> ReviewSpec:
         """주문 모드(rsim run --source orders): 상품·작성 시각·회원은 주문에서 정해진 값을 쓴다.
 
         나머지(별점·속성·말투·길이·이상 상황)는 무작위 모드와 같은 규칙으로 정한다.
         상품이 주문으로 정해지므로 이상 상황의 volume_multiplier(리뷰 수 늘리기)는 적용되지 않고,
         share(해당 상품 리뷰에 불만을 넣는 비율)만 적용된다. 리뷰 수를 늘리려면 주문 쪽에서 늘려야 한다.
+
+        age_group 을 주면(RDS 회원 연령대, --source rds) 그 값을 쓴다. 이때도 무작위 연령대 난수는 그대로 뽑고
+        결과만 바꿔 끼운다 → 다른 명세 값(별점·속성 등)의 난수 순서가 연령대 유무에 따라 달라지지 않는다.
         """
-        return self._build_spec(created_at, product, member_id=member_id)
+        spec = self._build_spec(created_at, product, member_id=member_id)
+        if age_group:
+            spec = replace(spec, age_group=age_group)
+        return spec
 
     def _build_spec(
         self, now: datetime, product: Product, member_id: str | None = None

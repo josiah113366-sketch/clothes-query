@@ -10,6 +10,24 @@
 | 변경 | 같은 입력에 결과가 달라지는 변경 (리뷰 분포, 프롬프트, 기본값) |
 | 실행 환경 | 기능은 같고 어디서·어떻게 도는지만 바뀜 |
 
+## 0.3.0 (2026-10-21)
+
+- 추가: `rsim run --source rds` — 리뷰 시뮬레이터가 **RDS orders 테이블**을 읽는다(lemin 결정).
+  업무 API 가 RDS 에 저장한 주문 중 결제가 끝난 주문(상태 PAID·SHIPPED·DELIVERED, 결제 SUCCESS)의 **주문 항목 하나에 리뷰 하나**를 단다.
+  결제 후 1~7일 규칙과 날짜(UTC) 파티션 덮어쓰기는 `--source orders` 와 같다.
+- 추가: 프롬프트를 RDS 값으로 만든다. 상품명(prod_name), 상품 종류(product_type_name), 색상(colour_group_name), 무늬(graphical_appearance_name)는
+  `product_info` 로(p5.7 형식 그대로, `PROMPT_VERSION` 변경 없음), 회원 연령대(members.age_band)는 `age_group` 으로 들어간다.
+  리뷰의 order_id·member_id·product_id 가 RDS 값(uuid, article_id)이라 레이크에서 거래 데이터와 바로 조인된다. 리뷰 컬럼(review.v2)은 그대로다.
+- 추가: 설정 `ORDERS_DATABASE_URL`(.env 또는 ECS Secret), 의존성 `psycopg[binary]`. 개인정보 컬럼(이름·이메일·전화)은 읽지 않는다.
+- 그대로: `--source orders`(JSONL 가짜 주문)와 `random` 은 결과가 바뀌지 않는다.
+- 아직: ECS 태스크는 여전히 가짜 주문으로 돈다. ECS 에서 `--source rds` 로 돌리려면 RDS 로 가는 네트워크(보안 그룹)와 접속 주소 Secret 이 필요하다.
+
+## 0.2.1 (2026-10-21)
+
+- 변경: 결제 후 리뷰까지 기간 기본값을 1~14일에서 **1~7일**로 좁힘(`REVIEW_DELAY_MAX_DAYS` 14 → 7, lemin 결정: 프로젝트 기간에 맞춤).
+  같은 주문이라도 리뷰 날짜가 달라지므로, 이미 만든 날짜를 다시 돌리면 그 날짜에 걸리는 주문이 바뀐다.
+  `.env` 에 `REVIEW_DELAY_MAX_DAYS=14` 를 직접 적어 두었다면 그 값이 우선한다.
+
 ## 0.2.0 (2026-10-18, 브랜치 sim/review-ecs)
 
 로컬과 같은 기능을 AWS ECS Fargate 에서 돌린다. **리뷰를 만드는 방식은 0.1.0 과 같다** (지시서 특례: 기능 변경 없음).
