@@ -116,3 +116,4 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 진행 중 | |
+| `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 진행 중 (`pipelines/gold-b` 위) | |
