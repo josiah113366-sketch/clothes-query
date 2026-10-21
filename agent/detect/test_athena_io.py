@@ -88,7 +88,7 @@ runs = [{"run_id": "20261020T1510Z", "kind": "REGULAR", "request_id": None, "jud
 fake = FakeAthena()
 AthenaIO("w", client=fake, sleep=no_sleep).write("detection_runs", runs)
 sql = fake.sent[0]["sql"]
-check("INSERT 문: 표, 시각 타입, NULL, 숫자, 파티션(dt, hour)", ("INSERT INTO gold_b.detection_runs" in sql, "TIMESTAMP '2026-10-20 15:10:07'" in sql, "NULL" in sql, ", 2, '2026-10-20', '15')" in sql), (True, True, True, True))
+check("INSERT 문: 표, 시각 타입, NULL, 숫자, 날짜 파티션(dt)", ("INSERT INTO gold_b.detection_runs" in sql, "TIMESTAMP '2026-10-20 15:10:07'" in sql, "NULL" in sql, ", 2, '2026-10-20')" in sql, '"dt")' in sql), (True, True, True, True, True))
 fake = FakeAthena()
 AthenaIO("w", client=fake, sleep=no_sleep).write("reprocess_events", [{"request_id": "rq'1", "step": "VERIFIED", "at": datetime(2026, 10, 20, 16, 30), "detail": "it's \"x\""}])
 check("작은따옴표는 두 번 써서 막음", "'rq''1'" in fake.sent[0]["sql"] and "'it''s \"x\"'" in fake.sent[0]["sql"], True)
@@ -106,7 +106,13 @@ many = [dict(runs[0], run_id=f"r{i}", started_at="2026-10-20 15:10:07") for i in
 fake = FakeAthena()
 AthenaIO("w", client=fake, sleep=no_sleep).write("detection_runs", many)
 check("줄이 많으면 크기 한도 안에서 여러 번에 나눠 보냄", (len(fake.sent) > 1, all(len(s["sql"]) <= athena_io.MAX_QUERY_BYTES for s in fake.sent), sum(s["sql"].count("'r") for s in fake.sent)), (True, True, 3000))
-check("표 3개가 모두 파티션 기준 시각 컬럼을 가짐", all(sp["partition_by"] in sp["columns"] for sp in athena_io.TABLE_SPECS.values()), True)
+check("파티션이 있는 표는 파티션 기준 시각 컬럼을 가짐", all(sp["partition_by"] in sp["columns"] for sp in athena_io.TABLE_SPECS.values() if sp["partitions"]), True)
+fake = FakeAthena()
+AthenaIO("w", client=fake, sleep=no_sleep).write("reprocess_events", [{"request_id": "rq-1", "step": "VERIFIED", "at": "2026-10-20 16:30:00"}])
+check("reprocess_events는 은서 님 DDL처럼 파티션 컬럼 없이 씀", ("dt" in fake.sent[0]["sql"], fake.sent[0]["sql"].rstrip().endswith("NULL)")), (False, True))
+fake = FakeAthena()
+AthenaIO("w", database="gold_b", client=fake, sleep=no_sleep).write("investigation_runs", [{"run_id": "i-1", "started_at": "2026-10-21 09:00:00", "turns": 4}])
+check("조사 에이전트 표는 gold_b가 아니라 agent 데이터베이스에 씀", "INSERT INTO agent.investigation_runs" in fake.sent[0]["sql"], True)
 
 # --- 실행 진입점 ---
 class Rec:
