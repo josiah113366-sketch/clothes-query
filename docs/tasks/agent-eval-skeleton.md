@@ -21,7 +21,7 @@
 
 ## 완료 확인
 
-- [x] `python3 agent/eval/test_score.py` 가 "모두 통과"를 출력한다 (시험 28건)
+- [x] `python3 agent/eval/test_score.py` 가 "모두 통과"를 출력한다 (시험 29건)
 - [x] 예시 파일로 `score.py`를 돌려 점수가 나온다
 - [x] 비밀값, 계정 ID, 개인정보가 없다(가짜 값만 사용)
 

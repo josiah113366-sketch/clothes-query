@@ -98,5 +98,12 @@ with tempfile.TemporaryDirectory() as d:
     except ValueError:
         check("모르는 오염 종류는 오류", "오류", "오류")
 check("채점하는 종류 4개 정의", sorted(SCENARIOS), ["DUPLICATE_SUCCESS_PAYMENT", "INGEST_LAG", "ORDER_TOTAL_MISMATCH", "PG_OUTAGE"])
+# --- 추정(ASSUMPTION)은 근거 연결 점수에서 뺀다 ---
+rep_a = [{"anomaly_id": "a-r1-1", "cause_layer": "PAYMENT", "claims": [
+    {"text": "사실", "kind": "FACT", "evidence": [{"tool": "payment_summary"}]},
+    {"text": "근거 없는 사실", "kind": "FACT", "evidence": []},
+    {"text": "추정", "kind": "ASSUMPTION", "evidence": []}]}]
+res3 = score(inc, anoms, runs, rep_a)
+check("근거 연결: 사실 2개 중 1개만 근거 있음, 추정은 세지 않음", (res3["evidence"]["claims"], res3["evidence"]["backed"]), (2, 1))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

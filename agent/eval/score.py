@@ -172,6 +172,8 @@ def score_reports(incidents, detection, reports):
                           "said": said, "expected": inc["expected_layer"]})
         for r in linked:
             for c in r.get("claims", []):
+                if c.get("kind") == "ASSUMPTION":      # 추정은 근거가 없어도 감점하지 않는다 (확인된 사실만 센다)
+                    continue
                 claims_total += 1
                 claims_backed += 1 if c.get("evidence") else 0
     return layer, {"claims": claims_total, "backed": claims_backed,
