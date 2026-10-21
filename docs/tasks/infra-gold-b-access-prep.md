@@ -2,6 +2,8 @@
 
 상태: 조회용 자원·EKS 실행 신원 연결 및 합성 실측 완료·검토 대기 / 판정 기록 쓰기·Airflow·업무 실행 후속
 
+2026-10-21 Terraform 12 roots/58 mock plan 통과 후 [PR #40](https://github.com/josiah113366-sketch/clothes-query/pull/40)을 생성했다. Airflow PR #41의 선행 기반이며 실제 업무 쓰기 권한은 여전히 미설정이다. 이번 Git 정리에서 AWS 재적용·PR 승인·머지는 하지 않았다. 아래 미푸시 표현은 과거 작업 시점 기록이다.
+
 PR 정리: 최신 main을 반영했다. 이 브랜치는 Gold B 권한과 agent namespace/ServiceAccount만 포함하며 Airflow 설치는 `infra/airflow-runtime`에서 이 브랜치를 기반으로 별도 검토한다. CI/CD·비용 알림·과거 단일 Athena 후보는 포함하지 않는다. README의 과거 namespace 미연결 표현도 실제 검증 상태로 갱신했다.
 
 ## 목표와 승인된 범위
