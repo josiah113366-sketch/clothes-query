@@ -51,9 +51,33 @@ python3 test_job.py     # sqlite 가짜 원장으로 순찰을 직접 돌려 시
 - `query(sql)`: SQL을 실행해 줄 목록(dict)을 돌려준다
 - `write(표 이름, 줄 목록)`: 새 줄을 추가한다. **시각 컬럼은 문자열 `YYYY-MM-DD HH:MM:SS`(UTC)로 넘어온다.** Gold B가 이 컬럼을 TIMESTAMP로 정의하므로 실제 `write`는 시각 타입으로 바꿔서 써야 한다(시험이 문자열 형식을 확인한다)
 
+## Athena 연결과 실행 (제안, 진짜 Athena에서는 아직 안 돌려 봤다)
+
+| 하는 일 | 코드 |
+|---|---|
+| `query(sql)`: Athena에 쿼리를 보내고 끝날 때까지 기다려 결과를 타입에 맞게 돌려줌 | `athena_io.py`의 `AthenaIO.query()` |
+| `write(표, 줄)`: Athena `INSERT INTO`로 새 줄 추가. 표 3개(`anomaly`, `detection_runs`, `reprocess_events`)만 허용 | `athena_io.py`의 `AthenaIO.write()`, 표 정의 `TABLE_SPECS` |
+| 5분마다 한 번 실행하는 진입점 | `run_job.py` |
+| 컨테이너 이미지 | `Dockerfile`, `requirements.txt` |
+
+실행: `ATHENA_WORKGROUP=<판정용 workgroup> python run_job.py` (선택 `ATHENA_DATABASE`, 기본 `gold_b`). 비밀값은 없다. AWS 권한은 Pod의 ServiceAccount에 연결된 역할이 준다. 결과 저장 위치는 workgroup 설정이 정한다.
+
+**판정 잡 역할에 필요한 권한** (인프라 담당 확인용, 계정 번호나 ARN은 이 문서에 적지 않는다)
+- Athena: 판정용 workgroup에 쿼리 시작·상태 확인·결과 읽기·중지
+- Glue: 데이터베이스 `gold_b`의 표 정보 읽기 (원장, 뷰, `anomaly`, `detection_runs`, `reprocess_events`)
+- S3 읽기: `gold_b/` 전체. S3 쓰기: **`gold_b/anomaly/`, `gold_b/detection_runs/`, `gold_b/reprocess_events/`만**
+- S3: 판정용 조회 결과 폴더(`athena-results/detection/`) 읽기·쓰기
+- `ground_truth/`는 접근 금지(이미 차단됨)
+
+**표 정의와 쓰기 방식은 Gold B 담당과 확정 전이다 (제안)**
+- 쓰기는 `INSERT INTO ... VALUES`로 한다(시각을 `TIMESTAMP`로 안전하게 넣기 위해). 5분마다 작은 파일이 생기는 점이 단점이다. S3에 Parquet를 직접 쓰는 방법도 있다.
+- 세 표를 Gold B 원장처럼 **시간 폴더(`dt`, `hour` 파티션)**로 쌓는다고 가정했다. 기준 시각은 `anomaly`는 `detected_at`, `detection_runs`는 `started_at`, `reprocess_events`는 `at`이다. 실제 표 정의가 다르면 `TABLE_SPECS`만 고친다.
+- `reprocess_events`는 승인 화면(`REQUESTED`, `APPROVED`), 재처리 잡(`STARTED`, `LEDGER_REPLACED`, `FAILED`)과 이 잡(`REDETECTED`, `VERIFIED`)이 함께 쓴다. 이 잡은 자기 줄만 쓴다.
+- 같은 순찰을 다시 돌려도(순찰 기록을 쓰기 전에 멈췄던 경우) 이미 쓴 이상 줄은 다시 쓰지 않는다.
+
 ## 알아야 할 것 (한계)
 
-- **Athena에서는 아직 실행하지 않았다.** sqlite 가짜 원장으로만 시험했다. 실제 `query`, `write` 연결(Athena 읽기, S3 Parquet 쓰기)은 아직 없다.
+- **진짜 Athena에서는 아직 실행하지 않았다.** sqlite 가짜 원장과 가짜 Athena 클라이언트로만 시험했다. 연결 코드(`athena_io.py`)는 있지만, 표가 Athena에 올라온 뒤 실제 쿼리 문법(예: `"at"` 컬럼 인용, 시각 비교)과 `INSERT`를 확인해야 한다.
 - **5분마다 실행하는 일**(Airflow 작업)은 만들지 않았다. 인프라 담당과 정해야 한다.
 - **재처리 뒤 재판정 방식은 Gold B 담당과 정리됐다.** 재처리 작업은 판정을 직접 부르지 않고, 이 잡이 5분마다 `reprocess_events`의 `LEDGER_REPLACED` 줄을 읽어 재판정한다(Gold B 문서 2026-10-19). 이 코드의 `pending_replacements()`와 `redetect()`가 그 일이다. 재판정은 **교체 구간의 끝까지(비율 규칙의 3분 대기를 포함해 한 번 더) 훑고**, 재처리가 다시 만들지 않는 **R3(Bronze 지연)는 비교에서 뺀다**(`VERIFIED`의 `detail`에 `excluded_rules`로 적는다). 교체 때 다시 적재된 줄은 R5 순찰이 새 중복으로 세지 않는다(`_replaced_filter`).
 - **`detection_runs`(순찰 기록 표)**는 Gold B 문서(2026-10-19)에 `anomaly`와 함께 `gold_b/` 안의 내 표로 적혀 있다. 컬럼 정의는 내가 한다(`job.py`의 `_run_record`).

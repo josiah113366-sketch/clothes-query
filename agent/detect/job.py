@@ -115,6 +115,9 @@ def regular_run(query, write, cfg: Config, now: datetime):
     if query(f"SELECT run_id FROM gold_b.detection_runs WHERE run_id = '{run_id}'"):
         return {"run_id": run_id, "skipped": True}          # 같은 번호를 두 번 돌리지 않는다
     rows = judge(query, cfg, tick, run_id, now, as_of=tick)
+    # 이상 줄을 쓰고 순찰 기록을 쓰기 전에 멈췄다가 다시 도는 경우를 위해, 이 순찰 번호로 이미 쓴 줄은 다시 쓰지 않는다
+    done = {r["anomaly_id"] for r in query(f"SELECT anomaly_id FROM gold_b.anomaly WHERE run_id = '{run_id}'")}
+    rows = [r for r in rows if r["anomaly_id"] not in done]
     if rows:
         write("anomaly", rows)
     write("detection_runs", [_run_record(run_id, "REGULAR", None, tick - timedelta(minutes=STEP_MIN), tick, now, len(rows))])

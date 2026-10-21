@@ -225,5 +225,11 @@ for tb, cols in (("anomaly", ("window_start", "window_end", "detected_at")), ("d
                 except ValueError:
                     bad.append((tb, cname, r[cname]))
 check("쓰는 줄의 시각 컬럼이 모두 'YYYY-MM-DD HH:MM:SS' 형식", bad, [])
+
+# 6. 이상 줄을 쓰고 순찰 기록을 쓰기 전에 멈췄다가 같은 순찰을 다시 돌려도 이상 줄이 두 번 쌓이지 않는다
+n_before = len(query("SELECT * FROM gold_b.anomaly WHERE run_id = '20261020T1510Z'"))
+con.execute("DELETE FROM gold_b.detection_runs WHERE run_id = '20261020T1510Z'")
+regular_run(query, write, CFG, datetime(2026, 10, 20, 15, 10, 20))
+check("같은 순찰을 다시 돌려도 이상 줄이 늘지 않음", (n_before > 0, len(query("SELECT * FROM gold_b.anomaly WHERE run_id = '20261020T1510Z'"))), (True, n_before))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
