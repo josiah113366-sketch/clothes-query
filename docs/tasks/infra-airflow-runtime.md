@@ -47,6 +47,10 @@ Gold B Glue DB/테이블 계약, 판정용 쓰기 prefix·쓰기 방식은 별�
 
 PR #14의 사용자 클릭과 알려진 SQL 후속 사항을 인지했으며 해당 PR을 승인·머지·수정하지 않았다. 이 브랜치도 push·PR 승인·머지를 수행하지 않는다.
 
+## PR 준비
+
+최신 main의 PR #14·#33을 반영하고 `infra/gold-b-access-prep`를 의존 기반으로 병합했다. 브랜치 대장 충돌은 Airflow와 Gold B 두 항목을 보존해 해결했다. PR은 gold-b-access-prep를 base로 두어 Airflow 변경만 검토하고, Gold B가 main에 머지된 뒤 base를 main으로 변경한다. 플랫폼/인프라 README의 Airflow 미설치 표현을 실제 상태로 정리했다. 보류한 CI/CD·비용 알림·과거 Athena 후보는 포함하지 않는다. 이번 Git 정리에서는 AWS/Helm을 재적용하지 않는다.
+
 ## 참고
 
 - [공식 발표](https://airflow.apache.org/announcements/)
