@@ -111,7 +111,7 @@ check("유입량: orders 6, clickstream 4", vol, {"orders": 6, "clickstream": 4}
 lg = run("bronze_lag", topic="orders", **W)["rows"][0]
 check("Bronze 지연: 최대 150초, 처리 위치 40에서 안 움직임", (lg["max_lag_sec"], lg["min_committed_offset"], lg["max_committed_offset"]), (150.0, 40, 40))
 ms = run("malformed_summary", rule_version="v1.0", **W)["rows"]
-check("깨진 메시지: 현재 규칙 v1.0만 2개 (옛 v0.9 제외)", [(r["reason"], r["broken_messages"]) for r in ms], [("MISSING_FIELD", 2)])
+check("깨진 메시지: 사유별 메시지 수, 현재 규칙 v1.0만 (옛 v0.9 제외). 사유는 오류 단위 원장에서 읽음", [(r["reason"], r["broken_messages"]) for r in ms], [("MISSING_FIELD", 2), ("TYPE_MISMATCH", 1)])
 mf = {(r["field"], r["reason"]): (r["errors"], r["earliest_offset"]) for r in run("malformed_fields", rule_version="v1.0", **W)["rows"]}
 check("깨진 필드: session_id 2건(가장 이른 offset 10), article_id 1건", mf, {("session_id", "MISSING_FIELD"): (2, 10), ("article_id", "TYPE_MISMATCH"): (1, 10)})
 rel = run("ledger_reliability", **W)
@@ -132,6 +132,21 @@ EARLY = dict(window_start="2026-10-20T14:00:00", window_end="2026-10-20T15:00:00
 check("성공 결제 중복: 14시대를 적재 시각으로 보면 없고, 결제 시각으로 보면 o4(중복 행이 14:30)",
       ([r["order_id"] for r in run("duplicate_success_orders", **EARLY)["rows"]], [r["order_id"] for r in run("duplicate_success_orders", time_basis="completed_at", **EARLY)["rows"]]), ([], ["o4"]))
 rejects("모르는 time_basis 막힘", lambda: run("duplicate_success_orders", time_basis="x; DROP", **W))
+
+
+# --- 재영 님 리뷰 반영 ---
+from guard import parse_time, GuardError as _GE
+check("시각: Z와 +00:00과 시간대 없음은 모두 같은 UTC 시각", (parse_time("2026-10-20T15:00:00Z"), parse_time("2026-10-20T15:00:00+00:00"), parse_time("2026-10-20 15:00:00")), (datetime(2026, 10, 20, 15),) * 3)
+check("시각: +09:00은 UTC로 바꿈 (9시간 빼기)", parse_time("2026-10-21T00:00:00+09:00"), datetime(2026, 10, 20, 15))
+sql_kst = run("payment_summary", window_start="2026-10-21T00:00:00+09:00", window_end="2026-10-21T01:00:00+09:00")
+check("시각: 조회 구간을 +09:00으로 줘도 UTC 구간(15시대)을 조회함", len(sql_kst["rows"]) >= 0 and run("payment_summary", window_start="2026-10-20T15:00:00Z", window_end="2026-10-20T16:00:00+00:00")["rows"] == run("payment_summary", window_start="2026-10-21T00:00:00+09:00", window_end="2026-10-21T01:00:00+09:00")["rows"], True)
+check("시각: Z와 +00:00을 섞어 시작·끝을 줘도 오류 없음", len(run("payment_summary", window_start="2026-10-20T15:00:00Z", window_end="2026-10-20T16:00:00+00:00")["rows"]) > 0, True)
+rejects("시각: 형식이 틀리면 막힘", lambda: parse_time("어제 3시"))
+check("신뢰성: 누락 검사는 부분 확인(PARTIAL)이라고 알려 줌", (rel["completeness"], "빠진 것은 찾지 못" in rel["completeness_note"]), ("PARTIAL", True))
+check("신뢰성: 메시지가 없던 파티션 목록을 알려 줌 (orders 0, clickstream 1만 있음 -> 13개)", (len(rel["partitions_without_messages"]), {"topic": "orders", "partition": 0} in rel["partitions_without_messages"]), (13, False))
+con.execute("DELETE FROM gold_b.topic_messages"); con.execute("DELETE FROM gold_b.bronze_lag_snapshots")
+empty = run("ledger_reliability", **W)
+check("신뢰성: 표가 비어 있으면 정상(OK)이 아니라 NO_DATA", (empty["ledger_writer"]["status"], empty["lag_collector"]["status"], empty["completeness"], empty["messages_in_window"]), ("NO_DATA", "NO_DATA", "NO_DATA", 0))
 
 # --- 울타리가 막는가 ---
 rejects("INSERT 막힘", lambda: validate_sql("INSERT INTO gold_b.anomaly VALUES (1) LIMIT 1"))
