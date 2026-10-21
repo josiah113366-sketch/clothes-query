@@ -16,13 +16,13 @@ class TransactionFlowTest(unittest.TestCase):
         orders = [
             {
                 "order_id": "00000000-4000-8000-0000-000000000009", "member_id": "00000000-4000-8000-0000-000000000006", "session_id": "00000000-4000-8000-0000-00000000001e",
-                "status": "PLACED", "status_reason": None, "total_amount": 3000,
+                "status": "PLACED", "status_reason": None, "total_amount": 30000,
                 "ordered_at": "2026-10-14T00:30:00+09:00",
                 "updated_at": "2026-10-14T00:30:00+09:00",
             },
             {
                 "order_id": "00000000-4000-8000-0000-000000000009", "member_id": "00000000-4000-8000-0000-000000000006", "session_id": "00000000-4000-8000-0000-00000000001e",
-                "status": "PAID", "status_reason": None, "total_amount": 3000,
+                "status": "PAID", "status_reason": None, "total_amount": 30000,
                 "ordered_at": "2026-10-14T00:30:00+09:00",
                 "updated_at": "2026-10-14T01:10:00+09:00",
             },
@@ -30,24 +30,24 @@ class TransactionFlowTest(unittest.TestCase):
         items = [
             {
                 "order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1",
-                "quantity": 2, "unit_price": 1000,
+                "quantity": 2, "unit_price": 10000,
             },
             {
                 "order_item_id": "00000000-4000-8000-0000-000000000002", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-2",
-                "quantity": 1, "unit_price": 1000,
+                "quantity": 1, "unit_price": 10000,
             },
         ]
         payments = [
             {
                 "payment_id": "00000000-4000-8000-0000-000000000011", "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1,
-                "method": "CARD", "pg": "PG_A", "amount": 3000,
+                "method": "CARD", "pg": "PG_A", "amount": 30000,
                 "status": "FAILED", "failure_code": "PG_TIMEOUT",
                 "requested_at": "2026-10-14T00:40:00+09:00",
                 "completed_at": "2026-10-14T00:41:00+09:00",
             },
             {
                 "payment_id": "00000000-4000-8000-0000-000000000012", "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 2,
-                "method": "CARD", "pg": "PG_A", "amount": 3000,
+                "method": "CARD", "pg": "PG_A", "amount": 30000,
                 "status": "SUCCESS", "failure_code": None,
                 "requested_at": "2026-10-14T01:00:00+09:00",
                 "completed_at": "2026-10-14T01:10:00+09:00",
@@ -73,7 +73,7 @@ class TransactionFlowTest(unittest.TestCase):
                     "hour_start_kst": "2026-10-14T01:00:00+09:00",
                     "order_count": 0,
                     "paid_order_count": 1,
-                    "approved_amount": 3000,
+                    "approved_amount": 30000,
                 },
             ],
         )
@@ -83,12 +83,12 @@ class TransactionFlowTest(unittest.TestCase):
                 {
                     "sales_date_kst": "2026-10-14", "article_id": "A-1",
                     "paid_order_count": 1, "sold_quantity": 2,
-                    "item_sales_amount": 2000,
+                    "item_sales_amount": 20000,
                 },
                 {
                     "sales_date_kst": "2026-10-14", "article_id": "A-2",
                     "paid_order_count": 1, "sold_quantity": 1,
-                    "item_sales_amount": 1000,
+                    "item_sales_amount": 10000,
                 },
             ],
         )
@@ -101,11 +101,11 @@ class TransactionFlowTest(unittest.TestCase):
             source = root / "input"
             source.mkdir()
             order = {"order_id": "00000000-4000-8000-0000-000000000009", "member_id": "00000000-4000-8000-0000-000000000006", "session_id": "00000000-4000-8000-0000-00000000001e", "status": "PAID",
-                     "status_reason": None, "total_amount": 2000,
+                     "status_reason": None, "total_amount": 20000,
                      "ordered_at": "2026-10-14T00:30:00+09:00", "updated_at": "2026-10-14T01:00:00+09:00"}
-            item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001", "quantity": 2, "unit_price": 1000}
+            item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001", "quantity": 2, "unit_price": 10000}
             payment = {"payment_id": "00000000-4000-8000-0000-000000000011", "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
-                       "amount": 2000, "status": "SUCCESS", "failure_code": None,
+                       "amount": 20000, "status": "SUCCESS", "failure_code": None,
                        "requested_at": "2026-10-14T00:59:00+09:00", "completed_at": "2026-10-14T01:00:00+09:00"}
             locations = {}
             for name, row in (("orders", order), ("order_items", item), ("payments", payment)):
@@ -118,7 +118,7 @@ class TransactionFlowTest(unittest.TestCase):
             first_rows = {name: Path(path).read_bytes() for name, path in first["outputs"].items()}
             repeated = run_gold(str(silver), str(gold))
             self.assertEqual(first_rows, {name: Path(path).read_bytes() for name, path in repeated["outputs"].items()})
-            self.assertIn(b'"approved_amount": 2000', first_rows["order_sales_hourly.jsonl"])
+            self.assertIn(b'"approved_amount": 20000', first_rows["order_sales_hourly.jsonl"])
             self.assertIn(b'"article_id": "0001"', first_rows["product_sales_daily.jsonl"])
             pointer = gold / "gold_a/transactions/current.json"
             previous = pointer.read_bytes()

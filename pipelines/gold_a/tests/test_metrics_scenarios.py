@@ -45,14 +45,14 @@ def make_example(root):
     variants = [{"article_id": article, "product_code": 100, "colour_group_code": 1,
                  "graphical_appearance_no": 1, "price": price, "prod_name": "test product",
                  "colour_group_name": "black", "graphical_appearance_name": "solid"}
-                for article, price in (("0001", 10000), ("0002", 5000))]
+                for article, price in (("0001", 10000), ("0002", 5900))]
     write(source / "designs.jsonl", [design])
     write(source / "variants.jsonl", variants)
     silver_products(str(source / "designs.jsonl"), str(source / "variants.jsonl"), str(silver))
     orders, items, payments = [], [], []
     specifications = [("00000000-4000-8000-0000-00000000000e", "00000000-4000-8000-0000-000000000020", "0001", 2, 10000, "2026-10-18T23:50:00+09:00", "2026-10-19T00:10:00+09:00", "SUCCESS"),
                       ("00000000-4000-8000-0000-00000000000f", "00000000-4000-8000-0000-000000000022", "0001", 1, 10000, "2026-10-18T11:00:00+09:00", "2026-10-18T11:01:00+09:00", "SUCCESS"),
-                      ("00000000-4000-8000-0000-000000000010", "00000000-4000-8000-0000-000000000023", "0002", 1, 5000, "2026-10-18T12:00:00+09:00", "2026-10-18T12:01:00+09:00", "FAILED")]
+                      ("00000000-4000-8000-0000-000000000010", "00000000-4000-8000-0000-000000000023", "0002", 1, 5900, "2026-10-18T12:00:00+09:00", "2026-10-18T12:01:00+09:00", "FAILED")]
     for order_id, session, article, quantity, price, ordered, completed, status in specifications:
         orders.append({"order_id": order_id, "member_id": "00000000-4000-8000-0000-000000000007", "session_id": session,
                        "status": "PAID" if status == "SUCCESS" else "PAYMENT_FAILED", "status_reason": None,
@@ -136,7 +136,7 @@ def test_scoped_hold_preserves_bad_product_updates_good_and_recovers(tmp_path):
     assert manifest["status"] == "PARTIAL"
     rows = read_outputs(manifest)["product_sales_daily.jsonl"]
     assert next(row for row in rows if row["sales_date_kst"] == "2026-10-19")["item_sales_amount"] == 20000
-    assert next(row for row in rows if row["article_id"] == "0002")["item_sales_amount"] == 5000
+    assert next(row for row in rows if row["article_id"] == "0002")["item_sales_amount"] == 5900
     hours = [scope["key"].get("hour_start_kst") for scope in manifest["held_scopes"]]
     assert "2026-10-19T00:00:00+09:00" in hours and "2026-10-19T01:00:00+09:00" in hours
     repeated = gold_transactions(silver, gold, silver, scope_aware=True)
@@ -174,7 +174,7 @@ def test_scoped_changed_order_key_also_finds_previously_published_order(tmp_path
     payments = [json.loads(line) for line in (source / "payments.jsonl").read_text().splitlines()]
     # 이번 입력에 O1 결제 후보가 없어도 이전 공개에 반영한 P/O1을 따라가야 한다.
     changed = next(row for row in payments if row["payment_id"] == "e6e94ad2-c079-5128-aa8c-5210ed303bbf")
-    changed.update(order_id="00000000-4000-8000-0000-000000000010", amount=5000, requested_at="2026-10-18T12:00:00+09:00",
+    changed.update(order_id="00000000-4000-8000-0000-000000000010", amount=5900, requested_at="2026-10-18T12:00:00+09:00",
                    completed_at="2026-10-18T12:01:00+09:00")
     write(source / "payments.jsonl", payments)
     silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"),
@@ -380,7 +380,7 @@ def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
     assert all(row["article_id"] == "0001" for row in output["product_sales_daily.jsonl"])
     assert next(row for row in output["product_sales_daily.jsonl"] if row["sales_date_kst"] == "2026-10-19")["sold_quantity"] == 3
     # 전체 주문 시간 지표는 상품 필터와 관계없이 해당 날짜 전체를 다시 계산한다.
-    assert sum(row["approved_amount"] for row in output["order_sales_hourly.jsonl"]) == 45000
+    assert sum(row["approved_amount"] for row in output["order_sales_hourly.jsonl"]) == 45900
     details = read_outputs(funnels)["funnel_session_product.jsonl"]
     assert not next(row for row in details if row["session_id"] == "00000000-4000-8000-0000-000000000020")["has_cart"]
     assert not next(row for row in details if row["session_id"] == "00000000-4000-8000-0000-000000000023")["has_paid"]

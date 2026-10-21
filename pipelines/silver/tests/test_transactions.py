@@ -132,7 +132,7 @@ def fixture_id(label):
 def order(identifier="00000000-4000-8000-0000-000000000009", **changes):
     return {
         "order_id": fixture_id(identifier), "member_id": "00000000-4000-8000-0000-000000000008", "session_id": "00000000-4000-8000-0000-00000000001f",
-        "status": "PLACED", "status_reason": None, "total_amount": 1000,
+        "status": "PLACED", "status_reason": None, "total_amount": 11800,
         "ordered_at": "2026-10-14T00:00:00+09:00",
         "updated_at": "2026-10-14T00:00:00+09:00", **changes,
     }
@@ -141,7 +141,7 @@ def order(identifier="00000000-4000-8000-0000-000000000009", **changes):
 def payment(identifier="00000000-4000-8000-0000-000000000011", **changes):
     return {
         "payment_id": fixture_id(identifier), "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1,
-        "method": "CARD", "pg": "PG_A", "amount": 1000,
+        "method": "CARD", "pg": "PG_A", "amount": 11800,
         "status": "SUCCESS", "failure_code": None,
         "requested_at": "2026-10-14T00:01:00+09:00",
         "completed_at": "2026-10-14T00:02:00+09:00", **changes,
@@ -169,7 +169,7 @@ def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_pat
     assert len(saved) == 1
     row = saved[0]
     assert {key: row[key] for key in payment_fingerprint(raw)} == payment_fingerprint(utc)
-    assert row["amount"] == 1000
+    assert row["amount"] == raw["amount"]
     assert row["completed_at_utc"] == "2026-10-13T15:02:00+00:00"
     assert row["completed_at_kst"] == "2026-10-14T00:02:00+09:00"
     assert raw == original
@@ -177,7 +177,7 @@ def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_pat
 
 def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
     raw = payment()
-    conflict = build_silver([order()], [], [raw, {**raw, "amount": 1001}])
+    conflict = build_silver([order()], [], [raw, {**raw, "amount": raw["amount"] + 1}])
     assert conflict["payment_attempts"] == []
     assert len(conflict["quarantined_records"]) == 2
     assert {row["error_code"] for row in conflict["quarantined_records"]} == {"CONTENT_CONFLICT"}
@@ -188,6 +188,27 @@ def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
         issues = result["quarantined_records"]
         assert any(row["field"] == field and row["error_code"] == "INVALID_VALUE" for row in issues)
         assert summary(result, "payments")["status"] == "INCOMPLETE"
+
+
+def test_order_item_price_minimum_is_5900():
+    rules = FormatRules()
+    item = {"order_item_id": fixture_id("minimum-price"), "order_id": order()["order_id"],
+            "article_id": "0001", "quantity": 1, "unit_price": 5900}
+    assert rules.version == "0.1.1"
+    rules.validate("order_items", item)
+    result = build_silver([order(total_amount=5900)], [item], [payment(amount=5900)],
+                          input_complete=True)
+    assert not result["quarantined_records"]
+    assert result["silver_order_items"][0]["item_amount"] == 5900
+    bad = {**item, "unit_price": 5899}
+    with pytest.raises(FormatError) as caught:
+        rules.validate("order_items", bad)
+    assert caught.value.rule_id == "order_items.fields.unit_price.minimum"
+    rejected = build_silver([order(total_amount=5899)], [bad], [payment(amount=5899)],
+                            input_complete=True)
+    assert not rejected["orders_current"]
+    assert not rejected["silver_order_items"]
+    assert not rejected["payment_attempts"]
 
 
 def test_kafka_trace_observations_and_conflict_references(tmp_path):
@@ -258,7 +279,7 @@ def test_yaml_contract_validates_uuid_enums_reasons_and_times():
 def test_yaml_is_the_executed_rule_source_and_proposals_are_not_applied(tmp_path):
     document = yaml.safe_load(DEFAULT_RULES.read_text(encoding="utf-8"))
     item = {"order_item_id": fixture_id("rule-item"), "order_id": order()["order_id"],
-            "article_id": "0001", "quantity": 2, "unit_price": 500}
+            "article_id": "0001", "quantity": 2, "unit_price": 5900}
     document["source_rules"]["order_items"]["fields"]["quantity"]["minimum"] = 3
     custom = tmp_path / "rules.yaml"
     custom.write_text(yaml.safe_dump(document), encoding="utf-8")
@@ -309,7 +330,7 @@ def test_failure_codes_follow_source_allowlist_and_preserve_valid_failed_attempt
     result = build_silver([order()], [], payments)
     assert not result["quarantined_records"]
     assert {row["failure_code"] for row in result["payment_attempts"]} == set(codes)
-    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.1.0"
+    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.1.1"
 
 
 def test_missing_unknown_and_non_string_failure_codes_have_distinct_errors():
@@ -352,7 +373,7 @@ def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
     rows = {
         "orders": [order(__op="r", __source_ts_ms=1000)],
         "items": [{"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
-                   "quantity": 1, "unit_price": 1000, "__op": "r", "__source_ts_ms": 1000}],
+                   "quantity": 1, "unit_price": 11800, "__op": "r", "__source_ts_ms": 1000}],
         "payments": [payment(__op="c", __source_ts_ms=2000),
                      payment(amount=2000, __op="c", __source_ts_ms=2000)],
     }
@@ -371,22 +392,22 @@ def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
 
 def test_order_item_sum_requires_complete_input_and_counts_duplicates_once():
     item = {"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
-            "quantity": 2, "unit_price": 500}
-    unchecked = build_silver([order(total_amount=1200)], [item], [], input_complete=False)
+            "quantity": 2, "unit_price": 5900}
+    unchecked = build_silver([order(total_amount=12000)], [item], [], input_complete=False)
     assert summary(unchecked, "orders")["amount_checks"][0]["status"] == "UNVERIFIED"
     assert not unchecked["quarantined_records"]
     passed = build_silver([order()], [item, dict(item)], [payment()], input_complete=True)
-    assert summary(passed, "orders")["amount_checks"][0]["item_total_amount"] == 1000
+    assert summary(passed, "orders")["amount_checks"][0]["item_total_amount"] == 11800
     assert summary(passed, "orders")["amount_checks"][0]["status"] == "PASS"
     assert len(passed["orders_current"]) == 1
-    result = build_silver([order(total_amount=1200), order("00000000-4000-8000-0000-00000000000a")],
+    result = build_silver([order(total_amount=12000), order("00000000-4000-8000-0000-00000000000a")],
                          [item, {**item, "order_item_id": "00000000-4000-8000-0000-000000000005", "order_id": "00000000-4000-8000-0000-00000000000a"}],
-                         [payment(amount=1200), payment("00000000-4000-8000-0000-00000000001c", order_id="00000000-4000-8000-0000-00000000000a")], input_complete=True)
+                         [payment(amount=12000), payment("00000000-4000-8000-0000-00000000001c", order_id="00000000-4000-8000-0000-00000000000a")], input_complete=True)
     assert [row["order_id"] for row in result["orders_current"]] == ["00000000-4000-8000-0000-00000000000a"]
     assert [row["order_id"] for row in result["order_status_history"]] == ["00000000-4000-8000-0000-00000000000a"]
     assert [row["payment_id"] for row in result["payment_attempts"]] == ["00000000-4000-8000-0000-00000000001c"]
     issue = next(row for row in result["quarantined_records"] if row["error_code"] == "ORDER_TOTAL_MISMATCH")
-    assert (issue["order_total_amount"], issue["item_total_amount"], issue["amount_difference"]) == (1200, 1000, -200)
+    assert (issue["order_total_amount"], issue["item_total_amount"], issue["amount_difference"]) == (12000, 11800, -200)
 
 
 def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches():
@@ -395,7 +416,7 @@ def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches()
     assert summary(missing, "orders")["amount_checks"][0]["status"] == "PENDING_REFERENCE"
     assert all(row["error_code"] != "ORDER_TOTAL_MISMATCH" for row in missing["quarantined_records"])
     item = {"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
-            "quantity": 1, "unit_price": 500}
+            "quantity": 1, "unit_price": 5900}
     broken = build_silver([order()], [item, {**item, "order_item_id": "00000000-4000-8000-0000-000000000005", "unit_price": 0}],
                           [payment()], input_complete=True)
     check = summary(broken, "orders")["amount_checks"][0]
@@ -471,7 +492,7 @@ def test_retry_sequence_and_amount_failures_do_not_remove_unrelated_success():
 
 
 def test_history_item_totals_and_invalid_shapes():
-    item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1", "quantity": 2, "unit_price": 500}
+    item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1", "quantity": 2, "unit_price": 5900}
     result = build_silver(
         [order(), order(status="PAID", updated_at="2026-10-14T00:02:00+09:00")],
         [item, dict(item), {**item, "order_item_id": "00000000-4000-8000-0000-000000000003", "unit_price": 0}],
@@ -479,7 +500,7 @@ def test_history_item_totals_and_invalid_shapes():
     )
     assert result["orders_current"][0]["status"] == "PAID"
     assert len(result["order_status_history"]) == 2
-    assert result["silver_order_items"][0]["item_amount"] == 1000
+    assert result["silver_order_items"][0]["item_amount"] == 11800
     assert summary(result, "order_items")["duplicate_count"] == 1
     assert summary(result, "orders")["status"] == "PASS"
     assert summary(result, "payments")["status"] == "INCOMPLETE"

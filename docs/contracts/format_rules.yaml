@@ -1,7 +1,8 @@
 # 원천 규칙은 승인된 Silver 검사기에 연결한다. 경로 간 제안은 별도다.
-# source_rules는 db/schema/004_orders.sql의 정규화된 업무 행 규칙이다.
+# source_rules는 거래 DDL과 승인된 업무 기준의 정규화된 행 규칙이다.
+# unit_price 하한 5,900원은 2026-10-21 사용자 승인 기준이며 DDL의 > 0보다 엄격하다.
 # proposed_changes는 합의 후 반영할 안이며 실행 규칙으로 자동 합치지 않는다.
-version: "0.1.0"
+version: "0.1.1"
 status: proposed
 source_rules_status: decided
 runtime_connected:
@@ -57,7 +58,7 @@ source_rules:
       order_id: {type: uuid, required: true, nullable: false}
       article_id: {type: string, required: true, nullable: false}
       quantity: {type: integer, required: true, nullable: false, minimum: 1}
-      unit_price: {type: integer, required: true, nullable: false, minimum: 1}
+      unit_price: {type: integer, required: true, nullable: false, minimum: 5900}
     checks: []
 
   payments:
