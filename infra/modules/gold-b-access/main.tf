@@ -31,6 +31,13 @@ resource "aws_athena_workgroup" "this" {
   }
 }
 
+resource "aws_glue_catalog_database" "investigation" {
+  count        = var.enable_investigation_catalog ? 1 : 0
+  name         = var.investigation_database_name
+  description  = "Investigation reports and run history; separate from Gold B ledgers"
+  location_uri = "s3://${local.bucket_name}/agent/"
+}
+
 resource "aws_iam_role" "this" {
   for_each = local.workloads
   name     = "${var.name}-${each.value}"
@@ -88,7 +95,7 @@ resource "aws_iam_role_policy" "this" {
         Action   = ["s3:ListBucket"]
         Resource = [var.bucket_arn]
         Condition = {
-          StringLike = { "s3:prefix" = concat(["gold_b/*", "${var.results_prefixes[each.key]}*"], each.key == "detection" ? [for p in var.detection_write_prefixes : "${p}*"] : []) }
+          StringLike = { "s3:prefix" = concat(["gold_b/*", "${var.results_prefixes[each.key]}*"], each.key == "detection" ? [for p in var.detection_write_prefixes : "${p}*"] : [for p in var.investigation_write_prefixes : "${p}*"]) }
         }
       },
       {
@@ -115,7 +122,20 @@ resource "aws_iam_role_policy" "this" {
         Effect   = "Allow"
         Action   = ["s3:PutObject", "s3:AbortMultipartUpload"]
         Resource = [for p in sort(tolist(var.detection_write_prefixes)) : "${var.bucket_arn}/${p}*"]
-    }] : [])
+      }] : [], each.key == "investigation" && length(var.investigation_write_prefixes) > 0 ? [
+      {
+        Sid      = "InvestigationData"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+        Resource = [for p in sort(tolist(var.investigation_write_prefixes)) : "${var.bucket_arn}/${p}*"]
+      },
+      {
+        Sid      = "InvestigationCatalogRead"
+        Effect   = "Allow"
+        Action   = ["glue:GetDatabase", "glue:GetTable", "glue:GetTables", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"]
+        Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/${var.investigation_database_name}", "${local.glue_base}:table/${var.investigation_database_name}/*"]
+      }
+    ] : [])
   })
 }
 

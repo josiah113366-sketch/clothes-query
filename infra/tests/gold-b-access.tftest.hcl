@@ -2,6 +2,41 @@ mock_provider "aws" {
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "000000000000" } }
 }
+
+run "investigation_writes_are_outside_gold_b" {
+  command = plan
+  module { source = "../modules/gold-b-access" }
+  variables {
+    enable_investigation_catalog = true
+    investigation_write_prefixes = ["agent/"]
+    detection_write_prefixes     = ["gold_b/anomaly/", "gold_b/detection_runs/", "gold_b/reprocess_events/"]
+  }
+  assert {
+    condition = (
+      aws_glue_catalog_database.investigation[0].name == "agent" &&
+      aws_glue_catalog_database.investigation[0].location_uri == "s3://test-gold-b-bucket/agent/" &&
+      jsondecode(aws_iam_role_policy.this["investigation"].policy).Statement[8].Resource == ["arn:aws:s3:::test-gold-b-bucket/agent/*"] &&
+      !contains(jsondecode(aws_iam_role_policy.this["investigation"].policy).Statement[8].Action, "s3:DeleteObject") &&
+      contains(jsondecode(aws_iam_role_policy.this["investigation"].policy).Statement[9].Resource, "arn:aws:glue:ap-northeast-1:000000000000:database/agent") &&
+      length(jsondecode(aws_iam_role_policy.this["detection"].policy).Statement) == 9
+    )
+    error_message = "Investigation storage/catalog must be separate and detection must not gain agent writes."
+  }
+}
+
+run "reject_investigation_writes_into_gold_b" {
+  command = plan
+  module { source = "../modules/gold-b-access" }
+  variables { investigation_write_prefixes = ["gold_b/anomaly/"] }
+  expect_failures = [var.investigation_write_prefixes]
+}
+
+run "reject_investigation_catalog_using_gold_b" {
+  command = plan
+  module { source = "../modules/gold-b-access" }
+  variables { investigation_database_name = "gold_b" }
+  expect_failures = [var.investigation_database_name]
+}
 variables {
   cluster_name        = "test-cluster"
   bucket_arn          = "arn:aws:s3:::test-gold-b-bucket"

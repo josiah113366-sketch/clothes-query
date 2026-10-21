@@ -84,3 +84,26 @@ variable "bytes_scanned_cutoff_per_query" {
     error_message = "Use an integer scan cutoff of at least 10MiB."
   }
 }
+
+variable "enable_investigation_catalog" {
+  description = "Create the separate investigation database after namespace agreement."
+  type        = bool
+  default     = false
+}
+variable "investigation_database_name" {
+  type    = string
+  default = "agent"
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9_]{0,254}$", var.investigation_database_name)) && var.investigation_database_name != "gold_b"
+    error_message = "Use a separate lowercase Glue database name."
+  }
+}
+variable "investigation_write_prefixes" {
+  description = "Confirmed report/history paths under agent/; query results remain separately writable."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for p in var.investigation_write_prefixes : (p == "agent/" || can(regex("^agent/[a-zA-Z0-9][a-zA-Z0-9/_.=-]*/$", p))) && !strcontains(p, "//")])
+    error_message = "Investigation data writes must remain in literal agent/ paths ending in /."
+  }
+}

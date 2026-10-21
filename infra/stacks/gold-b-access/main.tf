@@ -31,4 +31,7 @@ module "gold_b_access" {
   results_prefixes               = var.results_prefixes
   detection_write_prefixes       = var.detection_write_prefixes
   bytes_scanned_cutoff_per_query = var.bytes_scanned_cutoff_per_query
+  enable_investigation_catalog   = var.enable_investigation_catalog
+  investigation_database_name    = var.investigation_database_name
+  investigation_write_prefixes   = var.investigation_write_prefixes
 }
