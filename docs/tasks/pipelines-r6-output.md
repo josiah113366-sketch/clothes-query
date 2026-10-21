@@ -22,3 +22,8 @@
 ## 완료 확인
 
 main 기반 Silver 회귀 테스트, 변경 실행 코드 Ruff, diff 공백 검사 및 Gold A/공통 YAML 변경 미포함을 확인한다. 일반 PR로 제출하고 주현의 입력 계약 검토를 요청한다. S3/Athena/판정 잡 연결은 후속이다.
+
+## 이번 제출 검증 결과
+
+- 최신 origin/main 기반 Silver 테스트 29개 통과(3.03초), common.py/transactions.py Ruff·git diff --check 통과.
+- main 대비 6개 파일이며 Gold A·Kafka 메타데이터·공통 YAML/단가 정책 변경은 없다. 불일치 지속/해소의 실제 알림 판정이 아니라 제공 출력과 고정 근거·저장 실패 보호를 검증했다.
