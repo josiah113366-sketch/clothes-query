@@ -64,6 +64,12 @@ gitGraph
   commit id: "sim(clickstream)"
   checkout main
   merge sim/clickstream
+  branch sim/cdc-orders
+  commit id: "sim(cdc-orders)"
+  checkout main
+  merge sim/cdc-orders
+  branch pipelines/silver
+  commit id: "pipelines(silver)"
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -82,12 +88,14 @@ gitGraph
 | `sim/behavior-core` | `docs/tasks/sim-behavior-core.md` | 머지됨 | |
 | `sim/controller` | `docs/tasks/sim-controller.md` | 머지됨 | |
 | `sim/clickstream` | `docs/tasks/sim-clickstream.md` | 머지됨 | |
+| `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `docs/branch-rules` | - | 진행 중 | |
 | `docs/api-design` | - (설계 문서 `docs/design/api.md`) | 진행 중 | |
+| `docs/data-contracts` | [docs-data-contracts.md](tasks/docs-data-contracts.md) | 검토 대기 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -99,4 +107,9 @@ gitGraph
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
 
 ### 그 밖의 영역
-`db`, `conn`, `review-sim`, `review-model`, `silver`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+`db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `agent`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+
+### pipelines
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |

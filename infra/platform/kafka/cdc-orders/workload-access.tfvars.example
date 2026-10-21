@@ -1,0 +1,11 @@
+# Merge into the existing private stacks/workload-access/deployment.local.tfvars; keep other bindings.
+# Strimzi names the Connect ServiceAccount <connect name>-connect. Only bronze/ is writable.
+bindings = {
+  bronze-s3-sink = {
+    namespace       = "kafka"
+    service_account = "clothes-query-dev-connect-connect"
+    s3_access = {
+      "bronze/" = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+    }
+  }
+}
