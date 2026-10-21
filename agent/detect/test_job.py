@@ -231,5 +231,56 @@ n_before = len(query("SELECT * FROM gold_b.anomaly WHERE run_id = '20261020T1510
 con.execute("DELETE FROM gold_b.detection_runs WHERE run_id = '20261020T1510Z'")
 regular_run(query, write, CFG, datetime(2026, 10, 20, 15, 10, 20))
 check("같은 순찰을 다시 돌려도 이상 줄이 늘지 않음", (n_before > 0, len(query("SELECT * FROM gold_b.anomaly WHERE run_id = '20261020T1510Z'"))), (True, n_before))
+
+# --- 재영 님 리뷰: 저장 도중 실패한 작업을 다시 돌려도 이상 줄과 순찰 기록이 두 번 쌓이지 않는다 ---
+class Boom(RuntimeError):
+    pass
+
+
+def flaky(write_fn, fail_on, times=1):
+    """fail_on 표에 쓸 때 times번 실패하는 write."""
+    left = {"n": times}
+
+    def w(table, rows):
+        if table == fail_on and left["n"] > 0:
+            left["n"] -= 1
+            raise Boom(table)
+        write_fn(table, rows)
+    return w
+
+
+q3, w3, c3 = blank()
+for i in range(6):
+    c3.execute("INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)", (f"f{i}", f"of{i}", 1, "PG_A", "FAILED", "PG_TIMEOUT", "PG", "2026-10-20 15:02:00", "2026-10-20 15:03:00"))
+TICK = datetime(2026, 10, 20, 15, 10)
+bad = flaky(w3, "detection_runs")
+try:
+    regular_run(q3, bad, CFG, datetime(2026, 10, 20, 15, 10, 30), TICK)
+    check("순찰 기록을 쓰다 실패하면 오류가 올라옴", "통과됨", "오류")
+except Boom:
+    check("순찰 기록을 쓰다 실패하면 오류가 올라옴", "오류", "오류")
+n1 = len(q3("SELECT * FROM gold_b.anomaly"))
+res = regular_run(q3, bad, CFG, datetime(2026, 10, 20, 15, 23, 0), TICK)       # 몇 분 뒤 재시도 (같은 순찰 시각 TICK을 받음)
+check("재시도해도 이상 줄이 두 번 쌓이지 않음 (같은 순찰 번호)", (n1 > 0, len(q3("SELECT * FROM gold_b.anomaly")), res["run_id"]), (True, n1, "20261020T1510Z"))
+check("재시도에서 순찰 기록이 한 줄 쓰이고, 이상 개수는 처음 판정한 개수 그대로", [(x["run_id"], x["anomaly_count"]) for x in q3("SELECT * FROM gold_b.detection_runs")], [("20261020T1510Z", n1)])
+check("그다음 재실행은 건너뜀", regular_run(q3, bad, CFG, datetime(2026, 10, 20, 15, 24, 0), TICK).get("skipped"), True)
+
+# 재판정: 이상과 순찰 기록을 쓴 뒤 재처리 기록(REDETECTED/VERIFIED) 쓰기가 실패해도, 재시도가 이중 저장하거나 STILL_OPEN으로 잘못 판정하지 않는다
+q4, w4, c4 = blank()
+for i in range(6):
+    c4.execute("INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)", (f"g{i}", f"og{i}", 1, "PG_A", "FAILED", "PG_TIMEOUT", "PG", "2026-10-20 15:20:00", "2026-10-20 16:30:00"))
+replaced(c4, "rq-r", "2026-10-20 15:00:00", "2026-10-20 16:00:00", "2026-10-20 16:30:00")
+bad2 = flaky(w4, "reprocess_events")
+try:
+    run_once(q4, bad2, CFG, datetime(2026, 10, 20, 16, 40), None)
+    check("재처리 기록을 쓰다 실패하면 오류가 올라옴", "통과됨", "오류")
+except Boom:
+    check("재처리 기록을 쓰다 실패하면 오류가 올라옴", "오류", "오류")
+rd1 = len(q4("SELECT * FROM gold_b.anomaly WHERE run_id LIKE '%-RD-%'"))
+s2 = run_once(q4, bad2, CFG, datetime(2026, 10, 20, 17, 5), None)                 # 한 시간 가까이 뒤에 재시도 (순찰 시각이 달라도)
+check("재판정 재시도: 이상 줄이 두 번 쌓이지 않음", (rd1 > 0, len(q4("SELECT * FROM gold_b.anomaly WHERE run_id LIKE '%-RD-%'"))), (True, rd1))
+check("재판정 재시도: 순찰 기록 REDETECT가 한 줄만", len(q4("SELECT * FROM gold_b.detection_runs WHERE kind = 'REDETECT'")), 1)
+check("재판정 재시도: 이전 시도가 쓴 이상 줄을 옛 이상으로 착각하지 않음 (옛 이상이 없었으니 NO_ANOMALY_BEFORE)", [x["result"] for x in s2["redetected"]], ["NO_ANOMALY_BEFORE"])
+check("재판정 재시도: VERIFIED가 한 줄만", len(q4("SELECT * FROM gold_b.reprocess_events WHERE step = 'VERIFIED'")), 1)
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
