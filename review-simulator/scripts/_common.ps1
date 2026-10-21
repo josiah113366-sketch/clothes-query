@@ -37,6 +37,10 @@ function Invoke-Deploy {
     Push-Location $RsimRoot
     try {
         Write-Host "> python deploy\$Name.py $($Arguments -join ' ')" -ForegroundColor DarkGray
+        # 파이썬 로그(INFO 등)는 stderr 로 나온다. Windows PowerShell 5.1 은 ISE 나 출력 리다이렉트 환경에서
+        # stderr 줄을 오류로 바꾸는데, 위의 Stop 설정 때문에 정상 실행도 중간에 멈출 수 있다.
+        # 그래서 파이썬을 부르는 동안만 Continue 로 두고, 성공·실패는 종료 코드로만 판단한다.
+        $ErrorActionPreference = "Continue"
         & $py $script @Arguments
         $code = $LASTEXITCODE
     }

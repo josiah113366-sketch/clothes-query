@@ -1,0 +1,3 @@
+# Merge into the existing private stacks/network/deployment.local.tfvars.
+# S3 Sink multipart upload cleanup through the S3 Gateway Endpoint policy.
+additional_s3_endpoint_actions = ["s3:AbortMultipartUpload"]

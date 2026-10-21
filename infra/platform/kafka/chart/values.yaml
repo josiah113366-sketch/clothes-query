@@ -52,3 +52,15 @@ metrics:
     resources:
       requests: {cpu: "100m", memory: "128Mi"}
       limits: {cpu: "500m", memory: "256Mi"}
+# Read-only Kafka UI, ClusterIP only (reach it with kubectl port-forward). Off by default.
+ui:
+  enabled: false
+  name: kafka-ui
+  # Must be repository@sha256:...
+  image: ""
+  # Literal topic/group names the UI may read; must be defined business topics.
+  topics: []
+  consumerGroups: []
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits: {cpu: "500m", memory: "512Mi"}

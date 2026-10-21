@@ -15,6 +15,7 @@ from typing import Protocol
 import psycopg
 from psycopg import sql
 
+from sim.common.api import PhoneTaken, StoreRejected, StoreUnavailable
 from sim.common.clock import SimClock
 from sim.common.control import ControlSource, ControlState
 from sim.common.db import SafeDatabaseError, db_error_info, describe_db_error
@@ -259,6 +260,20 @@ class LiveRunner:
                 self.out(f"DB 연결 오류: {describe_db_error(error)}")
                 self._open_with_retry(initial=False)
                 return False  # 연결이 끊긴 동안 만든 회원은 없다. 인덱스는 다시 센 값이다
+            except StoreUnavailable as error:  # --backend api: 끊긴 동안의 가입은 다시 센다
+                self.out(f"API 연결 오류: {error}")
+                self._open_with_retry(initial=False)
+                return False
+            except PhoneTaken:
+                if retries >= params.PHONE_RETRY_LIMIT:
+                    raise LiveError(
+                        f"전화번호 중복이 {params.PHONE_RETRY_LIMIT}번 재시도 후에도 풀리지 않았습니다."
+                    ) from None
+                retries += 1
+                self.summary.phone_retries += 1
+                member = replace(member, phone=draw_phone(self._member_rng))
+            except StoreRejected as error:
+                raise LiveError(str(error)) from None
             except psycopg.Error as error:
                 info = db_error_info(error)
                 is_phone = info.sqlstate == UNIQUE_VIOLATION and info.constraint == PHONE_CONSTRAINT
@@ -290,10 +305,16 @@ class LiveRunner:
             try:
                 self.store.connect()
                 self.next_index = self.store.count_since(params.BASELINE_END)
-            except psycopg.Error as error:
-                if not isinstance(error, psycopg.OperationalError):
+            except (psycopg.Error, StoreUnavailable) as error:
+                if isinstance(error, psycopg.Error) and not isinstance(
+                    error, psycopg.OperationalError
+                ):
                     raise SafeDatabaseError(describe_db_error(error)) from None
-                self.out(f"DB 연결 실패: {describe_db_error(error)} — {delay}초 뒤 다시 시도")
+                if isinstance(error, psycopg.Error):
+                    reason = f"DB 연결 실패: {describe_db_error(error)}"
+                else:
+                    reason = f"API 연결 실패: {error}"
+                self.out(f"{reason} — {delay}초 뒤 다시 시도")
                 self._sleep_interruptible(delay)
                 if self._stop:
                     return False
