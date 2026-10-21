@@ -7,7 +7,7 @@ DB 오류(psycopg.Error)는 그대로 던진다. 재연결과 오류 가리기�
 import json
 from collections.abc import Sequence
 from dataclasses import astuple, fields
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, TextIO
 
@@ -15,7 +15,6 @@ import psycopg
 from psycopg import sql
 
 from sim.behavior.model import ClickEvent, NewOrder, NewOrderItem, NewPayment
-from sim.common.timezone import KST
 
 
 class OrderSink(Protocol):
@@ -126,13 +125,16 @@ class MemoryOrderSink:
 
 
 def click_record(event: ClickEvent) -> dict[str, str]:
-    """클릭 로그 한 건 (필드 6개). ingest_time은 파이프라인이 붙이므로 넣지 않는다."""
+    """클릭 로그 한 건 (필드 6개). ingest_time은 파이프라인이 붙이므로 넣지 않는다.
+
+    event_time은 UTC이고 `Z`로 끝난다 (Bronze는 UTC, Debezium 시각 표기와 같다).
+    """
     return {
         "event_id": event.event_id,
         "event_type": event.event_type,
         "member_id": event.member_id,
         "article_id": event.article_id,
-        "event_time": event.event_time.astimezone(KST).isoformat(),
+        "event_time": event.event_time.astimezone(UTC).isoformat().replace("+00:00", "Z"),
         "session_id": event.session_id,
     }
 

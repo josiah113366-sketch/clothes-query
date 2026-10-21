@@ -226,6 +226,7 @@ __marimo__/
 crash.log
 crash.*.log
 *.tfplan
+tfplan
 
 # Simulator
 simulator/.local/

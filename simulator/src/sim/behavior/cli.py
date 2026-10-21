@@ -5,6 +5,7 @@ from typing import Annotated
 import typer
 
 from sim.behavior import params
+from sim.behavior.kafka_sink import ClickSinkError, KafkaClickSink
 from sim.behavior.pool import DbCatalogSource, DbMemberSource
 from sim.behavior.runner import BehaviorError, BehaviorRunner, stop_on_signals
 from sim.behavior.sink import ClickSink, DbOrderSink, JsonlClickSink, NullClickSink
@@ -12,10 +13,11 @@ from sim.common.clock import SimClock
 from sim.common.config import ConfigError, load_config
 from sim.common.control import DEFAULT_CONTROL_FILE, MODES, FileControlSource
 from sim.common.db import DatabaseTargetError, SafeDatabaseError, check_db_target, describe_target
+from sim.common.kafka import CLICK_TOPIC, load_kafka_settings
 
 app = typer.Typer(help="쇼핑 행동: 방문, 주문, 결제, 상태 전이", no_args_is_help=True)
 
-CLICK_SINKS = ("none", "jsonl")
+CLICK_SINKS = ("none", "jsonl", "kafka")
 ALLOW_REMOTE_ENV = "SIM_ALLOW_REMOTE_DB"
 
 
@@ -50,7 +52,8 @@ def live(
         int | None, typer.Option(help="실행 구분값 (기본: 시작 시각의 epoch 초)")
     ] = None,
     click_sink: Annotated[
-        str, typer.Option(help=f"클릭 로그 출력 ({' | '.join(CLICK_SINKS)})")
+        str,
+        typer.Option(envvar="SIM_CLICK_SINK", help=f"클릭 로그 출력 ({' | '.join(CLICK_SINKS)})"),
     ] = "none",
     click_file: Annotated[Path, typer.Option(help="--click-sink jsonl일 때 파일 경로")] = Path(
         params.DEFAULT_CLICK_FILE
@@ -70,8 +73,14 @@ def live(
     clock = SimClock(speed=speed)
     run_salt = int(clock.now().timestamp()) if run_salt is None else run_salt
 
-    clicks: ClickSink = NullClickSink() if click_sink == "none" else JsonlClickSink(click_file)
-    click_label = "none" if click_sink == "none" else f"jsonl ({click_file})"
+    kafka_clicks = _kafka_click_sink() if click_sink == "kafka" else None
+    clicks: ClickSink
+    if kafka_clicks is not None:
+        clicks, click_label = kafka_clicks, f"kafka (topic {CLICK_TOPIC})"
+    elif click_sink == "jsonl":
+        clicks, click_label = JsonlClickSink(click_file), f"jsonl ({click_file})"
+    else:
+        clicks, click_label = NullClickSink(), "none"
     typer.echo(f"대상 DB: {describe_target(config.database_url)}")
     typer.echo(
         f"모드: {mode}  배속: {speed:g}  하루 방문: {visits_daily:,.0f}  시드: {seed}  "
@@ -104,3 +113,22 @@ def live(
     typer.echo("")
     for line in summary.lines():
         typer.echo(line)
+    if kafka_clicks is not None:
+        stats = kafka_clicks.stats
+        typer.echo(f"클릭 발행: 성공 {stats.sent:,}건, 실패 {stats.failed:,}건")
+
+
+def _kafka_click_sink() -> KafkaClickSink:
+    """Kafka 클릭 Sink를 만들고 시작 전에 브로커와 토픽을 한 번 확인한다. 안 되면 시작하지 않는다."""
+    try:
+        settings = load_kafka_settings()
+    except ConfigError as error:
+        raise _fail(str(error)) from None
+    sink = KafkaClickSink(settings, warn=lambda m: typer.echo(f"경고: {m}", err=True))
+    try:
+        sink.check_ready()
+    except ClickSinkError as error:
+        sink.close()
+        hint = " `sim clickstream setup`을 먼저 실행하세요." if settings.is_local else ""
+        raise _fail(f"{error}{hint}") from None
+    return sink

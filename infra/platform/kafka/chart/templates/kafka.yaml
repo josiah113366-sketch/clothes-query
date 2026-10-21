@@ -85,6 +85,11 @@ spec:
               matchLabels:
                 strimzi.io/cluster: {{ .Values.connect.name }}
                 strimzi.io/kind: KafkaConnect
+          {{- if .Values.ui.enabled }}
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: {{ .Values.ui.name }}
+          {{- end }}
           {{- range .Values.kafka.clientNamespaces }}
           - namespaceSelector:
               matchLabels:
