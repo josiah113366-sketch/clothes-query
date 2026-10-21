@@ -21,6 +21,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        # Secret 볼륨 파일은 root 소유다. fsGroup 이 있어야 kafka-client(0400)가 그룹 읽기(0440)로 바뀌어 비root 가 읽는다
+        fsGroup: 10001
         seccompProfile: {type: RuntimeDefault}
       affinity:
         nodeAffinity:

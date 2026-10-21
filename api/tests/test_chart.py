@@ -43,6 +43,8 @@ def test_renders_internal_http_alb_and_secure_pod():
     container = pod["containers"][0]
     assert docs["Deployment"]["spec"]["replicas"] == 1
     assert pod["securityContext"]["runAsNonRoot"] is True
+    # 비root 가 Secret 볼륨(kafka-client 0400)을 읽으려면 fsGroup 이 같아야 한다
+    assert pod["securityContext"]["fsGroup"] == pod["securityContext"]["runAsUser"]
     assert container["securityContext"]["readOnlyRootFilesystem"] is True
     env = {e["name"]: e for e in container["env"]}
     assert env["PGSSLMODE"]["value"] == "verify-full"
