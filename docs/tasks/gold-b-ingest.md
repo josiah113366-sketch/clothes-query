@@ -48,9 +48,30 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 
 ## 완료 확인
 
-- [ ] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경)
-- [ ] 묶음 하나의 줄이 이벤트 시각의 시간 폴더로 가고, 같은 묶음을 다시 써도 두 번 쌓이지 않는지
-- [ ] 설정 파일을 읽는 시험 (PyYAML이 있는 Python)
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 40개 통과, 설정 파일 시험 1개는 PyYAML이 없어 건너뜀)
+- [x] 묶음 하나의 줄이 이벤트 시각의 시간 폴더로 가고, 같은 묶음을 다시 써도 두 번 쌓이지 않는지
+- [x] 설정 파일을 읽는 시험 (PyYAML이 있는 PC 기본 Python으로 `test_ingest.py` 4개 통과)
 - [ ] Spark로 실제 실행 → **대기** (이 PC에서 Spark가 뜨지 않음, 형식 검사 없음)
 
 ## 작업 결과 (머지 전에 작성한다)
+
+- **한 줄 요약:** Kafka를 Spark Structured Streaming으로 1분마다 읽어 원장 ①②④에 쌓는 적재 잡 본체와 설정 파일을 만들었다. 묶음 처리는 시험으로 확인했고, Spark 연결은 이 PC에서 돌려 보지 못했다. 형식 검사(2단계)가 생겨야 실제로 돌 수 있다.
+- **무엇을 만들었나:**
+  - `pipelines/gold_b/jobs/streaming_ingest.py`: `write_batch`, `kafka_options`, `build_query`, `Settings.from_env`, `load_config`
+  - `pipelines/gold_b/config/gold_b.yaml`: 토픽 6개, 1분, `earliest`, 묶음 최대 20,000건
+  - `pipelines/gold_b/tests/test_ingest.py`(4개), `requirements.txt`에 `PyYAML==6.0.3`, `jobs/README.md` 적재 잡 절, `pipelines/gold_b/README.md`, 설계 문서 4단계 체크, `docs/BRANCHES.md` 한 줄
+- **왜 그렇게 했나:**
+  - 묶음 처리를 Spark와 떼어 순수 파이썬 함수(`write_batch`)로 만들었다. 이 PC에서 Spark가 뜨지 않아도 핵심을 시험할 수 있고, 재처리 잡과 같은 `message_rows`를 써서 평소 경로와 재처리 경로의 결과가 같다.
+  - 파일 이름을 메시지 위치로 정해서 Spark가 묶음을 다시 처리해도 같은 파일을 덮어쓴다. Spark의 foreachBatch는 실패하면 같은 묶음을 다시 부르기 때문이다.
+  - Kafka 시각을 밀리초 숫자로 받는다. PySpark가 시각을 파이썬으로 옮길 때 서버 시간대를 쓰는 문제를 피한다.
+  - 주소·버킷 이름은 환경변수로만 받고 로그에는 묶음 번호와 건수만 쓴다.
+- **확인한 결과:**
+  - Gold B 가상환경에서 `pipelines/gold_b/tests` 40개 통과, 1개 건너뜀 (테이블 정의 22 + 재처리 15 + 적재 3, 설정 파일 시험은 PyYAML이 없어 건너뜀).
+  - PC 기본 Python(PyYAML 있음)으로 `test_ingest.py` 4개 통과: 샘플 31건을 한 묶음으로 쓰면 원장 세 표가 샘플 기대 결과와 같고 파일은 4개(메시지 05·06시, 결제 06시, 오류 06시), 같은 묶음을 다시 쓰면 파일이 늘지 않고, 다음 묶음은 새 파일로 쌓여 전체가 기대 결과와 같음, 설정 파일과 환경변수 확인.
+  - `git diff --check` 통과.
+- **알려진 한계·남은 일:**
+  - 형식 검사(2단계)가 없어서 실행 진입점을 만들지 않았다. 현지 님과 형식 검사를 정한 뒤 연결한다.
+  - Spark 연결(`build_query`)은 이 PC에서 Spark가 뜨지 않아(Java 소켓 오류) 돌려 보지 않았다. Docker의 Spark나 EKS에서 확인해야 한다.
+  - Spark 런타임(이미지, `spark-sql-kafka` jar, S3 체크포인트용 `hadoop-aws`), 클라이언트 인증서 형식(Java Kafka 클라이언트는 암호 없는 PKCS#8 키를 PEM 값으로 받음), `deploy/gold_b_streaming.yaml`은 재영 님과 정한다.
+  - Gold B 가상환경에 `PyYAML`을 아직 설치하지 않았다 (`pip install -r pipelines/gold_b/requirements.txt`로 설치).
+  - push는 #36과 재처리 브랜치가 머지된 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
