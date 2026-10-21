@@ -37,17 +37,44 @@
 - 사실이 하나도 없이 원인 층을 고르면 되돌려 보낸다(증거가 부족하면 `UNKNOWN`으로 낸다).
 - `agent/eval`의 `score_reports()`가 같은 형식을 읽는다 (`anomaly_id`, `cause_layer`, `claims[].evidence`). 근거 연결 점수는 **확인된 사실(`FACT`)만** 센다(추정은 근거가 없어도 감점하지 않는다).
 
+## 실제 모델 연결 (이 브랜치에서 추가)
+
+| 파일 | 하는 일 |
+|---|---|
+| `bedrock_io.py` | Bedrock Converse 호출(`converse` 함수). 서비스 계정 권한(boto3) 또는 API 키(내 컴퓨터 시험용)로 부름. 429·5xx는 3번까지 재시도. 모델이 지원하지 않으면 `toolResult.status`를 뺌 |
+| `run_investigation.py` | Airflow가 5분마다 한 번 실행. 아직 조사 안 한 OPEN 이상을 찾아 조사하고 `agent.investigation_reports`, `agent.investigation_runs`에 새 줄로 쌓음 |
+| `try_model.py` | 진짜 모델 시험대. 가짜 원장(sqlite)에 만든 시나리오 4개(결제·적재·데이터 품질·정상)로 돌려 층 판별·호출 수·거절 수·토큰을 출력 |
+| `Dockerfile` | 이미지 제안. 빌드 위치는 `agent` 폴더 |
+
+환경 변수(비밀값 없음): `ATHENA_WORKGROUP`, `BEDROCK_MODEL_ID`, `AWS_REGION`(기본 ap-northeast-1), `INVESTIGATE_MAX`(기본 3), `INVESTIGATE_LOOKBACK_HOURS`(기본 24). `AWS_BEARER_TOKEN_BEDROCK`은 내 컴퓨터 시험에서만 쓴다.
+
+### 모델 고르기 전에 확인할 것
+
+| 확인 | 이유 |
+|---|---|
+| 모델 ID 또는 추론 프로필 ID가 맞는가 (예: `jp.`, `apac.` 접두) | 도쿄에서 모델 ID만으로는 안 불리는 모델이 있다 |
+| 도구 호출(tool use)을 지원하는가 | 지원하지 않으면 조사 루프가 돌지 않는다 |
+| 도쿄 가격을 확인했는가 | 가격표는 지역마다 다르다 |
+| `toolResult.status`를 지원하는가 | 지원하지 않는 모델은 코드가 자동으로 뺀다 |
+
+모델 후보 비교는 한국어 글 생성 벤치마크가 아니라 **도구 호출 시험**으로 해야 한다: `try_model.py --scenario all --repeat 3`.
+
 ## 실행
 
 ```
 cd agent/investigator
 python3 test_investigator.py     # 가짜 모델·가짜 원장 시험 (표준 라이브러리만 사용)
+python3 test_bedrock_io.py && python3 test_run_investigation.py && python3 test_try_model.py
+
+# 내 컴퓨터에서 진짜 모델 시험 (키는 환경 변수로만. 파일이나 채팅에 적지 않는다)
+# 환경 변수 AWS_BEARER_TOKEN_BEDROCK, BEDROCK_MODEL_ID를 정한 뒤:
+python3 try_model.py --scenario all --repeat 3
 ```
 
 ## 알아야 할 것 (한계)
 
-- **진짜 모델로는 아직 돌려 보지 않았다.** 시험은 정해 둔 순서대로 도구를 부르는 가짜 모델이라 **배관(도구 호출·결과 전달·리포트 검사)만 확인**한다. 모델이 도구를 잘 고르고 원인을 잘 맞히는지는 Bedrock을 연결한 뒤 정답표로 채점해야 안다.
-- **`converse` 연결은 비어 있다.** Bedrock Converse API의 메시지 모양(`toolUse`, `toolResult`)을 따라 만들었지만, 실제 호출 코드, 모델 ID, 권한은 아직 없다.
+- **진짜 모델로는 아직 돌려 보지 않았다**(`bedrock_io.py`도 가짜 클라이언트로만 시험함). 시험은 정해 둔 순서대로 도구를 부르는 가짜 모델이라 **배관(도구 호출·결과 전달·리포트 검사)만 확인**한다. 모델이 도구를 잘 고르고 원인을 잘 맞히는지는 Bedrock을 연결한 뒤 정답표로 채점해야 안다.
+- **모델 ID, Athena 권한은 정해지지 않았다.** 실제 Athena에도 아직 돌려 보지 않았다(`agent` 표 DDL이 PR로 올라가 있고 생성 전).
 - 지시문(`prompt.py`)은 **제안**이다. 실제 모델의 답을 보고 고쳐야 한다.
 - 반복 한도(10회), 되돌리는 횟수(2번)는 임의 값이다.
 - 이 폴더는 **조사까지만** 한다. 재처리 요청, 승인 화면, Airflow 호출은 없다(에이전트는 읽기 전용).
