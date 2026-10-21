@@ -248,9 +248,9 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
   - Secret `api-database`(password 32 bytes), `rds-ca`, `kafka-client` 생성(값 출력 없음)
   - 이미지 `clothes-query-dev/was:api-87cd0a9`(digest로 배포). 첫 설치는 위 fsGroup 문제로 CrashLoopBackOff → 수정 후 revision 2에서 Pod Ready, 재시작 0
   - 노드 2대: 기존 `clothes-query-dev-compute`(t3a.large) + `clothes-query-dev-api`(t3a.medium, Pod 생성 후 약 1분에 뜸)
-  - Ingress 주소 `internal-…`(내부 ALB). VPC 안 임시 Pod에서 ALB로 `/readyz`는 사용자 확인 대기
+  - Ingress 주소 `internal-…`(내부 ALB). VPC 안 임시 Pod에서 ALB로 `/readyz` 정상(사용자 확인)
   - 로컬 시뮬레이터 → port-forward → EKS API: `member live` 가입 408. `behavior live`(배속 60, 하루 방문 20,000, 2분) 방문 2,148, 주문 90, 결제 95(성공 86·실패 9), 상태 PAID 86·PAYMENT_FAILED 2·CANCELLED 1, 클릭 11,485 전송 실패 0, 재연결 0(위 권한 추가 뒤). `남은 큐`는 아직 때가 안 된 배송 등 예약
-  - S3 bronze(2026-10-21, UTC `day=21`): `clickstream`, `orders`, `payments`, `members-events`에 실행 시각 파일 생성(15분 단위). `order-items`는 사용자 확인 대기
+  - S3 bronze(2026-10-21, UTC `day=21`): `clickstream`, `orders`, `payments`, `members-events`, `order-items`에 실행 시각 파일 생성(15분 단위, `order-items`는 사용자 확인)
   - 확인 못 한 것: API Pod 자원 사용량(`kubectl top`), EKS에서의 부하 측정
 
 ### 다음 할 일
