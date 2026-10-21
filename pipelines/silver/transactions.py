@@ -16,7 +16,8 @@ from .common import run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v5"
+CHECK_VERSION = "transactions.v7"
+AMOUNT_CHECK_VERSION = "items-sum-v1"
 
 
 def _version(raw: dict, row: dict) -> tuple:
@@ -312,10 +313,20 @@ def build_silver(
         })
         if name == "orders":
             quality[-1]["amount_checks"] = amount_checks
-            quality[-1]["amount_check_policy"] = "items-sum-v1; requires-declared-complete-input"
+            quality[-1]["amount_check_policy"] = AMOUNT_CHECK_VERSION + "; requires-declared-complete-input"
         elif name == "payments":
             quality[-1]["failure_code_policy"] = "format_rules:" + rules.version
     output["quarantined_records"], output["dq_results"] = quarantine, quality
+    # R6용 조회 출력: 기존 검사값을 펼칠 뿐 금액을 다시 판정하지 않는다.
+    # 실행 ID/검사 완료 시각/고정 참조는 저장 단계에서 연결한다.
+    output["order_amount_checks"] = [
+        {"order_id": check["order_id"], "check_name": "order_item_total_match",
+         "check_version": AMOUNT_CHECK_VERSION, "status": check["status"],
+         "order_total_amount": check["order_total_amount"],
+         "item_total_amount": check.get("item_total_amount"),
+         "amount_difference": check.get("amount_difference")}
+        for check in amount_checks
+    ]
     # 정상 결과에서 사라진 후보도 추적한다. 회원 정보·원문 대신 집계 연결 최소값만 보존.
     candidates = []
     fields = {"orders": ("order_id", "session_id", "ordered_at", "updated_at"),

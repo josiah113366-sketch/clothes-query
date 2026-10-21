@@ -1,5 +1,41 @@
 # Silver 입력·출력 현황
 
+## R6용 주문 금액 검사 출력
+
+기존 금액 검사를 다시 만들지 않고 dq_results의 amount_checks를 `order_amount_checks.jsonl`로 펼친다. 로컬 거래 실행 완료 후 current.json의 outputs.order_amount_checks로 읽는다. 실행 1회 × 검사 종류 × 주문당 1행이며 중복 소비 키는 run_id/check_name/order_id다. 기존 dq_results·quarantined_records도 유지한다. R6가 두 파일의 오류 건수를 합산하면 같은 오류가 중복될 수 있다.
+
+| 컬럼 | JSON 값 / 조회 타입 제안 | 의미 |
+|---|---|---|
+| run_id | 문자열 / STRING | 이번 실행 ID |
+| checked_at | 시간대 포함 ISO 문자열 / TIMESTAMP(UTC) | 입력의 금액 검사 계산 완료 후 기록한 실행 단위 시각. 주문/결제 업무 시각이 아님 |
+| order_id | 문자열 / STRING | 검사한 주문 |
+| check_name | 문자열 / STRING | order_item_total_match |
+| check_version | 문자열 / STRING | items-sum-v1. manifest의 파이프라인 검사 버전 transactions.v7과 구분 |
+| status | 문자열 / STRING | PASS/MISMATCH/UNVERIFIED/PENDING_REFERENCE/ITEM_ERROR |
+| order_total_amount | 정수 / BIGINT | 주문 총액 |
+| item_total_amount | 정수 또는 null / BIGINT | 계산한 상품 합계. 검사 불가이면 null |
+| amount_difference | 정수 또는 null / BIGINT | 상품 합계 − 주문 총액. 검사 불가이면 null |
+| source_manifest | 문자열 / STRING | runs/실행-ID/manifest.json의 고정 경로 |
+
+위 타입은 JSON 값과 후속 조회용 명세이며 Athena 테이블 생성 완료를 뜻하지 않는다. checked_at은 같은 실행 내 모든 주문에 같은 값으로 부여한다. build_silver는 순수 검사값만 반환하고 CLI/run 저장 단계에서 실행 메타데이터를 연결한다.
+
+```text
+silver/transactions/
+  current.json                       최신 공개 참조
+  runs/run-.../
+    manifest.json                    변경하지 않는 해당 실행의 고정 기록
+    order_amount_checks.jsonl        R6용 조회 결과
+    dq_results.jsonl                 기존 품질 요약
+    quarantined_records.jsonl        기존 오류 상세
+    ...                              기존 업무 결과
+```
+
+고정 manifest는 입력·출력 참조/실행 ID/checked_at을 포함하고, 모든 결과와 고정 manifest 저장 성공 후 current.json을 교체한다. 실패하면 이전 공개 결과를 유지한다. source_manifest로 과거 결과를 찾고, 고정 manifest 안의 manifest_path는 최신 참조 주소이므로 이를 따라가 과거 실행을 대체하지 않는다. runs 전체를 업무 결과로 합치지 않는다.
+
+R6는 MISMATCH만 금액 불일치로 본다. UNVERIFIED는 입력 준비 미확인, PENDING_REFERENCE는 주문상품 미도착, ITEM_ERROR는 상품 오류로 검사 보류다. 같은 실행 재조회는 중복 소비하지 않고 후속 실행의 같은 주문 MISMATCH는 기존 이상 지속, 실제 재검사 PASS는 해소 여부 재판정에 사용한다. 주문 자체가 오류로 제외되면 이 출력에 없을 수 있으며 행 부재·검사 대기를 해소로 간주하지 않는다.
+
+실행별 파일은 보존하지만 로컬 실행의 자동 알림·이상 지속/해소 판정은 하지 않는다. 최신 실행만 읽으면 중간 실행을 건너뛸 수 있어 소비 방식은 주현과 합의해야 한다. S3/Parquet/Athena·권한·정기 실행·판정 잡 연결은 이번 구현 범위가 아니다.
+
 ## 결정: 회원 현재 상태 (`members_current`)
 
 | 항목 | 기준 |
