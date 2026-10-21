@@ -1,0 +1,104 @@
+# Chart 1.22.0. Preparation only: existing RDS and separately supplied Secrets.
+airflowVersion: "3.3.2"
+defaultAirflowRepository: apache/airflow
+defaultAirflowTag: "3.3.2-python3.12"
+executor: LocalExecutor
+nodeSelector:
+  karpenter.sh/nodepool: clothes-query-dev-compute
+multiNamespaceMode: false
+allowPodLaunching: false
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+pgbouncer:
+  enabled: false
+statsd:
+  enabled: false
+triggerer:
+  enabled: false
+flower:
+  enabled: false
+data:
+  metadataSecretName: airflow-metadata-db
+  # Suppress the chart's unused broker Secret with LocalExecutor.
+  brokerUrlSecretName: unused-no-celery
+fernetKeySecretName: airflow-fernet-key
+apiSecretKeySecretName: airflow-api-secret-key
+jwtSecretName: airflow-jwt-secret
+createUserJob:
+  enabled: false
+migrateDatabaseJob:
+  resources:
+    requests: {cpu: "50m", memory: "256Mi"}
+    limits: {cpu: "500m", memory: "768Mi"}
+apiServer:
+  replicas: 1
+  service:
+    type: ClusterIP
+  strategy:
+    type: Recreate
+  resources:
+    requests: {cpu: "50m", memory: "256Mi"}
+    limits: {cpu: "300m", memory: "512Mi"}
+scheduler:
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  resources:
+    requests: {cpu: "150m", memory: "512Mi"}
+    limits: {cpu: "750m", memory: "1024Mi"}
+  logGroomerSidecar:
+    enabled: false
+dagProcessor:
+  replicas: 1
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  resources:
+    requests: {cpu: "100m", memory: "384Mi"}
+    limits: {cpu: "500m", memory: "768Mi"}
+  logGroomerSidecar:
+    enabled: false
+volumes:
+  - name: simple-auth
+    secret:
+      secretName: airflow-simple-auth
+  - name: rds-ca
+    configMap:
+      name: airflow-rds-ca
+volumeMounts:
+  - name: simple-auth
+    mountPath: /opt/airflow/auth
+    readOnly: true
+  - name: rds-ca
+    mountPath: /opt/airflow/certs
+    readOnly: true
+config:
+  core:
+    auth_manager: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    simple_auth_manager_users: "operator:admin,observer:viewer,approval:user"
+    simple_auth_manager_passwords_file: /opt/airflow/auth/passwords.json
+    simple_auth_manager_all_admins: "False"
+    load_examples: "False"
+    dags_are_paused_at_creation: "True"
+    parallelism: "1"
+    max_active_tasks_per_dag: "1"
+    max_active_runs_per_dag: "1"
+  api:
+    workers: "1"
+  database:
+    sql_alchemy_pool_size: "1"
+    sql_alchemy_max_overflow: "1"
+  dag_processor:
+    parsing_processes: "1"
+  logging:
+    remote_logging: "False"
+dags:
+  persistence:
+    enabled: false
+  gitSync:
+    enabled: false
+logs:
+  persistence:
+    enabled: false

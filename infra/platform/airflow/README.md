@@ -1,5 +1,7 @@
 # Airflow 실행 기반 후보
 
+2026-10-21 후속 준비: 사용자가 기존 RDS의 전용 DB·계정과 개발용 Simple Auth Manager를 선택했다. [development-values.yaml](development-values.yaml)은 Helm 1.22.0/Airflow 3.3.2 설치 준비용이며 실제 배포하지 않았다. Secret·DAG·영속 task 로그·DB 초기화·업무 Pod 실행 RBAC가 준비되지 않았으므로 그대로 설치 완료 구성으로 취급하지 않는다. [현재 작업 기록](../../../docs/tasks/infra-airflow-runtime.md). 아래는 10월 16일 당시의 로컬 후보 검증 기록이다.
+
 상태: 제안(운영 배포) / 로컬 검증 완료 · 2026-10-16
 
 사용자가 Airflow를 AWS 배포 전에 로컬에서 검증하도록 요청했다. [local-smoke](local-smoke/README.md)는 공식 Airflow 3.3.2 이미지·LocalExecutor·일회성 PostgreSQL 메타데이터 DB로 API 실행·인증·5분 예약·동시 실행 제한을 검사한다. 운영 버전/Executor/인증 모듈을 확정하거나 AWS/Helm 리소스를 생성하는 변경은 아니다. 팀원의 이상 판정·재처리 업무 DAG는 구현하지 않는다.
