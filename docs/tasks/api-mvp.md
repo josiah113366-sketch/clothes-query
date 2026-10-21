@@ -1,6 +1,6 @@
 # 작업 지시서: api/mvp
 
-> 상태: 검토 대기(EKS 적용 완료, 2026-10-21) · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design`, #33 머지됨) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
+> 상태: 완료 (PR #44, 2026-10-21 머지) · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design`, #33 머지됨) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
 
 ## 목표
 

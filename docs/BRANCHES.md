@@ -70,6 +70,11 @@ gitGraph
   merge sim/cdc-orders
   branch pipelines/silver
   commit id: "pipelines(silver)"
+  checkout main
+  branch api/mvp
+  commit id: "api(mvp)"
+  checkout main
+  merge api/mvp
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -110,7 +115,7 @@ gitGraph
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `api/mvp` | `docs/tasks/api-mvp.md` | 검토 대기 | |
+| `api/mvp` | `docs/tasks/api-mvp.md` | 머지됨 (PR #44) | 2026-10-21 |
 
 ### agent
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
