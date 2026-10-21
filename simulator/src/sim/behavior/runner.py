@@ -47,6 +47,7 @@ from sim.behavior.pool import CatalogSource, MemberPool, MemberSource
 from sim.behavior.queue import Entry, ScheduledQueue
 from sim.behavior.sink import ClickSink, OrderSink
 from sim.behavior.visit import VisitContext, after, build_rankings, plan_visit
+from sim.common.api import MemberNotActive, StoreRejected, StoreUnavailable
 from sim.common.clock import SimClock
 from sim.common.control import MODES, ControlSource, ControlState
 from sim.common.curve import rate_factor
@@ -70,6 +71,7 @@ class BehaviorSummary:
     views: int = 0
     cart_adds: int = 0
     orders: int = 0
+    orders_rejected: int = 0  # 주문 API가 회원 비활성으로 거절 (--backend api)
     payments_success: int = 0
     payments_failed: int = 0
     transitions: Counter[str] = field(default_factory=Counter)
@@ -89,7 +91,12 @@ class BehaviorSummary:
         return [
             f"총 방문: {self.visits:,}건 (모드별: {modes})",
             f"클릭: 조회 {self.views:,}건, 담기 {self.cart_adds:,}건",
-            f"주문: {self.orders:,}건",
+            f"주문: {self.orders:,}건"
+            + (
+                f" (회원 비활성으로 거절 {self.orders_rejected:,}건)"
+                if self.orders_rejected
+                else ""
+            ),
             f"결제 시도: {self.payments:,}건 "
             + f"(성공 {self.payments_success:,}, 실패 {self.payments_failed:,})",
             f"상태 전이: {moves or '없음'}",
@@ -273,7 +280,8 @@ class BehaviorRunner:
         if now_real - self._last_progress >= params.PROGRESS_SECONDS:
             self._print_progress(now_real - self._last_progress)
             self._last_progress = now_real
-        if now_real - self._last_refresh >= params.POOL_REFRESH_SECONDS:
+        refresh = getattr(self.members, "refresh_seconds", params.POOL_REFRESH_SECONDS)
+        if now_real - self._last_refresh >= refresh:
             self._last_refresh = now_real
             self._refresh_pool()
 
@@ -309,7 +317,14 @@ class BehaviorRunner:
         try:
             ids = self.members.read_active_members()
             self._ctx.pool.update(ids)
-        except (SafeDatabaseError, psycopg.Error, OSError, ValueError):
+        except (
+            SafeDatabaseError,
+            psycopg.Error,
+            StoreUnavailable,
+            StoreRejected,
+            OSError,
+            ValueError,
+        ):
             if not self._pool_warned:
                 self._pool_warned = True
                 self.out("경고: 회원 목록을 다시 읽지 못했습니다. 이전 목록을 유지합니다.")
@@ -342,8 +357,14 @@ class BehaviorRunner:
             self.queue.push_front(entry)  # 다시 연결되면 이 항목부터 이어서 한다
             self.out(f"DB 연결 오류: {describe_db_error(error)}")
             self._open_with_retry(initial=False)
+        except StoreUnavailable as error:  # --backend api. ID가 고정이라 다시 보내도 중복 없음
+            self.queue.push_front(entry)
+            self.out(f"API 연결 오류: {error}")
+            self._open_with_retry(initial=False)
         except psycopg.Error as error:
             raise SafeDatabaseError(describe_db_error(error)) from None
+        except StoreRejected as error:
+            raise BehaviorError(str(error)) from None
 
     def _write(self, action: Callable[..., None], *args: object) -> None:
         """23505(PK/UNIQUE 위반)는 이미 반영된 것으로 본다 (끊기는 순간 커밋됐을 수 있다)."""
@@ -380,7 +401,17 @@ class BehaviorRunner:
 
     def _create_order(self, task: CreateOrderTask) -> None:
         plan = task.plan
-        self._write(self.orders.create_order, plan.order, plan.items)
+        try:
+            self._write(self.orders.create_order, plan.order, plan.items)
+        except MemberNotActive:
+            # 목록이 늦어 비활성 회원이 뽑혔다. 그 주문은 버리고 회원을 목록에서 뺀다
+            self.summary.orders_rejected += 1
+            assert self._ctx is not None
+            self._ctx.pool.discard(plan.order.member_id)
+            discard = getattr(self.members, "discard", None)
+            if discard is not None:
+                discard(plan.order.member_id)
+            return
         self.summary.orders += 1
         ref = OrderRef(plan.order.order_id, task.visit_no, plan.method, plan.order.total_amount)
         if plan.cancel_at is not None:
@@ -456,10 +487,16 @@ class BehaviorRunner:
         while True:
             try:
                 self.orders.connect()
-            except psycopg.Error as error:
-                if not isinstance(error, psycopg.OperationalError):
+            except (psycopg.Error, StoreUnavailable) as error:
+                if isinstance(error, psycopg.Error) and not isinstance(
+                    error, psycopg.OperationalError
+                ):
                     raise SafeDatabaseError(describe_db_error(error)) from None
-                self.out(f"DB 연결 실패: {describe_db_error(error)} — {delay}초 뒤 다시 시도")
+                if isinstance(error, psycopg.Error):
+                    reason = f"DB 연결 실패: {describe_db_error(error)}"
+                else:
+                    reason = f"API 연결 실패: {error}"
+                self.out(f"{reason} — {delay}초 뒤 다시 시도")
                 self._sleep_interruptible(delay)
                 if self._stop:
                     return False

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clothes-query-api
+description: 업무 API(WAS). 내부 ALB(HTTP 80) 뒤의 FastAPI Pod
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
