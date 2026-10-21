@@ -1,3 +1,7 @@
+workgroup_names = {
+  investigation = "clothes-query-dev-investigation"
+  detection     = "clothes-query-dev-detection"
+}
 results_prefixes = {
   investigation = "athena-results/investigation/"
   detection     = "athena-results/detection/"

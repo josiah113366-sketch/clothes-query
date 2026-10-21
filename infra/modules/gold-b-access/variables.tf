@@ -15,6 +15,21 @@ variable "aws_region" {
   }
 }
 variable "cluster_name" { type = string }
+variable "workgroup_names" {
+  type = map(string)
+  default = {
+    detection     = "clothes-query-dev-detection"
+    investigation = "clothes-query-dev-investigation"
+  }
+  validation {
+    condition = (
+      toset(keys(var.workgroup_names)) == toset(["detection", "investigation"]) &&
+      length(distinct(values(var.workgroup_names))) == 2 &&
+      alltrue([for n in values(var.workgroup_names) : n != "primary" && can(regex("^[a-zA-Z0-9._-]{1,128}$", n))])
+    )
+    error_message = "Supply distinct detection/investigation workgroup names; primary is reserved."
+  }
+}
 variable "s3_endpoint_actions" {
   type = set(string)
   validation {

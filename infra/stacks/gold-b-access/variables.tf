@@ -11,6 +11,7 @@ variable "state_bucket" {
   sensitive = true
 }
 variable "results_prefixes" { type = map(string) }
+variable "workgroup_names" { type = map(string) }
 variable "detection_write_prefixes" {
   type    = set(string)
   default = []

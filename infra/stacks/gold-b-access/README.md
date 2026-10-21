@@ -1,10 +1,11 @@
 # Gold B 접근 준비
 
-상태: 코드 준비, 실제 미적용. 기존 network/eks/storage state 이후 독립 key `clothes-query/dev/gold-b-access/terraform.tfstate`를 사용한다. 생성 후보는 workgroup 2개·역할 2개·inline policy 2개·Pod Identity association 2개다. 새 버킷·컴퓨팅·Glue DB/테이블·개발자 권한은 만들지 않는다.
+상태: 2026-10-21 사용자 요청으로 조회용 자원 실제 적용 완료. 기존 network/eks/storage state 이후 독립 key `clothes-query/dev/gold-b-access/terraform.tfstate`를 사용한다. 관리 자원은 workgroup 2개·역할 2개·inline policy 2개·Pod Identity association 2개다. 새 버킷·컴퓨팅·Glue DB/테이블·개발자 권한은 만들지 않는다. namespace/ServiceAccount/업무 Pod와 판정 업무 기록 쓰기는 아직 준비 대상이다.
 
 - `agent/detection-job` → `clothes-query-dev-detection-job`, workgroup `clothes-query-dev-detection`.
 - `agent/investigation-agent` → `clothes-query-dev-investigation-agent`, workgroup `clothes-query-dev-investigation`.
 - 기존 데이터 버킷의 `athena-results/detection/` 및 `athena-results/investigation/`를 강제하고 SSE-S3를 사용한다. prefix는 tfvars에서 나중에 변경할 수 있다. 변경해도 과거 결과 파일을 자동 이동/삭제하지 않는다.
+- 변경 입력은 `terraform.tfvars`의 `workgroup_names`, `results_prefixes`, `bytes_scanned_cutoff_per_query`다. 이름/경로를 바꾸면 대응하는 IAM 정책도 함께 갱신된다. workgroup 이름 변경은 기존 그룹의 단순 표시명 수정이 아니라 교체/신규 생성이 될 수 있으므로 매번 plan을 확인한다. 실행 코드의 workgroup 설정도 함께 맞춘다.
 - 우선 쿼리당 1GiB 제한이다. 월 예산·누적 비용 상한이 아니며 취소된 쿼리도 읽은 데이터에 요금이 발생할 수 있다. workgroup의 추가 CloudWatch 지표 게시를 끈다. S3 결과 저장·요청 및 Athena 조회는 실제 사용 시 과금된다.
 - 개발자는 운영 역할 trust에 포함하지 않는다. 기존 사용자 권한을 제한하는 변경이 아니다. 운영 역할에 접근 가능한 데이터/허용된 쿼리 결과로만 범위를 제한한다. 다른 주체가 정답표를 gold_b/에 복사하면 경로 차단만으로 내용의 유출을 막을 수는 없다.
 

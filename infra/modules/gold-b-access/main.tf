@@ -13,7 +13,7 @@ locals {
 
 resource "aws_athena_workgroup" "this" {
   for_each      = local.workloads
-  name          = "${var.name}-${each.key}"
+  name          = var.workgroup_names[each.key]
   description   = "Gold B ${each.key}: isolated S3 results and per-query scan limit"
   force_destroy = false
   state         = "ENABLED"
@@ -62,7 +62,7 @@ resource "aws_iam_role_policy" "this" {
         Sid      = "OwnWorkgroup"
         Effect   = "Allow"
         Action   = ["athena:GetWorkGroup", "athena:StartQueryExecution", "athena:StopQueryExecution", "athena:GetQueryExecution", "athena:BatchGetQueryExecution", "athena:GetQueryResults"]
-        Resource = ["arn:${data.aws_partition.current.partition}:athena:${var.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${var.name}-${each.key}"]
+        Resource = ["arn:${data.aws_partition.current.partition}:athena:${var.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${var.workgroup_names[each.key]}"]
       },
       {
         Sid      = "GoldBCatalogRead"

@@ -24,6 +24,7 @@ data "terraform_remote_state" "storage" {
 }
 module "gold_b_access" {
   source                         = "../../modules/gold-b-access"
+  workgroup_names                = var.workgroup_names
   cluster_name                   = data.terraform_remote_state.eks.outputs.cluster_name
   bucket_arn                     = data.terraform_remote_state.storage.outputs.bucket_arn
   s3_endpoint_actions            = data.terraform_remote_state.network.outputs.s3_endpoint_actions

@@ -102,3 +102,41 @@ run "reject_missing_endpoint_operation" {
   variables { s3_endpoint_actions = ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"] }
   expect_failures = [var.s3_endpoint_actions]
 }
+
+run "custom_query_settings_follow_through_to_policy" {
+  command = plan
+  module { source = "../modules/gold-b-access" }
+  variables {
+    workgroup_names = {
+      investigation = "test-investigation-v2"
+      detection     = "test-detection-v2"
+    }
+    results_prefixes = {
+      investigation = "query-results/investigation-v2/"
+      detection     = "query-results/detection-v2/"
+    }
+    bytes_scanned_cutoff_per_query = 536870912
+  }
+  assert {
+    condition = alltrue([for k, wg in aws_athena_workgroup.this :
+      wg.name == var.workgroup_names[k] &&
+      wg.configuration[0].bytes_scanned_cutoff_per_query == 536870912 &&
+      wg.configuration[0].result_configuration[0].output_location == "s3://test-gold-b-bucket/${var.results_prefixes[k]}" &&
+      jsondecode(aws_iam_role_policy.this[k].policy).Statement[0].Resource == ["arn:aws:athena:ap-northeast-1:000000000000:workgroup/${var.workgroup_names[k]}"] &&
+      jsondecode(aws_iam_role_policy.this[k].policy).Statement[3].Resource == ["arn:aws:s3:::test-gold-b-bucket/${var.results_prefixes[k]}*"]
+    ])
+    error_message = "Changing variables must update the workgroup, cutoff, results path and matching IAM policy together."
+  }
+}
+run "reject_shared_workgroup" {
+  command = plan
+  module { source = "../modules/gold-b-access" }
+  variables { workgroup_names = { investigation = "same", detection = "same" } }
+  expect_failures = [var.workgroup_names]
+}
+run "reject_primary_workgroup" {
+  command = plan
+  module { source = "../modules/gold-b-access" }
+  variables { workgroup_names = { investigation = "primary", detection = "test-detection" } }
+  expect_failures = [var.workgroup_names]
+}

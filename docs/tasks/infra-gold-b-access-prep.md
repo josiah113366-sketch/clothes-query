@@ -1,6 +1,6 @@
 # 작업 지시서: infra/gold-b-access-prep
 
-상태: EKS 실행·S3 결과 경로 확정, 코드·plan 검증 완료 / 실제 미적용
+상태: 조회용 자원 실제 적용 완료·검토 대기 / 판정 기록 쓰기·업무 실행 연결 후속
 
 ## 목표와 승인된 범위
 
@@ -50,6 +50,8 @@
 
 ## 구현 범위
 
+후속 사용자 결정: “응 이것도 일단 하고 나중에 수정할수있게 변수로 빼자” 요청에 따라 workgroup 이름도 독립 map 입력으로 노출하고, 이미 변수화된 결과 경로·스캔 상한과 함께 현재 확정한 조회용 자원을 실제 적용한다. 이 요청을 이번 신규8개 적용의 승인으로 처리한다. 기존 사용자/공통 그룹이나 미확정 업무 기록 쓰기는 변경하지 않는다.
+
 - 새 gold-b-access 모듈/스택에서 workgroup 2개, IAM 역할 2개, inline policy 2개, Pod Identity association 2개를 준비했다. 기존 workgroup/역할/동일 SA association이 없음을 사전 조회한다.
 - Glue DB gold_b 메타데이터와 S3 gold_b/ 읽기, 자기 결과 prefix 읽기·쓰기만 허용하며 ground_truth/ 객체와 해당 prefix 목록을 명시 Deny한다. trust는 클러스터/namespace/SA에 바인딩하고 개발자 신원을 포함하지 않는다.
 - 조회 결과 경로·SSE-S3·bucket owner·쿼리당 1GiB를 workgroup에서 강제한다. 추가 CloudWatch 지표 게시를 끈다. SQL 자체의 SELECT-only 기능이나 월 비용 상한이라고 주장하지 않는다.
@@ -64,5 +66,13 @@
 - 모듈/스택 fmt·스택 validate·기존 고정 AWS provider 6.68.0으로 mock 7개 통과. 두 역할/결과/workgroup 분리·신뢰 바인딩·정답표 Deny·기록 쓰기 opt-in, 중첩 결과 경로·금지 결과 경로·전체 gold_b 쓰기·너무 작은 스캔 상한·부족한 endpoint 권한 거부를 확인했다. 초기 PowerShell 직접 호출은 테스트 0개로 종료돼 검증으로 인정하지 않고 Python argv 호출로 실제 test summary 7 passed를 확인했다.
 - 실제 도쿄 plan은 신규8·수정0·삭제0이다. 기존 버킷·네트워크·EKS·Bronze Sink·개발자 그룹에는 변경이 없다. 판정 이력 쓰기 목록은 비어 있다. 실제 이름이 같은 역할/workgroup/association도 사전 조회에서 없었다.
 - 생성 예정 inline policy를 AWS IAM SimulateCustomPolicy에 전달해 S3 객체 읽기/버전 읽기/쓰기/삭제 40개, 자기·상대·primary workgroup 조회 시작 6개, S3 일반/버전 목록과 root/상대/정답표 prefix 20개, 총 66개 허용·거부 조합을 통과했다. CLI의 policy list 전달과 여러 resource의 결과 집계 구조를 수정해 검증을 완료했으며 정책 자체를 넓히지 않았다. 이는 실제 Pod 세션·버킷/Lake Formation/상위 정책·Athena 업무 조회 검증을 대신하지 않는다.
-- Git 제외 private input/backend/plan/시뮬레이션 요청에만 실제 계정/버킷/ARN을 저장한다. 실제 역할 ARN은 아직 생성되지 않았으므로 배포 완료 ARN으로 전달하지 않는다.
+- Git 제외 private input/backend/plan/시뮬레이션 요청에만 실제 계정/버킷/ARN을 저장한다. 초기 코드 검증 단계에서는 실제 역할이 없었으며 아래 후속 적용으로 생성했다.
 - 다음 입력은 판정이 쓰는 anomaly/detection_runs/reprocess_events의 최종 S3 prefix와 S3 직접 Parquet append 또는 Athena INSERT 등 저장 방식이다. 이후 namespace/ServiceAccount·Airflow·업무 이미지 배포와 실제 경로 허용/금지 검증을 연결한다.
+
+## 후속: 변수 노출과 실제 적용
+
+사용자의 후속 진행 요청으로 workgroup_names를 모듈과 스택에 노출했다. results_prefixes와 bytes_scanned_cutoff_per_query도 공용 tfvars에서 편집한다. 변수로 바꾼 이름·경로·한도가 IAM과 함께 갱신되는 검사, 같은 workgroup 이름/primary 거부를 추가해 mock 10개를 통과했다. 이름 변경은 리소스 교체일 수 있고 과거 결과는 자동 이관되지 않으므로 변경 때마다 plan과 실행 코드 설정을 대조한다.
+
+최신 origin/main 반영 확인 후 새 plan(생성8·수정0·삭제0), S3/Workgroup 시뮬레이션 46개 재검증을 거쳐 적용했다. 실제 두 workgroup의 ENABLED·쿼리당 1GiB·각각의 결과 경로 강제·SSE-S3·추가 CloudWatch 지표 비활성을 확인했다. IAM inline policy가 검토한 문서와 일치하고 각 역할 trust/Pod Identity association이 지정 namespace/ServiceAccount에 연결됨을 확인했다. 사후 plan 변경 없음이다.
+
+실제 Glue DB/table·namespace/ServiceAccount/Pod를 만들거나 업무 쿼리를 실행하지 않았다. 실제 Pod에서 Athena 조회/정답표 차단 성공까지 검증된 상태는 아니다. 판정 이력 쓰기는 빈 목록 그대로다. 개발자 개인/그룹 정책도 바꾸지 않았다. push·PR·승인·머지는 수행하지 않았다.
