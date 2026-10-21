@@ -11,9 +11,10 @@
   query(sql) -> 줄 목록(dict),  write(표 이름, 줄 목록) -> 새 줄 추가
 """
 import json
+import re
 from datetime import datetime, timedelta
 
-from rules import Config, r1_pg_failures, r3_bronze_lag, r4_malformed, r5_duplicate_success
+from rules import R6_RULE, Config, open_orders, r1_pg_failures, r3_bronze_lag, r4_malformed, r5_duplicate_success, r6_order_total
 
 STEP_MIN = 5     # 판정 주기 (제안)
 ACTOR = "detect_job"
@@ -61,6 +62,42 @@ WHERE step = 'LEDGER_REPLACED' AND "at" >= {_ts(tick - timedelta(minutes=STEP_MI
     return "".join(parts)
 
 
+_TABLE_NAME = re.compile(r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$")
+_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+
+def _to_dt(value):
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("T", " ")[:19])
+
+
+def _r6(query, cfg, run_id, now):
+    """R6: Silver 주문 총액 검사의 **최신 실행**만 읽는다(최신 상태 확인 방식). 설정된 표가 없으면 돌리지 않는다.
+    열려 있는 주문은 이전 R6 이상 줄의 근거에서 되살린다. 같은 실행을 다시 읽어도 새 줄이 생기지 않는다."""
+    table = cfg.silver_checks_table
+    if not table:
+        return []
+    if not _TABLE_NAME.match(table) or not _ID.match(cfg.r6_check_name):
+        raise ValueError("silver_checks_table 또는 r6_check_name 형식이 맞지 않습니다")
+    latest = query(f"""SELECT run_id, MAX(checked_at) AS checked_at FROM {table}
+WHERE check_name = '{cfg.r6_check_name}' GROUP BY run_id ORDER BY MAX(checked_at) DESC LIMIT 1""")
+    if not latest:
+        return []
+    silver_run = {"run_id": latest[0]["run_id"], "checked_at": _to_dt(latest[0]["checked_at"])}
+    if not _ID.match(str(silver_run["run_id"])):
+        raise ValueError("Silver 실행 번호 형식이 맞지 않습니다")
+    prior = query(f"SELECT evidence_ref FROM gold_b.anomaly WHERE rule_id = '{R6_RULE}' ORDER BY detected_at, run_id")
+    opened = open_orders([p["evidence_ref"] for p in prior])
+    base = f"FROM {table} WHERE run_id = '{silver_run['run_id']}' AND check_name = '{cfg.r6_check_name}'"
+    cols = "order_id, status, order_total_amount, item_total_amount, amount_difference, check_version, source_manifest"
+    mismatches = query(f"SELECT {cols} {base} AND status = 'MISMATCH'")
+    passes = []
+    ids = sorted(o for o in opened if _ID.match(str(o)))
+    for i in range(0, len(ids), 200):      # 열려 있는 주문 중 PASS가 된 것만 확인한다 (정상 주문 전체를 읽지 않는다)
+        chunk = ", ".join(f"'{o}'" for o in ids[i:i + 200])
+        passes += query(f"SELECT {cols} {base} AND status = 'PASS' AND order_id IN ({chunk})")
+    return r6_order_total(cfg, run_id, now, silver_run, mismatches, passes, opened)
+
+
 def judge(query, cfg: Config, tick: datetime, run_id: str, now: datetime, as_of=None, bounds=None):
     """tick 시점의 원장을 읽어 이상 줄 목록을 돌려준다 (쓰지는 않는다).
 
@@ -100,6 +137,8 @@ WHERE t.status = 'SUCCESS' AND t.order_id IN (SELECT order_id FROM gold_b.paymen
                                               WHERE status = 'SUCCESS' AND {_in(col, *w5, cfg)}{skip})
 GROUP BY t.order_id HAVING COUNT(*) > 1""")
     out += r5_duplicate_success(cfg, run_id, now, w5, dup)
+    if as_of is not None:   # R6: Silver 수동 배치 결과를 최신 상태로 읽는다. 재처리(Kafka에서 원장 재생성)와 무관해서 재판정에서는 빼고 비교에서도 뺀다
+        out += _r6(query, cfg, run_id, now)
     return out
 
 
@@ -109,16 +148,21 @@ def _run_record(run_id, kind, request_id, start, end, now, count):
             "judged_to": end.strftime(f), "started_at": now.strftime(f), "anomaly_count": count}
 
 
-def regular_run(query, write, cfg: Config, now: datetime):
-    tick = floor_tick(now)
+def regular_run(query, write, cfg: Config, now: datetime, tick: datetime = None):
+    """tick을 주면(Airflow의 논리 시각) 그 시각으로 순찰 번호를 만든다. 실패한 작업을 다시 돌려도 같은 번호가 되어 이중 저장이 안 생긴다."""
+    tick = floor_tick(tick or now)
     run_id = tick.strftime("%Y%m%dT%H%MZ")
     if query(f"SELECT run_id FROM gold_b.detection_runs WHERE run_id = '{run_id}'"):
         return {"run_id": run_id, "skipped": True}          # 같은 번호를 두 번 돌리지 않는다
     rows = judge(query, cfg, tick, run_id, now, as_of=tick)
+    # 이상 줄을 쓰고 순찰 기록을 쓰기 전에 멈췄다가 다시 도는 경우를 위해, 이 순찰 번호로 이미 쓴 줄은 다시 쓰지 않는다
+    total = len(rows)
+    done = {r["anomaly_id"] for r in query(f"SELECT anomaly_id FROM gold_b.anomaly WHERE run_id = '{run_id}'")}
+    rows = [r for r in rows if r["anomaly_id"] not in done]
     if rows:
         write("anomaly", rows)
-    write("detection_runs", [_run_record(run_id, "REGULAR", None, tick - timedelta(minutes=STEP_MIN), tick, now, len(rows))])
-    return {"run_id": run_id, "anomalies": len(rows)}
+    write("detection_runs", [_run_record(run_id, "REGULAR", None, tick - timedelta(minutes=STEP_MIN), tick, now, total)])
+    return {"run_id": run_id, "anomalies": total}
 
 
 def _event(request_id, step, now, ws, we, detail, cfg):
@@ -143,9 +187,10 @@ def redetect(query, write, cfg: Config, now: datetime, item):
     """교체된 시간대를 5분 간격으로 다시 훑어 판정하고, 이전 판정과 비교해 해결 여부를 기록한다."""
     rid, ws, we = item["request_id"], item["window_start"], item["window_end"]
     start, end = datetime.fromisoformat(str(ws)), datetime.fromisoformat(str(we))
-    run_id = f"{floor_tick(now):%Y%m%dT%H%MZ}-RD-{rid}-{start:%H%M}"
+    run_id = f"{start:%Y%m%dT%H%MZ}-RD-{rid}"     # 요청과 교체 구간으로 정해서, 실패한 작업을 다시 돌려도 같은 번호가 된다(이중 저장 방지)
     prior = query(f"""SELECT DISTINCT rule_id, scope_type, scope_key FROM gold_b.anomaly
-WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)} AND rule_id <> 'R3_BRONZE_LAG'""")   # 교체된 시간대와 겹치는 옛 판정 (R3는 재처리가 안 바꾸는 값이라 비교에서 뺀다)
+WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)} AND rule_id NOT IN ('R3_BRONZE_LAG', '{R6_RULE}')
+  AND run_id <> '{run_id}'""")   # 교체된 시간대와 겹치는 옛 판정 (R3, R6은 재처리가 안 바꾸는 값이라 비교에서 뺀다. 자기 번호의 줄도 뺀다)
     key = lambda r: (r["rule_id"], r["scope_type"], r["scope_key"])   # 규칙·대상이 같으면 같은 이상 (R5는 순찰·재판정의 시간 기준이 달라 id로 비교할 수 없다)
     prior_ids = {key(r) for r in prior}
     rows, tick = [], start + timedelta(minutes=STEP_MIN)
@@ -159,22 +204,25 @@ WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)} AND rule
         if r["anomaly_id"] not in seen:
             seen.add(r["anomaly_id"]); unique.append(r)
     new_ids = {key(r) for r in unique}
-    if unique:
-        write("anomaly", unique)
-    write("detection_runs", [_run_record(run_id, "REDETECT", rid, start, end, now, len(unique))])
+    done = {r["anomaly_id"] for r in query(f"SELECT anomaly_id FROM gold_b.anomaly WHERE run_id = '{run_id}'")}   # 앞선 시도가 이미 쓴 줄은 다시 쓰지 않는다
+    fresh = [r for r in unique if r["anomaly_id"] not in done]
+    if fresh:
+        write("anomaly", fresh)
+    if not query(f"SELECT run_id FROM gold_b.detection_runs WHERE run_id = '{run_id}'"):
+        write("detection_runs", [_run_record(run_id, "REDETECT", rid, start, end, now, len(unique))])
     remaining = prior_ids & new_ids
     result = "NO_ANOMALY_BEFORE" if not prior_ids else ("RESOLVED" if not remaining else "STILL_OPEN")
     detail = json.dumps({"before": len(prior_ids), "after": len(new_ids), "still_open": len(remaining), "result": result,
-                         "excluded_rules": ["R3_BRONZE_LAG"]})
+                         "excluded_rules": ["R3_BRONZE_LAG", R6_RULE]})
     write("reprocess_events", [_event(rid, "REDETECTED", now, str(ws), str(we), f"run_id={run_id}", cfg),
                                _event(rid, "VERIFIED", now, str(ws), str(we), detail, cfg)])
     return {"request_id": rid, "run_id": run_id, "result": result}
 
 
-def run_once(query, write, cfg: Config = None, now: datetime = None):
+def run_once(query, write, cfg: Config = None, now: datetime = None, tick: datetime = None):
     cfg = cfg or Config()
     now = now or datetime.utcnow()
-    summary = {"regular": regular_run(query, write, cfg, now), "redetected": []}
+    summary = {"regular": regular_run(query, write, cfg, now, tick), "redetected": []}
     for item in pending_replacements(query):
         summary["redetected"].append(redetect(query, write, cfg, now, item))
     return summary

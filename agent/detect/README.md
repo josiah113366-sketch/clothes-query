@@ -8,7 +8,7 @@
 
 1. **번호 붙이기**: 지금 시각을 5분 단위로 내려 순찰 번호(`run_id`, 예: `20261020T1510Z`)를 정한다. 이미 돈 번호면 건너뛴다.
 2. **장부 확인**: 원장과 정리 뷰를 읽는다.
-3. **규칙과 비교**: R1(PG 결제 실패), R3(Bronze 지연), R4(깨진 메시지), R5(한 주문에 성공 결제 2건)로 이상 여부를 본다.
+3. **규칙과 비교**: R1(PG 결제 실패), R3(Bronze 지연), R4(깨진 메시지), R5(한 주문에 성공 결제 2건), R6(Silver 주문 총액 불일치)로 이상 여부를 본다.
 4. **일지에 쓰기**: 이상이 있으면 이상 이력에 **새 줄로 쌓는다**(지우거나 덮지 않는다). 순찰을 돌았다는 기록(`detection_runs`)도 남긴다.
 5. **재처리 쪽지 확인**: 재처리 기록(`reprocess_events`)에 "교체 끝났는데 아직 재판정 안 한" 줄이 있으면 그 시간대를 다시 훑고, `REDETECTED`와 `VERIFIED`(해결됐나)를 적는다.
 
@@ -34,6 +34,11 @@
 | R5 한 주문에 성공 결제 2건 | `payment_attempts`에서 SUCCESS 결제가 2건 이상인 주문이 최근 5분 사이 적재된 줄에 1개 이상. 평소에는 0이어야 하는 값이라 비율 조건이 없다. 실패 뒤 재시도 성공은 SUCCESS가 1건이라 안 센다 |
 
 - R5는 **적재 시각(`loaded_at`)** 으로 최근 5분을 본다. 시뮬레이터 컨트롤러의 오염은 기존 성공 결제의 +2초 시각으로 새 행을 넣기 때문에 `completed_at`은 과거일 수 있다. 재처리 뒤 재판정에서만 결제 완료 시각(`completed_at`)으로 본다(교체된 줄의 적재 시각은 재처리 시각이라서).
+- **R6 주문 총액 불일치**는 Silver가 남기는 검사 결과(`status`가 `MISMATCH`)를 **최신 실행만** 읽는다(Silver 담당과 합의한 방식).
+  - 새로 불일치가 된 주문 → 이상 줄(`OPEN`). 이미 열려 있는 주문이 계속 불일치 → **지속**(새 줄 없음). 열려 있던 주문이 `PASS` → **해소 줄**(`RESOLVED`).
+  - 결과에서 주문이 사라졌거나 `UNVERIFIED`·`PENDING_REFERENCE`·`ITEM_ERROR`이면 **해소로 보지 않는다.**
+  - 열려 있는 주문은 이전 R6 이상 줄의 `evidence_ref`(`new_orders`, `resolved_orders`)에서 되살린다. 근거에는 Silver 실행 번호, 검사 버전, 실행 참조, 주문 번호(최대 500), 금액 차이를 싣는다(에이전트가 이상 이력만 읽어도 근거를 볼 수 있게).
+  - `Config.silver_checks_table`이 비어 있으면(기본) 돌리지 않는다. **표 위치와 이름은 Silver·인프라 담당과 확정 전**이다. 재판정(재처리 뒤 비교)에서는 R3처럼 뺀다(재처리와 무관한 값).
 - R1·R4는 비율 조건이 있어 **구간이 끝난 지 3분 지난 것만** 본다(Gold B 문서).
 - 근거 시험은 `agent/prototype`(PR #14)에 있다.
 
@@ -51,9 +56,36 @@ python3 test_job.py     # sqlite 가짜 원장으로 순찰을 직접 돌려 시
 - `query(sql)`: SQL을 실행해 줄 목록(dict)을 돌려준다
 - `write(표 이름, 줄 목록)`: 새 줄을 추가한다. **시각 컬럼은 문자열 `YYYY-MM-DD HH:MM:SS`(UTC)로 넘어온다.** Gold B가 이 컬럼을 TIMESTAMP로 정의하므로 실제 `write`는 시각 타입으로 바꿔서 써야 한다(시험이 문자열 형식을 확인한다)
 
+## Athena 연결과 실행 (제안, 진짜 Athena에서는 아직 안 돌려 봤다)
+
+| 하는 일 | 코드 |
+|---|---|
+| `query(sql)`: Athena에 쿼리를 보내고 끝날 때까지 기다려 결과를 타입에 맞게 돌려줌 | `athena_io.py`의 `AthenaIO.query()` |
+| `write(표, 줄)`: Athena `INSERT INTO`로 새 줄 추가. 표 3개(`anomaly`, `detection_runs`, `reprocess_events`)만 허용 | `athena_io.py`의 `AthenaIO.write()`, 표 정의 `TABLE_SPECS` |
+| 5분마다 한 번 실행하는 진입점 | `run_job.py` |
+| 컨테이너 이미지 | `Dockerfile`, `requirements.txt` |
+
+실행: `ATHENA_WORKGROUP=<판정용 workgroup> python run_job.py` (선택 `ATHENA_DATABASE`, 기본 `gold_b`). 비밀값은 없다. AWS 권한은 Pod의 ServiceAccount에 연결된 역할이 준다. 결과 저장 위치는 workgroup 설정이 정한다.
+
+**판정 잡 역할에 필요한 권한** (인프라 담당 확인용, 계정 번호나 ARN은 이 문서에 적지 않는다)
+- Athena: 판정용 workgroup에 쿼리 시작·상태 확인·결과 읽기·중지
+- Glue: 데이터베이스 `gold_b`의 표 정보 읽기 (원장, 뷰, `anomaly`, `detection_runs`, `reprocess_events`)
+- S3 읽기: `gold_b/` 전체. S3 쓰기: **`gold_b/anomaly/`, `gold_b/detection_runs/`, `gold_b/reprocess_events/`만**
+- S3: 판정용 조회 결과 폴더(`athena-results/detection/`) 읽기·쓰기
+- `ground_truth/`는 접근 금지(이미 차단됨)
+
+**표 정의와 쓰기 방식은 Gold B 담당과 확정 전이다 (제안)**
+- 쓰기는 `INSERT INTO ... VALUES`로 한다(시각을 `TIMESTAMP`로 안전하게 넣기 위해). 5분마다 작은 파일이 생기는 점이 단점이다. S3에 Parquet를 직접 쓰는 방법도 있다.
+- 세 표를 Gold B 원장처럼 **시간 폴더(`dt`, `hour` 파티션)**로 쌓는다고 가정했다. 기준 시각은 `anomaly`는 `detected_at`, `detection_runs`는 `started_at`, `reprocess_events`는 `at`이다. 실제 표 정의가 다르면 `TABLE_SPECS`만 고친다.
+- `reprocess_events`는 승인 화면(`REQUESTED`, `APPROVED`), 재처리 잡(`STARTED`, `LEDGER_REPLACED`, `FAILED`)과 이 잡(`REDETECTED`, `VERIFIED`)이 함께 쓴다. 이 잡은 자기 줄만 쓴다.
+- **저장 도중 실패해서 다시 돌려도 이중 저장이 없다**(재영 님 리뷰). ① 이상 줄은 같은 순찰 번호·이상 번호로 이미 있으면 다시 쓰지 않는다. ② 순찰 기록은 이미 있으면 다시 쓰지 않는다. ③ 순찰 기록의 이상 개수는 처음 판정한 개수 그대로다. ④ 재판정의 순찰 번호는 요청과 교체 구간으로 정해서(`<구간 시작>-RD-<요청 번호>`) 몇 시간 뒤 재시도해도 같은 번호가 된다. ⑤ 재판정이 옛 이상을 찾을 때 자기 번호의 줄은 제외한다(이전 시도가 쓴 줄을 옛 이상으로 착각하지 않게).
+- 정기 순찰의 번호는 시각으로 만들므로, **Airflow가 논리 시각(`data_interval_end`)을 환경 변수 `JUDGE_TICK`으로 넘기면** 몇 분 뒤 재시도해도 같은 번호가 된다. 안 넘기면 현재 시각을 5분 단위로 내려 쓴다(같은 5분 안의 재시도만 안전).
+
 ## 알아야 할 것 (한계)
 
-- **Athena에서는 아직 실행하지 않았다.** sqlite 가짜 원장으로만 시험했다. 실제 `query`, `write` 연결(Athena 읽기, S3 Parquet 쓰기)은 아직 없다.
+- **R6**: Silver 결과는 아직 로컬 파일이고 Athena 표·정기 실행이 없다(현지 님 제공안). 표 이름과 컬럼은 제공안을 가정했고 시험은 가짜 표로만 했다. `MISMATCH` 줄이 많아 근거에 못 담는 주문(500개 초과)은 열려 있는 주문으로 추적되지 않아 다음 실행에서 다시 새 불일치로 셀 수 있다. 상태값 `RESOLVED`는 이 표의 `status`에 새로 쓰는 값이라 설계 문서의 `status` 값 목록(`OPEN`/`INVESTIGATING`/`REPORTED`)에 추가가 필요하다(제안). Silver가 수동 실행이라 채점(`agent/eval`)에서는 이 사건을 당분간 "규칙 없음"으로 둔다.
+
+- **진짜 Athena에서는 아직 실행하지 않았다.** sqlite 가짜 원장과 가짜 Athena 클라이언트로만 시험했다. 연결 코드(`athena_io.py`)는 있지만, 표가 Athena에 올라온 뒤 실제 쿼리 문법(예: `"at"` 컬럼 인용, 시각 비교)과 `INSERT`를 확인해야 한다.
 - **5분마다 실행하는 일**(Airflow 작업)은 만들지 않았다. 인프라 담당과 정해야 한다.
 - **재처리 뒤 재판정 방식은 Gold B 담당과 정리됐다.** 재처리 작업은 판정을 직접 부르지 않고, 이 잡이 5분마다 `reprocess_events`의 `LEDGER_REPLACED` 줄을 읽어 재판정한다(Gold B 문서 2026-10-19). 이 코드의 `pending_replacements()`와 `redetect()`가 그 일이다. 재판정은 **교체 구간의 끝까지(비율 규칙의 3분 대기를 포함해 한 번 더) 훑고**, 재처리가 다시 만들지 않는 **R3(Bronze 지연)는 비교에서 뺀다**(`VERIFIED`의 `detail`에 `excluded_rules`로 적는다). 교체 때 다시 적재된 줄은 R5 순찰이 새 중복으로 세지 않는다(`_replaced_filter`).
 - **`detection_runs`(순찰 기록 표)**는 Gold B 문서(2026-10-19)에 `anomaly`와 함께 `gold_b/` 안의 내 표로 적혀 있다. 컬럼 정의는 내가 한다(`job.py`의 `_run_record`).
