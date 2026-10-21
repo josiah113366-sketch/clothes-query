@@ -68,7 +68,7 @@ gitGraph
   checkout main
   merge sim/cdc-orders
   branch pipelines/silver
-  commit id: "silver(pipelines)"
+  commit id: "pipelines(silver)"
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
