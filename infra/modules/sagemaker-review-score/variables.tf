@@ -1,0 +1,136 @@
+# 입력 변수. 스택(stacks/sagemaker-review-score)이 값을 넘긴다.
+# 계정 ID·버킷 이름 같은 비공개 값은 이 파일에 기본값으로 두지 않는다(공개 저장소). 스택이 remote state 에서 받아 넘긴다.
+
+variable "name" {
+  description = "리소스 이름 접두사. 팀 규칙: clothes-query-<환경>-<용도>."
+  type        = string
+  default     = "clothes-query-dev-sagemaker-review-score"
+}
+
+variable "component" {
+  description = "비용 할당 태그 Component 값. 예산 필터와, 스크립트가 만드는 Processing Job 의 태그가 같아야 한다."
+  type        = string
+  default     = "sagemaker-review-score"
+}
+
+variable "region" {
+  description = "리전. 팀 기준은 도쿄(ap-northeast-1)."
+  type        = string
+  default     = "ap-northeast-1"
+}
+
+# ------------------------------------------------------------------ 네트워크 (network 스택 output)
+
+variable "use_vpc" {
+  description = <<-EOT
+    true 면 Processing Job 을 VPC(app subnet)에서 실행한다. NAT 를 통해 pip install(PyPI)과 ECR 이미지 받기를 하고,
+    S3 는 Gateway Endpoint 를 탄다. false 면 SageMaker 관리 네트워크(인터넷 직접)로 실행하며 SG·ENI 권한이 필요 없다.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "vpc_id" {
+  description = "network 스택 output vpc_id. use_vpc=false 여도 값은 받되 쓰지 않는다."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "network 스택 output app_subnet_ids. 스크립트가 NetworkConfig 에 넣는다(SSM 설정에 담김)."
+  type        = list(string)
+}
+
+# ------------------------------------------------------------------ S3 (storage 스택 output)
+
+variable "bucket_name" {
+  description = "팀 데이터 버킷 이름(storage 스택 output). 민감 값이라 코드에 쓰지 않는다."
+  type        = string
+}
+
+variable "bucket_arn" {
+  description = "팀 데이터 버킷 ARN(storage 스택 output)."
+  type        = string
+}
+
+variable "review_input_prefix" {
+  description = <<-EOT
+    점수화할 리뷰가 있는 prefix. 리뷰 시뮬레이터가 <이 값>/year=yyyy/month=mm/day=dd/ 파티션으로 쓴다.
+    역할은 이 아래 읽기만 한다. 정답 라벨(reviews_truth)·ground_truth·gold_b 는 일부러 권한을 주지 않는다.
+  EOT
+  type        = string
+  default     = "bronze/reviews"
+}
+
+variable "work_prefix" {
+  description = <<-EOT
+    모델·코드를 두는 작업 영역 prefix. 아래 두 곳을 쓴다(둘 다 역할은 읽기만).
+      <work_prefix>/model/ : 합친 모델(upload_model.py 로 올림)
+      <work_prefix>/code/  : score_batch.py
+  EOT
+  type        = string
+  default     = "review-score"
+}
+
+variable "output_prefix" {
+  description = "점수 결과 CSV(review_id,aspect,score)를 쓰는 prefix. 역할은 쓰기만. 2026-10-21 결정: silver/review-score/output"
+  type        = string
+  default     = "silver/review-score/output"
+}
+
+variable "error_prefix" {
+  description = "오류가 난 건/실패 요약을 쓰는 prefix. 역할은 쓰기만. 2026-10-21 결정: silver/review-score/error"
+  type        = string
+  default     = "silver/review-score/error"
+}
+
+# ------------------------------------------------------------------ 컨테이너 이미지 (AWS 공개 Deep Learning Container)
+
+variable "dlc_registry_account_id" {
+  description = "AWS 가 운영하는 Deep Learning Container ECR 의 계정 ID(도쿄 포함 공개 값, 우리 계정이 아님)."
+  type        = string
+  default     = "763104351884"
+}
+
+variable "dlc_repository" {
+  description = "DLC 저장소 이름."
+  type        = string
+  default     = "pytorch-training"
+}
+
+variable "dlc_image_tag" {
+  description = "DLC 이미지 태그. 개인 계정 실측(1,000건 약 27분)에 쓴 것과 같다. 바꾸면 transformers 호환을 다시 확인한다."
+  type        = string
+  default     = "2.5.1-gpu-py311-cu124-ubuntu22.04-sagemaker"
+}
+
+# ------------------------------------------------------------------ 실행 옵션 (스크립트가 SSM 설정에서 읽는 기본값)
+
+variable "instance_type" {
+  description = "Processing Job 인스턴스. ml.g4dn.xlarge 는 시간당 약 0.994 USD(실측 기준, 1,000건 약 27분 ≒ 0.46 USD)."
+  type        = string
+  default     = "ml.g4dn.xlarge"
+}
+
+variable "volume_size_gb" {
+  description = "인스턴스 EBS 크기(GB). 합친 모델 다운로드 + pip 설치분을 담는다."
+  type        = number
+  default     = 50
+}
+
+variable "max_runtime_seconds" {
+  description = "비용 안전장치. 이 시간이 지나면 SageMaker 가 작업을 중단한다(StoppingCondition). IAM 으로는 강제할 수 없어 스크립트가 지킨다."
+  type        = number
+  default     = 3600
+}
+
+variable "job_name_prefix" {
+  description = "Processing Job 이름 접두사. 실패 알림 규칙이 이 접두사로 이 작업만 골라낸다. 기존 run_processing_job.py 는 review-score-<시각> 을 쓴다."
+  type        = string
+  default     = "review-score"
+}
+
+variable "config_parameter_name" {
+  description = "스크립트가 읽는 SSM 파라미터 이름. 다른 스택과 겹치지 않게 스택 이름을 넣는다."
+  type        = string
+  default     = "/clothes-query/dev/sagemaker-review-score/config"
+}

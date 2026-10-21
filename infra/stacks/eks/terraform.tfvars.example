@@ -7,4 +7,7 @@ admin_trusted_principal_arns = ["REPLACE_WITH_APPROVED_USER_OR_ROLE_ARN"]
 # Optional extra existing administrator roles; usually leave empty.
 admin_role_arns = []
 public_access_cidrs = ["REPLACE_WITH_ADMIN_PC_PUBLIC_IPV4/32"]
-# Add each approved team network here; do not use /0.
+# Preserve approved team networks here; do not replace this list with /0.
+# Temporary development only: true opens the EKS public API to all IPv4.
+# Set false and apply to restore public_access_cidrs. This does not change IAM/RBAC.
+allow_public_api_from_anywhere = false

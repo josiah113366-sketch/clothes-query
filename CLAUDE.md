@@ -7,6 +7,7 @@
 | `infra/` | `infra/CLAUDE.md` |
 | `simulator/` | `simulator/CLAUDE.md` |
 | `review-simulator/` | `review-simulator/CLAUDE.md` |
+| `api/` | `api/CLAUDE.md` |
 | `db/`, `connectors/`, `docs/` | 별도 규칙 없음. 이 문서와 해당 폴더의 `README.md`를 따른다 |
 
 ## 프로젝트 한눈에

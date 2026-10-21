@@ -33,6 +33,9 @@ WHERE kafka_timestamp >= :a AND kafka_timestamp < :b"""
 Q2b = "SELECT COUNT(*) - COUNT(DISTINCT payment_id) FROM payment_events WHERE completed_at >= :a AND completed_at < :b"
 
 def stopped(last_seen, now, limit=120):
+    """Q3의 CASE 식과 같은 기준 (표가 비어 마지막 시각이 없으면 OK가 아니라 NO_DATA)"""
+    if last_seen is None:
+        return "NO_DATA"
     return "STOPPED" if (now - last_seen).total_seconds() > limit else "OK"
 
 rng = random.Random(1)
@@ -55,5 +58,10 @@ check("Q2 결제 중복 4 찾음", con.execute(Q2b, dict(a=a, b=b)).fetchone()[0
 now = datetime(2026, 10, 20, 9, 0, 0)
 check("Q3 1분 전까지 썼으면 OK", stopped(now - timedelta(seconds=60), now), "OK")
 check("Q3 3분 전에 멈췄으면 STOPPED", stopped(now - timedelta(seconds=180), now), "STOPPED")
+check("Q3 표가 비어 마지막 시각이 없으면 OK가 아니라 NO_DATA", stopped(None, now), "NO_DATA")
+Q1B = "SELECT topic, kafka_partition, COUNT(*) FROM topic_messages WHERE kafka_timestamp >= :a AND kafka_timestamp < :b GROUP BY topic, kafka_partition"
+check("Q1b 메시지가 있는 파티션 목록 (파티션 0, 1)", [r[:2] for r in build(rng).execute(Q1B, dict(a=a, b=b)).fetchall()], [("orders", 0), ("orders", 1)])
+con = build(rng); con.execute("delete from topic_messages where kafka_offset < 20 or kafka_offset > 280")   # 구간 맨 앞·맨 뒤가 통째로 빠진 경우
+check("한계 확인: 맨 앞·맨 뒤가 빠져도 Q1은 0줄이다 (그래서 0줄이 전체 완전성을 뜻하지 않는다)", con.execute(Q1, dict(a=a, b=b)).fetchall(), [])
 check("Q3 정확히 120초는 OK(2분 넘게 멈추면 고장)", stopped(now - timedelta(seconds=120), now), "OK")
 print("전체:", "모두 통과" if ok else "실패 있음")
