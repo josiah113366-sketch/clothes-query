@@ -64,10 +64,10 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - [x] `terraform fmt -check -recursive` (스택·모듈)
 - [x] `terraform init -backend=false` 후 `terraform validate`
 - [x] `terraform plan` → 첫 plan 은 9 create, 0 change, 0 destroy
-- [ ] GPU 쿼터 조회 명령 실행 결과가 1 이상 (또는 증설 승인) ← 2026-10-21 증설 요청 필요, 승인 대기 중
-- [ ] apply 후 `terraform plan` 이 변경 없음
-- [ ] apply 후 SSM 파라미터 JSON 에 `role_arn`·`network`·`output_prefix`·`error_prefix` 가 있고, 계정 ID·버킷 이름이 저장소 파일에는 없음 (`git grep`)
-- [ ] (후속 PR 이후) 100건 입력으로 Job 1회 실행 → `silver/review-score/output/` 에 CSV, 실패 건은 `error/` 에 기록
+- [x] GPU 쿼터 조회 명령 실행 결과가 1 이상 (또는 증설 승인) ← 2026-10-21 강사님께 증설 요청하여 확인
+- [x] apply 후 `terraform plan` 이 변경 없음
+- [x] apply 후 SSM 파라미터 JSON 에 `role_arn`·`network`·`output_prefix`·`error_prefix` 가 있고, 계정 ID·버킷 이름이 저장소 파일에는 없음 (`git grep`)
+- [x] (후속 PR 이후) 100건 입력으로 Job 1회 실행 → `silver/review-score/output/` 에 CSV, 실패 건은 `error/` 에 기록
 
 ## README 갱신
 
