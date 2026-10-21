@@ -358,6 +358,8 @@ class KafkaReader:
         if not wanted:
             return messages
         self._consumer.assign([TopicPartition(t, p, start) for (t, p), (start, _) in wanted.items()])
+        # 앞선 read()에서 다 읽고 멈춰 둔 파티션은 다시 assign해도 멈춘 채라서 푼다 (같은 연결로 폴더를 차례로 읽을 때)
+        self._consumer.resume([TopicPartition(t, p) for (t, p) in wanted])
         remaining = set(wanted)
         deadline = time.monotonic() + self._timeout
 
