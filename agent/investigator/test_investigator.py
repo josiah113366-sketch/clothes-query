@@ -142,5 +142,17 @@ check("추정이라도 부르지 않은 도구를 근거로 대면 거절", r["t
 conv, calls = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **REPORT)])
 investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("지시문과 제출 도구 정의에 사실/추정 구분이 들어 있음", ("ASSUMPTION" in calls[0]["system"], "ASSUMPTION" in str(SUBMIT_REPORT_SPEC)), (True, True))
+
+# --- 재영 님 리뷰: 조회와 제출을 한 응답에 같이 요청하면 제출은 받지 않는다 ---
+conv, calls = script([use(1, "payment_summary", **W), use(2, "submit_report", **REPORT)], [use(3, "submit_report", **REPORT)])
+r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
+check("조회와 같은 응답에서 낸 제출은 거절하고, 조회 결과를 받은 다음 응답의 제출만 받음", ([t["status"] for t in r["trace"]], "problems" in r, len(calls)), (["ok", "rejected"], False, 2))
+check("거절 이유와 조회 결과가 함께 모델에 전달됨", ("다음 응답" in str(calls[1]["messages"][-1]), "toolResult" in str(calls[1]["messages"][-1])), (True, True))
+conv, calls = script(*[[use(i, "payment_summary", **W), use(i + 100, "submit_report", **REPORT)] for i in range(5)])
+r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW, max_turns=4, max_revisions=0)
+check("같은 응답 제출을 계속 반복하면 되돌림 한도가 0이어도 받지 않고 UNKNOWN 리포트", (r["cause_layer"], len([t for t in r["trace"] if t["status"] == "rejected"])), ("UNKNOWN", 4))
+conv, calls = script([use(1, "submit_report", **REPORT)], [use(2, "payment_summary", **W)], [use(3, "submit_report", **REPORT)])
+r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
+check("조회 없이 먼저 낸 제출은 부르지 않은 도구를 근거로 댔으니 거절 (다음 응답에서 조회 뒤 통과)", [t["status"] for t in r["trace"]], ["rejected", "ok"])
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

@@ -46,9 +46,15 @@ def investigate(anomaly: dict, converse, execute, dialect="athena", now: datetim
             messages.append({"role": "user", "content": [{"text": "조회 도구로 확인한 뒤 submit_report로 제출해 줘."}]})
             continue
         results = []
+        mixed = any(u["name"] != "submit_report" for u in uses)    # 조회와 제출을 한 응답에 같이 요청했나
         for use in uses:
             name, args = use["name"], use.get("input") or {}
             if name == "submit_report":
+                if mixed:    # 모델은 아직 이번 조회 결과를 못 봤다. 결과를 전달한 다음 응답부터 제출할 수 있다 (한도에 걸려도 받지 않는다)
+                    msg = "조회와 같은 응답에서는 리포트를 제출할 수 없습니다. 조회 결과를 확인한 다음 응답에서 submit_report를 부르세요."
+                    trace.append({"tool": name, "status": "rejected", "problems": [msg]})
+                    results.append(_result(use["toolUseId"], {"problems": [msg]}, error=True))
+                    continue
                 problems = check_report(args, called)
                 if not problems or revisions >= max_revisions:
                     report = build_report(anomaly.get("anomaly_id"), args, problems)
