@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("pyarrow")
 
 from pipelines.gold_b.jobs.streaming_ingest import (CONFIG_PATH, Config, ConfigError, Settings,  # noqa: E402
-                                                    kafka_options, load_config, write_batch)
+                                                    kafka_options, load_config, topic_pattern, write_batch)
 from pipelines.gold_b.ledger import EVENT_TIME, LocalStore, hour_of  # noqa: E402
 from test_reprocess import SampleChecker, comparable, sample_messages, streamed_rows  # noqa: E402
 
@@ -67,10 +67,18 @@ def test_settings_and_kafka_options():
                                   "KAFKA_BOOTSTRAP": "broker-x:9092"})
     assert "bucket-x" not in repr(settings) and "broker-x" not in repr(settings)
     options = kafka_options(settings, Config(topics=("payments", "clickstream")))
-    assert options["subscribe"] == "payments,clickstream"
+    assert options["subscribePattern"] == r"^(payments|clickstream)$"
+    assert "subscribe" not in options   # 이름 목록으로 받으면 없는 토픽 하나에 쿼리가 실패한다
     assert (options["startingOffsets"], options["failOnDataLoss"], options["kafka.allow.auto.create.topics"]) == (
         "earliest", "false", "false")
     assert not any(key.startswith("kafka.ssl.") for key in options)
+
+
+def test_topic_pattern_matches_only_exact_names():
+    import re
+    pattern = re.compile(topic_pattern(("order-items", "reviews.raw")))
+    assert [n for n in ("order-items", "reviews.raw", "reviewsXraw", "order-items-dlq") if pattern.match(n)] == [
+        "order-items", "reviews.raw"]
 
 
 def test_config_file():

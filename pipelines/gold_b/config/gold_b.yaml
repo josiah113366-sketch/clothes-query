@@ -2,7 +2,7 @@
 # 주소·버킷 이름은 여기에 넣지 않는다. 원장 저장 위치·체크포인트·Kafka 주소는 환경변수로 받는다 (jobs/README.md).
 # PG 같은 허용 값은 공통 규칙표(docs/contracts/format_rules.yaml)에 있다.
 
-# 읽을 Kafka 토픽 (설계: 6개 토픽). Kafka에 없는 토픽은 읽지 않고 새로 만들지도 않는다.
+# 읽을 Kafka 토픽 (설계: 6개 토픽). Kafka에 없는 토픽은 새로 만들지 않고, 나중에 생기면 그때부터 읽는다.
 topics:
   - payments
   - orders

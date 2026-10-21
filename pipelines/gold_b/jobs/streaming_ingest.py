@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Callable, Mapping, Sequence
 
 from pipelines.gold_b.ledger import (EVENT_TIME, Checker, KafkaMessage, Store, hour_folder, hour_of,
@@ -117,13 +118,20 @@ def write_batch(messages: Sequence[KafkaMessage], *, checker: Checker, store: St
 
 # ---------- Spark 연결 ----------
 
+def topic_pattern(topics: Sequence[str]) -> str:
+    """토픽 이름과 정확히 같은 것만 맞는 정규식 (Kafka 클라이언트의 Java 정규식)."""
+    return "^(" + "|".join(re.escape(topic) for topic in topics) + ")$"
+
+
 def kafka_options(settings: Settings, config: Config) -> dict[str, str]:
     """Spark Kafka 소스 옵션."""
     options = {
         "kafka.bootstrap.servers": settings.bootstrap,
         "kafka.security.protocol": settings.security_protocol,
         "kafka.allow.auto.create.topics": "false",       # 없는 토픽을 새로 만들지 않는다
-        "subscribe": ",".join(config.topics),
+        # 토픽 이름 목록(subscribe)으로 받으면 Kafka에 없는 토픽이 하나만 있어도 쿼리가 실패한다 (로컬 Spark 4.1.3에서 확인).
+        # 이름과 정확히 같은 패턴으로 받으면 있는 토픽만 읽고, 나중에 생긴 토픽은 그때부터 읽는다
+        "subscribePattern": topic_pattern(config.topics),
         "startingOffsets": config.starting_offsets,
         "maxOffsetsPerTrigger": str(config.max_offsets_per_trigger),
         # 보관 기간(3일)보다 오래 멈춰 메시지가 지워졌어도 멈추지 않고 남은 것부터 읽는다.
