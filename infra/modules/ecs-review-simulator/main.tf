@@ -4,6 +4,7 @@
 #   - ECR 저장소 1개 (이미지는 review-simulator/deploy/deploy.py 가 빌드해서 올린다)
 #   - ECS 클러스터, 태스크용 보안 그룹, IAM 역할 3개(태스크 실행 / 태스크 / 스케줄러)
 #   - Bedrock API 키를 담을 Secrets Manager secret (값은 deploy/secret.py 가 넣는다. Terraform 에 값을 두지 않는다)
+#   - RDS 접속 주소(ORDERS_DATABASE_URL)를 담을 secret + RDS(5432)로 나가는 보안 그룹 규칙 (2026-10-21, --source rds)
 #   - 하루 1번 실행 스케줄 (EventBridge Scheduler). 2026-10-18 lemin: 계속 실행은 보류 → 꺼진(DISABLED) 상태로 만든다
 #   - 관제: 앱 로그, 태스크 종료 기록 로그, 오류 지표, CloudWatch 대시보드, (선택) 이메일 알림·예산 알림
 #   - 스크립트가 읽을 설정 묶음 (SSM Parameter Store, JSON 한 개)
@@ -11,7 +12,9 @@
 # 만들지 않는 것
 #   - 태스크 정의: 이미지 태그·실행 옵션(REVIEW_RATE 등)이 자주 바뀌어서 deploy/switch 스크립트가 새 리비전을 등록한다.
 #     Terraform 이 태스크 정의를 들고 있으면 스크립트가 바꾼 값을 다음 apply 가 되돌린다.
-#   - RDS 접근: 다음 브랜치(sim/review-transaction-import)에서 RDS 담당과 security_group_id 로 연결한다.
+#   - RDS 쪽 허용(들어오는 규칙): RDS 스택 담당이 infra/stacks/rds 의 database_clients 에 이 모듈의
+#     security_group_id 출력을 넣고 apply 한다. 이 모듈은 나가는 쪽(5432)만 연다.
+#   - RDS 읽기 전용 DB 계정: DB 안에서 SQL 로 만든다(review-simulator/deploy/README.md "RDS 주문 읽기").
 
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
@@ -78,7 +81,8 @@ resource "aws_ecs_cluster" "this" {
 
 # ------------------------------------------------------------------ 보안 그룹
 # 들어오는 연결은 없다. 나가는 연결은 HTTPS(Bedrock·ECR·Secrets Manager·CloudWatch Logs, S3 는 Gateway Endpoint)만 연다.
-# 다음 브랜치에서 RDS 에 붙을 때 RDS 담당이 이 보안 그룹 ID 를 database_clients 에 넣는다.
+# RDS(PostgreSQL 5432)로 나가는 연결도 연다(2026-10-21, --source rds). 대상은 VPC 안쪽 주소로만 제한한다.
+# RDS 쪽에서는 RDS 담당이 이 보안 그룹 ID 를 database_clients 에 넣어야 실제로 연결된다.
 resource "aws_security_group" "task" {
   name        = "${var.name}-task"
   description = "review-simulator Fargate task (egress HTTPS only)"
@@ -96,6 +100,20 @@ resource "aws_vpc_security_group_egress_rule" "https" {
 
 # ------------------------------------------------------------------ Secret (Bedrock API 키)
 # 값은 넣지 않는다. deploy/secret.py 가 PutSecretValue 로 넣고, 태스크 정의가 환경변수 AWS_BEARER_TOKEN_BEDROCK 로 주입한다.
+# RDS 가 있는 VPC 의 주소 범위. 5432 나가는 규칙을 VPC 안으로만 열 때 쓴다
+data "aws_vpc" "this" {
+  id = var.vpc_id
+}
+
+resource "aws_vpc_security_group_egress_rule" "postgres" {
+  security_group_id = aws_security_group.task.id
+  description       = "PostgreSQL to RDS in the same VPC (orders read, --source rds)"
+  ip_protocol       = "tcp"
+  from_port         = 5432
+  to_port           = 5432
+  cidr_ipv4         = data.aws_vpc.this.cidr_block
+}
+
 resource "aws_secretsmanager_secret" "bedrock_api_key" {
   name                    = "${var.name}/bedrock-api-key"
   description             = "Bedrock API key for review-simulator (value set by deploy/secret.py)"
@@ -140,11 +158,23 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
   policy_arn = "arn:${local.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# 태스크 시작 때 Bedrock API 키 secret 하나만 읽는다
+# 태스크 시작 때 secret 두 개(Bedrock API 키, RDS 접속 주소)만 읽는다
+# ------------------------------------------------------------------ Secret (RDS 접속 주소)
+# 값(postgresql://읽기전용계정:비밀번호@RDS주소:5432/DB)은 넣지 않는다. deploy/secret.py --orders-db 가 넣는다.
+# 태스크 정의는 ORDERS_SOURCE=rds 일 때만 이 secret 을 ORDERS_DATABASE_URL 로 주입한다(값이 비어 있으면 태스크가 시작을 못 하므로).
+resource "aws_secretsmanager_secret" "orders_database_url" {
+  name                    = "${var.name}/orders-database-url"
+  description             = "RDS read-only connection URL for review-simulator --source rds (value set by deploy/secret.py --orders-db)"
+  recovery_window_in_days = 7
+}
+
 data "aws_iam_policy_document" "execution_secret" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.bedrock_api_key.arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      aws_secretsmanager_secret.bedrock_api_key.arn,
+      aws_secretsmanager_secret.orders_database_url.arn,
+    ]
   }
 }
 
@@ -497,25 +527,26 @@ resource "aws_ssm_parameter" "config" {
   description = "review-simulator deploy script config (managed by Terraform)"
   type        = "String"
   value = jsonencode({
-    region             = var.region
-    cluster            = aws_ecs_cluster.this.name
-    cluster_arn        = aws_ecs_cluster.this.arn
-    task_family        = local.task_family
-    container_name     = local.container_name
-    cpu                = tostring(var.cpu)
-    memory             = tostring(var.memory)
-    ecr_repository_url = aws_ecr_repository.this.repository_url
-    execution_role_arn = aws_iam_role.execution.arn
-    task_role_arn      = aws_iam_role.task.arn
-    secret_arn         = aws_secretsmanager_secret.bedrock_api_key.arn
-    subnets            = var.subnet_ids
-    security_groups    = [aws_security_group.task.id]
-    app_log_group      = aws_cloudwatch_log_group.app.name
-    events_log_group   = aws_cloudwatch_log_group.events.name
-    schedule_name      = aws_scheduler_schedule.daily.name
-    schedule_group     = aws_scheduler_schedule.daily.group_name
-    lake_root          = local.lake_root
-    input_root         = local.input_root
-    dashboard          = aws_cloudwatch_dashboard.this.dashboard_name
+    region               = var.region
+    cluster              = aws_ecs_cluster.this.name
+    cluster_arn          = aws_ecs_cluster.this.arn
+    task_family          = local.task_family
+    container_name       = local.container_name
+    cpu                  = tostring(var.cpu)
+    memory               = tostring(var.memory)
+    ecr_repository_url   = aws_ecr_repository.this.repository_url
+    execution_role_arn   = aws_iam_role.execution.arn
+    task_role_arn        = aws_iam_role.task.arn
+    secret_arn           = aws_secretsmanager_secret.bedrock_api_key.arn
+    orders_db_secret_arn = aws_secretsmanager_secret.orders_database_url.arn
+    subnets              = var.subnet_ids
+    security_groups      = [aws_security_group.task.id]
+    app_log_group        = aws_cloudwatch_log_group.app.name
+    events_log_group     = aws_cloudwatch_log_group.events.name
+    schedule_name        = aws_scheduler_schedule.daily.name
+    schedule_group       = aws_scheduler_schedule.daily.group_name
+    lake_root            = local.lake_root
+    input_root           = local.input_root
+    dashboard            = aws_cloudwatch_dashboard.this.dashboard_name
   })
 }

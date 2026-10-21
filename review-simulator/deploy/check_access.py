@@ -37,6 +37,8 @@ ACTIONS: list[tuple[str, str]] = [
     ("EC2 (보안 그룹)", "ec2:CreateSecurityGroup"),
     ("EC2 (보안 그룹)", "ec2:AuthorizeSecurityGroupEgress"),
     ("EC2 (보안 그룹)", "ec2:DescribeSecurityGroups"),
+    # RDS(5432) 나가는 규칙을 VPC 주소 범위로 열 때 VPC 를 조회한다 (2026-10-21)
+    ("EC2 (보안 그룹)", "ec2:DescribeVpcs"),
     ("IAM 역할", "iam:CreateRole"),
     ("IAM 역할", "iam:PutRolePolicy"),
     ("IAM 역할", "iam:AttachRolePolicy"),

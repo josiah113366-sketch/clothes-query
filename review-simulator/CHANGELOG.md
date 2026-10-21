@@ -20,7 +20,11 @@
   리뷰의 order_id·member_id·product_id 가 RDS 값(uuid, article_id)이라 레이크에서 거래 데이터와 바로 조인된다. 리뷰 컬럼(review.v2)은 그대로다.
 - 추가: 설정 `ORDERS_DATABASE_URL`(.env 또는 ECS Secret), 의존성 `psycopg[binary]`. 개인정보 컬럼(이름·이메일·전화)은 읽지 않는다.
 - 그대로: `--source orders`(JSONL 가짜 주문)와 `random` 은 결과가 바뀌지 않는다.
-- 아직: ECS 태스크는 여전히 가짜 주문으로 돈다. ECS 에서 `--source rds` 로 돌리려면 RDS 로 가는 네트워크(보안 그룹)와 접속 주소 Secret 이 필요하다.
+- 실행 환경: ECS 에서도 RDS 주문을 읽을 수 있다. 태스크 환경변수 `ORDERS_SOURCE`(fake 기본 / rds)로 고르고 `deploy/switch.py --orders rds` 로 바꾼다.
+  rds 면 진입점이 가짜 주문 단계를 건너뛰고 `rsim run --source rds` 를 부르며, 접속 주소는 새 Secret(`deploy/secret.py --orders-db`)에서 `ORDERS_DATABASE_URL` 로 들어온다.
+  Terraform(`infra/modules/ecs-review-simulator`): 접속 주소 Secret, 태스크 보안 그룹의 5432 나가는 규칙(VPC 안), 설정 `orders_db_secret_arn`.
+  RDS 쪽 허용(`database_clients`)과 읽기 전용 계정은 `deploy/README.md` "RDS 주문 읽기" 순서대로 따로 한다.
+- 실행 방식은 하루 1번 그대로다. 실시간(계속 쓰기)은 보류(2026-10-21 lemin).
 
 ## 0.2.1 (2026-10-21)
 

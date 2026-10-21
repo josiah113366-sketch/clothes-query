@@ -48,6 +48,7 @@ def aws(monkeypatch):
         s3 = sess.client("s3")
         s3.create_bucket(Bucket=BUCKET, CreateBucketConfiguration={"LocationConstraint": REGION})
         secret_arn = sess.client("secretsmanager").create_secret(Name="rsim/bedrock")["ARN"]
+        orders_db_arn = sess.client("secretsmanager").create_secret(Name="rsim/orders-db")["ARN"]
         logs = sess.client("logs")
         logs.create_log_group(logGroupName="/ecs/rsim")
         logs.create_log_group(logGroupName="/aws/events/rsim")
@@ -65,6 +66,7 @@ def aws(monkeypatch):
             "execution_role_arn": role,
             "task_role_arn": role,
             "secret_arn": secret_arn,
+            "orders_db_secret_arn": orders_db_arn,
             "subnets": ["subnet-1"],
             "security_groups": ["sg-1"],
             "app_log_group": "/ecs/rsim",
@@ -109,6 +111,37 @@ def test_first_revision_has_defaults_and_secret(aws):
     assert c["secrets"] == [{"name": "AWS_BEARER_TOKEN_BEDROCK", "valueFrom": cfg["secret_arn"]}]
     assert c["entryPoint"] == ["/bin/sh", "/app/deploy/entrypoint.sh"]
     assert "AWS_BEARER_TOKEN_BEDROCK" not in env  # 키 값은 환경변수 평문으로 안 들어간다
+    assert env["ORDERS_SOURCE"] == "fake"  # 처음에는 가짜 주문 (RDS 접속 secret 은 안 넣는다)
+
+
+def test_switch_orders_to_rds_needs_secret_then_injects_it(aws, capsys):
+    sess, cfg = aws
+    _register(sess, cfg)
+    # 접속 주소 secret 이 비어 있으면 rds 로 못 바꾼다 (빈 secret 을 넣으면 태스크가 시작부터 실패하므로)
+    with pytest.raises(SystemExit):
+        switch.main(["--orders", "rds"])
+    # localhost 주소(로컬 port-forward)는 ECS 에서 못 쓰므로 거절
+    with pytest.raises(SystemExit):
+        secret.check_db_url("postgresql://ro:pw@localhost:5432/clothes")
+    sess.client("secretsmanager").put_secret_value(
+        SecretId=cfg["orders_db_secret_arn"], SecretString="postgresql://ro:pw@db.internal:5432/x"
+    )
+    switch.main(["--orders", "rds"])
+    td = aws_common.latest_task_definition(sess.client("ecs"), "rsim")
+    assert aws_common.env_of(td)["ORDERS_SOURCE"] == "rds"
+    assert aws_common.env_of(td)["REVIEW_RATE"] == "0.1"  # 비율은 그대로
+    assert {"name": "ORDERS_DATABASE_URL", "valueFrom": cfg["orders_db_secret_arn"]} in td[
+        "containerDefinitions"
+    ][0]["secrets"]
+    assert "ORDERS_DATABASE_URL" not in aws_common.env_of(td)  # 값은 평문 환경변수로 안 들어간다
+    # 다시 fake 로 돌리면 secret 주입도 빠진다
+    switch.main(["--orders", "fake"])
+    td = aws_common.latest_task_definition(sess.client("ecs"), "rsim")
+    assert [x["name"] for x in td["containerDefinitions"][0]["secrets"]] == [
+        "AWS_BEARER_TOKEN_BEDROCK"
+    ]
+    with pytest.raises(SystemExit):
+        switch.main(["high", "--orders", "rds"])  # 비율과 같이 바꾸지 않는다
 
 
 def test_switch_keeps_image_and_changes_rate(aws, capsys):
@@ -309,6 +342,14 @@ def test_entrypoint_runs_same_rsim_commands(tmp_path):
     assert calls == [
         "orders-fake --start 2026-10-01T00:00:00+00:00 --days 17 --per-day 1000 --seed 42",
         "run --source orders --sink lake --llm bedrock --date 2026-10-17",
+    ]
+    log.unlink()
+    # ORDERS_SOURCE=rds 면 가짜 주문 없이 RDS 주문으로 바로 리뷰
+    subprocess.run(
+        ["sh", str(script)], env={**env, "ORDERS_SOURCE": "rds"}, check=True, capture_output=True
+    )
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "run --source rds --sink lake --llm bedrock --date 2026-10-17"
     ]
     log.unlink()
     subprocess.run(["sh", str(script), "inject", "--file", "s3://b/k.csv"], env=env, check=True)
