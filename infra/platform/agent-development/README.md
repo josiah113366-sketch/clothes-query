@@ -27,11 +27,11 @@ aws configure set profile.agent-dev.region ap-northeast-1
 $registry = '<비공개-ECR-registry>'
 $imageTag = '<새로운-커밋-SHA>'
 aws ecr get-login-password --profile agent-dev --region ap-northeast-1 | docker login --username AWS --password-stdin $registry
-docker build --platform linux/amd64 -f agent/detect/Dockerfile -t "${registry}/clothes-query-dev/detection-job:${imageTag}" .
+docker build --platform linux/amd64 -t "${registry}/clothes-query-dev/detection-job:${imageTag}" agent/detect
 docker push "${registry}/clothes-query-dev/detection-job:${imageTag}"
 ```
 
-Dockerfile이 PR에 들어온 뒤 실제 build context·실행 명령을 확인한다. 위 예시는 저장소 루트 context를 가정하며 아직 실제 빌드 성공을 뜻하지 않는다. 태그는 immutable이므로 덮어쓰지 말고 새 SHA를 사용한다. push 후 repository/tag/digest와 필요한 환경변수·자원·실행 명령을 인프라 담당에게 전달한다. 이번 준비에서 Docker를 시작하거나 이미지를 빌드하지 않는다.
+PR #46 Dockerfile 기준 build context는 `agent/detect`이고 ENTRYPOINT는 `python run_job.py`다. 위 명령은 해당 PR 파일을 받은 뒤 실행하며 아직 실제 빌드 성공을 뜻하지 않는다. 태그는 immutable이므로 덮어쓰지 말고 새 SHA를 사용한다. push 후 repository/tag/digest와 필요한 환경변수·자원·실행 명령을 인프라 담당에게 전달한다. 이번 준비에서 Docker를 시작하거나 이미지를 빌드하지 않는다.
 
 ## Airflow 승인 API
 
