@@ -117,3 +117,4 @@ gitGraph
 |---|---|---|---|
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 진행 중 | |
 | `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 진행 중 (`pipelines/gold-b` 위) | |
+| `pipelines/gold-b-compact` | [gold-b-compact.md](tasks/gold-b-compact.md) | 진행 중 (`pipelines/gold-b-reprocess` 위) | |
