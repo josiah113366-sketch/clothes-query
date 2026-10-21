@@ -1,6 +1,6 @@
 # 작업 지시서: infra/gold-b-access-prep
 
-상태: 조회용 자원 실제 적용 완료·검토 대기 / 판정 기록 쓰기·업무 실행 연결 후속
+상태: 조회용 자원·EKS 실행 신원 연결 및 합성 실측 완료·검토 대기 / 판정 기록 쓰기·Airflow·업무 실행 후속
 
 ## 목표와 승인된 범위
 
@@ -76,3 +76,15 @@
 최신 origin/main 반영 확인 후 새 plan(생성8·수정0·삭제0), S3/Workgroup 시뮬레이션 46개 재검증을 거쳐 적용했다. 실제 두 workgroup의 ENABLED·쿼리당 1GiB·각각의 결과 경로 강제·SSE-S3·추가 CloudWatch 지표 비활성을 확인했다. IAM inline policy가 검토한 문서와 일치하고 각 역할 trust/Pod Identity association이 지정 namespace/ServiceAccount에 연결됨을 확인했다. 사후 plan 변경 없음이다.
 
 실제 Glue DB/table·namespace/ServiceAccount/Pod를 만들거나 업무 쿼리를 실행하지 않았다. 실제 Pod에서 Athena 조회/정답표 차단 성공까지 검증된 상태는 아니다. 판정 이력 쓰기는 빈 목록 그대로다. 개발자 개인/그룹 정책도 바꾸지 않았다. push·PR·승인·머지는 수행하지 않았다.
+
+## 후속: EKS 실행 신원 연결과 실제 접근 검사
+
+사용자가 API/ALB 현황 확인 후 “하던거나 마저 하자”라고 요청해 기존 접근 준비를 이어갔다. agent namespace가 없음을 확인하고 별도 manifest로 namespace와 detection-job/investigation-agent ServiceAccount를 생성했다. 기본 Kubernetes API 토큰 자동 마운트는 비활성화하고 기존 Pod Identity association을 사용했다. AWS 키·Secret을 만들거나 주입하지 않았다. 운영 업무 Pod는 아직 배포하지 않았다.
+
+현재 실제 노드는 Kafka용 t3a.large 한 대와 API용 t3a.medium 한 대다. API용 namespace는 api이며 내부 ALB 연결과 헬스체크 정상을 읽기 전용 확인했다. 이번 검사는 기존 Kafka compute 노드에 소형 임시 Pod를 고정해 추가 노드 생성을 피했다. boto3가 포함된 기존 사설 리뷰 이미지의 digest를 사용하되 앱 기본 명령·리뷰/Bedrock 프로그램은 실행하지 않았다.
+
+각 역할 12개, 총 24개 실제 접근 검사를 통과했다. 올바른 Pod Identity 역할, 합성 gold_b 객체 읽기·prefix 목록, 자기 결과 쓰기/읽기·Athena SELECT 1 및 결과 조회는 성공했다. 정답표 객체·이전 버전·prefix 목록, 상대 결과, 버킷 root 목록, 업무 데이터 쓰기, 상대 workgroup 사용은 거부됐다. 실제 정답표/업무 파일 내용은 읽지 않았다. 합성 객체는 실제 원장/정답표 처리 위치가 아닌 각 상위 prefix의 고유 _infra-checks/ 아래에 만들었다.
+
+정리: 임시 Pod 2개 삭제, 합성 source/truth/result 객체와 SELECT 1 결과/metadata의 총 10개 버전 삭제, 각 고유 key/query ID prefix의 남은 version/delete marker 0개를 확인했다. agent namespace Pod 0개, 노드 수 2개 유지다. namespace/SA·운영 역할·workgroup은 의도된 기반으로 남긴다. 캐시의 실행 기록/ID는 Git 제외이며 업무 SQL·스캔 상한 초과·부하 테스트를 수행한 것은 아니다. probe.py 문법·manifest 구조·Ruff 검사 및 diff check도 확인했다.
+
+다음은 판정 이력 쓰기 저장 계약과 Airflow 설치 설정을 맞추는 일이다. 실제 업무 코드/이미지·DAG·scheduler의 업무 Pod 생성 RBAC·카탈로그/뷰 연결은 미완료다. 과거 문단의 미생성/미검증 상태는 해당 시점 기록이며 현재 상태는 이 절을 따른다.

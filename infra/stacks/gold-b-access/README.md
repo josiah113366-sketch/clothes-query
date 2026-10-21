@@ -1,6 +1,6 @@
 # Gold B 접근 준비
 
-상태: 2026-10-21 사용자 요청으로 조회용 자원 실제 적용 완료. 기존 network/eks/storage state 이후 독립 key `clothes-query/dev/gold-b-access/terraform.tfstate`를 사용한다. 관리 자원은 workgroup 2개·역할 2개·inline policy 2개·Pod Identity association 2개다. 새 버킷·컴퓨팅·Glue DB/테이블·개발자 권한은 만들지 않는다. namespace/ServiceAccount/업무 Pod와 판정 업무 기록 쓰기는 아직 준비 대상이다.
+상태: 2026-10-21 사용자 요청으로 조회용 자원 실제 적용 완료. 기존 network/eks/storage state 이후 독립 key `clothes-query/dev/gold-b-access/terraform.tfstate`를 사용한다. 관리 자원은 workgroup 2개·역할 2개·inline policy 2개·Pod Identity association 2개다. 새 버킷·컴퓨팅·Glue DB/테이블·개발자 권한은 만들지 않는다. namespace/ServiceAccount는 [별도 manifest](../../platform/agent-access/README.md)로 생성해 실제 Pod 신원·합성 S3/Athena 접근·정답표 차단을 검증했다. 업무 Pod와 판정 업무 기록 쓰기는 아직 후속이다.
 
 - `agent/detection-job` → `clothes-query-dev-detection-job`, workgroup `clothes-query-dev-detection`.
 - `agent/investigation-agent` → `clothes-query-dev-investigation-agent`, workgroup `clothes-query-dev-investigation`.
@@ -13,7 +13,7 @@
 
 실제 계정/state bucket은 Git 제외 `deployment.local.tfvars.json`, backend bucket은 `deployment.backend.hcl`로 공급한다. [전체 안내](../../IMPLEMENTATION.md)에 따라 init, fmt, validate, mock, plan 후 적용한다. 실제 적용 전 동일 역할/workgroup/association의 존재와 소유권을 확인한다. 보류 중인 `infra/athena-query-base`는 같은 판정 workgroup 이름을 사용하므로 두 스택을 함께 적용하지 않는다. 이번 스택으로 통합해 쓸 경우 기존 미적용 후보는 대체한다.
 
-이 스택은 IAM/Workgroup만 준비한다. namespace/ServiceAccount는 Airflow·에이전트 배포 준비에서 생성하고 scheduler가 판정 Pod를 띄우는 RBAC도 별도로 연결해야 한다. 판정의 업무 기록 쓰기는 실제 저장 prefix·writer 방식이 확정될 때까지 빈 목록으로 유지한다. Athena INSERT와 S3 직접 Parquet append의 요구 권한은 다를 수 있다. 읽기 전용 Glue 권한만으로 신규 테이블 생성은 불가능하다.
+이 스택은 IAM/Workgroup만 관리한다. namespace/ServiceAccount 소유권은 별도 manifest에 있으며 Airflow/업무 chart에서 재사용한다. scheduler가 판정 Pod를 띄우는 RBAC도 별도로 연결해야 한다. 판정의 업무 기록 쓰기는 실제 저장 prefix·writer 방식이 확정될 때까지 빈 목록으로 유지한다. Athena INSERT와 S3 직접 Parquet append의 요구 권한은 다를 수 있다. 읽기 전용 Glue 권한만으로 신규 테이블 생성은 불가능하다.
 
 적용 후 검증은 각 역할의 gold_b 읽기와 자기 결과 쓰기 성공, ground_truth 객체/version/list와 상대 결과 읽기 거부, 쿼리 스캔 한도·뷰 의존·실제 Athena 성공을 포함한다. Lake Formation 등록 또는 KMS 암호화가 있다면 별도 권한 계약을 확인한다. policy simulation/mock은 실제 Pod Identity 세션·업무 SQL의 성공을 대신하지 않는다. 결과 보관/정리 정책은 아직 추가하지 않아 결과가 누적될 수 있다. [작업 기록](../../../docs/tasks/infra-gold-b-access-prep.md).
 
