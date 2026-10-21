@@ -1,6 +1,6 @@
 # 작업 지시서: infra/sagemaker-review-score
 
-> 상태: 보류 (apply 완료, GPU 서비스 쿼터 증설 요청·승인 대기) · 브랜치: `infra/sagemaker-review-score` · 다음 작업: `review-model/score-batch-airflow` (입력 모으기·실행 스크립트 개선, 별도 PR)
+> 상태: 검토 대기 (apply 완료, AWS 실행 확인 완료) · 브랜치: `infra/sagemaker-review-score` · 다음 작업: `review-model/score-batch-airflow` (입력 모으기·실행 스크립트 개선, 별도 PR)
 
 ## 목표
 
@@ -82,6 +82,6 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
   스케줄·알림·예산은 요청으로 제외. 이미지는 AWS 공개 DLC 를 써서 팀 ECR 이 필요 없다.
 - **입력과 출력:** 입력 `bronze/reviews/` 읽기, 모델·코드 `review-score/` 읽기. 출력 `silver/review-score/output/`, 오류 `silver/review-score/error/`.
   Airflow 와는 SSM 파라미터 `/clothes-query/dev/sagemaker-review-score/config` 와 `launcher_policy_arn` output 으로 맞춘다.
-- **확인한 결과:** fmt·validate 통과, 첫 plan 9 create / 0 change / 0 destroy. (apply 후 항목은 위 체크리스트에서 채운다)
-- **알려진 한계·남은 일:** GPU 쿼터 확인, launcher 정책 연결, `score_batch.py`·`run_processing_job.py` 수정(별도 PR), 오류 파일 기록 방식 결정,
+- **확인한 결과:** fmt·validate 통과, 첫 plan 9 create / 0 change / 0 destroy, apply 후 plan 변경 없음. 2026-10-21 GPU 쿼터 증설 후 팀 AWS 에서 모델/코드 업로드부터 Job 실행·결과 확인까지 진행해 이상 없음(작성자 확인, 상세 수치는 PR 본문에 첨부).
+- **알려진 한계·남은 일:** launcher 정책 연결(Airflow 역할), `score_batch.py`·`run_processing_job.py` 수정(별도 PR), 오류 파일 기록 방식 결정,
   `/aws/sagemaker/ProcessingJobs` 로그 보존 기간(무기한) 정책.
