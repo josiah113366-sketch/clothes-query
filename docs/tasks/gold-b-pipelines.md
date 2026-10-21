@@ -56,11 +56,11 @@ Gold B 1단계: 원장 4개와 재처리 기록 1개의 테이블 정의(Athena 
 
 ## 완료 확인
 
-- [ ] `python -m pytest -q pipelines/gold_b/tests` 통과
-- [ ] 로컬 Spark에서 DDL 6개 실행, 빈 테이블 조회 0건
-- [ ] 샘플 기대 결과를 원장 모양으로 만든 Parquet을 시간 폴더에 두고 조회되는지
-- [ ] DDL과 샘플에 비밀값·계정 ID·개인정보 값이 없는지 (`git grep`)
-- [ ] Athena에서 생성·빈 조회 (권한 준비 전이면 "대기"로 보고)
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (22개)
+- [ ] 로컬 Spark에서 DDL 6개 실행, 빈 테이블 조회 0건 → **이 PC에서 실행 불가** (아래 작업 결과)
+- [x] 샘플 기대 결과를 원장 모양으로 만든 Parquet을 시간 폴더에 두고 조회되는지 (pyarrow로 대신 확인)
+- [x] DDL과 샘플에 비밀값·계정 ID·개인정보 값이 없는지 (`git grep`)
+- [ ] Athena에서 생성·빈 조회 → **대기** (Glue 관리 방식·권한, 재영 님)
 
 ## README 갱신
 
@@ -69,9 +69,31 @@ Gold B 1단계: 원장 4개와 재처리 기록 1개의 테이블 정의(Athena 
 
 ## 작업 결과 (머지 전에 작성한다)
 
-- **한 줄 요약:**
+### 1단계 (2026-10-21)
+
+- **한 줄 요약:** Gold B 설계 문서를 저장소에 옮기고, 원장 4개·재처리 기록의 Athena 테이블 정의와 샘플 메시지 29개를 만들었다.
 - **무엇을 만들었나:**
+  - `docs/design/gold-b/README.md`: 설계 (오늘 결정과 실제 커넥터 설정 반영, 「2026-10-21 반영」 절)
+  - `pipelines/gold_b/ddl/`: `database.sql` + 테이블 5개. 원장은 Parquet, UTC `dt`/`hour` 시간 폴더, 파티션 프로젝션(`2026-09-01,NOW`, 시간 0~23 두 자리)
+  - `pipelines/gold_b/tests/samples/`: 결제 16개, 나머지 5개 토픽 13개. 메시지마다 기대 결과(원장, 오류 필드·사유, 뷰 결과)
+  - `pipelines/gold_b/tests/test_ddl.py`, `pipelines/gold_b/README.md`
 - **왜 그렇게 했나:**
+  - 충돌 결제: 첫 줄을 남기는 안 대신 Silver(PR #26)·공통 계약과 같이 모든 줄을 빼고 `payment_conflicts`로 보여 준다 (사용자 결정). 비교 컬럼은 Gold B 원장의 6개.
+  - `kafka_partition`: 표끼리 이름을 맞추고, Athena DDL 예약어 `partition`을 피했다.
+  - 기획의 `after.payment_id`는 실제 설정(`ExtractNewRecordState`로 봉투를 풂)과 달라서, 샘플은 평평한 메시지 + `__op` 모양으로 만들었다.
+  - `reprocess_events`는 양이 적어 시간 폴더 없이 만들었다.
 - **입력과 출력:**
+  - 정한 것: 테이블 이름 `gold_b.*`, 컬럼 이름·타입, S3 경로 `s3://clothes-query-datalake/gold_b/<표>/dt=…/hour=…/`
+  - 주현 님께 공유할 것: `reprocess_events` 12개 컬럼, `payment_conflicts`, `bronze_lag_snapshots.kafka_partition`
 - **확인한 결과:**
+  - `python -m pytest -q pipelines/gold_b/tests`: 22개 통과 (2.6초)
+  - `python -m pytest -q pipelines`: Silver 포함 50개 통과
+  - 샘플 원장을 시간 폴더 Parquet으로 쓰고 다시 읽기: 결제 8줄, 메시지 29줄, 오류 = 기대 오류 합, 한 메시지 최대 3줄. 컬럼 타입이 DDL과 같음
+  - `git grep`으로 키·계정 ID·엔드포인트 없음 확인 (걸린 것은 가짜 UUID와 밀리초 시각)
+  - 로컬 Spark(Hive DDL) 실행은 이 PC에서 안 됨: Java NIO 파이프가 Unix 도메인 소켓 연결에서 `Invalid argument`로 멈춘다. 샌드박스 밖, 짧은 임시 경로, `jdk.net.unixdomain.tmpdir` 지정 모두 같았다. 대신 DDL을 읽어 설계 표와 비교했고, Parquet 왕복은 pyarrow로 확인했다.
 - **알려진 한계·남은 일:**
+  - Athena에서 실제 생성·빈 조회는 하지 않았다. Glue DB를 Terraform으로 관리할지와 Athena 권한을 재영 님께 확인한 뒤 실행한다.
+  - 샘플 중 사유를 정하지 않은 것: 회원 PII 컬럼 오류의 사유(`reason: null`), `op u` 결제를 오류로도 기록할지. 2단계에서 정한다.
+  - `unit_price ≥ 5,900`(설계)과 공통 계약 초안 `minimum: 1`이 다르다. 결제 충돌 비교 컬럼도 현지 님과 맞춰야 한다.
+  - `team-inputs.md`(인프라)의 재판정 연결 문장이 이 설계와 다르다. 재영 님께 공유해야 한다.
+  - `pipelines/README.md`는 Silver 문서라 Gold B 줄을 넣지 않았다.

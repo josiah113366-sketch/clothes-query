@@ -26,7 +26,7 @@ s3://clothes-query-datalake/gold_b/reprocess_events/*.parquet
 
 - 원장 4개는 Athena **파티션 프로젝션**을 쓴다. 새 시간 폴더를 `MSCK REPAIR`나 `ALTER TABLE ADD PARTITION` 없이 바로 읽는다. 범위는 `2026-09-01`부터 오늘(UTC)까지다.
 - 조회할 때 `WHERE dt = '2026-10-21' AND hour = '06'`처럼 폴더 조건을 같이 주면 그 폴더만 읽는다.
-- 시각 컬럼은 모두 UTC `TIMESTAMP`다. 적재 잡은 Parquet 시각을 마이크로초(`TIMESTAMP_MICROS`)로 쓴다 (4단계에서 확인).
+- 시각 컬럼은 모두 UTC `TIMESTAMP`다. Parquet에 시각을 어떤 형식(마이크로초 / Spark 기본 INT96)으로 쓸지는 4단계 적재 잡에서 Athena로 읽어 보고 정한다. 1단계 테스트는 마이크로초로 쓴다.
 
 ## 실행
 
