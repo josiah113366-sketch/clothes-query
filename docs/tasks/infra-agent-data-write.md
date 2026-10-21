@@ -1,6 +1,6 @@
 # 조사 저장소 분리·판정 쓰기 권한
 
-상태: 완료 (실제 적용·로컬 커밋, 업무 테이블 연동 후속)
+상태: 완료 (실제 적용·PR #50 검토 대기, 업무 테이블 연동 후속)
 
 ## 요청과 범위
 
@@ -22,3 +22,5 @@
 IAM simulation 32건에서 조사 agent 읽기/쓰기·Gold B 읽기만, 판정 세 경로 쓰기·다른 Gold B/agent 쓰기 거부, 각자 쿼리 결과만 읽기/쓰기, ground_truth 명시 거부를 확인했다. simulation은 실제 Pod/Athena 업무 SQL 검증을 대신하지 않는다. 이번에는 Pod를 띄우거나 S3 테스트 객체·테이블·업무 INSERT를 만들지 않았다. 표 DDL과 partition 생성 필요 권한은 실제 SQL을 받은 뒤 연결한다.
 
 기존 개발자/ECR 준비는 독립 브랜치 infra/agent-development-access의 로컬 커밋에 보존했다. 이 브랜치는 Gold B 준비 PR 이후의 후속 변경이며 push·PR 생성·승인·머지는 하지 않았다. 이 후속 변경 이전의 Gold B 코드로 다시 apply하면 쓰기가 회수될 수 있으므로 이후 plan에는 현재 코드와 비공개 입력을 함께 사용한다.
+
+게시 정리: 선행 #40과 본 브랜치에 최신 main을 반영하고 root 14개·mock suite 12개/plan 68건의 격리 전체 검사를 통과했다. 사용자 요청으로 push하고 [PR #50](https://github.com/josiah113366-sketch/clothes-query/pull/50)을 #40 브랜치 대상으로 생성했다. #40 머지 후 base를 main으로 바꾼다. 개발 접근은 별도 PR #49다. 승인·머지는 팀원이 진행하며 이번 게시 작업에서 추가 AWS 변경은 하지 않았다.
