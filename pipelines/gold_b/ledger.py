@@ -131,7 +131,12 @@ def message_rows(message: KafkaMessage, judgement: Judgement, rule_version: str,
             raise ValueError("결제 줄에 completed_at이 없다 (시간 폴더를 정할 수 없음)")
         payment["completed_at"] = utc_naive(payment["completed_at"])
         rows["payment_events"].append({**payment, **where, "loaded_at": loaded_at})
+    fields_seen: set[object] = set()
     for error in judgement.errors:
+        # 설계 「중복 제거」: (토픽, 파티션, offset, rule_version, field)가 같으면 한 줄만. 같은 필드의 첫 오류를 남긴다
+        if error.get("field") in fields_seen:
+            continue
+        fields_seen.add(error.get("field"))
         rows["malformed_events"].append({
             "topic": message.topic, **where, "kafka_timestamp": kafka_timestamp,
             **{name: error.get(name) for name in ERROR_FIELDS},

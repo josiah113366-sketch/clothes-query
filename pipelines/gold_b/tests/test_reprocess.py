@@ -158,6 +158,15 @@ def test_ledger_schemas_match_ddl(table):
     assert list(TABLE_COLUMNS[table]) == parse_ddl(table)["columns"]
 
 
+def test_one_error_row_per_field():
+    message = KafkaMessage("payments", 0, 7, datetime(2026, 10, 21, 6, 1, tzinfo=UTC), b"{}")
+    judgement = Judgement(errors=[{"field": "pg", "reason": "INVALID_VALUE"},
+                                  {"field": "pg", "reason": "TYPE_MISMATCH"},
+                                  {"field": "status", "reason": "MISSING_FIELD"}])
+    rows = message_rows(message, judgement, "test", STREAMED_AT)["malformed_events"]
+    assert [(r["field"], r["reason"]) for r in rows] == [("pg", "INVALID_VALUE"), ("status", "MISSING_FIELD")]
+
+
 def test_hour_folders():
     at = lambda h, m: datetime(2026, 10, 21, h, m, tzinfo=UTC)  # noqa: E731
     assert hour_folders(at(14, 40), at(16, 20)) == [datetime(2026, 10, 21, h) for h in (14, 15, 16)]
