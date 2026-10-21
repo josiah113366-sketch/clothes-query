@@ -34,6 +34,7 @@ bootstrap → network → eks → compute → apps
 | `ecr` | `stacks/ecr/` | WEB/WAS 및 선택적 Connect 이미지 저장소 | bootstrap | 세 저장소 배포·Connect 이미지 push/EKS pull 확인 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `ecs-review-simulator` | `stacks/ecs-review-simulator/` | 리뷰 시뮬레이터 ECS Fargate 기반: ECR·클러스터·IAM·Secret·꺼진 예약 실행·로그/대시보드 (담당자 apply, [안내](stacks/ecs-review-simulator/README.md)) | network, storage | 코드·validate, 미배포 |
+| `ecs-simulator` | [stacks/ecs-simulator/](stacks/ecs-simulator/README.md) | 거래·회원 시뮬레이터 ECS Fargate: ECR·클러스터·IAM·SG·오염용 DB Secret·로그, 이미지 digest가 있으면 태스크 정의(컨테이너 3개)·서비스 1개 (담당자 apply) | network, storage, 업무 API(내부 ALB) | 코드·validate·mock·plan(생성 14) |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
 | `team-access` | [stacks/team-access/](stacks/team-access/README.md) | 동료 WAS 배포·클러스터 운영 조회 | 기존 EKS, 비공개 동료 신원 | 2026-10-19 실제 연결·RBAC16개 통과·후속 plan 변경 없음; 동료 본인 접속 확인 후속 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
