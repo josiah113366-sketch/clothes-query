@@ -1,0 +1,167 @@
+# Chart 1.22.0. Existing RDS and separately supplied Secrets/runtime values.
+airflowVersion: "3.3.2"
+defaultAirflowRepository: apache/airflow
+defaultAirflowTag: "3.3.2-python3.12"
+executor: LocalExecutor
+nodeSelector:
+  karpenter.sh/nodepool: clothes-query-dev-compute
+multiNamespaceMode: false
+allowPodLaunching: false
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+pgbouncer:
+  enabled: false
+statsd:
+  enabled: false
+triggerer:
+  enabled: false
+flower:
+  enabled: false
+workers:
+  persistence:
+    enabled: false
+  celery:
+    persistence:
+      enabled: false
+env:
+  - name: AIRFLOW_CONN_AWS_DEFAULT
+    value: "aws://"
+  - name: AWS_DEFAULT_REGION
+    value: ap-northeast-1
+extraEnv: |-
+  - name: AIRFLOW_INFRA_PROBE_CONFIG
+    valueFrom:
+      configMapKeyRef:
+        name: airflow-infra-probe-runtime
+        key: config
+data:
+  metadataSecretName: airflow-metadata-db
+  # Suppress the chart's unused broker Secret with LocalExecutor.
+  brokerUrlSecretName: unused-no-celery
+fernetKeySecretName: airflow-fernet-key
+apiSecretKeySecretName: airflow-api-secret-key
+jwtSecretName: airflow-jwt-secret
+createUserJob:
+  enabled: false
+migrateDatabaseJob:
+  useHelmHooks: false
+  ttlSecondsAfterFinished: 600
+  resources:
+    requests: {cpu: "50m", memory: "256Mi"}
+    limits: {cpu: "500m", memory: "768Mi"}
+apiServer:
+  replicas: 1
+  startupProbe:
+    failureThreshold: 30
+  extraInitContainers:
+    - name: prepare-simple-auth
+      image: '{{ template "airflow_image" . }}'
+      command:
+        - python
+        - -c
+        - >-
+          import os, shutil;
+          shutil.copyfile('/opt/airflow/auth-source/passwords.json', '/opt/airflow/auth/passwords.json');
+          os.chmod('/opt/airflow/auth/passwords.json', 0o600)
+      resources:
+        requests: {cpu: "25m", memory: "32Mi"}
+        limits: {cpu: "100m", memory: "64Mi"}
+      securityContext:
+        runAsUser: 50000
+        runAsGroup: 0
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: simple-auth
+          mountPath: /opt/airflow/auth-source
+          readOnly: true
+        - name: auth-runtime
+          mountPath: /opt/airflow/auth
+  service:
+    type: ClusterIP
+  strategy:
+    type: Recreate
+  resources:
+    requests: {cpu: "50m", memory: "256Mi"}
+    limits: {cpu: "300m", memory: "512Mi"}
+scheduler:
+  replicas: 1
+  strategy:
+    type: Recreate
+  resources:
+    requests: {cpu: "150m", memory: "512Mi"}
+    limits: {cpu: "750m", memory: "1024Mi"}
+  logGroomerSidecar:
+    enabled: false
+dagProcessor:
+  replicas: 1
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  resources:
+    requests: {cpu: "100m", memory: "384Mi"}
+    limits: {cpu: "500m", memory: "768Mi"}
+  logGroomerSidecar:
+    enabled: false
+volumes:
+  - name: infra-dags
+    configMap:
+      name: airflow-infra-dags
+  - name: simple-auth
+    secret:
+      secretName: airflow-simple-auth
+  - name: auth-runtime
+    emptyDir:
+      sizeLimit: 1Mi
+  - name: rds-ca
+    configMap:
+      name: airflow-rds-ca
+volumeMounts:
+  - name: infra-dags
+    mountPath: /opt/airflow/dags/infra_probe.py
+    subPath: infra_probe.py
+    readOnly: true
+  - name: simple-auth
+    mountPath: /opt/airflow/auth-source
+    readOnly: true
+  - name: auth-runtime
+    mountPath: /opt/airflow/auth
+  - name: rds-ca
+    mountPath: /opt/airflow/certs
+    readOnly: true
+config:
+  core:
+    auth_manager: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    simple_auth_manager_users: "operator:admin,observer:viewer,approval:user"
+    simple_auth_manager_passwords_file: /opt/airflow/auth/passwords.json
+    simple_auth_manager_all_admins: "False"
+    load_examples: "False"
+    dags_are_paused_at_creation: "True"
+    parallelism: "1"
+    max_active_tasks_per_dag: "1"
+    max_active_runs_per_dag: "1"
+  api:
+    workers: "1"
+  database:
+    sql_alchemy_pool_size: "3"
+    sql_alchemy_max_overflow: "2"
+  dag_processor:
+    parsing_processes: "1"
+  logging:
+    remote_logging: "True"
+    remote_log_conn_id: aws_default
+    delete_local_logs: "True"
+    # Supply remote_base_log_folder privately using the existing data bucket.
+dags:
+  persistence:
+    enabled: false
+  gitSync:
+    enabled: false
+logs:
+  emptyDirConfig:
+    sizeLimit: 512Mi
+  persistence:
+    enabled: false
