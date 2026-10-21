@@ -48,7 +48,7 @@ def script(*turns):
 
 
 REPORT = dict(cause_layer="PAYMENT", conclusion="PG_A 장애입니다. 재처리는 필요 없습니다.",
-              claims=[{"text": "PG_A의 PG 원인 실패 30건", "evidence": [{"tool": "payment_summary"}]}])
+              claims=[{"text": "PG_A의 PG 원인 실패 30건", "kind": "FACT", "evidence": [{"tool": "payment_summary"}]}])
 PG_ANOMALY = {"anomaly_id": "a-1", "anomaly_type": "PG_FAILURE_SPIKE", "scope_type": "pg", "scope_key": "PG_A", "ground_truth": "정답"}
 
 # --- 정상 흐름 ---
@@ -63,16 +63,16 @@ check("정상: 정답 관련 값(ground_truth)은 모델에 보내지 않음", "
 check("정상: 지시문에 원칙(읽기만, 근거 필수)이 들어 있음", "submit_report" in calls[0]["system"] and "읽기만" in calls[0]["system"], True)
 
 # --- 리포트 검사 ---
-bad = dict(REPORT, claims=[{"text": "측정값", "evidence": [{"tool": "bronze_lag"}]}])      # 부르지 않은 도구를 근거로 댐
+bad = dict(REPORT, claims=[{"text": "측정값", "kind": "FACT", "evidence": [{"tool": "bronze_lag"}]}])      # 부르지 않은 도구를 근거로 댐
 conv, calls = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **bad)], [use(3, "submit_report", **REPORT)])
 r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("부르지 않은 도구를 근거로 대면 거절하고 다시 쓰게 함", ([t["status"] for t in r["trace"]], "problems" in r), (["ok", "rejected"], False))
 check("거절 이유가 모델에 전달됨", "bronze_lag" in str(calls[2]["messages"][-1]), True)
-conv, _ = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **dict(REPORT, claims=[{"text": "근거 없음", "evidence": []}]))],
+conv, _ = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **dict(REPORT, claims=[{"text": "근거 없음", "kind": "FACT", "evidence": []}]))],
                  [use(3, "submit_report", **REPORT)])
 r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("근거 없는 주장은 거절", [t["status"] for t in r["trace"]], ["ok", "rejected"])
-worse = dict(REPORT, claims=[{"text": "근거 없음", "evidence": []}])
+worse = dict(REPORT, claims=[{"text": "근거 없음", "kind": "FACT", "evidence": []}])
 conv, _ = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **worse)], [use(3, "submit_report", **worse)], [use(4, "submit_report", **worse)])
 r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("계속 고치지 못하면 2번 거절한 뒤 받되 problems를 남김(채점에서 근거 없는 주장으로 셈)", (len([t for t in r["trace"] if t["status"] == "rejected"]), len(r["problems"])), (2, 1))
@@ -107,14 +107,40 @@ check("한도(3회) 안에 제출 못 하면 UNKNOWN 리포트", (r["cause_layer
 # --- 시나리오별 흐름: 소비 지연, 성공 결제 중복 ---
 conv, _ = script([use(1, "bronze_lag", **W), use(2, "ingest_volume", **W)],
                  [use(3, "submit_report", cause_layer="INGEST", conclusion="orders 적재가 밀립니다.",
-                      claims=[{"text": "orders 지연 200초", "evidence": [{"tool": "bronze_lag"}]}, {"text": "유입 증가", "evidence": [{"tool": "ingest_volume"}]}])])
+                      claims=[{"text": "orders 지연 200초", "kind": "FACT", "evidence": [{"tool": "bronze_lag"}]}, {"text": "유입 증가", "kind": "FACT", "evidence": [{"tool": "ingest_volume"}]}])])
 r = investigate({"anomaly_id": "a-2", "anomaly_type": "BRONZE_LAG_SPIKE"}, conv, execute, dialect="sqlite", now=NOW)
 check("소비 지연: 한 번에 도구 2개를 불러도 처리하고 INGEST 리포트", ([t["tool"] for t in r["trace"]], r["cause_layer"]), (["bronze_lag", "ingest_volume"], "INGEST"))
 conv, _ = script([use(1, "duplicate_success_orders", **W)],
                  [use(2, "submit_report", cause_layer="DATA_QUALITY", conclusion="한 주문에 성공 결제가 2건입니다. 원본에 있는 오염이라 재처리해도 다시 나올 수 있습니다.",
-                      claims=[{"text": "성공 결제 2건인 주문 존재", "evidence": [{"tool": "duplicate_success_orders"}]}])])
+                      claims=[{"text": "성공 결제 2건인 주문 존재", "kind": "FACT", "evidence": [{"tool": "duplicate_success_orders"}]}])])
 r = investigate({"anomaly_id": "a-3", "anomaly_type": "DUPLICATE_SUCCESS_PAYMENT"}, conv, execute, dialect="sqlite", now=NOW)
 check("성공 결제 중복: 새 도구를 부르고 DATA_QUALITY 리포트", ([t["tool"] for t in r["trace"]], r["cause_layer"]), (["duplicate_success_orders"], "DATA_QUALITY"))
 check("제출 도구 정의에 원인 층 4가지가 들어 있음", SUBMIT_REPORT_SPEC["toolSpec"]["inputSchema"]["json"]["properties"]["cause_layer"]["enum"], ["PAYMENT", "INGEST", "DATA_QUALITY", "UNKNOWN"])
+
+# --- 사실/추정 구분 ---
+def submit(*claims, layer="PAYMENT"):
+    """payment_summary를 한 번 부른 뒤 주어진 주장으로 리포트를 내는 가짜 모델로 조사한다."""
+    conv, calls = script([use(1, "payment_summary", **W)], [use(2, "submit_report", cause_layer=layer, conclusion="결론", claims=list(claims))],
+                         [use(3, "submit_report", **REPORT)])
+    return investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW), calls
+
+
+FACT_OK = {"text": "PG_A 실패 30건", "kind": "FACT", "evidence": [{"tool": "payment_summary"}]}
+GUESS = {"text": "PG_A 쪽 일시 장애일 가능성", "kind": "ASSUMPTION", "evidence": []}
+r, _ = submit(FACT_OK, GUESS)
+check("추정은 근거 없이도 받음 (사실 1 + 추정 1)", ([t["status"] for t in r["trace"]], [c["kind"] for c in r["claims"]], "problems" in r), (["ok"], ["FACT", "ASSUMPTION"], False))
+r, _ = submit({"text": "근거 없는 사실", "kind": "FACT", "evidence": []}, GUESS)
+check("근거 없는 사실(FACT)은 거절 (추정으로 바꾸라고 안내)", ([t["status"] for t in r["trace"]], "ASSUMPTION" in str(r["trace"][1])), (["ok", "rejected"], True))
+r, _ = submit({"text": "kind 없음", "evidence": [{"tool": "payment_summary"}]})
+check("kind가 없으면 거절", r["trace"][1]["status"], "rejected")
+r, _ = submit(GUESS)
+check("사실이 하나도 없이 원인 층을 고르면 거절", r["trace"][1]["status"], "rejected")
+r, _ = submit(GUESS, layer="UNKNOWN")
+check("증거가 부족해 UNKNOWN이면 추정만 있어도 받음", (r["cause_layer"], "problems" in r, [t["status"] for t in r["trace"]]), ("UNKNOWN", False, ["ok"]))
+r, _ = submit(FACT_OK, {"text": "추정인데 안 부른 도구를 근거로", "kind": "ASSUMPTION", "evidence": [{"tool": "bronze_lag"}]})
+check("추정이라도 부르지 않은 도구를 근거로 대면 거절", r["trace"][1]["status"], "rejected")
+conv, calls = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **REPORT)])
+investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
+check("지시문과 제출 도구 정의에 사실/추정 구분이 들어 있음", ("ASSUMPTION" in calls[0]["system"], "ASSUMPTION" in str(SUBMIT_REPORT_SPEC)), (True, True))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
