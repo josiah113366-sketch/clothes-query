@@ -1,6 +1,26 @@
 # pipelines/gold_b/jobs
 
-Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수 ②)만 있다. 적재 잡(4단계)과 파일 합치기(6단계)는 나중에 여기에 만든다.
+Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수 ②)과 **적재 잡**(`streaming_ingest.py`, 4단계)이 있다. 파일 합치기(6단계)는 나중에 여기에 만든다.
+
+## 적재 잡 (`streaming_ingest.py`)
+
+Kafka 토픽(`config/gold_b.yaml`)을 Spark Structured Streaming으로 1분마다 읽어 원장 ①②④에 쌓는다. ③은 수집기가 쌓는다.
+
+- 묶음 하나(`write_batch`): 메시지마다 형식 검사를 하고 원장 줄을 만든다 (재처리 잡과 같은 `ledger.message_rows`). ②에는 모든 메시지, ①에는 형식을 통과한 결제, ④에는 오류마다 한 줄. 줄을 이벤트 시각의 시간 폴더로 나눠 (표, 시간 폴더)마다 파일 하나로 쓰고, `loaded_at`은 그 묶음을 쓴 시각이다.
+- 파일 이름은 그 파일에 든 메시지 위치로 정한다 (`part-ingest-<16자리>.parquet`). Spark가 끝내지 못한 묶음을 다시 처리하면 덮어써서 두 번 쌓이지 않는다.
+- 어디까지 읽었는지는 Spark 체크포인트가 기억한다. 체크포인트가 없으면 Kafka에 남은 가장 오래된 메시지부터 읽는다. 묶음 하나는 최대 20,000건.
+- 보관 기간보다 오래 멈춰 메시지가 지워졌으면 멈추지 않고 남은 것부터 읽는다. 빠진 구간은 `topic_messages` 오프셋 빈틈으로 보이고 Bronze 재처리로 채운다.
+
+| 환경변수 | 뜻 |
+|---|---|
+| `GOLD_B_LEDGER_ROOT` | 원장 저장 위치 (`s3://<버킷>/gold_b` 또는 로컬 폴더) |
+| `GOLD_B_CHECKPOINT` | Spark 체크포인트 위치 (S3면 `s3a://…`) |
+| `KAFKA_BOOTSTRAP`, `KAFKA_SECURITY_PROTOCOL` | Kafka 주소, `PLAINTEXT` 또는 `SSL` (시뮬레이터·수집기와 같은 이름) |
+| `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | SSL일 때 PEM 파일 (클라이언트 인증서는 둘 다) |
+
+**형식 검사(2단계)가 없어서 아직 실행하지 않는다.** 이 PC에서는 Spark가 뜨지 않아 Spark 연결(`build_query`)은 돌려 보지 않았고, `write_batch`만 시험했다. Spark 런타임(이미지, `spark-sql-kafka` jar, S3 체크포인트용 `hadoop-aws`)과 배포는 재영 님과 정한다. 부를 때는 Spark 세션을 만든 뒤 `build_query(spark, settings=Settings.from_env(os.environ), config=load_config(), checker=…, store=open_store(…))`.
+
+확인: `python -m pytest -q pipelines/gold_b/tests/test_ingest.py` (설정 파일 시험은 `PyYAML`이 있어야 돈다).
 
 ## 재처리 잡이 하는 일
 

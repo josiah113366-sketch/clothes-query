@@ -17,7 +17,10 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
 | `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체 ([설명](jobs/README.md)) |
 | `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패 (가짜 Kafka, 샘플 메시지) |
-| `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`) |
+| `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`, `PyYAML`). Spark는 실행 환경이 준다 |
+| `jobs/streaming_ingest.py` | 적재 잡: Kafka를 Spark로 1분마다 읽어 원장 ①②④에 쌓음 ([설명](jobs/README.md)) |
+| `config/gold_b.yaml` | 적재 잡 설정: 토픽 목록, 주기, 처음 읽기 시작할 곳, 묶음 크기 (주소·버킷 이름은 환경변수) |
+| `tests/test_ingest.py` | 묶음 하나가 시간 폴더로 가는지, 같은 묶음을 다시 써도 두 번 쌓이지 않는지, 설정 |
 
 정리 뷰(`payment_conflicts`, `payment_attempts`, `malformed_messages`) SQL은 설계 문서에 있고, 파일은 3단계에서 `views/`에 만든다.
 
