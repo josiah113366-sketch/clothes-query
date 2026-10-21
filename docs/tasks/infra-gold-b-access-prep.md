@@ -1,6 +1,6 @@
 # 작업 지시서: infra/gold-b-access-prep
 
-상태: EKS 별도 Pod 실행 확정·결과 저장 방식 선택 대기 / AWS 변경 없음
+상태: EKS 실행·S3 결과 경로 확정, 코드·plan 검증 완료 / 실제 미적용
 
 ## 목표와 승인된 범위
 
@@ -16,6 +16,7 @@
 | Athena | 에이전트 전용 workgroup, 조회 결과는 gold_b/ 밖, 스캔량 제한 희망 |
 | 개발자 | 제공 IAM 사용자 존재 확인. 실제 ARN은 비공개 기록에만 보관 |
 | 운영 실행 위치 | 사용자가 두 작업 모두 기존 EKS의 별도 Pod로 실행하도록 선택. 작업별 ServiceAccount/IAM 역할 분리 |
+| 조회 결과 저장 | 사용자가 기존 버킷의 athena-results/investigation/ 및 athena-results/detection/ 분리 저장을 승인. 나중에 변수로 변경 가능 |
 | Airflow | 팀원은 3.3 계열을 추천. 최신 안정판 여부와 Helm 호환성을 공식 배포 정보로 검증한 뒤 정확한 버전 확정 |
 
 ## 현황 확인과 주의할 차이
@@ -45,10 +46,23 @@
 
 운영 역할의 trust는 지정 namespace/ServiceAccount의 EKS Pod Identity용이다. 개발자 개인 ARN을 운영 역할 trust에 자동 추가하지 않는다. Airflow가 업무 Pod를 생성하는 RBAC는 별도 연결하며 업무 역할 자체에는 Pod 생성 권한을 주지 않는다. 스캔량 상한은 우선 쿼리당 1GiB 후보로 준비하되 비용 예산과 구분한다.
 
-다음 사용자 선택은 Athena 관리형 임시 결과 또는 별도 S3 prefix다. S3 방식을 선택하면 gold_b/ 밖의 athena-results/detection/ 및 athena-results/investigation/를 후보로 구분한다. 원장 읽기 전용 에이전트도 자기 쿼리 결과 경로의 제한된 쓰기는 필요하다. 팀원이 읽는 이상/순찰/재처리 업무 기록과 쿼리 임시 결과는 다르다. 선택 전 해당 workgroup/결과 권한은 구현·적용하지 않는다.
+사용자가 S3 결과 경로를 승인해 gold_b/ 밖의 athena-results/detection/ 및 athena-results/investigation/로 구분한다. 원장 읽기 전용 에이전트도 자기 쿼리 결과 경로의 제한된 쓰기는 필요하다. 팀원이 읽는 이상/순찰/재처리 업무 기록과 쿼리 임시 결과는 다르다. 모듈 입력 results_prefixes로 변경 가능하며 과거 결과는 자동 이동/삭제하지 않는다. 결과 저장 파일 생성은 실제 Athena 쿼리 실행 시 발생한다.
+
+## 구현 범위
+
+- 새 gold-b-access 모듈/스택에서 workgroup 2개, IAM 역할 2개, inline policy 2개, Pod Identity association 2개를 준비했다. 기존 workgroup/역할/동일 SA association이 없음을 사전 조회한다.
+- Glue DB gold_b 메타데이터와 S3 gold_b/ 읽기, 자기 결과 prefix 읽기·쓰기만 허용하며 ground_truth/ 객체와 해당 prefix 목록을 명시 Deny한다. trust는 클러스터/namespace/SA에 바인딩하고 개발자 신원을 포함하지 않는다.
+- 조회 결과 경로·SSE-S3·bucket owner·쿼리당 1GiB를 workgroup에서 강제한다. 추가 CloudWatch 지표 게시를 끈다. SQL 자체의 SELECT-only 기능이나 월 비용 상한이라고 주장하지 않는다.
+- 판정 이력 쓰기 prefix는 미확정이라 빈 목록이다. mock의 예제 쓰기 경로는 테스트용일 뿐 실제 배포 입력이 아니다. 실제 Glue DB/table·Kubernetes namespace/SA·업무 Pod·DAG·실제 개발자 제한은 이번 코드에서 생성/수정하지 않는다.
+- 기존 infra/athena-query-base는 아직 미적용이며 동일 판정 workgroup을 중복 소유하면 안 된다. 이번 두 workgroup 스택으로 대체하는 방향으로 정리하고 예전 스택을 함께 배포하지 않는다.
 
 ## 작업 결과
 
 - 기존 infra 규칙·workload-access·보류 중 Athena 코드·Airflow 문서·최신 Gold B 브랜치를 대조했다.
 - 개발자 IAM 정책, 도쿄 Glue DB·Athena workgroup·역할 목록을 읽기 전용 조회했다. 실제 값은 Git 제외 경로에 저장했다.
-- 사용자가 EKS 별도 Pod 실행을 확정해 전용 ServiceAccount/역할/workgroup 연결 이름을 정리했다. AWS 리소스/권한/데이터는 생성·수정하지 않았다. 결과 저장 방식과 테이블 계약 확인 후 다음 단계로 진행한다.
+- 사용자가 EKS 별도 Pod 실행과 분리된 S3 결과 경로를 확정해 모듈/스택·테스트·안내를 준비했다. 실제 apply·업무 SQL·데이터 쓰기는 수행하지 않았다.
+- 모듈/스택 fmt·스택 validate·기존 고정 AWS provider 6.68.0으로 mock 7개 통과. 두 역할/결과/workgroup 분리·신뢰 바인딩·정답표 Deny·기록 쓰기 opt-in, 중첩 결과 경로·금지 결과 경로·전체 gold_b 쓰기·너무 작은 스캔 상한·부족한 endpoint 권한 거부를 확인했다. 초기 PowerShell 직접 호출은 테스트 0개로 종료돼 검증으로 인정하지 않고 Python argv 호출로 실제 test summary 7 passed를 확인했다.
+- 실제 도쿄 plan은 신규8·수정0·삭제0이다. 기존 버킷·네트워크·EKS·Bronze Sink·개발자 그룹에는 변경이 없다. 판정 이력 쓰기 목록은 비어 있다. 실제 이름이 같은 역할/workgroup/association도 사전 조회에서 없었다.
+- 생성 예정 inline policy를 AWS IAM SimulateCustomPolicy에 전달해 S3 객체 읽기/버전 읽기/쓰기/삭제 40개, 자기·상대·primary workgroup 조회 시작 6개, S3 일반/버전 목록과 root/상대/정답표 prefix 20개, 총 66개 허용·거부 조합을 통과했다. CLI의 policy list 전달과 여러 resource의 결과 집계 구조를 수정해 검증을 완료했으며 정책 자체를 넓히지 않았다. 이는 실제 Pod 세션·버킷/Lake Formation/상위 정책·Athena 업무 조회 검증을 대신하지 않는다.
+- Git 제외 private input/backend/plan/시뮬레이션 요청에만 실제 계정/버킷/ARN을 저장한다. 실제 역할 ARN은 아직 생성되지 않았으므로 배포 완료 ARN으로 전달하지 않는다.
+- 다음 입력은 판정이 쓰는 anomaly/detection_runs/reprocess_events의 최종 S3 prefix와 S3 직접 Parquet append 또는 Athena INSERT 등 저장 방식이다. 이후 namespace/ServiceAccount·Airflow·업무 이미지 배포와 실제 경로 허용/금지 검증을 연결한다.
