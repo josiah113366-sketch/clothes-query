@@ -22,7 +22,7 @@
 - 거래・클릭 --input-complete는 실행자의 입력 준비 확인이다. Kafka watermark 자동 검증이 아니다. S3 직접 입력・YAML 검사기・자동 시험 데이터 제외는 추가하지 않았다.
 - 기존 테스트 파일에 CDC 정렬/동시각 충돌・실제 형식 JSONL 읽기 사례를 추가했다. 전체 결과는 Gold A 작업 지시서에 기록한다.
 
-브랜치: `pipelines/silver`. `main`을 기준으로 이미 검증한 회원·리뷰·거래 Silver 파일만 모은다. Gold A 코드와 테스트는 `gold-a/metrics` 브랜치로 분리한다.
+과거 PR 제출 기록: 당시 Silver 파일만 모으고 Gold A 코드와 테스트는 별도 브랜치로 분리했다. 현재 브랜치 이름은 상단의 `pipelines/silver`와 `pipelines/gold-a`를 따른다.
 
 ## 입력과 남은 연결
 
