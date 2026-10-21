@@ -293,6 +293,11 @@ def main():
         business_listener = next(d["spec"] for d in business_docs if d["kind"] == "Kafka")["kafka"]["listeners"][0]
         assert {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "kafka-ui"}}} in business_listener["networkPolicyPeers"]
         assert not any(d["kind"] in UI_KINDS for d in compact_docs)  # ui is off by default
+        # api/mvp: the business API (namespace api) may only write clickstream.
+        api_user = next(d for d in business_docs if d["kind"] == "KafkaUser" and d["metadata"]["name"] == "api")
+        api_acls = {(a["resource"].get("name", "cluster"), tuple(a["operations"])) for a in api_user["spec"]["authorization"]["acls"]}
+        assert api_acls == {("clickstream", ("Write", "Describe")), ("cluster", ("IdempotentWrite",))}, api_acls
+        assert {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "api"}}} in business_listener["networkPolicyPeers"]
         bad = copy.deepcopy(business); bad["ui"]["image"] = ""
         render(bad, error="ui.image digest is required")
         bad = copy.deepcopy(business); bad["ui"]["image"] = "ghcr.io/kafbat/kafka-ui:latest"
