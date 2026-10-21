@@ -89,6 +89,7 @@ gitGraph
 | `sim/controller` | `docs/tasks/sim-controller.md` | 머지됨 | |
 | `sim/clickstream` | `docs/tasks/sim-clickstream.md` | 머지됨 | |
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
+| `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 진행 중 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
