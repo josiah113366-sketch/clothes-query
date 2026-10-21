@@ -10,7 +10,7 @@
 - [ecr](ecr/README.md)
 - [apps](apps/README.md)
 - [workload-access](workload-access/README.md): network/eks/storage 이후 명시된 서비스 입력으로 AWS 접근 역할 준비
-- [team-access](team-access/README.md): 기존 EKS 이후 동료 WAS 배포 접근과 namespace 준비
 - [gold-b-access](gold-b-access/README.md): network/eks/storage 이후 판정·조사 역할과 전용 Athena workgroup (조회용 자원 적용 완료)
+- [team-access](team-access/README.md): 기존 EKS 이후 동료 WAS 배포 접근과 namespace 준비
 
 설정과 검증 절차는 [전체 실행 안내](../IMPLEMENTATION.md)를 따른다. platform(Kafka/Spark/Airflow)은 후속 작업이다.
