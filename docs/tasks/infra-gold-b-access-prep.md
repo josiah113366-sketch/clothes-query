@@ -2,6 +2,8 @@
 
 상태: 조회용 자원·EKS 실행 신원 연결 및 합성 실측 완료·검토 대기 / 판정 기록 쓰기·Airflow·업무 실행 후속
 
+PR 정리: 최신 main을 반영했다. 이 브랜치는 Gold B 권한과 agent namespace/ServiceAccount만 포함하며 Airflow 설치는 `infra/airflow-runtime`에서 이 브랜치를 기반으로 별도 검토한다. CI/CD·비용 알림·과거 단일 Athena 후보는 포함하지 않는다. README의 과거 namespace 미연결 표현도 실제 검증 상태로 갱신했다.
+
 ## 목표와 승인된 범위
 
 2026-10-21 팀원에게 받은 Gold B 접근 요청을 사용자가 하나씩 지정하며 준비하도록 요청했다. 조사 에이전트·판정 업무 코드는 팀원 담당이다. 인프라는 읽기/쓰기 역할 분리, Athena workgroup, 정답표 차단, Airflow 실행 환경 연결을 담당한다. 실제 계정/ARN은 공개 Git에 넣지 않는다. 보류한 CI/CD와 비용 알림은 이번 작업에 포함하지 않는다.
