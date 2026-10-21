@@ -51,7 +51,8 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 40개 통과, 설정 파일 시험 1개는 PyYAML이 없어 건너뜀)
 - [x] 묶음 하나의 줄이 이벤트 시각의 시간 폴더로 가고, 같은 묶음을 다시 써도 두 번 쌓이지 않는지
 - [x] 설정 파일을 읽는 시험 (PyYAML이 있는 PC 기본 Python으로 `test_ingest.py` 4개 통과)
-- [ ] Spark로 실제 실행 → **대기** (이 PC에서 Spark가 뜨지 않음, 형식 검사 없음)
+- [x] Spark로 실제 실행: Docker의 Spark 4.1.3 + 로컬 Kafka 3.7로 확인 (형식 검사 대신 샘플 기대 결과로 판정)
+- [x] 같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않는지
 
 ## 작업 결과 (머지 전에 작성한다)
 
@@ -69,9 +70,14 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
   - Gold B 가상환경에서 `pipelines/gold_b/tests` 40개 통과, 1개 건너뜀 (테이블 정의 22 + 재처리 15 + 적재 3, 설정 파일 시험은 PyYAML이 없어 건너뜀).
   - PC 기본 Python(PyYAML 있음)으로 `test_ingest.py` 4개 통과: 샘플 31건을 한 묶음으로 쓰면 원장 세 표가 샘플 기대 결과와 같고 파일은 4개(메시지 05·06시, 결제 06시, 오류 06시), 같은 묶음을 다시 쓰면 파일이 늘지 않고, 다음 묶음은 새 파일로 쌓여 전체가 기대 결과와 같음, 설정 파일과 환경변수 확인.
   - `git diff --check` 통과.
+  - **로컬 Spark 실제 확인 (2026-10-22, Docker):** `spark:4.1.3-scala2.13-java17-python3-ubuntu` 컨테이너에서 `spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.3`로 `build_query`를 실행했다. Kafka는 `apache/kafka:3.7.0`, 샘플 메시지를 원래 Kafka 시각과 키(샘플 이름)로 넣고, 형식 검사 대신 키로 샘플 기대 결과를 돌려주는 가짜 판정을 썼다. 설정 파일은 그대로 읽고 주기만 5초로 줄였다.
+    - 1차: 06:08 전 메시지 23건 → 묶음 0번, 파일 4개(메시지 05·06시, 결제 06시, 오류 06시). 메시지 23·결제 7·오류 14줄이 기대와 같음 (Kafka 시각 포함).
+    - 나머지 6건을 넣고 **같은 체크포인트로 다시 실행** → 묶음 1번이 새 6건만 읽음. 합계 메시지 29·결제 10·오류 16줄이 기대와 같고, 같은 위치가 두 번 쌓인 메시지 없음.
+    - 처음 실행에서 **구독 목록에 Kafka에 없는 토픽(`reviews.raw`)이 있으면 쿼리가 `UnknownTopicOrPartitionException`으로 멈추는 것**을 찾았다. 토픽 이름 목록(`subscribe`) 대신 이름과 정확히 같은 패턴(`subscribePattern`, `^(payments|…|reviews\.raw)$`)으로 받게 고쳤다. 있는 토픽만 읽고, 나중에 생긴 토픽은 그때부터 읽는다. 시험 1개를 더했다 (가상환경 41개 통과·1개 건너뜀, PC Python `test_ingest.py` 5개 통과).
+    - 받은 것: Kafka 연결 jar와 의존 jar 125MB(Maven Central), 컨테이너 안 `pyarrow` 25.0.1(컨테이너가 Python 3.10이라 26.0.0이 없음)·`PyYAML` 6.0.3. 시험 컨테이너는 지웠다.
 - **알려진 한계·남은 일:**
   - 형식 검사(2단계)가 없어서 실행 진입점을 만들지 않았다. 현지 님과 형식 검사를 정한 뒤 연결한다.
-  - Spark 연결(`build_query`)은 이 PC에서 Spark가 뜨지 않아(Java 소켓 오류) 돌려 보지 않았다. Docker의 Spark나 EKS에서 확인해야 한다.
+  - Spark는 로컬 Docker에서만 돌려 봤다. EKS 실행, S3 체크포인트(`s3a://`, `hadoop-aws`), SSL·mTLS 연결은 확인하지 않았다.
   - Spark 런타임(이미지, `spark-sql-kafka` jar, S3 체크포인트용 `hadoop-aws`), 클라이언트 인증서 형식(Java Kafka 클라이언트는 암호 없는 PKCS#8 키를 PEM 값으로 받음), `deploy/gold_b_streaming.yaml`은 재영 님과 정한다.
   - Gold B 가상환경에 `PyYAML`을 아직 설치하지 않았다 (`pip install -r pipelines/gold_b/requirements.txt`로 설치).
   - push는 #36과 재처리 브랜치가 머지된 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.

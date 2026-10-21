@@ -18,7 +18,7 @@ Kafka 토픽(`config/gold_b.yaml`)을 Spark Structured Streaming으로 1분마�
 | `KAFKA_BOOTSTRAP`, `KAFKA_SECURITY_PROTOCOL` | Kafka 주소, `PLAINTEXT` 또는 `SSL` (시뮬레이터·수집기와 같은 이름) |
 | `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | SSL일 때 PEM 파일 (클라이언트 인증서는 둘 다) |
 
-**형식 검사(2단계)가 없어서 아직 실행하지 않는다.** 이 PC에서는 Spark가 뜨지 않아 Spark 연결(`build_query`)은 돌려 보지 않았고, `write_batch`만 시험했다. Spark 런타임(이미지, `spark-sql-kafka` jar, S3 체크포인트용 `hadoop-aws`)과 배포는 재영 님과 정한다. 부를 때는 Spark 세션을 만든 뒤 `build_query(spark, settings=Settings.from_env(os.environ), config=load_config(), checker=…, store=open_store(…))`.
+**형식 검사(2단계)가 없어서 아직 실행하지 않는다.** Spark 연결(`build_query`)은 Docker의 Spark 4.1.3으로 로컬 Kafka를 읽어 확인했다 (같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않음). 단위 시험은 `write_batch`만 본다. Spark 런타임(이미지, `spark-sql-kafka` jar, S3 체크포인트용 `hadoop-aws`)과 배포는 재영 님과 정한다. 부를 때는 Spark 세션을 만든 뒤 `build_query(spark, settings=Settings.from_env(os.environ), config=load_config(), checker=…, store=open_store(…))`.
 
 확인: `python -m pytest -q pipelines/gold_b/tests/test_ingest.py` (설정 파일 시험은 `PyYAML`이 있어야 돈다).
 

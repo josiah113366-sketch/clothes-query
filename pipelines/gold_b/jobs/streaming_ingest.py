@@ -10,7 +10,7 @@
   3. 파일 이름은 그 파일에 든 메시지 위치로 정한다. Spark가 끝내지 못한 묶음을 다시 처리하면 같은 이름이라 덮어쓴다 (두 번 쌓이지 않음).
 
 Kafka에서 어디까지 읽었는지는 Spark 체크포인트가 기억한다. Kafka에 처리 위치를 커밋하지 않는다.
-이 PC에서는 Spark가 뜨지 않아 build_query(Spark 연결)는 돌려 보지 않았다. write_batch는 시험으로 확인한다.
+build_query(Spark 연결)는 Docker의 Spark 4.1.3과 로컬 Kafka로 확인했다 (이 PC에서는 Spark가 바로 뜨지 않음). write_batch는 단위 시험으로 확인한다.
 """
 from __future__ import annotations
 
