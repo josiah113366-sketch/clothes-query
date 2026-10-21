@@ -1,6 +1,6 @@
 # 작업 지시서: api/mvp
 
-> 상태: 검토 대기(EKS 적용 완료, 2026-10-21) · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design` PR) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
+> 상태: 검토 대기(EKS 적용 완료, 2026-10-21) · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design`, #33 머지됨) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
 
 ## 목표
 
@@ -255,7 +255,7 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 
 ### 다음 할 일
 
-- `docs/api-design` PR 먼저 머지(이 브랜치의 README·CLAUDE.md가 `docs/design/api.md`를 가리킨다). 설계 문서 권한 줄(`members` UPDATE(status))을 맞출지 결정
+- 설계 문서 권한 줄(`docs/design/api.md`, `members` INSERT·SELECT)을 실제(`UPDATE (status)` 추가)에 맞출지 결정(`docs/` PR)
 - 통합 테스트를 `clothes_app`과 같은 권한의 계정으로 돌리기(이번 권한 문제는 테이블 소유자로 돌아서 로컬에서 못 잡았다)
 - 비밀값 교체 절차: DB 앱 비밀번호(Secrets Manager → K8s Secret 복사본), Kafka 인증서 갱신(2027-09 무렵) 시 `kafka-client` 재복사. CDC 비밀번호 교체 보류와 함께 정리
 - `sim/ecs-image`: 시뮬레이터가 내부 ALB로 호출, `inboundCIDRs`를 ECS 대역으로 좁히기. 클릭도 API로 가므로 ECS→Kafka 경로는 필요 없어졌다
