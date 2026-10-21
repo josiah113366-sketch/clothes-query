@@ -1,44 +1,55 @@
 # 작업 지시서: infra/airflow-runtime
 
-상태: DB·인증 선택 및 개발 profile 렌더/server dry-run 완료 / 실제 미설치
+상태: 개발용 Airflow 실제 설치·합성 검증 완료 / 업무 DAG 연결 대기 / 미푸시
 
-## 사용자 결정
+## 사용자 결정과 범위
 
-- 기존 EKS 사용. Airflow 본체 namespace는 airflow, 판정·조사는 별도 agent Pod/ServiceAccount를 재사용한다. agent namespace/역할은 기존 infra/gold-b-access-prep 작업으로 실제 연결·합성 검증됐다.
-- 기존 RDS 안에 Airflow 전용 DB·계정을 만든다. 새 RDS를 만들거나 기존 업무 테이블을 변경하지 않는다.
-- 개발용 Simple Auth Manager로 시작한다. 현재 개발 구성의 접속은 port-forward로 준비하며 새 ALB를 생성하지 않는다. 고정 역할 기반 개발 인증이며 세부 업무 권한 설계나 DAG allowlist를 대신하지 않는다.
-- 실제 설치 전 버전/Helm 호환성·자원 여유·비밀 공급·DB 연결·로그/DAG 공급과 실패 시 복구를 확인한다. 현재는 설정 준비/렌더링이며 EKS/RDS 변경을 수행하지 않는다.
-- CI/CD·비용 알림 보류는 유지하며 PR 승인/머지는 팀원이 한다.
+기존 EKS에 Airflow를 설치하고 기존 RDS 안의 별도 DB·계정을 사용한다. 인증은 개발용 Simple Auth Manager이며 접속은 port-forward로 시작한다. 판정·조사는 기존 `agent` namespace의 별도 Pod/ServiceAccount를 사용한다. 사용자의 설치 진행 요청에 따라 실제 변경을 수행했다. CI/CD·비용 알림 보류는 유지하며 PR 승인·머지는 팀원이 한다.
 
-## 확인한 사실
+업무용 DAG·판정/조사 앱·Spark job 구현은 포함하지 않는다. 새 노드·ALB·PVC·DB 서버를 만들거나 기존 업무 테이블을 변경하지 않는다. API 전용 taint를 유지하고 Airflow는 현재 compute 노드 hostname에 고정해 이번 검증의 자동 증설을 막는다. 이 고정은 노드 교체 대응을 제한하므로 향후 용량/가용성 설계에서 다시 판단한다.
 
-- Apache 공식 발표의 최신 3.3 안정판은 3.3.2(2026-09-17). 공식 Helm index의 최신 안정 차트는 1.22.0이며 기본 appVersion은 3.2.2다. 실제 image/version은 3.3.2-python3.12/3.3.2로 명시한다. 차트 archive SHA256을 official index와 대조했다.
-- 차트 기본 core.auth_manager는 FAB여서 SimpleAuthManager로 덮어써야 한다. 사용자 비밀번호를 미리 만든 Secret 파일로 공급해 자동 생성 비밀번호의 로그 노출을 피한다. 인증 해제 옵션은 false로 유지한다. operator/admin, observer/viewer, approval/user는 준비용 서비스 이름이며 실제 비밀번호·전달 방식은 비공개로 관리한다.
-- EKS 1.36에 대해 Helm 렌더가 성공하는 것은 실제 실행 호환성 검증을 의미하지 않는다. Airflow 3.3.2 prerequisite 페이지의 공식 테스트 Kubernetes 목록은 1.35까지다. 실제 EKS 실행 검증이 필요하다. PostgreSQL 16은 명시된 지원 버전이다.
-- 실제 Kafka 노드는 t3a.large, 요청량 CPU 1350m·메모리 3840Mi. 할당 가능량 기준 여유 약 430m/3207Mi다. API 노드는 t3a.medium이지만 API 전용 taint가 있어 Airflow가 사용하지 않도록 유지한다.
+## 구현
 
-## 개발 profile과 남은 일
+- 공식 Helm 1.22.0 / Airflow 3.3.2 Python 3.12, LocalExecutor, API·scheduler·DAG processor 각 1개. 본체 requests 300m/1152Mi, migration Job 50m/256Mi. 작업 병렬 한도 1, 업데이트 Recreate로 업데이트 중 중단 가능.
+- 기존 RDS의 `airflow_meta` DB·역할, 연결 한도 16. NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOREPLICATION, PUBLIC DB/schema 권한 제거, 기존 업무 테이블 SELECT 권한 없음 검증. RDS CA와 TLS verify-full 사용. RDS 재부팅·사양 변경 없음.
+- Secrets Manager 원본과 Kubernetes Secret 5개(metadata/Fernet/API/JWT/Simple Auth). master 자격 증명을 담은 일회성 bootstrap Secret·Pod는 삭제했다. 실제 비밀번호·ARN·계정·버킷·엔드포인트·이미지 digest·hostname은 비공개 파일에만 보관한다.
+- S3 `airflow-logs/`에 task 로그 저장. 기존 `workload-access` 입력을 보존하고 scheduler 읽기/쓰기와 API 읽기용 정책·역할·Pod Identity 6개만 plan 확인 후 추가했다. 적용 후 변경 없음 plan을 확인했고 비공개 deployment tfvars에도 보존했다.
+- scheduler는 `agent` Pod 생성·조회·삭제 및 로그 조회만 가능하다. agent Secret 조회와 kafka namespace Pod 생성은 실제 RBAC 검사에서 거부됐다. 기존 `agent/detection-job`, `agent/investigation-agent` Pod Identity를 재사용한다.
+- 내장 PostgreSQL·Redis·PgBouncer·triggerer·StatsD·추가 ALB·PVC 비활성. LocalExecutor 기본 worker PVC 옵션도 껐다. 최종 렌더 14개 객체, Deployment 3개와 migration Job이며 서버 dry-run 통과. 모든 init/container 이미지 digest를 고정했다.
 
-- LocalExecutor 본체 3개(API·scheduler·dag processor), 일반 작업 병렬1. 판정·조사는 KubernetesPodOperator로 agent namespace의 전용 SA를 지정하는 연결 후보다. 업무 DAG는 담당자가 구현한다. 자체 작업 Pod 생성 RBAC는 아직 추가하지 않았다.
-- 본체 requests 합계 300m/1152Mi, DB migration Job 별도 50m/256Mi를 후보로 둔다. 렌더된 init/sidecar/Job의 실제 유효 requests를 검사한다. 이 예약량은 실측 사용량이나 안정성 보장이 아니다. 공식 최소 메모리 권고와 실제 업무 부하를 함께 검토한다.
-- Redis/Celery·내장 PostgreSQL·PgBouncer·StatsD·triggerer·추가 ALB/PVC는 비활성. 개발용 Recreate 전략이므로 업데이트 중 중단될 수 있다. 자동으로 무중단을 보장한다고 주장하지 않는다.
-- metadata DB 이름/역할 이름, 연결 한도와 Secret 공급·TLS verify-full/CA, RDS 현재 부하·연결 여유 확인 후 DB 생성과 마이그레이션을 준비한다. 현재 DB·계정은 생성하지 않았다.
-- Secret은 metadata connection, Fernet, API key, JWT, Simple Auth passwords를 별도 공급하며 공개 values나 Helm --set 명령에 실제 값을 넣지 않는다. 샘플 password를 사용하지 않는다.
-- DAG 공급, Kubernetes provider 이미지 검증·고정 digest, agent Pod 실행 RBAC, 실제 task 로그 보관은 아직 미완료다. profile의 remote_logging=false/영속 로그 없음은 초기 렌더용이며 업무 배포 완료 구성으로 취급하지 않는다.
-- 실제 설치 직전 자원 재점검 및 필요시 기존 노드에만 배치하는 별도 검증 guard를 사용해 예상치 못한 증설을 피한다. 추가 노드/유료 자원이 필요한 경우 먼저 비용과 구성을 제시한다.
+## 발견과 수정
 
-## 참고 자료
+1. DB pool size 1/overflow 1은 migration에서 QueuePool timeout이 발생했다. size 3/overflow 2로 수정했다. 전체 역할 연결 한도 16은 유지했다.
+2. ConfigMap 디렉터리 내부 symlink를 DAG processor가 재귀 루프로 탐지했다. DAG 단일 파일을 subPath로 마운트했다. 변경 후 본체 rollout이 필요하다.
+3. Simple Auth Manager는 기존 비밀번호 파일도 쓰기 모드로 연다. Secret을 직접 읽기 전용 마운트하면 PermissionError가 발생한다. API init에서 Secret 원본을 Pod 전용 emptyDir로 복사하고 권한을 0600으로 지정했다. 파일 내용은 출력하지 않는다.
+4. API 기본 시작 점검 유예가 짧아 초기 기동이 재시작됐다. 유예를 5분으로 늘렸다. 정상 상태/인증 검사는 끄지 않았다.
+5. 임시 복구 중 namespace가 생략된 Helm 렌더를 kubectl로 적용해 default에 Deployment 3개와 ConfigMap 1개를 잘못 만들었다. 전체 last-applied 내용을 생성한 렌더와 대조하고 UID를 기록했다. 자동 승인 검토가 삭제를 차단해 사용자에게 명시적 승인을 받았으며, 동일 UID precondition으로 확인된 4개만 삭제했다. default의 관련 Deployment/Pod가 0개임을 확인했다. 올바른 namespace의 직접 수정은 최종 Helm upgrade로 관리 상태와 일치시켰다.
+
+실패한 최초 설치는 atomic 복구를 확인했다. Helm 복구는 사전에 준비한 DB·Secret·IAM을 되돌리지 않는다. 완료된 비-hook migration Job은 이후 template 변경 시 immutable 필드 충돌을 피하도록 성공 상태를 확인해 정리하고 재실행했다. 실패/실행 중 Job을 무조건 지우지 않는다.
+
+## 실제 검증 결과: 2026-10-21 Tokyo
+
+- 본체 3개 Ready, 최종 기동 후 restart 0, Helm 설치/업그레이드 완료. 노드 2개 유지. Kafka 6/6, 기존 API 1/1 Ready/restart 0.
+- 공식 이미지에서 Amazon provider 9.36.0, Kubernetes 10.22.0, PostgreSQL 7.0.2 및 SDK import 확인. 실제 EKS 1.36에서 아래 합성 검증 성공. 공식 테스트 Kubernetes 목록은 1.35까지이므로 이 결과를 공식 지원 범위 확대로 간주하지 않는다.
+- operator/admin·observer/viewer·approval/user 토큰 발급 성공. 미인증 조회 거부, 잘못된 비밀번호 거부, viewer 실행 거부, approval 실행 허용, 중복 dag_run_id 409 확인. DAG import 오류 0.
+- `infra_airflow_access_probe`: 실제 승인 계정 호출 → scheduler → detection/investigation Pod 순차 실행 → 모두 성공. 각 전용 IAM 역할과 Gold B 목록 조회·ground_truth 접근 거부를 확인했다. 실행 약 109초, 첫 Pod task 약 60초, 두 번째 약 15초였다. 업무 Athena 쿼리 시간은 포함하지 않는다.
+- API Pod의 전용 로그 읽기 역할로 S3 로그 2개를 읽어 두 Pod의 성공 증거를 확인했다. 로그 원문·토큰·비밀번호는 공개 출력하지 않았다.
+- `infra_airflow_five_minute_probe`의 5분 간격 logical date 실행 3회 성공. 설치/재시작 후 대기 실행은 약 93초·17초, 정상 03:30 UTC tick은 03:30:01.529에 시작해 약 3.4초 만에 끝났다. 아주 작은 합성 작업의 결과이며 실제 판정 잡의 5분 SLA를 입증하지 않는다.
+- 검증 DAG 2개 다시 pause. 임시 agent Pod 0개, 잘못 만든 default Airflow Pod 0개. 업무 데이터·정답표에 합성 행/파일을 쓰지 않았다. Airflow 실행 이력과 S3 task 로그는 검증 운영 기록으로 남는다.
+- 검증 후 관측점에서 compute 노드 working set 약 5232Mi, Airflow 본체 합계 약 1218Mi. 이는 단일 관측값이며 최고치나 업무 부하 예산이 아니다. DB 연결은 관측 시 Airflow 6개/한도 16이었다.
+- Ruff check/format, YAML 문법, Helm schema/render·서버 dry-run, diff 점검 완료. 실제 계정·엔드포인트·비밀값이 추적 파일에 없는지 확인 후 로컬 커밋한다.
+
+## 팀원에게 넘길 것과 남은 일
+
+[접속·설치 안내](../../infra/platform/airflow/README.md)의 port-forward와 인증/API 방식을 사용한다. 비밀번호는 별도 비공개로 전달한다. 실제 재처리/판정 DAG ID, 입력 범위와 교체 완료 조건, 앱 이미지·업무 SQL을 받아 DAG 공급·실행 시간·자원을 검증해야 한다. 이번 합성 DAG를 업무 DAG로 오인하지 않는다.
+
+Gold B Glue DB/테이블 계약, 판정용 쓰기 prefix·쓰기 방식은 별도 미확정 입력이며 이번 설치가 생성·확정하지 않는다. 조사·판정 ServiceAccount의 실제 권한 분리는 기존 gold-b-access 작업을 전제로 한다. 개발자 IAM 사용자에게 이미 광범위한 그룹 권한이 있는 사실도 그대로다. 업무 DAG를 직접 이어 재판정하는 구현은 담당자와 계약 후 가능하며, 임시 5분 확인 방식과 구분한다.
+
+PR #14의 사용자 클릭과 알려진 SQL 후속 사항을 인지했으며 해당 PR을 승인·머지·수정하지 않았다. 이 브랜치도 push·PR 승인·머지를 수행하지 않는다.
+
+## 참고
 
 - [공식 발표](https://airflow.apache.org/announcements/)
 - [Helm 1.22.0](https://airflow.apache.org/docs/helm-chart/1.22.0/index.html)
 - [Airflow 3.3.2 요구 조건](https://airflow.apache.org/docs/apache-airflow/3.3.2/installation/prerequisites.html)
 - [Simple Auth Manager](https://airflow.apache.org/docs/apache-airflow/3.3.2/core-concepts/auth-manager/simple/index.html)
-- [Helm DB/Secret 준비](https://airflow.apache.org/docs/helm-chart/1.22.0/production-guide.html)
-
-## 작업 결과
-
-DB 재사용과 Simple Auth 선택을 기록하고 개발용 values를 준비했다. 공식 chart checksum과 기본 설정을 대조했다. 최종 렌더는 14개 객체(API/DAG processor Deployment, scheduler StatefulSet, migration Job 포함)이며 실제 EKS 1.36 서버 dry-run이 통과했다. 추가 Secret/Ingress/PVC/ClusterRole/내장 DB/Redis는 렌더되지 않는다. LocalExecutor에서 사용하지 않는 chart broker Secret을 억제했고 사용되지 않는 외부 broker 참조가 컨테이너 환경에 없는지도 확인했다.
-
-본체 requests는 300m/1152Mi, migration Job은 50m/256Mi다. scheduler는 단일 replica StatefulSet RollingUpdate, API/DAG processor는 Recreate로 추가 surge를 피한다. 차트 기본 dagProcessor.strategy.rollingUpdate가 병합돼 Recreate와 충돌했던 것을 null로 제거하고 server dry-run을 재통과했다. 파일 문법/Helm schema·diff도 확인했다. 이 결과는 프로세스 메모리 실측·DB 연결·사용자 로그인·업무 DAG 성공을 의미하지 않는다.
-
-실제 Helm 설치·DB/계정/Secret 생성·업무 실행은 아직 수행하지 않았다. 실제 작업은 DB/Secret 공급, 이미지/provider·로그/DAG 공급, 전용 Pod RBAC 준비 이후 이어간다. 중간 PR #14 상태 문의를 읽기 전용 확인했고, 해당 PR은 OPEN이며 신뢰성 SQL은 SQLite 검증만 완료한 초안이다. PR #29도 OPEN으로 실제 판정 잡 연결과 구분했다.
