@@ -3,7 +3,7 @@
 에이전트가 쓰는 도구는 이 울타리를 통과한 SELECT만 실행한다. 통과하지 못하면 실행하지 않고 이유를 알려 준다.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 ALLOWED_TABLES = {
     "gold_b.payment_events", "gold_b.payment_attempts", "gold_b.topic_messages",
@@ -49,11 +49,19 @@ def validate_sql(sql: str) -> str:
 
 
 def parse_time(value: str) -> datetime:
-    """'2026-10-20T15:00:00' 또는 '2026-10-20 15:00:00' (UTC)만 받는다."""
+    """시각을 받아 **UTC 기준 시간대 없는 값**으로 통일한다.
+
+    받는 형식: '2026-10-20T15:00:00', '2026-10-20 15:00:00', 끝에 Z, +00:00, +09:00 같은 시간대가 붙은 것.
+    시간대가 붙어 있으면 UTC로 바꾸고(예: +09:00이면 9시간 빼고), 안 붙어 있으면 UTC로 본다.
+    """
+    text = str(value).strip()
     try:
-        return datetime.fromisoformat(str(value).strip().replace("Z", ""))
+        dt = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text)
     except ValueError as e:
         raise GuardError(f"시각 형식이 맞지 않습니다: {value!r} (예: 2026-10-20T15:00:00, UTC)") from e
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def check_window(start: str, end: str) -> tuple[datetime, datetime]:
