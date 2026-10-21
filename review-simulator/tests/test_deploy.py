@@ -21,6 +21,7 @@ import aws_common
 import check_access
 import onoff
 import run_incident
+import run_rds
 import secret
 import status
 import switch
@@ -354,3 +355,38 @@ def test_entrypoint_runs_same_rsim_commands(tmp_path):
     log.unlink()
     subprocess.run(["sh", str(script), "inject", "--file", "s3://b/k.csv"], env=env, check=True)
     assert log.read_text(encoding="utf-8").strip() == "inject --file s3://b/k.csv"
+
+
+def test_run_rds_checks_secret_switches_and_runs_bedrock(aws, monkeypatch, capsys):
+    """run_rds.py: secret 이 비어 있으면 멈추고, 있으면 주문 입력을 rds 로 맞춘 뒤 Bedrock 으로 한 번 실행한다."""
+    sess, cfg = aws
+    _register(sess, cfg)
+    with pytest.raises(SystemExit):
+        run_rds.main(["--yes", "--date", "2026-10-20"])
+    sess.client("secretsmanager").put_secret_value(
+        SecretId=cfg["orders_db_secret_arn"],
+        SecretString="postgresql://ro:pw@db.internal:5432/postgres",
+    )
+    calls = {}
+
+    def fake_run_task(ecs, cfg_, *, env=None, command=None, started_by=""):
+        calls.update(env=env, started_by=started_by)
+        return "arn:aws:ecs:x:1:task/rsim/abc"
+
+    monkeypatch.setattr(run_rds, "run_task", fake_run_task)
+    # 확인에 n 을 누르면 실행하지 않는다 (rds 전환은 남는다)
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    run_rds.main(["--date", "2026-10-20"])
+    assert not calls
+    td = aws_common.latest_task_definition(sess.client("ecs"), "rsim")
+    assert aws_common.env_of(td)["ORDERS_SOURCE"] == "rds"
+    rev = td["revision"]
+    run_rds.main(["--yes", "--date", "2026-10-20"])
+    assert calls["env"] == {
+        "RUN_DATE": "2026-10-20",
+        "LLM": "bedrock",
+    }  # 가짜 문장이 아니라 실제 생성
+    # 이미 rds 면 새 리비전을 또 만들지 않는다
+    assert aws_common.latest_task_definition(sess.client("ecs"), "rsim")["revision"] == rev
+    with pytest.raises(SystemExit):
+        run_rds.main(["--yes", "--date", "20261020"])

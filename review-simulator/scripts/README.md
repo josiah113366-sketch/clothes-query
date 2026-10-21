@@ -7,11 +7,12 @@ ECS 배포·운영 기능(`deploy/*.py`)을 PowerShell 에서 바로 부르는 �
 |---|---|---|
 | `check-access.ps1` | AWS 권한 확인 (읽기 전용) | `.\scripts\check-access.ps1` |
 | `infra.ps1` | Terraform 스택 `check` / `init` / `plan` / `apply` | `.\scripts\infra.ps1 plan` |
-| `secret.ps1` | Bedrock API 키 넣기·확인 | `.\scripts\secret.ps1 -FromEnv` · `-Check` |
+| `secret.ps1` | Bedrock API 키 넣기·확인, RDS 접속 주소(`-OrdersDb`) | `.\scripts\secret.ps1 -FromEnv` · `-Check` · `-OrdersDb` |
 | `deploy.ps1` | 이미지 빌드 → ECR → 태스크 정의 등록 | `.\scripts\deploy.ps1 -DryRun` |
 | `onoff.ps1` | 예약 실행 켜기 / 끄기 | `.\scripts\onoff.ps1 off` |
 | `run-once.ps1` | 지금 한 번 하루치 실행 | `.\scripts\run-once.ps1 -Fake` · `-Date 2026-10-17` |
-| `switch.ps1` | 리뷰 작성 비율 low · normal · high | `.\scripts\switch.ps1 high` · `-Rate 0.3` · `-Show` |
+| `run-rds.ps1` | RDS 주문으로 실제 리뷰(Bedrock) 한 번 생성 (주문 입력을 rds 로 맞춘 뒤 실행, 비용 확인 후 시작) | `.\scripts\run-rds.ps1` · `-Date 2026-10-20` |
+| `switch.ps1` | 리뷰 작성 비율 low · normal · high, 주문 입력 rds · fake | `.\scripts\switch.ps1 high` · `-Rate 0.3` · `-Orders rds` · `-Show` |
 | `status.ps1` | 상태·최근 실행·추정 비용 | `.\scripts\status.ps1 -Cost` |
 | `run-incident.ps1` | 특정 상품·카테고리 긍정·부정 비율 올려 실행 | `.\scripts\run-incident.ps1 -ProductId W-0003 -Aspect 품질·내구성 -Sentiment 부정 -Share 0.6` |
 | `run-inject.ps1` | 직접 쓴 리뷰 파일 넣기 | `.\scripts\run-inject.ps1 -File .local\manual\a.csv` |

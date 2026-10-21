@@ -27,6 +27,7 @@ deploy.py ──▶ ECR 이미지 + 태스크 정의(새 리비전) ◀── sw
 | `switch.py` | 실행 모드 = 리뷰 작성 비율. `low` 0.1 · `normal` 0.5 · `high` 1.0 · `--rate 0.3`. 주문 입력 `--orders rds` / `--orders fake` |
 | `status.py` | 스케줄·실행 설정·돌고 있는 태스크·최근 실행(리뷰 수, 토큰, 추정 비용)·S3 마지막 날짜. `--cost` 실제 청구액 |
 | `run_incident.py` | 특정 상품·카테고리의 긍정·부정 리뷰 비율을 올려 하루치 실행 (이미 있는 incidents 기능) |
+| `run_rds.py` | RDS 주문으로 실제 리뷰(Bedrock) 한 번: secret 확인 → 주문 입력 rds 로 맞춤 → 실행 (비용 확인 후 시작, `--yes`) |
 | `run_inject.py` | 직접 쓴 리뷰 파일을 검사 → S3 업로드 → `rsim inject` 한 번 실행 |
 | `container/entrypoint.sh` | 이미지 안의 진입점. 인자 없으면 하루치(`ORDERS_SOURCE` fake / rds), 인자 있으면 `rsim <인자>` |
 
@@ -80,7 +81,9 @@ python deploy/run_inject.py --file .local/manual/size_spike_1008.csv
    localhost(port-forward) 주소는 ECS 에서 못 쓰므로 거절된다. `--orders-db --check` 로 확인.
 5. **이미지 배포**: `python deploy/deploy.py` (0.3.0 이미지에 `--source rds` 와 psycopg 가 들어 있다).
 6. **전환**: `python deploy/switch.py --orders rds` (secret 이 비어 있으면 거절). 되돌리기는 `--orders fake`.
-7. **시험 실행**: `python deploy/onoff.py once --fake` → `status.py`/로그에서 `RDS 주문 항목 N건 읽음` 줄과 리뷰 수를 본다.
+7. **시험 실행**: `python deploy/onoff.py once --fake`(가짜 문장, 0원) → `status.py`/로그에서 `RDS 주문 항목 N건 읽음` 줄과 리뷰 수를 본다.
+8. **실제 생성**: `python deploy/run_rds.py`(PowerShell `.\scripts\run-rds.ps1`). 접속 secret 이 비었거나 배포 전이면 알려 주고 멈춘다(RDS 쪽 허용·DB 계정은 확인하지 못하므로 로그에서 접속 오류를 본다).
+   6번(전환)을 건너뛰어도 이 스크립트가 rds 로 맞춘다. Bedrock 비용 안내 후 y 를 눌러야 시작한다.
    RDS 에 그날 리뷰 시각인 주문이 없으면 리뷰 0건으로 정상 종료한다(결제 후 1~7일이라 주문이 쌓인 뒤부터 리뷰가 나온다).
 
 ## 관제 (상태·비용)
