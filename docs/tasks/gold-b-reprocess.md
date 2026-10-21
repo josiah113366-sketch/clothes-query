@@ -60,7 +60,7 @@
 
 ## 완료 확인
 
-- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 36개)
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 37개)
 - [x] 같은 입력으로 두 번 돌려 원장이 같은지 (`loaded_at` 제외), 폴더 밖 줄이 그대로인지
 - [x] 로컬 Kafka에서 시간으로 위치를 찾아 다시 읽고 폴더가 교체되는지
 - [x] 코드·README에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)
@@ -86,7 +86,7 @@
   - Spark 없이 파이썬으로 만들었다. 한 시간 폴더는 수천 줄이고, Airflow에서 부르기 쉽다.
 - **입력과 출력:** 입력은 `Request`(`request_id`, `window_start`, `window_end`, `rule_version`, `attempt`, `parent_request_id`), Kafka, 형식 검사 함수다. 출력은 원장 3개의 시간 폴더 파일(`part-reprocess-<시각>-<임의값>.parquet`), `reprocess_events/part-<시각>-<단계>-<임의값>.parquet`, 결과(`replaced`: 교체한 폴더 [시작, 끝) 목록)다.
 - **확인한 결과:**
-  - Gold B 가상환경에서 `pipelines/gold_b/tests` 36개 통과 (테이블 정의 22 + 재처리 14). `git diff --check` 통과.
+  - Gold B 가상환경에서 `pipelines/gold_b/tests` 37개 통과 (테이블 정의 22 + 재처리 15). `git diff --check` 통과.
   - 시험으로 확인한 것: 놓친 메시지와 두 번 쌓인 메시지가 있는 06시 폴더를 교체하면 Kafka 그대로가 되고 05시 폴더 파일은 그대로다. 두 번 돌려도 같다. 다시 읽지 못한 결제 줄과 옛 규칙의 오류 줄은 남고, 새 규칙(PG_C 허용)으로 PG_C 결제가 들어온다. 안 끝난 폴더·보관 기간 밖·규칙 버전 다름·빈 범위는 `FAILED` 한 줄만 남기고 원장과 Kafka를 건드리지 않는다. 06시 교체 중에 멈추면 05시만 `LEDGER_REPLACED`, 06시는 `FAILED`(재시도 가능)이고, 다시 돌리면 같은 줄 없이 정리된다.
   - 로컬 Kafka 실제 확인 (Docker `apache/kafka:3.7.0`): 샘플 메시지를 원래 Kafka 시각으로 넣고(토픽 5개, `reviews.raw`는 일부러 만들지 않음) 06:10~06:30을 재처리했다. 05:50~07:10의 메시지 30건을 읽어 06시 폴더에 결제 11·메시지 28·오류 16줄을 썼고 기대와 같았다. 07:05에 들어온 06:58 결제는 들어가고, 07:30에 들어온 06:59 결제는 빠졌다. `reviews.raw`는 `missing_topics`로 적히고 새로 생기지 않았다. 소비자 그룹이 남지 않았다(커밋 없음). 같은 연결로 한 번 더 돌려도 같았다. 시험 컨테이너를 지우고 Docker Desktop을 다시 껐다.
   - 처음에는 같은 연결로 두 번째 읽기가 시간 초과로 실패했다. 다 읽고 멈춰 둔 파티션이 다시 assign해도 멈춘 채로 남아서였다. assign 뒤에 다시 풀도록 고쳤다 (수집기는 실행마다 새 연결을 만들어 해당 없음).
@@ -99,3 +99,4 @@
   - 실제 S3 쓰기·지우기와 mTLS Kafka는 돌려 보지 않았다.
   - 판정 잡의 `TABLE_SPECS`는 `reprocess_events`를 시간 폴더로, `attempt`를 BIGINT로 가정한다. 테이블 정의(폴더 없음, INT)와 맞춰 달라고 주현 님께 전한다.
   - push는 #36 머지 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
+- **보완 (2026-10-21):** 한 메시지에서 같은 필드의 오류는 한 줄만 남긴다 (설계 「중복 제거」: `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같으면 한 번). `ledger.message_rows`에서 하므로 적재 잡도 같다. 시험 1개를 더했다.
