@@ -20,7 +20,7 @@
 | `payment_retry_impact` | 장애를 겪은 주문 수, 재시도 수 | `payment_attempts` | 1 |
 | `ingest_volume` | 토픽별 유입 메시지 수 | `topic_messages` | 2 트래픽 폭주 |
 | `bronze_lag` | Bronze 지연, 처리 위치 멈춤, 커넥터 상태 | `bronze_lag_snapshots` | 2 |
-| `malformed_summary` | 토픽·사유별 깨진 메시지 수(현재 규칙 버전만) | `malformed_messages` 뷰 | 3 스키마 오염 |
+| `malformed_summary` | 토픽·사유별 깨진 메시지 수(현재 규칙 버전만, 같은 메시지 위치는 한 번만 셈) | `malformed_events` (사유가 오류 단위 원장에 있다. 메시지 단위 뷰에는 사유가 배열 안에만 있다) | 3 스키마 오염 |
 | `malformed_fields` | 어느 필드가 왜, 언제부터, 가장 이른 offset | `malformed_events` | 3 |
 | `ledger_reliability` | 원장을 믿어도 되나(누락·중복·멈춤) | `topic_messages` 등 | 모두 |
 | `duplicate_success_orders` | 성공 결제가 2건 이상인 주문 (적재 시각 기준, 결제 시각 기준으로도 가능) | `payment_attempts` | 3 데이터 오염 |
@@ -45,6 +45,9 @@ python3 test_tools.py     # sqlite 가짜 원장으로 도구 11개와 울타리
 | `test_tools.py` | 도구가 맞는 숫자를 돌려주는지, 울타리가 위험한 요청을 막는지 시험 |
 
 ## 알아야 할 것 (한계)
+
+- **시각은 모두 UTC로 통일해 받는다**(재영 님 리뷰). `2026-10-20T15:00:00`, `...Z`, `...+00:00`은 같은 시각이고, `+09:00`처럼 다른 시간대가 붙으면 UTC로 바꿔서 조회한다(예: `+09:00`이면 9시간 빼기). 시간대가 없으면 UTC로 본다.
+- **`ledger_reliability`의 한계**: 누락 검사는 관측된 offset 사이의 빈 곳만 찾는다. 구간 맨 앞·맨 뒤나 파티션 전체가 빠진 것은 못 찾으므로 결과에 `completeness: PARTIAL`과 설명을 붙인다. 메시지가 없던 파티션 목록(`partitions_without_messages`)을 같이 돌려준다(조용한 시간대에는 정상일 수 있음). **표가 비어 있으면 `NO_DATA`**(정상 아님)로 표시한다.
 
 - **Athena에서는 아직 실행하지 않았다.** sqlite 가짜 원장으로만 시험했다. SQL은 두 곳에서 모두 돌아가는 기본 문법만 썼고, 다른 점은 시각 표기(`TIMESTAMP '...'`)뿐이다.
 - 표 이름과 컬럼은 Gold B 문서(2026-10-18)와 `docs/design/agent/anomaly-answer-key.md`의 제안을 보고 **가정한 것**이다. `anomaly` 표의 컬럼은 제안 단계다.
