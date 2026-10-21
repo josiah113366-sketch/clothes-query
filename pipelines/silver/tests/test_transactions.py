@@ -14,7 +14,79 @@ from pipelines.format_rules import (
     FormatRules,
     RuleConfigError,
 )
+from pipelines.payment_fingerprint import (
+    CONTENT_FIELDS,
+    FingerprintError,
+    canonical_payment_content,
+    payment_fingerprint,
+)
 from pipelines.silver.transactions import build_silver, run
+
+
+def fingerprint_example():
+    return {"order_id": "o-1", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
+            "amount": 20000, "status": "SUCCESS", "failure_code": None,
+            "requested_at": "2026-10-21T06:00:00Z",
+            "completed_at": "2026-10-21T06:00:02.123Z"}
+
+
+def test_payment_fingerprint_fixed_vector_and_time_equivalence():
+    original = fingerprint_example()
+    copy = deepcopy(original)
+    expected = (b'["o-1",1,"CARD","PG_A",20000,"SUCCESS",null,'
+                b'"2026-10-21T06:00:00.000000Z","2026-10-21T06:00:02.123000Z"]')
+    assert canonical_payment_content(original) == expected
+    assert payment_fingerprint(original) == {
+        "payment_content_hash": "efad032726ae5d4a0ab003e0e99175c4a372076e9d5e26a5c5d7a2b0235979fa",
+        "fingerprint_version": "payment-content.v1"}
+    kst = dict(reversed(list(original.items())))
+    kst.update(requested_at="2026-10-21T15:00:00.000000+09:00",
+               completed_at="2026-10-21T15:00:02.123000+09:00", payment_id="other",
+               kafka_offset=999, loaded_at="later", __op="r", __source_ts_ms=1)
+    assert payment_fingerprint(kst) == payment_fingerprint(original)
+    assert original == copy
+
+
+def test_payment_fingerprint_detects_every_business_field_change():
+    base = {**fingerprint_example(), "status": "FAILED", "failure_code": "PG_TIMEOUT"}
+    changes = {"order_id": "o-2", "attempt_no": 2, "method": "BANK_TRANSFER", "pg": "PG_B",
+               "amount": 20001, "status": "SUCCESS", "failure_code": "PG_ERROR",
+               "requested_at": "2026-10-21T06:00:00.000001Z",
+               "completed_at": "2026-10-21T06:00:02.123001Z"}
+    assert tuple(changes) == CONTENT_FIELDS
+    for field, value in changes.items():
+        changed = {**base, field: value}
+        if field == "status":
+            changed["failure_code"] = None
+        assert payment_fingerprint(changed) != payment_fingerprint(base), field
+    assert payment_fingerprint({**base, "order_id": " o-1"}) != payment_fingerprint(base)
+
+
+def test_payment_fingerprint_rejects_lossy_or_missing_inputs_without_policy_changes():
+    base = fingerprint_example()
+    cases = [("amount", "20000"), ("amount", 20000.0), ("amount", True), ("amount", 0),
+             ("attempt_no", False), ("attempt_no", 0), ("pg", " "), ("failure_code", ""),
+             ("status", "PENDING"), ("completed_at", "2026-10-21T06:00:02"),
+             ("completed_at", "2026-10-21T06:00:02.1234567Z"),
+             ("completed_at", "2026-02-30T06:00:02Z")]
+    for field, value in cases:
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint({**base, field: value})
+        assert caught.value.field == field
+    for field in CONTENT_FIELDS:
+        missing = dict(base)
+        missing.pop(field)
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(missing)
+        assert caught.value.field == field
+    with pytest.raises(FingerprintError):
+        payment_fingerprint({**base, "status": "FAILED"})
+    # 허용 목록은 입력 검사기의 역할이며 지문 함수가 UNKNOWN으로 바꾸지 않는다.
+    unknown = {**base, "status": "FAILED", "failure_code": "PG_NEW_ERROR"}
+    assert payment_fingerprint(unknown)["fingerprint_version"] == "payment-content.v1"
+    with pytest.raises(FormatError):
+        FormatRules().validate("payments", {**payment(), "status": "FAILED",
+                                            "failure_code": "PG_NEW_ERROR"})
 
 
 def fixture_id(label):

@@ -114,6 +114,49 @@ YAML의 `source_rules`는 현재 DDL을 충실히 옮긴 기준이다. `proposed
 
 ## 6. 주문・주문상품 처리 계약
 
+### 결제 내용 지문 규약 — payment-content.v1
+
+**상태: 사용자 승인으로 공통 함수 로컬 구현. Silver·Gold B 호출/저장·정리 뷰 연결은 후속 작업.** 입력 규칙과 별도 규약이며 format_rules.yaml에 지문 설정을 추가하지 않는다.
+
+| 항목 | v1 기준 |
+|---|---|
+| 내용 필드 순서 | order_id, attempt_no, method, pg, amount, status, failure_code, requested_at, completed_at |
+| 식별·제외 정보 | payment_id는 비교 키로 별도 유지. Kafka 위치·시각, CDC 정보, loaded_at 등 전달 정보는 지문 제외 |
+| 정수 | attempt_no/amount는 1 이상 Python 정수. bool·문자열·실수 변환 없음 |
+| 문자열 | 비어 있지 않은 문자열, trim/대소문자/유니코드 정규화 없음. 허용값 정책은 공통 입력 검사에서 적용 |
+| NULL | 9개 필드는 모두 전달. 성공은 failure_code=None, 실패는 비어 있지 않은 문자열. 누락/빈 값에서 NULL을 추정하지 않음 |
+| 시각 입력 | 시간대 포함 ISO 문자열: YYYY-MM-DDTHH:MM:SS[.1~6자리](Z 또는 ±HH:MM). datetime 객체·시간대 없는 값·7자리 이상 소수초는 거부 |
+| 시각 정규화 | UTC, 소수초 6자리, Z 고정. 반올림·절삭 없음 |
+| 직렬화 | 고정 순서 JSON 배열, ensure_ascii=False, 공백 없는 separators, UTF-8, NaN 금지 |
+| 알고리즘·반환 | SHA-256 소문자 64자리 payment_content_hash, fingerprint_version=payment-content.v1 |
+
+공통 구현은 [pipelines/payment_fingerprint.py](../../pipelines/payment_fingerprint.py)다. 공개 함수 payment_fingerprint(payment)는 위 두 필드의 dict를 반환한다. canonical_payment_content(payment)는 명세 확인용 UTF-8 바이트를 반환하며 내용을 로그·원장에 통째로 쓰지 않는다. 원본 dict는 수정하지 않는다. FingerprintError는 실패한 field만 전달한다.
+
+```python
+from pipelines.payment_fingerprint import payment_fingerprint
+
+# 호출 경로가 공통 업무 입력 검사를 통과시킨 9개 필드를 전달한다.
+# 이후 이 두 필드를 각 경로의 결과/원장에 보존하는 연결은 후속이다.
+fingerprint = payment_fingerprint(validated_payment)
+```
+
+Silver 소비 연결 시 requested_at_utc/completed_at_utc를 요청/완료 원천 필드명에 매핑하거나 정규화 전 검증 행을 전달할 수 있다. 이 함수는 별칭을 자동 추측하지 않는다. 기존 KST 출력·집계는 유지한다. Spark TIMESTAMP를 쓰는 Gold B는 JVM/Python 경계의 시간대·정밀도 손실 없이 위 문자열 계약으로 전달해야 한다.
+
+입력 정책과 지문 규칙은 분리한다. 이 함수가 미등록 실패 코드 문자열의 지문을 만들 수 있어도 그 코드를 정상 입력으로 수용한다는 뜻은 아니다. FormatRules의 허용 목록·조건 검사는 먼저 적용해야 한다. method/pg의 enum, UUID 형식, 완료>=요청 등 정책을 지문 모듈에 중복 정의하지 않는다. 공통 YAML/DDL은 이번 작업에서 변경하지 않는다.
+
+지문은 동일 payment_id의 내용 비교에 사용한다. 같은 버전의 다른 해시는 충돌 근거이며, 같은 해시만으로 원본 범위 완료/누락 없음을 증명하지 않는다. fingerprint_version이 다르면 지문 불일치를 곧바로 내용 충돌로 확정하지 않고 비교 불가로 두거나 같은 버전으로 원본에서 재계산한다. 필드/정규화/직렬화/알고리즘 변경은 지문 버전을 올리고 이전 기록의 전환 절차를 합의한다. 입력 허용값만 바뀌면 지문 버전을 반드시 바꿀 필요는 없다.
+
+공통 코드의 고정 벡터:
+
+```text
+["o-1",1,"CARD","PG_A",20000,"SUCCESS",null,"2026-10-21T06:00:00.000000Z","2026-10-21T06:00:02.123000Z"]
+SHA-256: efad032726ae5d4a0ab003e0e99175c4a372076e9d5e26a5c5d7a2b0235979fa
+```
+
+Gold B 원장은 두 컬럼 보존 정의를 반영했지만 실제 호출/원장 적재/뷰 동작 완료를 뜻하지 않는다. Silver도 아직 기존 dict 기반 중복·충돌 비교를 유지한다. 호출 연결 시 같은 실행뿐 아니라 기존 동일 ID 후보·지문 버전 혼재·원본 재계산·해시만으로 변경 필드를 알 수 없는 경우의 원본 추적을 함께 검토한다.
+
+### 주문·주문상품 기준
+
 | 대상 | 처리 기준 | 상태・근거 |
 |---|---|---|
 | 주문 상태 | 허용 상태와 `status_reason` 조건은 YAML의 원천 규칙 참조 | 결정: DDL |
