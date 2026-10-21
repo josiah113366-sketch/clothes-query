@@ -21,6 +21,8 @@
 
 ## 처음 만들 때 확인할 것 (Athena 권한이 생긴 뒤)
 
+로컬 Trino 484(Docker, Athena 엔진 3과 같은 계열)에서는 아래를 모두 확인했다 (2026-10-22, `docs/tasks/gold-b-views.md`). Athena에서 한 번 더 본다.
+
 - 문법: `ARRAY_AGG(CAST(ROW(...) AS ROW(...)))`, `filter(ARRAY[...], x -> ...)`가 Athena에서 도는지
 - 샘플(`tests/samples/`)로 만든 원장에서:
   - 같은 결제 중복(`success_pg_a`, `duplicate_of_success_pg_a`)이 `payment_attempts`에 1건

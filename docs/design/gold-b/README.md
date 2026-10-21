@@ -738,8 +738,8 @@ pipelines/gold_b/
 - [x]  `views/payment_conflicts.sql` (지문 비교, 같은 지문 버전끼리, 충돌 필드명)
 - [x]  `views/payment_attempts.sql` (충돌 제외, 가장 먼저 쌓인 줄, 원인 분류)
 - [x]  `views/malformed_messages.sql` (필드·사유 쌍 배열)
-- [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`)
-- [ ]  샘플로 확인: 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
+- [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
+- [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
 - [ ]  PR 올리고 합치기
 
 ### 4단계: 적재 잡
