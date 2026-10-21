@@ -20,10 +20,13 @@ CREATE ROLE clothes_app WITH LOGIN PASSWORD :'api_password' CONNECTION LIMIT 15;
 GRANT CONNECT ON DATABASE postgres TO clothes_app;
 GRANT USAGE ON SCHEMA public TO clothes_app;
 GRANT SELECT, INSERT ON public.members TO clothes_app;
+-- 주문 생성의 SELECT … FOR SHARE(회원 행 잠금)는 UPDATE 권한을 요구한다(PostgreSQL 규칙). 컬럼 하나면 된다.
+-- status 만으로는 탈퇴로 못 바꾼다(withdrawn_at 권한 없음 + CHECK). 잠금은 CDC 이벤트를 만들지 않는다.
+GRANT UPDATE (status) ON public.members TO clothes_app;
 GRANT SELECT, INSERT, UPDATE ON public.orders TO clothes_app;
 GRANT SELECT, INSERT ON public.order_items, public.payments TO clothes_app;
 GRANT SELECT ON public.product_variant TO clothes_app;
--- members_archive, product_design 은 권한 없음. members UPDATE(탈퇴)는 탈퇴 작업에서 정한다.
+-- members_archive, product_design 은 권한 없음. 탈퇴(withdrawn_at 등) 권한은 탈퇴 작업에서 정한다.
 COMMIT;
 
 -- 확인
@@ -31,8 +34,11 @@ SELECT rolname, rolcanlogin, rolconnlimit FROM pg_roles WHERE rolname = 'clothes
 SELECT table_name, string_agg(privilege_type, ',' ORDER BY privilege_type) AS privileges
 FROM information_schema.role_table_grants
 WHERE grantee = 'clothes_app' GROUP BY table_name ORDER BY table_name;
+SELECT table_name, column_name, privilege_type FROM information_schema.column_privileges
+WHERE grantee = 'clothes_app' AND privilege_type = 'UPDATE' AND table_name = 'members';  -- status 한 줄
 
 -- 되돌리기 (필요할 때만, API Pod를 먼저 내린 뒤 마스터로 실행)
+-- (테이블 REVOKE ALL 은 members.status 컬럼 권한도 같이 거둔다)
 -- REVOKE ALL ON public.members, public.orders, public.order_items, public.payments, public.product_variant FROM clothes_app;
 -- REVOKE USAGE ON SCHEMA public FROM clothes_app;
 -- REVOKE CONNECT ON DATABASE postgres FROM clothes_app;

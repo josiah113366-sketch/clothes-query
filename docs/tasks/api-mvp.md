@@ -1,6 +1,6 @@
 # 작업 지시서: api/mvp
 
-> 상태: 진행 중 · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design` PR) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
+> 상태: 검토 대기(EKS 적용 완료, 2026-10-21) · 브랜치: `api/mvp` (분기 기준: `sim/cdc-orders`. cdc-orders가 2026-10-21 `main`에 merge commit으로 머지되어 PR base는 **`main`**) · 설계: `docs/design/api.md`(`docs/api-design` PR) · 이전 작업: `sim/cdc-orders`, `docs/api-design` · 다음 작업: `sim/ecs-image`, `sim/console`
 
 ## 목표
 
@@ -209,7 +209,7 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 - 노드가 늘어나면(`kubectl get nodes` 2대) 바로 알린다.
 - 내부 ALB가 안 생기거나 public으로 생기면 적용을 멈추고 알린다.
 
-## 작업 결과 (진행 중 — EKS 적용 전)
+## 작업 결과
 
 ### 지금까지 만든 것 (커밋됨)
 
@@ -226,6 +226,9 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 - **API 전용 노드 풀**(2026-10-21 사용자 결정): 설계 문서 9절의 "replica 1개를 기존 노드에"를 바꿨다. chart가 Karpenter NodePool(t3a.medium, taint `clothes-query/dedicated=api`, CPU 한도 2)을 만들고, 기존 NodeClass를 같이 쓴다. Terraform(`compute` 스택)은 바꾸지 않았다(비공개 입력이 이 PC에 없음). 비용은 t3a.medium 1대분(도쿄 온디맨드 대략 월 35달러 + Auto Mode 관리비). 리소스 requests 500m / limits 1500m
 - HTTP 클라이언트는 **표준 라이브러리 `urllib`**(시뮬레이터 새 의존성 없음, 사용자 확인)
 - API dev 의존성에 `pyyaml`(chart 렌더 테스트)
+- **DB 앱 계정에 `members` `UPDATE (status)` 추가**(2026-10-21 사용자 결정): 설계 문서의 `members` INSERT·SELECT와 다르다. 주문 생성이 회원 행을 `SELECT … FOR SHARE`로 잠그는데, PostgreSQL은 잠금 SELECT에 UPDATE 권한(컬럼 하나 이상)을 요구한다. EKS 첫 실행에서 주문만 500(권한 거부)이 나서 찾았다. `status`만으로는 탈퇴로 못 바꾸고(`withdrawn_at` 권한 없음 + CHECK), 잠금은 CDC 이벤트를 만들지 않는다. 대안(잠금을 빼고 재배포)은 버렸다
+- **Pod `fsGroup: 10001` 추가**: Secret 볼륨 파일이 root 소유라 비root(10001)가 `kafka-client`(0400)를 못 읽어 시작하자마자 죽었다(`ssl.ca.location failed`). fsGroup으로 그룹 읽기(0440)가 된다. chart 테스트에 검사 추가
+- `api/README.md`: 새 PowerShell 창마다 관리자 kubeconfig, 비교 파일은 `Set-Content -Encoding utf8`(5.1의 `>`는 UTF-16), 시뮬레이터는 `--duration`으로. `simulator/README.md` 예시도 `--max-visits 300` → `--visits-daily 20000 --duration 120`
 
 ### 확인한 결과
 
@@ -240,6 +243,20 @@ RDS ─(Debezium, 기존)─▶ Kafka ─▶ S3 bronze/   ← 그대로
 - 발견: 시뮬레이터 시작 모드가 기존 control 파일(`.local/control.json`)의 `normal`로 덮어써진다(설계대로의 동작). 부하 측정은 비어 있는 control 파일 경로로 했다
 - 참고: `api_kafka_produced_total`은 전송 완료 알림을 받을 때 세므로 마지막 묶음만큼 실제 발행 수보다 잠깐 적다(토픽에는 모두 들어감)
 
-### 남은 일
+- **EKS 적용**(2026-10-21, 사용자가 `api/README.md` 1~7단계 실행):
+  - `helm upgrade cq-kafka` 전 diff: KafkaUser `api` 추가와 listener 허용 대상 `api` namespace뿐. 적용 후 Kafka Pod 재시작 0, Secret `api` 생성. 사용자 인증서 만료 2027-10-21
+  - Secret `api-database`(password 32 bytes), `rds-ca`, `kafka-client` 생성(값 출력 없음)
+  - 이미지 `clothes-query-dev/was:api-87cd0a9`(digest로 배포). 첫 설치는 위 fsGroup 문제로 CrashLoopBackOff → 수정 후 revision 2에서 Pod Ready, 재시작 0
+  - 노드 2대: 기존 `clothes-query-dev-compute`(t3a.large) + `clothes-query-dev-api`(t3a.medium, Pod 생성 후 약 1분에 뜸)
+  - Ingress 주소 `internal-…`(내부 ALB). VPC 안 임시 Pod에서 ALB로 `/readyz`는 사용자 확인 대기
+  - 로컬 시뮬레이터 → port-forward → EKS API: `member live` 가입 408. `behavior live`(배속 60, 하루 방문 20,000, 2분) 방문 2,148, 주문 90, 결제 95(성공 86·실패 9), 상태 PAID 86·PAYMENT_FAILED 2·CANCELLED 1, 클릭 11,485 전송 실패 0, 재연결 0(위 권한 추가 뒤). `남은 큐`는 아직 때가 안 된 배송 등 예약
+  - S3 bronze(2026-10-21, UTC `day=21`): `clickstream`, `orders`, `payments`, `members-events`에 실행 시각 파일 생성(15분 단위). `order-items`는 사용자 확인 대기
+  - 확인 못 한 것: API Pod 자원 사용량(`kubectl top`), EKS에서의 부하 측정
 
-- 사용자 EKS 적용(`api/README.md` 1~7단계) 후 "완료 확인"의 EKS 항목
+### 다음 할 일
+
+- `docs/api-design` PR 먼저 머지(이 브랜치의 README·CLAUDE.md가 `docs/design/api.md`를 가리킨다). 설계 문서 권한 줄(`members` UPDATE(status))을 맞출지 결정
+- 통합 테스트를 `clothes_app`과 같은 권한의 계정으로 돌리기(이번 권한 문제는 테이블 소유자로 돌아서 로컬에서 못 잡았다)
+- 비밀값 교체 절차: DB 앱 비밀번호(Secrets Manager → K8s Secret 복사본), Kafka 인증서 갱신(2027-09 무렵) 시 `kafka-client` 재복사. CDC 비밀번호 교체 보류와 함께 정리
+- `sim/ecs-image`: 시뮬레이터가 내부 ALB로 호출, `inboundCIDRs`를 ECS 대역으로 좁히기. 클릭도 API로 가므로 ECS→Kafka 경로는 필요 없어졌다
+- CI/CD(`ci` 영역): 이미지 빌드·push·배포 자동화(OIDC, EKS 엔드포인트 접근 방식, 승인 절차). 지금은 README 5~6단계 수동

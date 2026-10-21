@@ -285,8 +285,10 @@ sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
 export SIM_BACKEND=api                 # 또는 --backend api
 export SIM_API_URL=http://localhost:8000
 sim member live --speed 60
-sim behavior live --click-sink api --speed 60 --max-visits 300
+sim behavior live --click-sink api --speed 60 --visits-daily 20000 --duration 120   # 실제 2분: 주문 약 80건
 ```
+
+`--max-visits`로 짧게 끊으면 주문·결제가 거의 실행되지 않는다. 배속 60이면 방문 300이 몇 초 만에 차서, 조회 뒤에 예약된 주문·결제가 실행되기 전에 끝나기 때문이다(종료 요약의 `남은 큐`).
 
 | 무엇 | `--backend api`일 때 |
 |---|---|

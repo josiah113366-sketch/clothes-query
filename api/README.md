@@ -56,7 +56,7 @@ DATABASE_URL=postgresql://sim:sim@localhost:5432/clothes KAFKA_BOOTSTRAP=localho
 
 ## EKS 배포 (사용자가 실행, Windows PowerShell, 레포 루트)
 
-먼저 관리자 kubeconfig를 쓴다. **`aws` 명령에는 `--region ap-northeast-1`을 붙인다.** 임시 파일은 레포 밖·한글 없는 경로(`E:\…`)에 `[IO.File]::WriteAll*`로 쓰고 바로 지운다(cdc-orders에서 겪은 PowerShell 함정).
+먼저 관리자 kubeconfig를 쓴다. **새 PowerShell 창마다 다시 설정한다**(없으면 IAM 사용자 권한이라 `forbidden`). 처음 1~7단계는 같은 창에서 한다(`$repo`·`$digest` 등 변수를 이어 쓴다). Windows PowerShell 5.1의 `>`는 UTF-16으로 저장하므로 비교용 파일은 `Set-Content -Encoding utf8`로 쓴다. **`aws` 명령에는 `--region ap-northeast-1`을 붙인다.** 임시 파일은 레포 밖·한글 없는 경로(`E:\…`)에 `[IO.File]::WriteAll*`로 쓰고 바로 지운다(cdc-orders에서 겪은 PowerShell 함정).
 
 ```powershell
 $env:KUBECONFIG = "$PWD\.cache\eks-admin-kubeconfig.private"
@@ -73,7 +73,7 @@ aws secretsmanager create-secret --name clothes-query-dev-api-db --secret-string
 Remove-Item $tmp; $pw | Set-Clipboard; Remove-Variable pw
 ```
 
-`api/deploy/sql/app-account.sql`의 `BEGIN;`~`COMMIT;`을 DBeaver에 붙이고 `:'api_password'` 자리에 클립보드 값을 넣어 실행한다. 확인 쿼리 두 개로 계정(연결 한도 15)과 권한을 본다.
+`api/deploy/sql/app-account.sql`의 `BEGIN;`~`COMMIT;`을 DBeaver에 붙이고 `:'api_password'` 자리에 클립보드 값을 넣어(따옴표는 남긴다) 실행한다. 확인 쿼리 세 개로 계정(연결 한도 15), 테이블 권한, `members.status` UPDATE(주문 생성의 행 잠금용)를 본다.
 
 ### 2. K8s Secret (`api` namespace)
 
@@ -98,8 +98,9 @@ kubectl describe secret api-database rds-ca -n api   # password 32 bytes
 
 ```powershell
 $values = "-f", "infra/platform/kafka/single-node-values.yaml", "-f", "infra/platform/kafka/cdc-orders-values.yaml", "-f", "infra/platform/kafka/runtime.local.yaml"
-helm template cq-kafka infra/platform/kafka/chart -n kafka @values > E:\cq-new.yaml
-helm get manifest cq-kafka -n kafka > E:\cq-old.yaml
+helm template cq-kafka infra/platform/kafka/chart -n kafka @values | Set-Content -Encoding utf8 E:\cq-new.yaml
+helm get manifest cq-kafka -n kafka | Set-Content -Encoding utf8 E:\cq-old.yaml
+git diff --no-index E:\cq-old.yaml E:\cq-new.yaml
 ```
 
 비교해서 **추가: KafkaUser `api`, 변경: Kafka CR listener 허용 대상에 `api` namespace**뿐이어야 한다. 브로커·NodePool이 바뀌면 멈춘다.
@@ -130,6 +131,7 @@ Remove-Item -Recurse -Force $d; Remove-Variable u, c, d
 ```powershell
 $u = kubectl get secret api -n kafka -o json | ConvertFrom-Json
 ([System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($u.data.'user.crt'))).NotAfter
+Remove-Variable u
 ```
 
 갱신되면 `kafka-client`를 지우고(`kubectl delete secret kafka-client -n api`) 위 복사를 다시 한 뒤 `kubectl rollout restart deploy/api -n api`. 복사본이 옛 인증서면 클릭 발행만 실패하고(지표 `api_kafka_produced_total{result="failed"}`) 주문 저장은 계속된다.
@@ -155,7 +157,7 @@ docker logout "$acct.dkr.ecr.ap-northeast-1.amazonaws.com"
 
 ```powershell
 [IO.File]::WriteAllText("api\deploy\chart\runtime.local.yaml", "image: `"${repo}@$digest`"`ningress:`n  inboundCIDRs: [`"10.70.0.0/16`"]`n")
-helm template api api/deploy/chart -n api -f api/deploy/chart/runtime.local.yaml   # 눈으로 확인
+helm template api api/deploy/chart -n api -f api/deploy/chart/runtime.local.yaml | Set-Content -Encoding utf8 E:\api-render.yaml   # 열어서 확인 후 지운다
 helm upgrade --install api api/deploy/chart -n api -f api/deploy/chart/runtime.local.yaml --wait --timeout 5m
 kubectl get pod,svc,ingress -n api
 kubectl get nodes
@@ -175,7 +177,7 @@ kubectl run curl -n api --rm -i --restart=Never --image=curlimages/curl:8.10.1 -
 kubectl port-forward -n api svc/api 8000:80
 ```
 
-port-forward를 켠 채로 다른 창에서 시뮬레이터를 짧게 돌린다(`simulator/README.md` "업무 API로 쓰기"). 주문이 RDS에 들어가고 CDC로 `bronze/orders` 등에, 클릭이 `bronze/clickstream/`에 15분 안에 쌓인다. Kafka UI에서 `clickstream` 메시지 수가 늘어나는지 본다.
+port-forward를 켠 채로 다른 창(WSL)에서 시뮬레이터를 짧게 돌린다(`simulator/README.md` "업무 API로 쓰기"). 주문까지 보려면 `--max-visits`가 아니라 `--duration`으로 끊는다(방문 300은 4초 만에 끝나 예약된 주문·결제가 실행되지 않는다). 주문이 RDS에 들어가고 CDC로 `bronze/orders` 등에, 클릭이 `bronze/clickstream/`에 15분 안에 쌓인다. Kafka UI에서 `clickstream` 메시지 수가 늘어나는지 본다.
 
 ## 되돌리기
 
