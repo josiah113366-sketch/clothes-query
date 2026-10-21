@@ -2,6 +2,8 @@
 
 상태: 실제 적용 완료·검토 대기
 
+후속 결정: PR #39는 main에 머지됐다. 사용자가 2026-10-21 감사 로그 중단을 취소하고 수집 재개를 요청해 [audit 복구 작업](infra-eks-audit-restore.md)에서 되돌린다. 아래는 당시 중단 이력이며, 동료 관리자 신뢰 등 나머지 변경은 유지한다.
+
 2026-10-21 최신 main/접근 권한 기반 반영 및 Terraform 12 roots/55 mock plan 통과 후 [PR #39](https://github.com/josiah113366-sketch/clothes-query/pull/39)을 생성했다. base는 infra/generator-was-access이며 PR #38이 main에 머지되면 main으로 바꾼다. 이번 Git 정리에서 AWS 재적용·PR 승인·머지는 하지 않았다. 아래 로컬 보관 표현은 실제 적용 당시의 기록이다.
 
 ## 사용자 결정과 범위
