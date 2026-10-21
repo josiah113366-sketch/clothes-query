@@ -102,7 +102,7 @@ Gold B 1단계: 원장 4개와 재처리 기록 1개의 테이블 정의(Athena 
 
 - **무엇을 바꿨나:** `payment_events`에 `payment_content_hash`, `fingerprint_version` 두 칸을 추가했다. 결제 충돌 판단을 "원장의 6개 필드 비교"에서 "업무 필드 9개 지문 비교"로 바꿨다 (설계 문서 「결제 내용 지문」, `payment_conflicts`). 금액만 다른 충돌 샘플 한 쌍을 추가했다 (결제 18개, 전체 31개).
 - **왜:** 현지 님 리뷰. 6개만 비교하면 금액만 다른 같은 `payment_id`를 Silver는 충돌로, Gold B는 중복으로 판단한다. 세 필드를 컬럼으로 넣는 대신 지문 두 칸만 더하고, Silver와 같은 함수(`pipelines/payment_fingerprint.py`)를 쓰기로 했다 (은서 님 결정).
-- **같이 정한 세부:** 지문 버전이 다른 줄끼리는 비교하지 않는다 (가짜 충돌 방지). 저장된 필드가 모두 같고 지문만 다르면 `conflict_fields`는 `[payment_content_hash]`다. 지문에 들어가는 필드는 형식 검사에서도 모두 본다 (공통 규칙표와 같음).
+- **같이 정한 세부:** 뷰는 원장 전체를 읽어 예전에 쌓인 같은 `payment_id` 줄과도 비교한다 (설계 문서에 명시). 지문 버전이 다른 줄끼리는 비교하지 않는다 (가짜 충돌 방지). 저장된 필드가 모두 같고 지문만 다르면 `conflict_fields`는 `[payment_content_hash]`다. 지문에 들어가는 필드는 형식 검사에서도 모두 본다 (공통 규칙표와 같음).
 - **확인한 결과:** `python -m pytest -q pipelines/gold_b/tests` 22개 통과. 충돌 두 쌍은 지문이 다르고 `conflict_fields`가 기대값과 같음, 중복 한 쌍은 지문이 같음, 결제 원장 왕복 10줄. `git diff --check` 통과.
 - **남은 일:** 지문 규칙(필드 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 현지 님과 정한다 (2단계). 지금 시험의 지문은 대체값(`stand_in_fingerprint`)이다.
 
