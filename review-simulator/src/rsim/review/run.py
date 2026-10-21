@@ -17,7 +17,7 @@ rsim run --sink jsonl --start 2026-10-10T00:00:00+09:00 --reviews-per-hour 30 --
 # 5) 멈출 때까지 계속 생성 (ECS 에서 상시 실행할 때) — 초당 최대 0.5건
 rsim run --sink kafka --count 0 --max-rps 0.5
 
-주문 기반 실행 (--source orders, 2026-10-14 결정, 2026-10-21 에 기간만 1~7일로 좁힘: 결제 후 1~7일 뒤 리뷰 → S3 에 날짜별로 저장)
+주문 기반 실행 (--source orders, 2026-10-14 결정, 2026-10-21 에 기간만 0~7일로 바꿈: 결제 당일~7일 뒤 리뷰 → S3 에 날짜별로 저장)
 -------------------------------------------------------------------------------------------
 # 6) 가짜 주문 14일치(하루 1000건)를 만들고, 10월 8일(UTC) 하루에 리뷰 시각이 떨어지는 주문에 리뷰를 단다
 #    → .local/lake/reviews/year=2026/month=10/day=08/part-00000.jsonl (정답은 reviews_truth/)
@@ -194,7 +194,7 @@ def _order_specs(
 
     1) 주문을 읽는다 (source=orders: JSONL 파일 / source=rds: RDS orders 테이블, make_order_source)
        order_source 를 주면 그것을 쓴다(테스트에서 가짜 DB 를 넣을 때)
-    2) 결제 시각 + 텀(1~7일)이 [day 00:00 UTC, 다음 날 00:00 UTC) 안인 주문만 남긴다 (orders.due_orders)
+    2) 결제 시각 + 텀(0~7일)이 [day 00:00 UTC, 다음 날 00:00 UTC) 안인 주문만 남긴다 (orders.due_orders)
     3) 상품: 주문에 RDS 상품 정보가 있으면 그것을, 없으면 상품 목록(catalog)에서 찾는다.
        상품 목록에도 없는 상품의 주문은 건너뛰고 건수만 로그에 남긴다
     4) 연령대: 주문에 RDS 회원 연령대가 있으면 그것을, 없으면 무작위(scenario.AGE_GROUP_WEIGHTS)
@@ -273,7 +273,7 @@ def run(
 
     source
       random : 가상 시계 + 무작위 상품으로 리뷰를 만든다 (예전 방식). count 기본 10, 0 이면 계속.
-      orders : 주문 파일에서 "리뷰 시각(결제 + 1~7일)이 날짜 day(UTC) 안인 주문"을 골라 리뷰를 만든다.
+      orders : 주문 파일에서 "리뷰 시각(결제 + 0~7일)이 날짜 day(UTC) 안인 주문"을 골라 리뷰를 만든다.
                day 기본 = 어제(UTC, 다 끝난 마지막 하루). count 기본 0 = 그날 주문 전부.
       rds    : orders 와 같지만 주문을 RDS orders 테이블에서 읽는다(주문 항목 하나 = 리뷰 하나,
                상품 정보·회원 연령대도 RDS 값). 접속 주소는 ORDERS_DATABASE_URL.

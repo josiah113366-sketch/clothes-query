@@ -119,7 +119,7 @@ def test_make_order_source_window_covers_review_delay(workdir, monkeypatch) -> N
         "ORDERS_DATABASE_URL", "postgresql://test"
     )  # 연결은 하지 않는다(load 를 안 부름)
     settings = load_settings()
-    timing = ReviewTiming(min_days=1, max_days=7)
+    timing = ReviewTiming(min_days=0, max_days=7)
     start = datetime(2026, 10, 21, tzinfo=UTC)
     src = make_order_source("rds", settings, Path("x"), timing, start, start + timedelta(days=1))
     # 리뷰 날짜 D 에 걸릴 수 있는 결제(D-7 ~ D) 가 모두 범위 안
@@ -159,7 +159,7 @@ def test_run_from_rds_writes_reviews_with_rds_values(workdir) -> None:
             order_source=_source(rows),
         )
     reviews = _lake_rows(workdir, "reviews")
-    # 모든 항목에 리뷰 하나씩 (REVIEW_RATE 기본 1.0), 결제 후 1~7일 안
+    # 모든 항목에 리뷰 하나씩 (REVIEW_RATE 기본 1.0), 결제 후 0~7일 안
     assert total == len(reviews) == len(rows)
     for r in reviews:
         assert r["source"] == "simulator" and r["age_group"] == "20대"
@@ -170,7 +170,7 @@ def test_run_from_rds_writes_reviews_with_rds_values(workdir) -> None:
         assert r["member_id"] == matches[0]["member_id"]
         assert r["product_id"] in {x["article_id"] for x in matches}
         delay = datetime.fromisoformat(r["created_at"]) - datetime.fromisoformat(r["purchased_at"])
-        assert timedelta(days=1) <= delay <= timedelta(days=7)
+        assert timedelta(0) <= delay <= timedelta(days=7)
     assert len({r["review_id"] for r in reviews}) == len(rows)
     assert len(by_item) == len(rows)
 

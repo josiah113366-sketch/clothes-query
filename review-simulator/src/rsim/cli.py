@@ -37,10 +37,8 @@ class Llm(str, Enum):
 
 class Source(str, Enum):
     random = "random"  # 가상 시계 + 무작위 상품 (예전 방식)
-    rds = (
-        "rds"  # RDS orders 테이블에서 결제 후 1~7일이 지난 주문 항목에 리뷰 (2026-10-21 lemin 결정)
-    )
-    orders = "orders"  # 주문 파일에서 결제 후 1~7일이 지난 주문에 리뷰 (2026-10-14 구상, 2026-10-21 에 1~14일 → 1~7일)
+    rds = "rds"  # RDS orders 테이블에서 결제 후 0~7일(당일 포함) 주문 항목에 리뷰 (2026-10-21 lemin 결정)
+    orders = "orders"  # 주문 파일에서 결제 후 0~7일(당일 포함) 주문에 리뷰 (2026-10-14 구상, 2026-10-21 에 1~14일 → 0~7일)
 
 
 class SinkKind(str, Enum):
@@ -78,7 +76,7 @@ def run(
         Source,
         typer.Option(
             help="random: 무작위 상품 / orders: 주문 파일 기반 / rds: RDS orders 테이블 기반"
-            " (orders·rds 는 결제 후 1~7일, 날짜별)"
+            " (orders·rds 는 결제 후 0~7일, 날짜별)"
         ),
     ] = Source.random,
     count: Annotated[

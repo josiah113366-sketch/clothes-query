@@ -28,7 +28,7 @@ def test_due_at_is_fixed_per_order_and_within_range() -> None:
         o = _order(i)
         due = timing.due_at(o)
         assert due == timing.due_at(o)  # 같은 주문이면 항상 같은 시각
-        assert o.paid_at + timedelta(days=1) <= due <= o.paid_at + timedelta(days=7)
+        assert o.paid_at <= due <= o.paid_at + timedelta(days=7)  # 0~7일 (당일 포함)
 
 
 def test_review_rate() -> None:

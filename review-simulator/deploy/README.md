@@ -84,7 +84,7 @@ python deploy/run_inject.py --file .local/manual/size_spike_1008.csv
 7. **시험 실행**: `python deploy/onoff.py once --fake`(가짜 문장, 0원) → `status.py`/로그에서 `RDS 주문 항목 N건 읽음` 줄과 리뷰 수를 본다.
 8. **실제 생성**: `python deploy/run_rds.py`(PowerShell `.\scripts\run-rds.ps1`). 접속 secret 이 비었거나 배포 전이면 알려 주고 멈춘다(RDS 쪽 허용·DB 계정은 확인하지 못하므로 로그에서 접속 오류를 본다).
    6번(전환)을 건너뛰어도 이 스크립트가 rds 로 맞춘다. Bedrock 비용 안내 후 y 를 눌러야 시작한다.
-   RDS 에 그날 리뷰 시각인 주문이 없으면 리뷰 0건으로 정상 종료한다(결제 후 1~7일이라 주문이 쌓인 뒤부터 리뷰가 나온다).
+   RDS 에 그날 리뷰 시각인 주문이 없으면 리뷰 0건으로 정상 종료한다(결제 후 0~7일이라 결제 당일 주문부터 리뷰가 나온다).
 
 ## 관제 (상태·비용)
 

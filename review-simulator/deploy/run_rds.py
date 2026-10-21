@@ -12,7 +12,7 @@
      → S3 bronze/reviews/year=/month=/day= 그 날짜 파티션을 덮어쓴다
 
 비용: 리뷰 수 ≈ 그날 리뷰 시각인 RDS 주문 항목 수 x REVIEW_RATE. Bedrock 1,000건당 약 $0.21(docs/examples-scorecard.md).
-RDS 에 결제 후 1~7일이 지난 주문이 없으면 리뷰 0건으로 정상 종료한다(비용 거의 0).
+RDS 에 그날 리뷰 시각(결제 후 0~7일)인 주문이 없으면 리뷰 0건으로 정상 종료한다(비용 거의 0).
 결과 확인: python deploy/status.py 또는 출력되는 로그 명령 (로그의 "RDS 주문 항목 N건 읽음", "끝: 전송 N건").
 """
 

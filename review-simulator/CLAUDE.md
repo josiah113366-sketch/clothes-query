@@ -13,7 +13,7 @@
 가상 쇼핑몰 상품 리뷰를 Bedrock(gemma)으로 만들어 리뷰와 정답을 **따로** 내보낸다. 기본 흐름은 S3 레이크(`reviews/`, `reviews_truth/`), 실험용으로 Kafka 토픽 두 개(`reviews.raw`, `reviews.truth`)도 있다.
 무엇을 쓸지(명세 = 정답 라벨)는 코드가 정하고, 문장만 LLM 이 쓴다. 검수 모델이 본문을 다시 라벨링해서 명세와 비교한다.
 
-주문 기반 실행(`--source orders --date D`)은 결제 후 1~7일 뒤 리뷰(2026-10-21 에 1~14일에서 좁힘)를 만들어 **S3 에 날짜(dt)별로 바로 쓴다**(`--sink lake`).
+주문 기반 실행(`--source orders --date D`)은 결제 후 0~7일 뒤 리뷰(2026-10-21 에 1~14일 → 0~7일, 당일 포함)를 만들어 **S3 에 날짜(dt)별로 바로 쓴다**(`--sink lake`).
 RDS 에는 넣지 않는다(2026-10-14 lemin 결정). 주문은 로컬 파일(`--source orders`) 또는 RDS orders 테이블(`--source rds`, 2026-10-21, 읽기만)에서 읽는다.
 정답 라벨은 `reviews_truth/` 에 따로 쓴다.
 직접 작성한 테스트 리뷰는 `rsim inject` 로 같은 날짜 파티션에 `part-manual-<입력 파일 이름>.jsonl` 로 넣는다(2026-10-16, `review/inject.py`).

@@ -130,10 +130,10 @@ class Settings:
     # 하루 리뷰 수 ≈ 하루 주문 수 x 이 값. 값을 바꾸면 "어느 주문에 리뷰가 달리는지"도 바뀐다.
     review_rate: float = field(default_factory=lambda: float(_env("REVIEW_RATE", "1.0")))
     # 결제 후 리뷰까지 걸리는 기간(일). 주문마다 이 사이에서 고르게 정해진다.
-    # 2026-10-14 구상은 1~14일이었으나 2026-10-21 lemin 결정으로 1~7일로 좁힘(프로젝트 기간이 짧아서).
+    # 2026-10-14 구상은 1~14일이었으나 2026-10-21 lemin 결정으로 0~7일로 바꿈(프로젝트 기간이 짧아서 7일로 좁히고, 결제 당일 리뷰도 나오게 최소 0일).
     # 늘리면 결제 후 리뷰가 늦게 달려 첫 리뷰가 쌓이기까지 더 오래 걸린다.
     review_delay_min_days: float = field(
-        default_factory=lambda: float(_env("REVIEW_DELAY_MIN_DAYS", "1"))
+        default_factory=lambda: float(_env("REVIEW_DELAY_MIN_DAYS", "0"))
     )
     review_delay_max_days: float = field(
         default_factory=lambda: float(_env("REVIEW_DELAY_MAX_DAYS", "7"))

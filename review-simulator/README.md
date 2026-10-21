@@ -37,7 +37,7 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 | `src/rsim/review/examples.py` | 생성 프롬프트 예시 세트(`data/examples/ex-vN.md`) 읽기 |
 | `src/rsim/review/verifier.py` | 검수 프롬프트(`VERIFIER_PROMPT_VERSION`), 명세 비교, 정답 라벨 합치기 |
 | `src/rsim/review/bedrock.py` | Bedrock Converse 호출 (표준 라이브러리, SDK 없음) |
-| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 1~7일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
+| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 0~7일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
 | `src/rsim/review/options.py` | 구매 옵션(사이즈·색상)과 포토 리뷰 여부 |
 | `src/rsim/review/sinks.py`, `run.py` | Kafka / 콘솔 / 파일 전송, 실행 흐름 |
 | `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 예시 세트 점검표, 검수 모델 정확도 측정 |
@@ -85,9 +85,9 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-## 주문 기반 실행 (결제 후 1~7일 뒤 리뷰 → S3 날짜별 경로)
+## 주문 기반 실행 (결제 후 0~7일 뒤 리뷰 → S3 날짜별 경로)
 
-2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고(2026-10-21 에 1~7일로 좁힘), **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
+2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고(2026-10-21 에 0~7일로 바꿈, 결제 당일 포함), **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
 RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있으니 조인은 레이크(Athena 등)에서 한다.
 주문은 로컬 파일(`--source orders`, 가짜 주문) 또는 **RDS orders 테이블**(`--source rds`, 2026-10-21) 에서 읽는다. 레이크는 기본이 로컬 폴더(`.local/lake`)이고, `LAKE_ROOT` 에 `s3://` 경로를 주면 S3 에 쓴다.
 
