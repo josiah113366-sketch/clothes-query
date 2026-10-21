@@ -2,6 +2,8 @@
 
 상태: 실제 적용 완료·검토 대기
 
+2026-10-21 최신 main/접근 권한 기반 반영 및 Terraform 12 roots/55 mock plan 통과 후 [PR #39](https://github.com/josiah113366-sketch/clothes-query/pull/39)을 생성했다. base는 infra/generator-was-access이며 PR #38이 main에 머지되면 main으로 바꾼다. 이번 Git 정리에서 AWS 재적용·PR 승인·머지는 하지 않았다. 아래 로컬 보관 표현은 실제 적용 당시의 기록이다.
+
 ## 사용자 결정과 범위
 
 2026-10-21 사용자가 누적 비용 확인과 감사 로그 중지를 요청했다. 개발 EKS의 audit 수집만 중단하고 다른 로그 4종과 기존 30일 보관은 유지한다. 이 요청은 해당 Terraform 변경의 실제 적용까지 승인한 것으로 처리한다. 기존 접근 권한 작업 브랜치를 반영해 현재 AWS의 공개 API/관리자 신뢰 설정을 보존한다. 다른 인프라·데이터 변경이나 보류 중인 알림·CI/CD 작업은 적용하지 않는다. PR 승인·머지는 팀원이 한다.
