@@ -208,6 +208,12 @@ s3://clothes-query-datalake/gold_b/
 
 수집기는 Gold B 적재 잡과 따로 돈다 (EKS에서 1분마다). 데이터가 없어도 돌아야 Bronze 멈춤을 잡을 수 있기 때문이다. 토픽별·파티션별로 쌓고, 전체 값이 필요하면 밀린 개수는 합, 밀린 시간은 최댓값으로 본다. 과거 측정값이라 재처리해도 다시 만들지 않는다.
 
+수집 규칙 (2026-10-21, 코드는 `pipelines/gold_b/collector/`):
+- 처리 기록이 없으면 `committed_offset`, `lag_msgs`, `lag_sec`는 NULL이다. 밀린 게 없으면 `lag_sec`는 0이다.
+- 처리할 메시지가 보관 기간으로 지워졌으면 `lag_sec`는 남아 있는 가장 오래된 메시지 기준이다 (실제보다 작음).
+- `connector_state`는 커넥터 상태다. 태스크가 RUNNING이 아니면 그 태스크 상태, Connect에 접속하지 못하면 `UNREACHABLE`, 커넥터가 없으면 `NOT_FOUND`다.
+- Kafka에 접속하지 못하면 그 회차는 줄을 쓰지 않는다. 탐지가 "측정 줄 없음"으로 잡는다.
+
 ### ④ `malformed_events` - 오류 하나 = 한 줄 (한 메시지에 오류가 여러 개면 여러 줄)
 
 | 컬럼 | 타입 | 뜻 | 예시 |

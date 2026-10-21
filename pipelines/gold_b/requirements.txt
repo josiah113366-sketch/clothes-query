@@ -1,0 +1,4 @@
+# Gold B 실행 패키지. 시험에는 pytest를 따로 설치한다. Silver의 pipelines/requirements.txt와 따로 둔다.
+confluent-kafka==2.16.0
+pyarrow==26.0.0
+boto3==1.43.116
