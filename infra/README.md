@@ -12,6 +12,8 @@ compute는 `t3a.large` On-Demand, 6 vCPU/24GiB(세 대분 한도)다. 실제 한
 
 배치 기준: **두 AZ subnet, RDS Single-AZ, NAT 1개 공유, private t3a.large 1대·Kafka 1개**. 현재 계정에서는 t3a.large 제공 AZ를 ap-northeast-1a만 확인했다. [현재 구성](TOPOLOGY.md)을 따른다.
 
+2026-10-19 개발용 사용자 요청으로 우리 EKS public 관리 API의 IPv4 접속 범위를 `0.0.0.0/0`으로 변경했다. IAM/RBAC와 private endpoint는 유지한다. 원래 IP 목록은 비공개 입력에 보존하며 `allow_public_api_from_anywhere=false`로 바꿔 적용하면 복원된다. 자동 원복은 없다. [현재 접속·원복](EKS_ACCESS.md).
+
 clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별도 Helm release로 준비한다. 리전은 `ap-northeast-1`(도쿄).
 
 ## 스택 순서와 의존 관계
@@ -33,6 +35,7 @@ bootstrap → network → eks → compute → apps
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `ecs-review-simulator` | `stacks/ecs-review-simulator/` | 리뷰 시뮬레이터 ECS Fargate 기반: ECR·클러스터·IAM·Secret·꺼진 예약 실행·로그/대시보드 (담당자 apply, [안내](stacks/ecs-review-simulator/README.md)) | network, storage | 코드·validate, 미배포 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
+| `team-access` | [stacks/team-access/](stacks/team-access/README.md) | 동료 WAS 배포·클러스터 운영 조회 | 기존 EKS, 비공개 동료 신원 | 2026-10-19 실제 연결·RBAC16개 통과·후속 plan 변경 없음; 동료 본인 접속 확인 후속 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
 | Spark | 미구현 | 정제 runtime | 실행 방식·서비스 입력 | 예정 |
 | Airflow | [로컬 실행 후보](platform/airflow/README.md) | API 재처리·5분 예약 | 운영 배포 방식·메타데이터 DB·인증/IAM | AWS 미배포 |
