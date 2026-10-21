@@ -25,7 +25,8 @@ EXPECTED = {
     "payment_events": [
         ("payment_id", "STRING"), ("order_id", "STRING"), ("attempt_no", "INT"),
         ("pg", "STRING"), ("status", "STRING"), ("failure_code", "STRING"),
-        ("completed_at", "TIMESTAMP"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
+        ("completed_at", "TIMESTAMP"), ("payment_content_hash", "STRING"),
+        ("fingerprint_version", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
         ("loaded_at", "TIMESTAMP"),
     ],
     "topic_messages": [
@@ -53,7 +54,13 @@ LEDGERS = ("payment_events", "topic_messages", "bronze_lag_snapshots", "malforme
 TOPICS = {"payments", "orders", "order-items", "members-events", "clickstream", "reviews.raw"}
 REASONS = {"PARSE_ERROR", "MISSING_FIELD", "TYPE_MISMATCH", "INVALID_VALUE"}
 FAILURE_CAUSES = {None, "PG", "CUSTOMER", "UNKNOWN"}
-CONFLICT_FIELDS = {"order_id", "attempt_no", "pg", "status", "failure_code", "completed_at"}
+# 원장에 컬럼으로 있는 결제 업무 필드 (payment_conflicts.conflict_fields에 이름이 나올 수 있는 것)
+STORED_FIELDS = ("order_id", "attempt_no", "pg", "status", "failure_code", "completed_at")
+# 결제 내용 지문에 들어가는 업무 필드 9개. amount·method·requested_at은 지문에만 들어간다
+FINGERPRINT_FIELDS = ("order_id", "attempt_no", "method", "pg", "amount", "status",
+                      "failure_code", "requested_at", "completed_at")
+# 저장된 필드는 모두 같고 지문만 다를 때 conflict_fields에 쓰는 이름
+HASH_ONLY = "payment_content_hash"
 
 
 # ---------- DDL 읽기 ----------
@@ -138,6 +145,14 @@ def _utc(text: str) -> datetime:
     return parsed
 
 
+def stand_in_fingerprint(value: dict) -> str:
+    """시험용 대체 지문. 실제 규칙은 pipelines/payment_fingerprint.py(2단계, Silver와 같은 함수)에서 정한다.
+
+    여기서는 '업무 필드 9개가 같으면 같은 값, 다르면 다른 값'만 맞으면 된다 (Kafka 위치·__op는 넣지 않음).
+    """
+    return json.dumps([value.get(f) for f in FINGERPRINT_FIELDS], ensure_ascii=False)
+
+
 def test_samples_shape():
     samples = load_samples()
     names = [s["name"] for s in samples]
@@ -176,20 +191,27 @@ def test_payment_samples_follow_view_rules():
         if expected.get("payment_attempts"):
             assert expected["failure_cause"] in FAILURE_CAUSES
         if "payment_conflicts" in expected:
-            assert set(expected["payment_conflicts"]) <= CONFLICT_FIELDS
+            assert set(expected["payment_conflicts"]) <= set(STORED_FIELDS) | {HASH_ONLY}
             assert expected["payment_attempts"] is False
 
-    # 충돌 한 쌍: 같은 payment_id, 비교 컬럼 중 conflict_fields만 다름
-    pair = [s["value"] for s in payments if "payment_conflicts" in s["expected"]]
-    assert len(pair) == 2 and pair[0]["payment_id"] == pair[1]["payment_id"]
-    differ = sorted(f for f in CONFLICT_FIELDS if pair[0][f] != pair[1][f])
-    assert differ == sorted(payments[[s["name"] for s in payments].index("conflict_first")]
-                            ["expected"]["payment_conflicts"])
+    # 충돌 쌍: 같은 payment_id, 지문(업무 필드 9개)이 다름.
+    # conflict_fields는 저장된 필드 중 다른 것, 저장된 필드가 모두 같으면 [payment_content_hash]
+    pairs: dict[str, list[dict]] = {}
+    for s in payments:
+        if "payment_conflicts" in s["expected"]:
+            pairs.setdefault(s["value"]["payment_id"], []).append(s)
+    assert len(pairs) == 2 and all(len(pair) == 2 for pair in pairs.values())
+    for first, second in pairs.values():
+        a, b = first["value"], second["value"]
+        assert stand_in_fingerprint(a) != stand_in_fingerprint(b)
+        differ = sorted(f for f in STORED_FIELDS if a[f] != b[f]) or [HASH_ONLY]
+        assert differ == sorted(first["expected"]["payment_conflicts"])
+        assert first["expected"]["payment_conflicts"] == second["expected"]["payment_conflicts"]
 
-    # 중복: 비교 컬럼이 모두 같고 위치만 다름
+    # 중복: 지문이 같고 위치만 다름
     by_name = {s["name"]: s for s in payments}
     original, duplicate = by_name["success_pg_a"], by_name["duplicate_of_success_pg_a"]
-    assert all(original["value"][f] == duplicate["value"][f] for f in CONFLICT_FIELDS)
+    assert stand_in_fingerprint(original["value"]) == stand_in_fingerprint(duplicate["value"])
     assert original["kafka"]["offset"] != duplicate["kafka"]["offset"]
 
 
@@ -224,6 +246,7 @@ def ledger_rows(samples: list[dict], loaded_at: datetime) -> dict[str, list[dict
                 "payment_id": v["payment_id"], "order_id": v["order_id"], "attempt_no": v["attempt_no"],
                 "pg": v["pg"], "status": v["status"], "failure_code": v["failure_code"],
                 "completed_at": _utc(v["completed_at"]).replace(tzinfo=None),
+                "payment_content_hash": stand_in_fingerprint(v), "fingerprint_version": "test",
                 "kafka_partition": k["partition"], "kafka_offset": k["offset"], "loaded_at": loaded_at})
         for i, error in enumerate(s["expected"]["malformed"]):
             rows["malformed_events"].append({
@@ -262,9 +285,9 @@ def test_sample_ledgers_round_trip_through_hour_folders(tmp_path):
         for name, _ in parse_ddl(table)["columns"]:
             assert read.schema.field(name).type == schema.field(name).type
 
-    # 기대 건수: 결제 8줄(중복·충돌 포함), 메시지 29줄, 오류 = 샘플 기대 오류 합
-    assert len(rows["payment_events"]) == 8
-    assert len(rows["topic_messages"]) == len(samples) == 29
+    # 기대 건수: 결제 10줄(중복·충돌 두 쌍 포함), 메시지 31줄, 오류 = 샘플 기대 오류 합
+    assert len(rows["payment_events"]) == 10
+    assert len(rows["topic_messages"]) == len(samples) == 31
     assert len(rows["malformed_events"]) == sum(len(s["expected"]["malformed"]) for s in samples)
     per_message = Counter((r["topic"], r["kafka_partition"], r["kafka_offset"]) for r in rows["malformed_events"])
     assert max(per_message.values()) == 3, "오류 여러 개 샘플은 3줄"

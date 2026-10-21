@@ -4,7 +4,7 @@ Kafka에서 읽은 메시지 한 개 = 배열의 원소 하나다. 2단계(형�
 
 | 파일 | 내용 |
 |---|---|
-| `payments.json` | 결제 토픽. 정상·PG 원인 실패·고객 원인 실패·재시도·중복·충돌 한 쌍·모르는 실패 코드·필드 누락·이름 변경·`PG_C`·오류 여러 개·파싱 실패·`op u` |
+| `payments.json` | 결제 토픽. 정상·PG 원인 실패·고객 원인 실패·재시도·중복·충돌 두 쌍(상태가 다름, 금액만 다름)·모르는 실패 코드·필드 누락·이름 변경·`PG_C`·오류 여러 개·파싱 실패·`op u` |
 | `other_topics.json` | `clickstream`, `orders`, `order-items`, `members-events`, `reviews.raw` 각각 정상 1개 이상 + 오류 예 |
 
 ## 원소 모양
@@ -20,7 +20,7 @@ Kafka에서 읽은 메시지 한 개 = 배열의 원소 하나다. 2단계(형�
 | `expected.malformed` | `malformed_events`에 쌓일 오류 목록 (`field`, `reason`). 비어 있으면 형식 정상 |
 | `expected.payment_attempts` | (결제만) 정리 뷰 `payment_attempts`에 남는가 |
 | `expected.failure_cause` | (결제만) 뷰의 실패 원인 분류 |
-| `expected.payment_conflicts` | (충돌만) `payment_conflicts`의 `conflict_fields` |
+| `expected.payment_conflicts` | (충돌만) `payment_conflicts`의 `conflict_fields`. 원장에 없는 필드(`amount` 등)만 다르면 `[payment_content_hash]` |
 | `expected.note` | 설계에 없어 아직 정하지 않은 점 |
 
 모든 메시지는 형식과 상관없이 `topic_messages`에 한 줄씩 쌓인다.

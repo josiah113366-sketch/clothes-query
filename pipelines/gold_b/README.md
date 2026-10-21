@@ -7,7 +7,7 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | 경로 | 내용 |
 |---|---|
 | `ddl/database.sql` | Glue 데이터베이스 `gold_b` |
-| `ddl/payment_events.sql` | ① 결제 시도 원장 (`completed_at` 시간 폴더) |
+| `ddl/payment_events.sql` | ① 결제 시도 원장 (`completed_at` 시간 폴더). 결제 내용 지문(`payment_content_hash`, `fingerprint_version`) 포함 |
 | `ddl/topic_messages.sql` | ② 메시지 원장, 6개 토픽 전부 (`kafka_timestamp` 시간 폴더) |
 | `ddl/bronze_lag_snapshots.sql` | ③ Bronze 지연 측정 (`collected_at` 시간 폴더) |
 | `ddl/malformed_events.sql` | ④ 형식 오류, 오류 하나 = 한 줄 (`kafka_timestamp` 시간 폴더) |
@@ -45,3 +45,4 @@ Athena에 만들기 (권한 준비 후): `ddl/database.sql` → 나머지 5개 �
 - 입력 토픽과 메시지 모양: `connectors/cdc-source.yaml` (봉투가 풀린 평평한 CDC JSON, `__op`), 시뮬레이터의 `clickstream`
 - 결제 컬럼: `db/schema/004_orders.sql`
 - 형식 검사 규칙표: `docs/contracts/format_rules.yaml` (2단계에서 연결)
+- 결제 내용 지문: `pipelines/payment_fingerprint.py` (2단계, Silver와 같은 함수. 규칙은 현지 님과 정함)

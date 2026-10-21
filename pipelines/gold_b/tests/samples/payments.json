@@ -49,6 +49,20 @@
     "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["status", "failure_code"]}
   },
   {
+    "name": "conflict_amount_first",
+    "description": "금액만 다른 내용 충돌 1/2. 원장에 없는 amount만 달라서 지문으로만 잡힘",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 105, "timestamp": "2026-10-21T06:09:12Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-0000000000a5", "order_id": "00000000-4000-8000-0000-0000000000b5", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 29000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:09:05Z", "completed_at": "2026-10-21T06:09:10Z", "__op": "c", "__source_ts_ms": 1792563350200, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["payment_content_hash"]}
+  },
+  {
+    "name": "conflict_amount_second",
+    "description": "금액만 다른 내용 충돌 2/2 (같은 payment_id, amount 2900). 원장에 저장된 필드는 모두 같고 지문만 다름",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 141, "timestamp": "2026-10-21T06:21:00Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-0000000000a5", "order_id": "00000000-4000-8000-0000-0000000000b5", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 2900, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:09:05Z", "completed_at": "2026-10-21T06:09:10Z", "__op": "c", "__source_ts_ms": 1792564860000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["payment_content_hash"]}
+  },
+  {
     "name": "unknown_failure_code",
     "description": "매핑에 없는 실패 코드. 형식은 맞으므로 쌓이고 뷰에서 UNKNOWN",
     "kafka": {"topic": "payments", "partition": 0, "offset": 102, "timestamp": "2026-10-21T06:04:01Z"},

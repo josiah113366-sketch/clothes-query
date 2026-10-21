@@ -37,7 +37,8 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 | 판정 가능 구간 | 건수 규칙은 바로 판정, 비율 규칙은 끝난 지 3분 지난 구간만 |
 | 저장·조회 | S3 `clothes-query-datalake/gold_b/`, Athena로 조회 (테이블·뷰 정의는 Athena가 Glue 카탈로그 `gold_b`에 저장), 이름에 접두어 없음 |
 | 정리 뷰 중복 제거 | 같은 `payment_id`이고 내용도 같으면 가장 먼저 쌓인 줄(`loaded_at`이 가장 이른 줄) 하나만 남긴다 |
-| 정리 뷰 충돌 처리 | 같은 `payment_id`인데 내용이 다르면 **그 결제의 모든 줄을 `payment_attempts`에서 빼고** `payment_conflicts` 뷰로 보여 준다. 비교 컬럼은 Gold B 원장에 있는 6개(`order_id`, `attempt_no`, `pg`, `status`, `failure_code`, `completed_at`). Silver(PR #26)와 공통 계약(`docs/contracts/README.md` 「내용 충돌」)에 맞춘 것 (2026-10-21) |
+| 정리 뷰 충돌 처리 | 같은 `payment_id`인데 내용이 다르면 **그 결제의 모든 줄을 `payment_attempts`에서 빼고** `payment_conflicts` 뷰로 보여 준다. Silver(PR #26)와 공통 계약(`docs/contracts/README.md` 「내용 충돌」)에 맞춘 것 (2026-10-21) |
+| 결제 내용 지문 | 내용이 같은지는 **업무 필드 9개**(`order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, `requested_at`, `completed_at`)를 정규화한 지문 `payment_content_hash`로 판단한다. 원장에는 지문과 `fingerprint_version` 두 칸만 더하고, `amount`·`method`·`requested_at`은 컬럼으로 두지 않고 지문에만 넣는다. Silver와 Gold B가 같은 함수(`pipelines/payment_fingerprint.py`)로 지문을 만든다. Kafka 위치와 적재 시각은 지문에 넣지 않는다 (현지 님 PR #36 리뷰, 2026-10-21) |
 | 결제 필수 필드 | `order_id`, `attempt_no`도 원장에 넣고 형식 검사 필수로 본다 (원천 DDL에서 NOT NULL, 2026-10-21) |
 | 컬럼 이름 | Kafka 파티션 번호는 모든 표에서 `kafka_partition` (2026-10-21) |
 | 형식 검사 규칙표 | Git의 설정 파일(`format_rules.yaml`)을 Gold B와 Silver가 같이 읽는다 |
@@ -49,7 +50,7 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 
 ## 2026-10-21 반영
 
-**사용자와 정한 것:** 위 결정 표의 "2026-10-21" 항목 (충돌 처리, 결제 필수 필드, `kafka_partition`, 코드 위치), `order-items`의 `unit_price ≥ 5,900`.
+**사용자와 정한 것:** 위 결정 표의 "2026-10-21" 항목 (충돌 처리, 결제 내용 지문, 결제 필수 필드, `kafka_partition`, 코드 위치), `order-items`의 `unit_price ≥ 5,900`.
 
 **저장소에서 확인한 실제 모양** (`connectors/cdc-source.yaml`, `connectors/bronze-s3-sink.yaml`, `review-simulator/README.md`). 기획 원문과 다른 곳은 아래 기준으로 고쳤다.
 
@@ -172,11 +173,15 @@ s3://clothes-query-datalake/gold_b/
 | `status` | STRING | `status` | 이 시도 한 번의 결과. `SUCCESS`, `FAILED` 중 하나 | `FAILED` |
 | `failure_code` | STRING, NULL 허용 | `failure_code` | 실패했다면 그 이유. 성공이면 NULL | `PG_TIMEOUT` |
 | `completed_at` | TIMESTAMP | `completed_at` | 결제 결과가 확정된 시각 (UTC). 탐지가 구간을 묶을 때 기준 | 15:01:20 |
+| `payment_content_hash` | STRING | 업무 필드 9개로 계산 | 결제 내용 지문. 같은 `payment_id`인데 지문이 다르면 내용 충돌. `amount`·`method`·`requested_at`은 컬럼 없이 여기에만 들어간다 | `9f2c…` |
+| `fingerprint_version` | STRING | 지문 함수 | 지문 규칙 버전. 버전이 같은 줄끼리만 지문을 비교한다 | (현지 님과 정함) |
 | `kafka_partition` | INT | Kafka 위치 | 이 메시지가 `payments` 토픽의 몇 번 파티션에 있었는지 (추적용) | `0` |
 | `kafka_offset` | BIGINT | Kafka 위치 | 그 파티션 안에서 몇 번째 메시지였는지 (추적용) | `17920` |
 | `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 그때 탐지가 본 숫자를 재현할 때 씀 | 15:02:00 |
 
 실패 원인 분류(PG / 고객 / unknown), 중복 제거, 충돌 분리는 원장에 하지 않고 정리 뷰에서 한다.
+
+지문은 형식 검사를 통과한 결제를 쌓을 때 계산한다. 지문 규칙(필드 순서, 시각·NULL·숫자 정규화, 직렬화, 해시 알고리즘)은 공통 모듈 `pipelines/payment_fingerprint.py`에서 현지 님과 정한다 (**미정**, 2단계).
 
 ### ② `topic_messages` - 메시지 하나 = 한 줄 (6개 토픽 전부)
 
@@ -262,44 +267,50 @@ s3://clothes-query-datalake/gold_b/
 
 ### 정리 뷰 `payment_conflicts` - 내용이 충돌한 결제 하나 = 한 줄 (시나리오 1 보조)
 
-같은 `payment_id`인데 비교 컬럼 6개 중 하나라도 값이 다른 결제를 모은다. 결제 내용은 수정하지 않는다는 데이터 계약을 어긴 것이라 원래 0건이어야 한다. Silver도 같은 경우를 `CONTENT_CONFLICT`로 격리한다 (Silver는 `amount`, `method`, `requested_at`까지 비교한다).
+같은 `payment_id`인데 결제 내용 지문(`payment_content_hash`)이 다른 결제를 모은다. 결제 내용은 수정하지 않는다는 데이터 계약을 어긴 것이라 원래 0건이어야 한다. Silver도 같은 지문 함수로 같은 경우를 `CONTENT_CONFLICT`로 격리한다.
 
 ```sql
 CREATE OR REPLACE VIEW gold_b.payment_conflicts AS
-SELECT payment_id,
-       COUNT(*)                         AS row_count,
-       filter(ARRAY[
-         IF(COUNT(DISTINCT order_id) > 1,                  'order_id'),
-         IF(COUNT(DISTINCT attempt_no) > 1,                'attempt_no'),
-         IF(COUNT(DISTINCT pg) > 1,                        'pg'),
-         IF(COUNT(DISTINCT status) > 1,                    'status'),
-         IF(COUNT(DISTINCT coalesce(failure_code, '')) > 1, 'failure_code'),
-         IF(COUNT(DISTINCT completed_at) > 1,              'completed_at')
-       ], x -> x IS NOT NULL)          AS conflict_fields,
-       ARRAY_AGG(DISTINCT pg)           AS pgs,
-       MIN(completed_at)                AS first_completed_at,
-       MIN(loaded_at)                   AS first_loaded_at,
-       MAX(loaded_at)                   AS last_loaded_at,
-       ARRAY_AGG(CAST(ROW(kafka_partition, kafka_offset)
-                 AS ROW(kafka_partition INTEGER, kafka_offset BIGINT))) AS sources
-FROM gold_b.payment_events
-GROUP BY payment_id
-HAVING COUNT(DISTINCT order_id) > 1 OR COUNT(DISTINCT attempt_no) > 1
-    OR COUNT(DISTINCT pg) > 1 OR COUNT(DISTINCT status) > 1
-    OR COUNT(DISTINCT coalesce(failure_code, '')) > 1 OR COUNT(DISTINCT completed_at) > 1;
+WITH grouped AS (
+  SELECT payment_id, fingerprint_version,
+         COUNT(*)                         AS row_count,
+         filter(ARRAY[
+           IF(COUNT(DISTINCT order_id) > 1,                  'order_id'),
+           IF(COUNT(DISTINCT attempt_no) > 1,                'attempt_no'),
+           IF(COUNT(DISTINCT pg) > 1,                        'pg'),
+           IF(COUNT(DISTINCT status) > 1,                    'status'),
+           IF(COUNT(DISTINCT coalesce(failure_code, '')) > 1, 'failure_code'),
+           IF(COUNT(DISTINCT completed_at) > 1,              'completed_at')
+         ], x -> x IS NOT NULL)          AS stored_fields,
+         ARRAY_AGG(DISTINCT pg)           AS pgs,
+         MIN(completed_at)                AS first_completed_at,
+         MIN(loaded_at)                   AS first_loaded_at,
+         MAX(loaded_at)                   AS last_loaded_at,
+         ARRAY_AGG(CAST(ROW(kafka_partition, kafka_offset)
+                   AS ROW(kafka_partition INTEGER, kafka_offset BIGINT))) AS sources
+  FROM gold_b.payment_events
+  GROUP BY payment_id, fingerprint_version          -- 지문 버전이 같은 줄끼리만 비교
+  HAVING COUNT(DISTINCT payment_content_hash) > 1
+)
+SELECT payment_id, fingerprint_version, row_count,
+       IF(cardinality(stored_fields) = 0, ARRAY['payment_content_hash'], stored_fields) AS conflict_fields,
+       pgs, first_completed_at, first_loaded_at, last_loaded_at, sources
+FROM grouped;
 ```
 
 | 컬럼 | 뜻 | 예시 |
 | --- | --- | --- |
 | `payment_id` | 충돌한 결제 시도 번호 | `p-07` |
+| `fingerprint_version` | 비교한 지문 규칙 버전 | (현지 님과 정함) |
 | `row_count` | 원장에 쌓인 줄 수 | `2` |
-| `conflict_fields` | 값이 서로 다른 필드 이름 | `[status, failure_code]` |
+| `conflict_fields` | 원장에 저장된 업무 필드 6개 중 값이 다른 것. 6개가 모두 같은데 지문만 다르면 `[payment_content_hash]` (금액·결제 수단·요청 시각 중 하나 이상이 다르다는 뜻. 무엇이 다른지는 `sources`로 원본을 봐야 안다) | `[status, failure_code]`, `[payment_content_hash]` |
 | `pgs` | 그 결제에 나온 PG (영향 범위 확인용) | `[PG_A]` |
 | `first_completed_at` | 가장 이른 결제 결과 시각 (어느 구간에 영향이 있나) | 15:01:20 |
 | `first_loaded_at`, `last_loaded_at` | 처음·마지막으로 쌓인 시각 | 15:02:00, 15:05:00 |
 | `sources` | 원본 Kafka 위치 목록 (원본 다시 찾기) | `[{0, 17920}, {0, 17988}]` |
 
 - 원문 값은 넣지 않고 결제 키·원본 위치·충돌 필드명만 남긴다 (공통 계약과 같음).
+- 지문 버전이 다른 줄끼리는 비교하지 않는다. 규칙이 다르면 같은 내용도 지문이 달라져 가짜 충돌이 생기기 때문이다. 지문 규칙을 바꾸면 지난 시간 폴더를 재처리해 지문을 다시 만든다 (같은 결제의 중복은 `completed_at`이 같아 같은 시간 폴더에 있으므로 함께 다시 계산된다).
 - 탐지는 이 뷰에 줄이 있는 구간을 "확인 필요"로 볼 수 있다. 충돌한 결제는 `payment_attempts`에서 빠지므로 그 구간의 결제 수가 실제보다 적을 수 있다.
 
 ### 정리 뷰 `payment_attempts` - 결제 시도 한 건 = 한 줄 (시나리오 1)
@@ -411,7 +422,7 @@ GROUP BY 1, 2;
 
 | 대상 | 세는 것 | 중복 제거 | 누가 |
 | --- | --- | --- | --- |
-| 결제 (`payment_attempts`) | 결제 시도 (업무 사실) | `payment_id`가 같고 내용이 같으면 가장 먼저 쌓인 줄 하나. 내용이 다르면 충돌로 보고 모든 줄을 제외 | 정리 뷰 (은서) |
+| 결제 (`payment_attempts`) | 결제 시도 (업무 사실) | `payment_id`와 지문이 같으면 가장 먼저 쌓인 줄 하나. 지문이 다르면 충돌로 보고 모든 줄을 제외 | 정리 뷰 (은서) |
 | 결제 충돌 (`payment_conflicts`) | 계약을 어긴 결제 | `payment_id` 하나에 한 줄, 다른 필드 이름 목록 | 정리 뷰 (은서) |
 | 유입량 (`topic_messages`) | Kafka에 들어온 메시지 (관측 사실) | 하지 않음. 중복 전송도 파이프라인 상태의 일부 | - |
 | 깨진 메시지 (`malformed_events`) | 깨진 필드 하나 | `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같으면 한 번만 | 쌓을 때 (은서) |
@@ -444,7 +455,7 @@ GROUP BY 1, 2;
 | 토픽 | 필수 컬럼 | 규칙 예시 |
 | --- | --- | --- |
 | `clickstream` | `event_id`, `event_type`, `member_id`, `article_id`, `event_time`, `session_id` | `event_type`은 `view`·`cart_add`만, `article_id`는 10자리 문자열 |
-| `payments` | `payment_id`, `order_id`, `attempt_no`, `pg`, `status`, `completed_at` | `pg`는 `PG_A`·`PG_B`만, `attempt_no` ≥ 1, `FAILED`면 `failure_code` 필수, `SUCCESS`면 비어 있어야 함 |
+| `payments` | `payment_id`, `order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `requested_at`, `completed_at` | `pg`는 `PG_A`·`PG_B`만, `attempt_no` ≥ 1, `FAILED`면 `failure_code` 필수, `SUCCESS`면 비어 있어야 함. 지문에 들어가는 필드는 모두 검사한다 (공통 규칙표와 같음) |
 | `orders` | `order_id`, `member_id`, `status`, `ordered_at` | `status`는 7개 값 중 하나 |
 | `order-items` | `order_item_id`, `order_id`, `article_id`, `quantity`, `unit_price` | `quantity` ≥ 1, `unit_price` ≥ 5,900 (공통 계약 초안은 `minimum: 1`이라 현지 님과 맞춤) |
 | `members-events` | `member_id`, `status`, `created_at` | 개인정보 컬럼이 들어 있으면 오류 |
@@ -623,7 +634,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
 | 현지 | `format_rules.yaml` 위치·형식, 공통 모듈 분담과 저장소 위치 | Gold B와 Silver가 같은 규칙으로 판단 | 필요 (현재 `docs/contracts/format_rules.yaml`, `pipelines/format_rules.py`) |
 | 현지 | `unit_price` 최솟값 5,900 (계약 초안은 1) | 같은 메시지를 다르게 판단하지 않기 | 필요 |
-| 현지 | 결제 충돌 비교 컬럼을 Gold B 원장의 6개로 맞춤 | 공통 계약 「내용 충돌」의 비교 컬럼 합의 | 필요 |
+| 현지 | 결제 지문 규칙(필드 9개의 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 | Silver와 Gold B가 같은 함수로 같은 지문을 만들기 | 필요 |
 | 현지 | Silver 격리 기준 일치 | 같은 메시지를 다르게 판단하지 않기 | 필요 |
 | 현지 | 격리 해제와 Silver 재처리 방식 (upsert / 구간 교체), Silver 처리 범위 기록 | 같은 승인으로 Silver·Gold A를 다시 돌리기 | 필요 |
 | 현지 | `payment_attempts` 이름 겹침, Gold A 데이터셋 이름 | 발표와 문서에서 헷갈리지 않기 | 필요 |
@@ -677,6 +688,7 @@ pipelines/gold_b/
     test_format_check.py
     test_reprocess.py
 # 형식 검사·CDC 표시 읽기·마스킹: 현지 님과 공용 위치를 정하기 전까지 pipelines/gold_b/ 안에 둔다.
+# 결제 내용 지문: pipelines/payment_fingerprint.py (Silver와 같은 함수, 2단계)
 # 규칙표: docs/contracts/format_rules.yaml (현재 Silver가 읽음)
 ```
 
@@ -695,7 +707,7 @@ pipelines/gold_b/
 
 브랜치 `pipelines/gold-b`
 
-- [ ]  `tests/samples/` 샘플 메시지 만들기 (정상 결제, PG 원인 실패, 고객 원인 실패, 같은 결제 중복, 같은 결제 내용 충돌, 필드 누락, 필드 이름 변경, `pg = PG_C`, 오류 여러 개, 6개 토픽 각각)
+- [ ]  `tests/samples/` 샘플 메시지 만들기 (정상 결제, PG 원인 실패, 고객 원인 실패, 같은 결제 중복, 같은 결제 내용 충돌(상태가 다른 것, 금액만 다른 것), 필드 누락, 필드 이름 변경, `pg = PG_C`, 오류 여러 개, 6개 토픽 각각)
 - [ ]  `ddl/` 테이블 5개 + 데이터베이스
 - [ ]  시간 폴더(`dt`, `hour`)와 파티션 프로젝션 설정
 - [ ]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인
@@ -709,6 +721,7 @@ pipelines/gold_b/
 
 - [ ]  규칙표에 6개 토픽 규칙 추가 (`docs/contracts/format_rules.yaml`과 합칠지 현지 님과)
 - [ ]  CDC 표시 읽기 (`__op = c` 또는 `r`)
+- [ ]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, 규칙은 현지 님과 확정)
 - [ ]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록)
 - [ ]  `raw_sample` 마스킹 (필드 이름 유지, 값만 가림)
 - [ ]  `tests/test_format_check.py` 샘플로 검사 결과 확인
@@ -717,11 +730,11 @@ pipelines/gold_b/
 
 ### 3단계: 정리 뷰
 
-- [ ]  `views/payment_conflicts.sql` (비교 컬럼 6개, 충돌 필드명)
+- [ ]  `views/payment_conflicts.sql` (지문 비교, 같은 지문 버전끼리, 충돌 필드명)
 - [ ]  `views/payment_attempts.sql` (충돌 제외, 가장 먼저 쌓인 줄, 원인 분류)
 - [ ]  `views/malformed_messages.sql` (필드·사유 쌍 배열)
 - [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`)
-- [ ]  샘플로 확인: 중복이 1건으로, 충돌 결제가 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄, 오류 3개가 1줄·`error_count` 3으로
+- [ ]  샘플로 확인: 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
 - [ ]  PR 올리고 합치기
 
 ### 4단계: 적재 잡
