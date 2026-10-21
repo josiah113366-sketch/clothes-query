@@ -2,6 +2,8 @@
 
 > 상태: 실제 권한 연결 완료 / 검토 대기 · 브랜치: `infra/generator-was-access` · 다음 작업: 동료 본인 kubectl 검증 및 앱 명세에 따른 후속 연결
 
+2026-10-21 최신 main 반영과 Terraform 12 roots/55 mock plan 검사를 마치고 [PR #38](https://github.com/josiah113366-sketch/clothes-query/pull/38)을 생성했다. 보류 작업은 포함하지 않았으며 AWS 재적용·PR 승인·머지는 하지 않았다. 감사 로그 PR #39의 선행 기반이다.
+
 ## 목표와 사용자 결정
 
 2026-10-19 사용자가 제공한 IAM 사용자가 Fargate 제네레이터와 EKS WAS를 모두 배포한다고 가정하고 접근을 열어달라고 요청했다. 동료는 현재 사용자와 같은 공인 IP 네트워크를 사용한다고 확인했다. 실제 ARN/IP·계정은 공개 Git에 넣지 않는다.
