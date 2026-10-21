@@ -50,6 +50,50 @@ def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
 
 
+def test_kafka_trace_observations_and_conflict_references(tmp_path):
+    from pipelines.silver.common import kafka_reference, load_jsonl
+
+    trace = {"kafka_topic": "payments", "kafka_partition": 0, "kafka_offset": 10,
+             "kafka_timestamp": "2026-10-13T15:02:01+00:00",
+             "kafka_timestamp_type": "CreateTime"}
+    bad = kafka_reference({**trace, "kafka_timestamp": "2026-10-21T10:00:00",
+                           "kafka_timestamp_type": "unknown", "text": "must not copy"})
+    assert bad["status"] == "INVALID"
+    assert bad["errors"] == ["kafka_timestamp", "kafka_timestamp_type"]
+    assert "text" not in bad and "timestamp" not in bad
+    source = tmp_path / "input"
+    source.mkdir()
+    paths = [source / (name + ".jsonl") for name in ("orders", "items", "payments")]
+    rows = [payment(**trace), payment(**trace),
+            payment(**{**trace, "kafka_offset": 12}, pg="PG_B"),
+            payment("other", kafka_offset=True), payment("untraced")]
+    paths[0].write_text(json.dumps(order()) + "\n", encoding="utf-8")
+    paths[1].write_text("", encoding="utf-8")
+    paths[2].write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    result = run(*(str(path) for path in paths), str(tmp_path / "output"))
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    obs = manifest["kafka_observations"]["payments"]
+    assert obs["coverage_status"] == "UNVERIFIED"
+    assert obs["row_counts"] == {"VALID": 3, "INVALID": 1, "MISSING": 1}
+    assert obs["partitions"] == [{"topic": "payments", "partition": 0,
+                                  "min_offset": 10, "max_offset": 12,
+                                  "row_count": 3, "unique_offset_count": 2}]
+    candidates = [json.loads(line) for line in Path(result["outputs"]["impact_candidates"])
+                  .read_text(encoding="utf-8").splitlines()]
+    assert [r["source"]["kafka"]["offset"] for r in candidates
+            if r["source_dataset"] == "payments" and r["source"]["kafka"]["status"] == "VALID"] == [10, 10, 12]
+    errors = [json.loads(line) for line in Path(result["outputs"]["quarantined_records"])
+              .read_text(encoding="utf-8").splitlines()]
+    conflicts = [r for r in errors if r["record_key"] == payment()["payment_id"]]
+    assert {r["kafka_reference"]["offset"] for r in conflicts} == {10, 12}
+    assert all(r["source_file"] == str(paths[2].resolve()) for r in conflicts)
+    # 추적 정보 차이는 업무 중복·내용 충돌 판정에 섞지 않는다.
+    loaded, _ = load_jsonl(str(paths[2]), allow_cdc=True)
+    identical = build_silver([order()], [], [loaded[0], {**loaded[1], "_input_source": loaded[2]["_input_source"]}])
+    assert len(identical["payment_attempts"]) == 1
+    assert not identical["quarantined_records"]
+
+
 def test_yaml_contract_validates_uuid_enums_reasons_and_times():
     rules = FormatRules()
     cases = [

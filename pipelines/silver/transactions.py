@@ -16,7 +16,7 @@ from .common import run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v5"
+CHECK_VERSION = "transactions.v6"
 
 
 def _version(raw: dict, row: dict) -> tuple:
@@ -110,6 +110,8 @@ def build_silver(
             if isinstance(source.get("file"), str) and isinstance(source.get("line"), int):
                 issue["source_file"] = source["file"]
                 issue["source_line"] = source["line"]
+            if "kafka" in source:
+                issue["kafka_reference"] = source["kafka"]
         errors[name].setdefault(index, issue)
 
     # 행 오류만 분리한다. 프로그램 오류까지 잡아서 정상 완료로 숨기지 않는다.

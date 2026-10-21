@@ -2,6 +2,19 @@
 
 # Silver 파이프라인 통합
 
+## 2026-10-21 승인된 대조 설계·원본 추적
+
+- 목적: Silver/Gold B 결제 경로 대조 초안과 담당자별 PR 검토 항목을 기존 공통 계약에 모은다. 작업 브랜치는 pipelines/silver이며 #34가 이 브랜치로 합쳐진 원격 이력을 fast-forward로 반영했다. main 머지와 원격 제출은 이번 작업에서 하지 않는다.
+- 승인 범위: 기존 common.py/transactions.py에 선택적 Kafka 추적 검증·후보/격리 참조·실행별 관측 범위를 추가한다. 기존 거래 테스트에 원본 추적·누락/잘못된 메타데이터·업무 중복 분리를 검증한다. 새 코드/테스트 파일은 만들지 않는다.
+- 실제 대조 잡·Gold B 어댑터·Kafka Sink 변경·Airflow/알림은 합의 후 연결한다. 관측 min/max는 완료 증거가 아니며 coverage_status=UNVERIFIED다. 업무 규칙 YAML과 추적 입력 초안을 혼합하지 않는다.
+
+### 작업 결과: 대조 초안·추적
+
+- 공통 계약에 비교 단계·결과 상태·구조도·단계별 후속 구현·PR 확인 체크표를 추가했다. 각 체크는 수용/구현 완료와 구분한다.
+- 거래 입력의 검사된 Kafka 정보는 impact_candidates.source 및 격리 kafka_reference에 남긴다. current.json.kafka_observations에서 입력별 관측 범위와 추적 유효성 건수를 확인할 수 있다. 메타데이터가 없는 입력도 처리하고 업무 계산에는 섞지 않는다.
+- 실제 데이터/Sink/Gold B 대조를 완료한 것이 아니다. 검증 결과는 실행 후 아래에 기록한다.
+- 검증: Silver·Gold A·연결 테스트 47개 통과(9.22초), 변경 common.py/transactions.py Ruff와 git diff --check 통과. 같은 Kafka 위치 재수신·충돌 후보 양쪽 위치·누락/잘못된 추적 정보·메타데이터와 업무 중복 판정 분리를 기존 테스트 파일에서 확인했다. 실제 AWS 호출은 하지 않았다.
+
 브랜치: `pipelines/silver` (기존 `silver/pipelines`에서 이름 변경). Gold A 브랜치는 `pipelines/gold-a`다. 최초 분리 후 선행 Silver와 Gold A 연결 작업의 로컬 포함 관계는 각 브랜치 커밋을 확인한다.
 
 ## 2026-10-20 승인된 연결 작업
