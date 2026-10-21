@@ -555,7 +555,7 @@ GROUP BY 1, 2;
 **재처리 잡의 동작**
 
 - **교체 단위는 1시간 폴더다.** 15:10~15:30을 승인해도 15시대(15:00~15:59) 폴더 전체를 다시 채운다. 1분마다 쌓은 파일에는 늦게 온 데이터가 섞여 있고 하루 1회 합치기도 해서 특정 줄만 골라 바꾸면 복잡하고 위험하기 때문이다. 같은 입력으로 다시 계산하므로 문제없던 구간의 결과는 원래와 같다.
-- **재처리 대상:** `payment_events`, `topic_messages`, `malformed_events`. `bronze_lag_snapshots`는 그 시점에만 잴 수 있는 측정값이라 다시 만들지 않는다.
+- **재처리 대상:** `payment_events`, `topic_messages`, `malformed_events`. `bronze_lag_snapshots`는 그 시점에만 잴 수 있는 측정값이라 다시 만들지 않는다. `malformed_events`는 이번 재처리의 `rule_version` 줄만 지우고 다시 만들고, 다른 버전 줄은 그대로 남긴다 (예전 판정 이력 보존).
 - **읽기 범위 여유:** 폴더는 이벤트 시각 기준이라, 원본은 앞뒤로 몇 분 여유 있게 읽고 이벤트 시각으로 걸러서 쓴다. 결제는 결과 시각보다 늦게 Kafka에 들어올 수 있다.
 - **Kafka 보관 기간:** 3일이다. 3일 안에 잡아서 고친 구간은 Kafka를 다시 읽고, 그보다 오래된 구간(늦게 발견, 백필)은 Bronze로 다시 채운다.
 - **Bronze에 필요한 것:** 3일이 지난 구간을 Bronze로 같은 결과로 다시 만들려면 Bronze에 Kafka 위치·시각(`topic`, `partition`, `offset`, `timestamp`)과 깨진 메시지 원본이 있어야 한다. 현재 Bronze 파일에는 메시지 값만 있고(파일 이름에 파티션·시작 offset), S3 Sink에 오류 토픽 설정이 없다. Silver·Gold A를 고칠 때도 이 원본이 필요하다.
@@ -622,6 +622,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 주현 | 승인 메시지에 재처리 범위·규칙 버전 넣기 | 재처리 잡의 입력값 | 필요 |
 | 주현 | 신뢰성 쿼리는 `topic_messages` 기준, 3분 대기는 비율 규칙에만 | 정상인데 문제처럼 보이는 것을 막기 | 필요 |
 | 주현 | `payment_conflicts` 추가, `bronze_lag_snapshots.kafka_partition` 이름 | 탐지 SQL에서 쓰는 이름 | 필요 |
+| 주현 | 조사 에이전트 리포트·실행 기록 표를 둘 곳 (`gold_b` 밖 권장: 에이전트는 `gold_b/`를 읽기만 함) | 에이전트 권한, 정답 노출 방지 | 필요 |
 | 주현 | 허용 지연 (시연 모드별 재측정 후) | 정답표 채점 기준 | 팀 회의 |
 | 성철 | Bronze 적재 방식 | 지연 측정 방식 결정 | 완료 (S3 Sink) |
 | 성철 | S3 Sink 커넥터 이름, 소비자 그룹 이름 | 수집기가 처리 위치를 물어볼 대상 | 저장소상 `bronze-s3-sink`. 소비자 그룹 확인 필요 |
@@ -632,7 +633,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 성철 | 결제 데이터 계약, 결과 시각을 정하면 바로 저장 | 중복 제거와 재시도 구분, 늦은 데이터 방지 | 필요 |
 | 성철 | 시나리오별 시연 모드(3배·10배), 평소 변동 | 탐지 기준과 허용 지연 | 필요 |
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
-| 현지 | `format_rules.yaml` 위치·형식, 공통 모듈 분담과 저장소 위치 | Gold B와 Silver가 같은 규칙으로 판단 | 필요 (현재 `docs/contracts/format_rules.yaml`, `pipelines/format_rules.py`) |
+| 현지 | 공통 형식 검사 코드(`pipelines/format_rules.py`)를 Gold B도 쓰는 방법: 규칙표의 `gold_b` 사용 승인, 한 메시지의 오류를 전부 돌려주는 함수, 클릭·회원·리뷰 규칙에 필요한 종류(10자리 문자열, true/false 값, 최댓값, 개인정보 컬럼 금지) | Gold B와 Silver가 같은 규칙으로 판단 | 필요 (규칙표 `docs/contracts/format_rules.yaml`은 PR #20으로 머지됨) |
 | 현지 | `unit_price` 최솟값 5,900 (계약 초안은 1) | 같은 메시지를 다르게 판단하지 않기 | 필요 |
 | 현지 | 결제 지문 규칙(필드 9개의 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 | Silver와 Gold B가 같은 함수로 같은 지문을 만들기 | 필요 |
 | 현지 | Silver 격리 기준 일치 | 같은 메시지를 다르게 판단하지 않기 | 필요 |
@@ -641,16 +642,18 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 재영 | Kafka 보관 기간, 적재 잡 실행 방식 | 재처리 범위, 실행 환경 | 완료 (3일, Spark Structured Streaming) |
 | 재영 | 저장소 폴더 규칙, 브랜치·PR 규칙 | 파일을 어디에 둘지 | Silver와 같이 `pipelines/gold_b/`, `pipelines/gold-b` (사용자 결정) |
 | 재영 | S3 폴더(`gold_b/`), Athena 사용, Glue 데이터베이스 관리 방식(Terraform 여부) | 테이블 이름이 실제로 생기려면 필요 | 필요 |
+| 재영 | DDL·설계에 버킷 이름을 그대로 둘지, 자리표시자로 바꿀지 (`connectors/bronze-s3-sink.yaml`에는 이미 있음) | 공개 레포 규칙 | 필요 |
 | 재영 | 적재 잡·수집기 실행 위치와 자원, 배포 방식 | 상시 실행할 자리 | 필요 |
-| 재영 | Athena 접근 경로(NAT 또는 VPC 엔드포인트)와 권한 (주현 님 포함) | 탐지·에이전트가 조회하려면 필요 | 필요 |
+| 재영 | Athena 접근 경로(NAT 또는 VPC 엔드포인트)와 권한 (주현 님, 대시보드 포함) | 탐지·에이전트·대시보드가 조회하려면 필요 | 필요 |
 | 재영 | 규칙 파일 배포 방식 (이미지 포함 / S3) | 규칙 변경을 적재 잡에 반영 | 필요 |
 | 재영 | Airflow DAG 위치, 재시도 2번, 같은 시간대 한 번에 하나씩, 재판정 이어 붙이기 (`team-inputs.md`의 "직접 호출하지 않음"과 다름) | 재처리 흐름 | 필요 |
 | 민혁 | `reviews.raw` 리뷰 컬럼, 운영에서 이 토픽을 쓰는지 | 형식 검사 규칙, 대상 토픽 목록 | 필요 |
+| 민혁 | 대시보드(#31)의 Gold B 컬럼: `bronze_lag_snapshots`는 `kafka_partition`, `payment_attempts`에는 `copies`가 없음, `payment_conflicts` 표시 | 실데이터 연결 때 화면이 깨지지 않게 | 필요 |
 | 팀 전체 | "consumer lag 수집기 없음" → 수집기 추가, Gold B는 Kafka 직접, 구조도 수정 | 주문 설계·구조도와 맞추기 | 공유 필요 |
 
 ## 해야 할 일 워크플로우
 
-브랜치는 `pipelines/gold-b`에서 시작한다. 작업 기록은 `docs/tasks/gold-b-pipelines.md`에 단계별로 쌓는다. 다음 단계를 같은 브랜치에서 할지 새 브랜치로 나눌지는 1단계 머지 때 정한다.
+1단계는 `pipelines/gold-b`(PR #36)이고 작업 기록은 `docs/tasks/gold-b-pipelines.md`다. 다음 단계부터는 `pipelines/gold-b-<작업>` 새 브랜치와 작업 지시서 `docs/tasks/gold-b-<작업>.md`로 한다 (다음: 5단계 Bronze 지연 수집기). 결제 지문(`pipelines/payment_fingerprint.py`)은 Silver와 같이 쓰는 파일이라 규칙을 현지 님과 정한 뒤 `main`에서 따로 브랜치를 만든다.
 
 **파일 구조**
 
@@ -707,12 +710,12 @@ pipelines/gold_b/
 
 브랜치 `pipelines/gold-b`
 
-- [ ]  `tests/samples/` 샘플 메시지 만들기 (정상 결제, PG 원인 실패, 고객 원인 실패, 같은 결제 중복, 같은 결제 내용 충돌(상태가 다른 것, 금액만 다른 것), 필드 누락, 필드 이름 변경, `pg = PG_C`, 오류 여러 개, 6개 토픽 각각)
-- [ ]  `ddl/` 테이블 5개 + 데이터베이스
-- [ ]  시간 폴더(`dt`, `hour`)와 파티션 프로젝션 설정
-- [ ]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인
+- [x]  `tests/samples/` 샘플 메시지 만들기 (정상 결제, PG 원인 실패, 고객 원인 실패, 같은 결제 중복, 같은 결제 내용 충돌(상태가 다른 것, 금액만 다른 것), 필드 누락, 필드 이름 변경, `pg = PG_C`, 오류 여러 개, 6개 토픽 각각)
+- [x]  `ddl/` 테이블 5개 + 데이터베이스
+- [x]  시간 폴더(`dt`, `hour`)와 파티션 프로젝션 설정
+- [ ]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인 (이 PC에서는 Spark가 안 떠서 DDL과 설계 표 비교, pyarrow 시간 폴더 왕복으로 대신 확인)
 - [ ]  Athena에서 `CREATE DATABASE gold_b`, 테이블 생성, 빈 조회 확인 (권한 준비 후)
-- [ ]  `reprocess_events` 최종 컬럼을 주현 님께 공유
+- [x]  `reprocess_events` 최종 컬럼을 주현 님께 공유 (#29 리뷰, #36 리뷰 요청)
 - [ ]  PR 올리고 합치기
 
 ### 2단계: 정제·형식 검사
@@ -771,7 +774,7 @@ pipelines/gold_b/
 - [ ]  승인 범위를 시간 폴더 단위로 넓히기
 - [ ]  원본 선택: 3일 안은 Kafka(해당 offset부터), 넘으면 Bronze
 - [ ]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
-- [ ]  원장 3개(①②④)를 폴더마다 교체, `bronze_lag_snapshots`는 건드리지 않음
+- [ ]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
 - [ ]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록
 - [ ]  원본이 없는 구간은 재시도 없이 바로 `FAILED`
 - [ ]  실제 교체 범위를 결과로 넘기기
