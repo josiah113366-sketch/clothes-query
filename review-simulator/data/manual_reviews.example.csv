@@ -1,0 +1,4 @@
+text,rating,product_id,created_at,aspects,product_name,category,option_size,option_color,has_photo,order_id,member_id,age_group,purchased_at
+"<직접 쓴 테스트 문장: 사이즈가 작다는 불만>",2,W-0001,2026-10-08,사이즈·핏:부정,,,,,,,,,
+"<직접 쓴 테스트 문장: 배송은 좋고 색이 사진과 다르다>",3,W-0002,2026-10-08T14:30:00+09:00,배송:긍정|색상·디자인:부정,,,M,베이지,true,,,,
+"<라벨 없이 문장만 넣는 예시. 상품 목록에 없는 상품이면 이름과 카테고리를 적는다>",4,X-TEST-01,,,테스트 니트,여성의류,,,,,,,

@@ -2,7 +2,7 @@
 
 상태: 일부 결정 / 나머지 입력 대기 · 2026-10-16 갱신. 제네레이터는 팀원이 ECS Fargate로 구성하기로 결정했다. 정답표 경로·형식과 재처리 후 재판정 흐름도 아래처럼 확정됐다. DB→Kafka 캡처 범위와 업무 토픽은 팀원에게 받을 항목이다. 이 문서는 연결 계약이며 메시지를 전송하거나 ECS/IAM 리소스를 생성하지 않았다.
 
-현재 도쿄의 두 AZ VPC·private RDS PostgreSQL 16.15 Single-AZ·업무 S3는 생성 완료했다. NAT는 0개이며 향후 1개 공유한다. EKS Auto Mode는 t3a.large, 용량 한도 6 vCPU/24GiB로 코드만 준비했다. 최소 Kafka는 single-node 프로필의 broker/controller 1개·Connect 1개·RF 1/min ISR 1·gp3 20GiB·72시간이다. EKS/Kafka는 미배포다.
+현재 도쿄의 두 AZ VPC·private RDS PostgreSQL 16.15 Single-AZ·업무 S3에 이어 NAT 1개 공유·EKS 1.36 Auto Mode·private t3a.large 한 대를 생성했다. 용량 한도는 6 vCPU/24GiB다. 최소 Kafka는 single-node+measurement 프로필의 broker/controller 1개·RF 1/min ISR 1·암호화 gp3 20GiB·72시간이며 synthetic TLS 생산/소비를 확인했다. Connect는 비활성이다. Airflow는 namespace만 준비했고 동료 IAM 역할/IP는 입력 대기다. [실행 결과](../../tasks/infra-deploy-result.md).
 
 ## 승인 화면·5분 판정·정답표 연결
 

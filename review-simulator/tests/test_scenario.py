@@ -42,3 +42,33 @@ def test_spec_values_are_valid() -> None:
 def test_seeded_uuid_is_reproducible() -> None:
     assert seeded_uuid(make_rng(5)) == seeded_uuid(make_rng(5))
     assert seeded_uuid(make_rng(5)).version == 4
+
+
+def test_style_rules_p58() -> None:
+    # 재구매 말투 약 30%, 장단점 말투는 긍정·부정이 섞인 명세에만 (2026-10-16 lemin)
+    from rsim.review.taxonomy import PROS_CONS_STYLE, REBUY_STYLE
+
+    specs = _specs(4, 2000)
+    rebuy = sum(s.style == REBUY_STYLE for s in specs) / len(specs)
+    assert 0.26 < rebuy < 0.34
+    for s in specs:
+        if s.style == PROS_CONS_STYLE:
+            assert {"긍정", "부정"} <= {a["sentiment"] for a in s.aspects}
+    assert any(s.style == PROS_CONS_STYLE for s in specs)
+
+
+def test_prompt_p58_priority_and_rebuy() -> None:
+    from rsim.review.generator import PROMPT_VERSION, SYSTEM_TEMPLATE
+
+    assert PROMPT_VERSION == "p5.8"
+    assert "① 속성·감성 ② 길이 ③ 말투" in SYSTEM_TEMPLATE
+    assert (
+        "재구매" not in SYSTEM_TEMPLATE
+    )  # 재구매 말투와 부딪히던 금지어 예시를 뺐다(규칙 부분만 확인)
+
+
+def test_neutral_share_about_5_percent() -> None:
+    # 2026-10-16 lemin 결정: 속성 감성 중 중립은 약 5% (scenario.SENTIMENT_BY_RATING)
+    aspects = [a for s in _specs(5, 3000) for a in s.aspects]
+    share = sum(a["sentiment"] == "중립" for a in aspects) / len(aspects)
+    assert 0.03 <= share <= 0.08, share

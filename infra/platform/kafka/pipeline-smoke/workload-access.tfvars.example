@@ -1,0 +1,12 @@
+# Merge with any existing bindings; never overwrite another team's bindings.
+bindings = {
+  infra-smoke-sink = {
+    namespace       = "kafka"
+    service_account = "infra-smoke-connect-connect"
+    s3_access = {
+      "infra-smoke/REPLACE_WITH_RUN_ID/" = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+    }
+  }
+}
+# network.additional_s3_endpoint_actions must also include s3:AbortMultipartUpload.
+# No access to bronze/, gold_b/, ground_truth/ or other business prefixes.

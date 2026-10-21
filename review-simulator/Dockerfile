@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir .
 
 COPY data ./data
 COPY .local/seeds.jsonl ./.local/seeds.jsonl
+# ECS 태스크 진입점 (deploy/container/entrypoint.sh 참고). 로컬 compose 는 아래 ENTRYPOINT/CMD 를 그대로 쓴다
+COPY deploy/container/entrypoint.sh ./deploy/entrypoint.sh
 
 # 기본 실행: Bedrock 으로 생성해서 Kafka 로 계속 전송 (초당 최대 0.5건)
 # 옵션을 바꾸려면 compose 의 command 나 ECS 태스크 정의의 command 를 덮어쓴다

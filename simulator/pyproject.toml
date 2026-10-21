@@ -35,5 +35,5 @@ line-length = 100
 testpaths = ["tests"]
 addopts = "-m \"not integration\""
 markers = [
-    "integration: 로컬 PostgreSQL이 필요한 통합 테스트",
+    "integration: 로컬 PostgreSQL 또는 Kafka가 필요한 통합 테스트",
 ]

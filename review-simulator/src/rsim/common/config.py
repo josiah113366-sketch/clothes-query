@@ -35,6 +35,15 @@ def _path(name: str, default: str) -> Path:
     return p if p.is_absolute() else Path.cwd() / p
 
 
+def _path_or_s3(name: str, default: str) -> Path | str:
+    """로컬 경로 또는 s3://버킷/키. S3 면 문자열 그대로 둔다(Path 로 바꾸면 s3:/ 로 깨진다).
+
+    ECS 태스크는 PC 파일을 못 읽으므로 입력 파일(incidents JSON 등)을 S3 에 두고 경로만 넘긴다(2026-10-18 sim/review-ecs).
+    """
+    value = _env(name, default)
+    return value if value.startswith("s3://") else _path(name, default)
+
+
 @dataclass
 class Settings:
     # ---------------------------------------------------------------- Bedrock
@@ -67,6 +76,12 @@ class Settings:
     batch_size: int = field(default_factory=lambda: int(_env("BATCH_SIZE", "5")))
     # 프롬프트에 넣을 말투 예시(시드) 개수. 많을수록 말투가 다양해지지만 입력 토큰이 늘어난다.
     few_shot_k: int = field(default_factory=lambda: int(_env("FEW_SHOT_K", "8")))
+    # 생성 프롬프트 예시 세트 버전 (data/examples/<버전>.md, 2026-10-16 지시서 2단계).
+    # 예시 칸 문장과 말투 예시 출처(seed_sources)가 함께 바뀐다. 버전별 성능은 docs/examples-scorecard.md.
+    # 2026-10-18 lemin 결정: 기본값 ex-v1 (ex-v0 과 성능은 같고, 사람이 쓴 예시 + Gemini 합성 예시 제외)
+    examples_version: str = field(default_factory=lambda: _env("EXAMPLES_VERSION", "ex-v1"))
+    # 예시 세트 파일 폴더
+    examples_dir: Path = field(default_factory=lambda: _path("EXAMPLES_DIR", "data/examples"))
     # 자동 재시도 횟수 (429 스로틀링, 5xx, 네트워크 오류에 대해 지수 백오프로 재시도)
     bedrock_max_retries: int = field(default_factory=lambda: int(_env("BEDROCK_MAX_RETRIES", "5")))
 
@@ -86,7 +101,7 @@ class Settings:
 
     # ---------------------------------------------------------------- 레이크 (--sink lake)
     # 리뷰를 날짜(dt)별로 쓰는 레이크 경로 (2026-10-14 결정: 리뷰는 S3 에 바로 쓴다).
-    # 로컬 폴더 또는 s3://버킷/접두사. 팀 버킷은 s3://<버킷>/bronze 로 주면 bronze/reviews/dt=.../ 에 쓴다.
+    # 로컬 폴더 또는 s3://버킷/접두사. 팀 버킷은 s3://<버킷>/bronze 로 주면 bronze/reviews/year=YYYY/month=MM/day=DD/ 에 쓴다.
     # 버킷 이름은 공개 저장소에 넣지 않고 .env 에만 둔다. 기본값은 로컬 폴더(Bedrock·AWS 없이 시험).
     lake_root: str = field(default_factory=lambda: _env("LAKE_ROOT", ".local/lake"))
     # 정답(reviews_truth) 저장 경로. 운영 레이크(bronze)에 정답 라벨을 섞지 않으려고 따로 둔다. 기본은 로컬.
@@ -98,8 +113,9 @@ class Settings:
     # 상품 목록 CSV (선택). 없으면 시드의 상품명으로 자동 생성한다. 형식은 catalog.py 참고.
     products_path: Path = field(default_factory=lambda: _path("PRODUCTS_PATH", "data/products.csv"))
     # 이상 상황(불만 급증) 시나리오 JSON (선택). 형식은 scenario.py 와 incidents.example.json 참고.
-    incidents_path: Path = field(
-        default_factory=lambda: _path("INCIDENTS_PATH", "data/incidents.json")
+    # 로컬 경로 또는 s3://버킷/키 (ECS 에서는 deploy/run_incident.py 가 S3 에 올리고 이 값을 바꿔 실행한다)
+    incidents_path: Path | str = field(
+        default_factory=lambda: _path_or_s3("INCIDENTS_PATH", "data/incidents.json")
     )
 
     # ---------------------------------------------------------------- 주문 기반 리뷰 (rsim run --source orders)

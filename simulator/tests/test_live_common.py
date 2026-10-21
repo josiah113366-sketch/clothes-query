@@ -95,11 +95,47 @@ def _source(tmp_path: Path) -> tuple[FileControlSource, list[str], Path]:
 
 def test_control_reads_valid_file(tmp_path: Path) -> None:
     source, warnings, path = _source(tmp_path)
-    path.write_text(json.dumps({"running": True, "mode": "surge"}))
-    assert source.read() == ControlState(running=True, mode="surge")
+    path.write_text(json.dumps({"running": True, "mode": "burst"}))
+    assert source.read() == ControlState(running=True, mode="burst")
+    path.write_text(json.dumps({"running": True, "mode": "medium"}))
+    assert source.read() == ControlState(running=True, mode="medium")
     path.write_text(json.dumps({"running": False, "mode": "normal"}))
     assert source.read() == ControlState(running=False, mode="normal")
     assert warnings == []
+
+
+def test_control_reads_pg_extra_fail(tmp_path: Path) -> None:
+    source, warnings, path = _source(tmp_path)
+    path.write_text('{"running": true, "mode": "normal"}')  # 옛 파일: 없으면 빈 값
+    state = source.read()
+    assert state is not None and dict(state.pg_extra_fail) == {}
+    path.write_text(
+        '{"running": true, "mode": "burst", "pg_extra_fail": {"PG_B": 0.85, "PG_A": 0}}'
+    )
+    state = source.read()
+    assert state == ControlState(True, "burst", {"PG_B": 0.85, "PG_A": 0.0})
+    path.write_text('{"running": true, "mode": "normal", "pg_extra_fail": {"PG_B": 1}}')
+    assert source.read().pg_extra_fail == {"PG_B": 1.0}
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        '{"PG_B": 1.5}',
+        '{"PG_B": -0.1}',
+        '{"PG_B": "0.5"}',
+        '{"PG_B": true}',
+        '{"PG_B": null}',
+        "[0.5]",
+        "0.5",
+    ],
+)
+def test_control_bad_pg_extra_fail_is_invalid_file(tmp_path: Path, extra: str) -> None:
+    source, warnings, path = _source(tmp_path)
+    path.write_text(f'{{"running": true, "mode": "burst", "pg_extra_fail": {extra}}}')
+    assert source.read() is None
+    assert len(warnings) == 1
 
 
 @pytest.mark.parametrize(
@@ -110,6 +146,7 @@ def test_control_reads_valid_file(tmp_path: Path) -> None:
         "[1, 2]",
         '{"running": "yes", "mode": "normal"}',
         '{"running": true, "mode": "turbo"}',
+        '{"running": true, "mode": "surge"}',  # 예전 모드 이름은 이제 잘못된 값이다
         '{"running": true}',
     ],
 )

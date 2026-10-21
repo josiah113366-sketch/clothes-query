@@ -5,19 +5,22 @@
 """
 
 import json
-from collections.abc import Callable
-from dataclasses import dataclass
+import math
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-MODES: tuple[str, ...] = ("normal", "surge")
+MODES: tuple[str, ...] = ("normal", "medium", "burst")
 DEFAULT_CONTROL_FILE = ".local/control.json"
 
 
 @dataclass(frozen=True)
 class ControlState:
     running: bool  # False면 가입 생성을 멈춘다 (프로세스는 살아 있음)
-    mode: str  # "normal" | "surge"
+    mode: str  # "normal" | "medium" | "burst"
+    # PG 이름 → 그 PG의 PG 원인 실패 확률 추가분 (0~1). 없으면 빈 값. common은 PG 이름을 모른다
+    pg_extra_fail: Mapping[str, float] = field(default_factory=dict, hash=False)
 
 
 class ControlSource(Protocol):
@@ -34,8 +37,23 @@ def _parse(text: str) -> ControlState:
     if not isinstance(running, bool):
         raise TypeError("running은 true/false여야 합니다.")
     if mode not in MODES:
-        raise ValueError(f"mode는 {' 또는 '.join(MODES)}여야 합니다.")
-    return ControlState(running=running, mode=mode)
+        raise ValueError(f"mode는 {', '.join(MODES)} 중 하나여야 합니다.")
+    return ControlState(running=running, mode=mode, pg_extra_fail=_parse_extra(data))
+
+
+def _parse_extra(data: dict) -> dict[str, float]:
+    """선택 항목 pg_extra_fail: {PG 이름: 0 이상 1 이하의 숫자}. 틀리면 파일 전체가 잘못된 값이다."""
+    raw = data.get("pg_extra_fail", {})
+    if not isinstance(raw, dict):
+        raise TypeError("pg_extra_fail은 객체여야 합니다.")
+    extra: dict[str, float] = {}
+    for name, value in raw.items():
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise TypeError("pg_extra_fail의 값은 숫자여야 합니다.")
+        if not (math.isfinite(value) and 0 <= value <= 1):
+            raise ValueError("pg_extra_fail의 값은 0 이상 1 이하여야 합니다.")
+        extra[str(name)] = float(value)
+    return extra
 
 
 def _warn_stderr(message: str) -> None:
@@ -43,7 +61,10 @@ def _warn_stderr(message: str) -> None:
 
 
 class FileControlSource:
-    """JSON 파일 {"running": true, "mode": "surge"}를 읽는다 (로컬 개발용)."""
+    """JSON 파일 {"running": true, "mode": "burst", "pg_extra_fail": {"PG_B": 0.85}}를 읽는다.
+
+    pg_extra_fail은 없어도 된다. 로컬 개발용이다.
+    """
 
     def __init__(self, path: Path, warn: Callable[[str], None] = _warn_stderr) -> None:
         self.path = path

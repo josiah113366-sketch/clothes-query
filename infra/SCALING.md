@@ -1,4 +1,4 @@
-> **최신 결정(2026-10-16):** 프라이빗 EKS Auto Mode의 `t3a.large`와 단일 노드 Kafka 프로필을 사용한다. 용량 한도는 6 vCPU/24GiB(세 대분), 평소 한 대 배치가 목표다. NAT는 향후 1개 공유이며 현재 0개다. 제네레이터는 팀원이 ECS Fargate로 구성한다. WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다.
+> **실제 배포(2026-10-16):** 프라이빗 EKS Auto Mode의 `t3a.large` 한 대에서 단일 노드 Kafka 측정 구성을 확인했다. 용량 한도는 6 vCPU/24GiB(세 대분)다. NAT 1개를 공유한다. 제네레이터는 팀원이 ECS Fargate로 구성한다. Airflow는 namespace만 준비했으며 전체 플랫폼 한 대 수용은 미검증이다. WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다.
 
 ## 최소 구성의 노드 확장
 

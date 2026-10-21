@@ -1,8 +1,10 @@
-> **최신 결정(2026-10-16):** compute를 t3a.large·6 vCPU/24GiB(세 대분 한도)로 축소했다. Kafka는 별도 single-node 프로필의 1 broker·1 Connect·20GiB·72시간을 사용한다. 제네레이터는 팀원이 ECS Fargate로 구성하며 WEB/WAS·ALB·Spark는 이번 최소 배포에서 제외한다. 평소 한 대 배치·실제 AWS 연결 검증은 남아 있다. 아래 2026-10-14 표는 과거 설계 기록이며 현재 배포 기준은 [TOPOLOGY.md](TOPOLOGY.md)와 [연결 입력](../docs/design/infra/team-inputs.md)을 따른다.
+> **실제 배포(2026-10-16):** NAT 1개·EKS 1.36 Auto Mode·private t3a.large 1대·단일 Kafka 20GiB/72시간을 생성하고 TLS 메시지·EBS·JMX를 확인했다. Connect는 비활성, Airflow는 namespace만 생성했다. 아래 2026-10-14 표는 과거 설계 기록이며 현재 상태는 [배포 결과](../docs/tasks/infra-deploy-result.md)와 [TOPOLOGY.md](TOPOLOGY.md)를 따른다.
+
+**2026-10-18 실제 연결 시험:** 사용자 승인으로 RDS 논리 복제 설정/재부팅과 Connect ECR 이미지를 준비하고, 전용 계정·mTLS·Pod Identity로 RDS → Kafka → S3 JSON6개 전달 및 CDC 중단 후 이어받기를 확인했다. 시험 table/계정/slot·Kafka/Connect 시험 자원·S3 모든 버전8개·임시 IAM/접속 규칙은 정리했다. 현재 Kafka4 Pod·노드1대이며 Connect는 비활성이다. RDS 논리 복제 설정과 데이터 없는 ECR 이미지만 기반으로 남았다. 업무 스키마·계정·토픽·WAL 예산, Fargate/Airflow/Athena/에이전트 권한은 계속 후속이다. [검증·정리 기록](../docs/tasks/infra-pipeline-smoke.md).
 
 # 배포 준비 현황
 
-2026-10-16 후속 결과: RDS-first 범위로 NAT 없는 network와 EKS 의존성 없는 private RDS 생성 완료. DB available·암호화·백업/Secret 상태를 실제 확인했다. EKS·노드·Kafka는 생성하지 않았다. DB 접속·DDL/제네레이터 연결은 후속이며 [작업 기록](../docs/tasks/infra-rds-first.md)을 따른다. 아래 2026-10-14 내용은 당시 준비 현황이다.
+2026-10-16 후속 결과: PR #11 머지 후 최소 EKS/Kafka 측정 환경 배포 완료. network/EKS/compute/RDS 후속 plan 모두 변경 없음. 현재 본인 접속만 검증했고 동료 IAM 역할/IP는 입력 대기다. 순간 자원 표본은 노드 약 0.679 vCPU/1.619GiB working set이었으며 전체 플랫폼 수용 보장이 아니다. Airflow·실제 Athena·Fargate·DB 계정/DDL·CDC/S3 Sink·업무 권한은 [연결 입력](../docs/design/infra/team-inputs.md)을 받아 후속으로 준비한다.
 
 2026-10-14 기준. 실제 생성 테스트는 마지막에 수행한다. 코드 검증과 실환경 검증을 구분한다.
 

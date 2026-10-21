@@ -9,6 +9,7 @@
 모든 sink 는 send(review, truth) / close() 두 메서드만 가진다.
   review : 실제 쇼핑몰 리뷰와 같은 모양의 이벤트 → 운영 흐름(리뷰 토픽)
   truth  : 정답 라벨이 든 학습·채점용 이벤트 → 별도 흐름(정답 토픽)
+           StdoutSink·LakeSink 는 truth=None 도 받는다(rsim inject 에서 라벨 없이 넣은 리뷰).
 새 목적지(S3, Kinesis 등)가 필요하면 같은 모양의 클래스를 하나 더 만들고
 run.py 의 make_sink() 에 등록하면 된다.
 """
@@ -25,6 +26,23 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
+def s3_client(region: str | None = None):
+    """boto3 S3 클라이언트 (기본 자격 증명: aws login/sso, 환경변수, ECS 태스크 역할 등).
+
+    .env 에 AWS_PROFILE= 처럼 빈 값이 있으면 boto3 가 이름 없는 프로필을 찾다가
+    ProfileNotFound 로 멈춘다. 빈 값이면 지워서 기본 자격 증명을 쓰게 한다.
+    LakeSink(쓰기)와 rsim inject(s3:// 입력 읽기)가 같이 쓴다.
+    """
+    try:
+        import boto3
+    except ImportError:
+        raise SystemExit("S3 를 쓰려면 boto3 가 필요합니다: pip install -e .") from None
+    for name in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        if name in os.environ and not os.environ[name].strip():
+            del os.environ[name]
+    return boto3.client("s3", region_name=region)
+
+
 def _dumps(event: dict) -> str:
     # ensure_ascii=False: 한글을 \uXXXX 로 바꾸지 않고 그대로 보냄 (Kafka UI 에서 바로 읽힘)
     return json.dumps(event, ensure_ascii=False, default=str)
@@ -33,9 +51,10 @@ def _dumps(event: dict) -> str:
 class StdoutSink:
     """콘솔 출력. 두 흐름을 구분할 수 있게 줄 앞에 [review] / [truth] 를 붙인다."""
 
-    def send(self, review: dict, truth: dict) -> None:
+    def send(self, review: dict, truth: dict | None) -> None:
         sys.stdout.write("[review] " + _dumps(review) + "\n")
-        sys.stdout.write("[truth]  " + _dumps(truth) + "\n")
+        if truth is not None:
+            sys.stdout.write("[truth]  " + _dumps(truth) + "\n")
         sys.stdout.flush()
 
     def close(self) -> None:
@@ -61,13 +80,15 @@ class JsonlSink:
 
 
 class LakeSink:
-    """S3 레이크 경로 구조로 저장한다. 날짜(dt) 파티션 하나 = 파일 하나.
+    """S3 레이크 경로 구조로 저장한다. 날짜 파티션(year/month/day) 하나 = 파일 하나.
 
-      <root>/reviews/dt=2026-10-08/part-00000.jsonl              리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
-      <truth_root>/reviews_truth/dt=2026-10-08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
+      <root>/reviews/year=2026/month=10/day=08/part-00000.jsonl              리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
+      <truth_root>/reviews_truth/year=2026/month=10/day=08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
 
     예) LAKE_ROOT=s3://<버킷>/bronze
-        → s3://<버킷>/bronze/reviews/dt=2026-10-08/part-00000.jsonl (2026-10-14 lemin 결정, 버킷 이름은 .env 에만)
+        → s3://<버킷>/bronze/reviews/year=2026/month=10/day=08/part-00000.jsonl (버킷 이름은 .env 에만)
+        파티션 이름은 Hive 형식 year=YYYY/month=MM/day=DD (2026-10-16 lemin 결정, 이전 dt=YYYY-MM-DD 대체).
+        Glue 크롤러·Athena 가 year, month, day 를 파티션 컬럼으로 바로 인식한다. 월·일은 두 자리(01~12, 01~31).
         LAKE_TRUTH_ROOT 기본값은 로컬 .local/lake 다. 정답 라벨은 실제 운영 데이터에 없는 값이라
         운영 레이크(bronze)에 섞지 않는다. 정답도 S3 에 두려면 bronze 가 아닌 별도 경로를 준다.
 
@@ -79,11 +100,20 @@ class LakeSink:
       주문 모드는 날짜 하나를 돌리므로, 같은 날짜를 다시 돌려도 주문당 리뷰가 하나만 남는다.
       무작위 모드로 같은 날짜에 다시 쓰면 그 날짜의 예전 리뷰가 지워지니 주의한다.
     - 하루 약 1,000건이라 메모리에 모았다가 한 번에 쓴다.
+    - file_name 을 바꾸면 같은 파티션에 다른 파일로 쓴다. rsim inject 는 part-manual-<묶음>.jsonl 로 써서
+      매일 덮어쓰는 part-00000.jsonl 과 섞이지 않게 한다(inject.py 참고).
     """
 
     FILE_NAME = "part-00000.jsonl"
 
-    def __init__(self, root: str, truth_root: str, region: str | None = None):
+    def __init__(
+        self,
+        root: str,
+        truth_root: str,
+        region: str | None = None,
+        file_name: str = FILE_NAME,
+    ):
+        self.file_name = file_name
         self.root = root.rstrip("/")
         self.truth_root = truth_root.rstrip("/")
         self.region = region
@@ -99,21 +129,32 @@ class LakeSink:
             t = t.replace(tzinfo=UTC)
         return t.astimezone(UTC).date().isoformat()
 
+    @staticmethod
+    def partition(dt: str) -> str:
+        """UTC 날짜(2026-10-08) → 파티션 폴더 이름(year=2026/month=10/day=08).
+
+        파티션 모양을 바꾸려면 이 함수만 고치면 된다(경로·로그·테스트가 모두 이 함수를 쓴다).
+        """
+        y, m, d = dt.split("-")
+        return f"year={y}/month={m}/day={d}"
+
     def path(self, table: str, dt: str) -> str:
         """파티션 파일 위치 (로컬 경로 또는 s3:// URI)."""
         root = self.truth_root if table == "reviews_truth" else self.root
-        return f"{root}/{table}/dt={dt}/{self.FILE_NAME}"
+        return f"{root}/{table}/{self.partition(dt)}/{self.file_name}"
 
-    def send(self, review: dict, truth: dict) -> None:
+    def send(self, review: dict, truth: dict | None) -> None:
         reviews, truths = self.parts.setdefault(self.dt_of(review), ([], []))
         reviews.append(_dumps(review))
-        truths.append(_dumps(truth))
+        if truth is not None:  # 정답 라벨 없이 넣은 리뷰(rsim inject)는 정답 파일에 쓰지 않는다
+            truths.append(_dumps(truth))
 
     def close(self) -> None:
         for dt, (reviews, truths) in sorted(self.parts.items()):
             for table, lines in (("reviews", reviews), ("reviews_truth", truths)):
-                self._write(self.path(table, dt), "\n".join(lines) + "\n")
-            log.info("저장: dt=%s 리뷰 %d건 → %s", dt, len(reviews), self.path("reviews", dt))
+                if lines:
+                    self._write(self.path(table, dt), "\n".join(lines) + "\n")
+            log.info("저장: %s(UTC) 리뷰 %d건 → %s", dt, len(reviews), self.path("reviews", dt))
 
     def _write(self, target: str, body: str) -> None:
         if target.startswith("s3://"):
@@ -133,16 +174,7 @@ class LakeSink:
 
     def _client(self):
         if self._s3 is None:
-            try:
-                import boto3
-            except ImportError:
-                raise SystemExit("S3 에 쓰려면 boto3 가 필요합니다: pip install -e .") from None
-            # .env 에 AWS_PROFILE= 처럼 빈 값이 있으면 boto3 가 이름 없는 프로필을 찾다가
-            # ProfileNotFound 로 멈춘다. 빈 값이면 지워서 기본 자격 증명(aws login/sso 의 default)을 쓰게 한다.
-            for name in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
-                if name in os.environ and not os.environ[name].strip():
-                    del os.environ[name]
-            self._s3 = boto3.client("s3", region_name=self.region)
+            self._s3 = s3_client(self.region)
         return self._s3
 
 

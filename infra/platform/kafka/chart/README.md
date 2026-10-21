@@ -9,3 +9,9 @@
 Debezium 기본 `prefix.schema.table` 토픽의 점·밑줄은 실제 Kafka 이름에 유지한다. Kubernetes 이름으로 사용할 수 없으면 `topics[].resourceName`을 별도로 지정한다. 예: `name: smoke.public.cdc_probe`, `resourceName: smoke-public-cdc-probe`. ACL의 produceTopics/consumeTopics에는 **실제 토픽 이름**을 쓴다. 기존 DNS-compatible `name` 입력은 resourceName 없이 그대로 유지된다. 중복 리소스 이름은 거부한다.
 
 지표는 기본 비활성이다. `metrics.enabled`로 JMX 노출을 켜고, 별도 `metrics.lagExporter.enabled`에는 실제 토픽/group regex를 명시한다. [노출·수집·검증 안내](../metrics/README.md)를 따른다.
+
+Connect에서 Sink도 실행하려면 `connect.consumeTopics`와 `connect.consumerGroups`를 명시한다. 빈 기본값은 기존 source-only 권한을 유지한다. 읽기 토픽은 chart에 선언된 실제 토픽이어야 하며, consumer group은 Sink 이름에 맞는 `connect-<connector-name>`을 사용한다. wildcard와 그룹 없는 consume 설정은 거부한다. `produceTopics`는 계속 명시적으로 필요하므로 이 chart는 source 없는 Sink-only 배포를 지원하지 않는다.
+
+## Kafka UI (`ui`)
+
+기본은 꺼짐이다. `ui.enabled=true`이면 읽기 전용 KafkaUser(`ui.topics`에 Read/Describe/DescribeConfigs, `ui.consumerGroups`에 Describe/Read, cluster Describe/DescribeConfigs), Deployment 1개(`KAFKA_CLUSTERS_0_READONLY=true`, mTLS, uid 100), ClusterIP Service, Connect REST(8083)로 UI Pod만 허용하는 NetworkPolicy를 만들고 broker listener 허용 대상에 UI Pod를 더한다. 이미지는 digest로만 받는다. LoadBalancer·Ingress는 만들지 않는다.

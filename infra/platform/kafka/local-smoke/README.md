@@ -1,5 +1,7 @@
 # 로컬 CDC 연결 검사
 
+2026-10-18 선택적 전체 경로 시험: `python -X utf8 infra/platform/kafka/local-smoke/check.py --compact --s3`로 PostgreSQL → mTLS Kafka → S3 Sink → 로컬 S3 호환 저장을 검사한다. [S3 fixture](s3/README.md)와 [AWS 시험 준비](../pipeline-smoke/README.md)를 참고한다. AWS RDS/S3/IAM 적용·검증을 대신하지 않는다.
+
 축소 프로필 검증은 `python -X utf8 infra/platform/kafka/local-smoke/check.py --compact`로 실행한다. Kafka 1536 MiB/Connect 1 GiB, 두 JVM heap 각 512 MiB와 Kafka/Connect 각 1-vCPU quota를 사용한다. PostgreSQL·Java 관측 client·exporter fixture CPU는 별도다. 1000행 burst·Docker stats/OOM/재시작 검사와 `.cache/kafka-compact-report.json`을 추가한다. Kubernetes/Strimzi 운영자는 실행하지 않으므로 EKS 노드 수용 검증과 구분한다. [상세 범위](../../../../docs/design/infra/kafka-single-node-validation-2026-10-16.md).
 
 Python 표준 라이브러리와 Docker Desktop Linux/Compose로 임시 PostgreSQL 16·Kafka 4.3.1·Connect/Debezium 3.7.0.Final을 실행한다. PostgreSQL 공식 이미지와 Kafka 기반 이미지는 digest 고정이다. 테스트 데이터는 ID/value 정수뿐이며 사용자·상품·업무 스키마를 사용하지 않는다.

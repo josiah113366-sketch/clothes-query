@@ -1,6 +1,6 @@
 # simulator/
 
-가상 쇼핑몰의 회원 데이터를 만들어 RDS(PostgreSQL)에 쓰는 시뮬레이터이다. Kafka에는 직접 쓰지 않고, Debezium이 변경 로그를 읽어 보낸다. 설계는 `docs/design/`에 있다. 작업 규칙은 `CLAUDE.md`를 따른다.
+가상 쇼핑몰의 회원 데이터를 만들어 RDS(PostgreSQL)에 쓰는 시뮬레이터이다. 회원·주문·결제는 Kafka에 직접 쓰지 않고 Debezium이 변경 로그를 읽어 보낸다. 클릭 로그만 예외로 Kafka 토픽 `clickstream`에 직접 발행한다. 설계는 `docs/design/`에 있다. 작업 규칙은 `CLAUDE.md`를 따른다.
 
 ## 코드 구조
 
@@ -15,15 +15,16 @@ simulator/
 │   ├── cli.py             # sim 명령 진입점
 │   ├── cdc/               # 로컬 CDC: 커넥터 등록·상태·초기화, 토픽 검증 (sim cdc)
 │   ├── sink/              # 로컬 S3 Sink: 커넥터 등록·상태·초기화, S3 파일 검증 (sim sink)
+│   ├── clickstream/       # 클릭 로그 토픽 만들기·상태·검증·지우기 (sim clickstream)
 │   ├── product/           # 상품 시드(Parquet)를 DB에 옮기고 확인 (sim product)
-│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
-│   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
+│   ├── common/            # 설정, 시드·난수, DB 연결, Kafka 설정, 시계, 곡선, 제어 신호, 로깅, 지역 로더
+│   ├── controller/        # 모드 전환, 장애 주입, 정답표 기록 (sim controller)
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
-│   └── behavior/          # 쇼핑 행동 (나중에)
+│   └── behavior/          # 쇼핑 행동: 방문, 주문, 결제, 상태 전이 (sim behavior)
 └── tests/
 ```
 
-`member`, `behavior`, `controller`는 서로 import하지 않고 `common`만 공유한다. 데이터는 DB로, 제어는 컨트롤러 신호로만 주고받는다. DDL은 `db/schema/`에 있다.
+`member`, `behavior`, `controller`, `clickstream`은 서로 import하지 않고 `common`만 공유한다. 데이터는 DB로, 제어는 컨트롤러 신호로만 주고받는다. DDL은 `db/schema/`에 있다.
 
 ## 로컬 실행
 
@@ -84,16 +85,16 @@ pytest -m integration
 베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
-sim member live                                   # 평상시, 실시간, 하루 평균 5,000명
+sim member live                                   # normal, 실시간, 하루 평균 5,000명 (요일·시간대 곡선)
+sim member live --mode burst --speed 60 --duration 30   # 폭주로 시작, 시뮬레이터 30분
 sim member live --speed 1440 --duration 30        # 시뮬레이터 하루 = 실제 1분으로 30초 실행
 sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만들고 종료
 ```
 
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
-| `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `surge`) |
-| `--daily` | `SIM_LIVE_DAILY` | 5000 | 평상시 하루 평균 가입 수 |
-| `--surge-multiplier` | `SIM_LIVE_SURGE_MULTIPLIER` | 4.6 | 폭주 모드의 배율 |
+| `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`) |
+| `--daily` | `SIM_LIVE_DAILY` | 5000 | `normal`의 하루 평균 가입 수. `medium`·`burst` 속도도 이 값에서 정해진다 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
 | `--max-signups` | | 없음 | 이 건수만큼 만들면 정상 종료 |
@@ -102,16 +103,25 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 환경 변수 중 `DATABASE_URL`, `SIM_SEED`는 `.env`에서도 읽고, 나머지 `SIM_LIVE_*`, `SIM_CONTROL_FILE`은 실제 환경 변수로만 읽는다.
 
-- **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `하루 가입 수 × 모드 배율 ÷ 86,400`건/초이고, 하루 안의 시간대·날짜별 차이는 아직 없다(균등). 그 자리는 `member/schedule.py`의 `rate_multiplier`다.
+- **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `--daily ÷ 86,400 × rate_factor(모드, 시뮬레이터 시각)`건/초다. `rate_factor`는 `common/curve.py`에 있고, 방문(`behavior`)도 같은 함수를 쓴다.
+
+  | 모드 | `rate_factor` (하루 평균 대비) | `--daily 5000`일 때 |
+  |---|---|---|
+  | `normal` (일상) | 요일 배율 × 시간대 배율 | 하루 평균 5,000명. 월요일 20시는 분당 약 5.6명 |
+  | `medium` (중간) | 일상 피크 시간대 배율(1.8) × 3 = 5.4, 고정 | 시간당 1,125명 |
+  | `burst` (폭주) | 일상 피크 시간대 배율(1.8) × 10 = 18, 고정 | 시간당 3,750명 |
+
+  **곡선:** 요일 배율은 H&M 요일 비율 × 7(월 0.896 … 토 1.113, 한 주 평균 1), 시간대 배율은 우리가 정한 시간대 비율 ÷ 구간 길이(0~6시 0.20, 6~9시 0.64, 9~12시 1.12, 12~14시 1.32, 14~18시 1.02, 18~24시 1.80)다. 날짜와 시각은 KST 기준이고, 구간 안에서는 일정한 계단 함수다. 간격은 뽑은 시점의 속도로 뽑으므로 구간 경계에서 약간의 오차가 있다. `medium`·`burst`는 시간대·요일과 상관없이 고정이라 밤에 바꿔도 폭주가 된다. 자동 복귀(중간 60분, 폭주 15분)는 아직 없다(컨트롤러 작업).
 - **제어 파일**을 약 1초마다 읽는다. 로컬에서는 이렇게 바꾼다.
 
   ```bash
-  echo '{"running": true,  "mode": "surge"}'  > .local/control.json   # 폭주 (평상시의 4.6배)
-  echo '{"running": true,  "mode": "normal"}' > .local/control.json   # 평상시로 복귀
+  echo '{"running": true,  "mode": "burst"}'  > .local/control.json   # 폭주 (피크 시간대의 10배)
+  echo '{"running": true,  "mode": "medium"}' > .local/control.json   # 중간 (피크 시간대의 3배)
+  echo '{"running": true,  "mode": "normal"}' > .local/control.json   # 일상(곡선)으로 복귀
   echo '{"running": false, "mode": "normal"}' > .local/control.json   # 멈춤 (프로세스는 살아 있음)
   ```
 
-  모드가 바뀌면 `mode: normal → surge` 한 줄이 출력되고 새 속도로 간격을 다시 뽑는다. 파일이 없거나 깨졌거나 값이 잘못되면 마지막 상태를 유지하고 경고를 한 번만 낸다. 제어 파일은 시작 상태(`--mode`)를 이후에 덮어쓴다.
+  모드가 바뀌면 `mode: normal → burst` 한 줄이 출력되고 새 속도로 간격을 다시 뽑는다. 파일이 없거나 깨졌거나 값이 잘못되면 마지막 상태를 유지하고 경고를 한 번만 낸다. 제어 파일은 시작 상태(`--mode`)를 이후에 덮어쓴다.
 - **제어 신호 전달 수단은 아직 정해지지 않았다.** 파일 방식은 로컬 개발용이고, 실제 수단은 컨트롤러 작업에서 `ControlSource`를 새로 구현해 붙인다.
 - **배속과 시각:** `signup_at`은 시뮬레이터 시각(KST)이고 `created_at`은 DB가 기록한 실제 시각이다. 배속 1이면 거의 같고, 배속이 크면 어긋난다. 정상이다.
 - **껐다 켜도 이어진다:** k번째 신규 회원은 `derive_seed(시드, "live", k)`로 난수를 다시 심어 만들어 값이 시드와 k만으로 정해진다. 시작할 때 k는 `members`에서 `signup_at >= 2026-10-01 00:00 KST`인 행 수로 센다(탈퇴는 행을 지우지 않으므로 줄지 않는다). 그래서 껐다 켜도 같은 순서로 이어지고 `member_id`가 겹치지 않는다. 시뮬레이터 시각이 10/1 KST보다 이르면 이 기준이 깨지므로 오류로 멈춘다.
@@ -120,6 +130,152 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 - 실제 시간 10초마다 진행 한 줄(모드, 구간 건수와 초당 건수, 누적, 시뮬레이터 시각)을 출력한다. 회원 값(PII)은 출력하지 않는다.
 - 이 명령으로 `member`에 신규 가입이 섞이면 `sim member verify`의 가입 기간·일별·시간대별 항목은 베이스라인 기준이라 실패할 수 있다.
 - 확인 후 로컬에서 신규 가입만 지우려면: `DELETE FROM members WHERE signup_at >= '2026-10-01 00:00:00+09';`
+
+## 행동 (behavior)
+
+회원의 쇼핑 행동을 만들어 `orders`, `order_items`, `payments`에 쓴다. 회원(`members`)과 상품(`product_variant`)이 먼저 있어야 하고, 로컬 DB에 `db/schema/004_orders.sql`이 적용돼 있어야 한다.
+
+```bash
+docker compose exec -T postgres psql -U sim -d clothes < ../db/schema/004_orders.sql   # 처음 한 번
+sim behavior live                                                  # normal, 실시간, 하루 평균 11만 1천 방문
+sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink jsonl
+```
+
+| 옵션 | 환경 변수 | 기본값 | 설명 |
+|---|---|---|---|
+| `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`). `member live`와 같은 변수 |
+| `--visits-daily` | `SIM_VISITS_DAILY` | 111000 | `normal`의 하루 평균 방문 수 |
+| `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 |
+| `--duration` | | 계속 | **실제 시간** 기준 실행 초 |
+| `--max-visits` | | 없음 | 이만큼 방문을 만들면 정상 종료 |
+| `--control-file` | `SIM_CONTROL_FILE` | `.local/control.json` | 제어 신호 파일 (`member live`와 **같은 파일**) |
+| `--seed` | `SIM_SEED` | 42 | 기본 시드 |
+| `--run-salt` | | 시작 시각의 epoch 초 | 실행 구분값 (아래) |
+| `--click-sink` | `SIM_CLICK_SINK` | `none` | 클릭 로그 출력: `none`(버림), `jsonl`(파일), `kafka`(토픽 `clickstream`, 아래 "클릭 로그" 절) |
+| `--click-file` | | `.local/clicks.jsonl` | `jsonl`일 때 경로. `.local/`은 커밋하지 않는다 |
+
+- **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 11만 1천 방문이면 주문은 약 5,000건이다.
+- **값을 바꾸는 곳:** 확률, 분포, 지연은 모두 `src/sim/behavior/params.py` 한 곳에 있다. `[가정]` 표시는 팀과 맞추는 임시값이다.
+- **쓰는 방식:** 주문과 그 상품 줄은 한 트랜잭션, 결제 INSERT와 상태 UPDATE는 한 건씩 자동 커밋이다. `orders.updated_at`과 모든 전이 시각은 **예정된 시뮬레이터 시각**이다(실제 UPDATE 시각이 아니다). 결제는 INSERT만 하고 환불도 결제 행을 만들지 않는다.
+- **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink`, `JsonlClickSink`, `KafkaClickSink`)로 나간다. 나중에 쇼핑몰 API로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(UTC, `Z`로 끝남), `session_id`다.
+- **제어 파일:** `member live`와 같은 파일을 약 1초마다 읽는다. 모드를 바꾸면 다음 방문 간격을 지금부터 다시 뽑고 `mode: normal → burst` 한 줄이 나온다. `{"running": false, ...}`는 **새 방문만 멈춘다.** 이미 예약된 클릭·결제·상태 전이는 계속 실행된다.
+- **run_salt:** 같은 시드 + 같은 `run_salt` + 같은 시계 + 같은 제어 순서이면 결과가 완전히 같다. 기본값이 시작 시각이라 재시작마다 달라지고, 그래서 `order_id`·`payment_id`가 이전 실행과 겹치지 않는다. 시작 출력에 항상 보인다.
+- **알려진 한계: 재시작하면 진행 중이던 주문이 멈춘다.** 예약된 결제·상태 전이는 메모리 큐에만 있고 DB에서 복구하지 않는다. 껐다 켜면 그때 `PLACED`, `PAID`, `SHIPPED`였던 주문은 그 상태로 남는다.
+- **원격 DB:** 접속 대상이 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다. ECS에서 RDS에 붙을 때는 `SIM_ALLOW_REMOTE_DB=1`을 명시한다. 오류 메시지에는 호스트와 비밀번호를 싣지 않는다.
+- **오류와 종료:** DB 연결이 끊기면 실패한 항목을 큐 맨 앞에 되돌리고 1, 2, 4, … 최대 30초 간격으로 다시 연결한 뒤 그 항목부터 이어서 한다. 다시 할 때 `23505`(PK/UNIQUE 위반)는 이미 반영된 것으로 본다. SIGINT/SIGTERM이면 하던 항목을 끝내고 요약(남은 큐 건수 포함)을 출력한 뒤 종료 코드 0으로 끝난다.
+- **출력:** 실제 시간 10초마다 진행 한 줄(모드, 구간 방문·주문·결제 시도, 누적, 큐 길이, 시뮬레이터 시각). 회원 값은 읽지도 출력하지도 않는다(회원은 `member_id`만 읽는다).
+- 확인 후 로컬에서 거래 행을 지우려면: `DELETE FROM payments; DELETE FROM order_items; DELETE FROM orders;`
+
+## 컨트롤러 (controller)
+
+시연자가 버튼(또는 명령)으로 모드와 장애를 바꾸고, 바꾸기 **전에** 정답표(`incident_log`)를 JSON으로 남긴다. 정답표는 AI 조사 에이전트가 맞혀야 할 답이라, 기록이 실패하면 아무것도 바꾸지 않는다. 컨트롤러는 제어 파일만 쓰고(데이터 오염만 DB에 직접 쓴다), 실행 중인 `sim member live`와 `sim behavior live`가 1초마다 그 파일을 읽어 따라 움직인다.
+
+```bash
+sim controller serve                                   # http://127.0.0.1:8080 (버튼 화면)
+sim controller mode burst                              # 다른 터미널에서
+sim controller pg-outage --pg PG_B --extra-fail 0.85 --minutes 10
+sim controller pollution --kind ORDER_TOTAL_MISMATCH --count 30
+sim controller end                                     # 진행 중 사건 종료
+```
+
+| 명령 | 동작 |
+|---|---|
+| `serve` | 서버를 켠다. `--host`(`SIM_CONTROLLER_HOST`, 기본 `127.0.0.1`), `--port`(`SIM_CONTROLLER_PORT`, 기본 8080), `--control-file`(기본 `.local/control.json`), `--incident-log file\|s3`(기본 `file`), `--incident-dir`(기본 `.local/incident_log`), `--medium-minutes`(`SIM_MEDIUM_MINUTES`, 기본 60), `--burst-minutes`(`SIM_BURST_MINUTES`, 기본 15, 소수 허용) |
+| `status` | 현재 상태 |
+| `mode <normal\|medium\|burst>` | 모드 전환 |
+| `running <true\|false>` | 새 가입·방문 멈춤/재개 |
+| `pg-outage --pg PG_B [--extra-fail 0.85] [--minutes 10]` | PG 장애 시작 |
+| `pollution [--kind ORDER_TOTAL_MISMATCH] [--count 30]` | 데이터 오염 |
+| `end` | 진행 중 사건 종료 |
+
+`serve` 밖의 명령은 `--url`(`SIM_CONTROLLER_URL`, 기본 `http://127.0.0.1:8080`)로 서버를 HTTP로 부르는 얇은 클라이언트다. 파일을 쓰는 곳은 서버 하나다.
+
+**제어 파일** (`member live`, `behavior live`가 같은 파일을 읽는다):
+
+```json
+{"running": true, "mode": "normal", "pg_extra_fail": {"PG_B": 0.85}}
+```
+
+`pg_extra_fail`(PG 이름 → 그 PG의 PG 원인 실패 확률 추가분, 0~1)은 없어도 된다. 값이 틀리면 파일 전체를 잘못된 값으로 보고 마지막 상태를 유지한다. `behavior live`는 바뀌면 `pg_extra_fail: {} → {"PG_B": 0.85}` 한 줄을 출력하고, 그 뒤에 시작하는 결제 시도부터 적용한다. `member live`는 이 항목을 무시한다. 컨트롤러는 임시 파일에 쓴 뒤 `os.replace`로 바꿔, 읽는 쪽이 반쯤 쓴 파일을 보지 않는다.
+
+**사건 종류** (한 번에 하나만 진행한다. 진행 중에 다른 사건을 요청하면 409. 일시정지는 예외):
+
+| 사건 | 만드는 법 | 끝나는 때 |
+|---|---|---|
+| `INGEST_LAG` | `mode burst` (적재 지연이 목적) | 15분 뒤 자동으로 `normal`, 또는 `mode normal` |
+| `TRAFFIC_SURGE` | `mode medium` (약한 급증) | 60분 뒤 자동으로 `normal`, 또는 `mode normal` |
+| `PG_OUTAGE` | `pg-outage` (PG 하나, 기본 추가 실패율 0.85, 10분, 최대 60분) | 정한 시간 뒤 자동, 또는 `end` |
+| `DATA_POLLUTION` | `pollution` (기본 30건, 최대 500건) | 즉시 (`complete`) |
+| `OPERATOR_PAUSE` | `running false` (사건은 아니지만 트래픽 공백이 장애로 오해되지 않게 남긴다) | `running true` |
+
+**데이터 오염**은 DB 제약(CHECK, UNIQUE, FK)은 통과하지만 업무 규칙을 어기는 행만 만든다. 스키마 변경은 하지 않는다. 한 종류의 오염은 한 트랜잭션이다.
+
+| 종류 | 하는 일 | 어기는 규칙 |
+|---|---|---|
+| `ORDER_TOTAL_MISMATCH` | `PAID`·`SHIPPED`·`DELIVERED` 중 가장 최근 주문의 `total_amount`에 10,000을 더한다 (`updated_at`은 그대로) | 주문 총액 = 항목 합계 = 결제 금액 |
+| `DUPLICATE_SUCCESS_PAYMENT` | SUCCESS 결제가 있는 최근 주문에 같은 수단·PG·금액의 SUCCESS 결제를 한 건 더 넣는다 (`attempt_no`는 최대 + 1) | 주문당 SUCCESS 결제는 1건 |
+
+**정답표**는 레코드 하나를 파일 하나로 쓴다. 로컬은 `.local/incident_log/YYYYMMDDTHHMMSSZ_<incident_id>_<phase>.json`, S3는 키 접두어 `ground_truth/incident_log/`(`--incident-log s3`, `S3_BUCKET` 필요)다. 시각은 UTC다.
+
+```json
+{"schema_version": 1, "incident_id": "…", "phase": "start", "type": "PG_OUTAGE", "at": "2026-10-18T08:12:00Z", "params": {"pg": "PG_B", "extra_fail": 0.85, "planned_minutes": 10.0}}
+{"schema_version": 1, "incident_id": "…", "phase": "end", "type": "PG_OUTAGE", "at": "2026-10-18T08:22:00Z", "ended_by": "timer", "result": {}}
+```
+
+`ended_by`는 `timer`, `manual`, `shutdown`, `complete`, `failed`(적용 실패) 중 하나다. 오염의 `result`에는 `kind`, `affected_count`, `order_ids`(최대 500개)가 들어간다. 회원 정보, 접속 정보, 버킷 이름은 넣지 않는다. 기록 순서는 "시작 기록 → 바꾸기"이고, 끝은 "되돌리기 → 끝 기록"이다. 끝 기록이 실패하면 1초마다 다시 쓴다.
+
+- **인증:** `/api/*`는 `Authorization: Bearer <SIM_CONTROLLER_TOKEN>`이 필요하다. 로컬(`127.0.0.1`)에 열 때만 토큰 없이 켤 수 있고, 다른 주소에 열면서 토큰이 없으면 시작하지 않는다. `/healthz`는 토큰 없이 `{"ok": true}`다. 버튼 화면은 운영자용이라 정답표 내용(`result`)은 보여 주지 않는다.
+- **데이터 오염**은 `DATABASE_URL`이 있을 때만 켜진다(없으면 오염 요청만 503). 로컬이 아니면 `SIM_ALLOW_REMOTE_DB=1`이 필요하다.
+- **시각:** 컨트롤러는 벽시계(UTC)만 쓴다. ECS에서는 실행기를 `--speed 1`로 돌린다. 배속이 1이 아니면 정답표 시각과 데이터 시각이 어긋난다.
+- **종료와 재시작:** SIGINT/SIGTERM이면 진행 중 사건을 `shutdown`으로 끝내고 제어 파일을 `normal`, 장애 없음으로 되돌린 뒤 종료 코드 0으로 끝난다. 다시 켜면 깨끗한 상태로 시작한다.
+- **알려진 한계:** 비정상 종료(강제 종료)하면 진행 중이던 사건의 끝 기록이 남지 않는다. 컨트롤러를 다시 켜도 그 사건을 복구하지 않는다.
+
+## 클릭 로그 (clickstream)
+
+방문 중에 생기는 조회(`view`)와 장바구니 담기(`cart_add`)를 Kafka 토픽 `clickstream`에 직접 발행한다. 주문·결제·회원은 지금처럼 DB에만 쓰고(Debezium이 Kafka로 보낸다), **클릭만 예외**다. 클릭은 DB에 넣지 않는다. EKS에서는 S3 Sink(`connectors/bronze-s3-sink.yaml`)가 다른 업무 토픽과 함께 `bronze/clickstream/`에 쌓는다(`sim/cdc-orders`). ECS에서 EKS Kafka로 보내는 경로는 아직 없다.
+
+```bash
+docker compose --profile cdc up -d kafka
+sim clickstream setup                       # 토픽 만들기 (처음 한 번)
+sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink kafka
+sim clickstream status                      # 파티션별 offset과 합계
+sim clickstream verify                      # 내용·순서·중복 확인
+sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
+```
+
+**메시지 모양:** 토픽 `clickstream`(파티션 3, 보관 72시간), 키는 `session_id`(UTF-8), 값은 한 건당 JSON 하나다. `--click-sink jsonl`의 한 줄과 **같은 6개 필드**다.
+
+```json
+{"event_id":"<uuid>","event_type":"view","member_id":"<uuid>","article_id":"0108775015","event_time":"2026-10-19T06:20:01.123456Z","session_id":"<uuid>"}
+```
+
+- 키가 `session_id`라서 같은 방문의 `view` → `cart_add` 순서가 한 파티션 안에서 지켜진다. PII는 없다(`member_id`, `article_id`뿐). 메시지 내용은 로그·콘솔에 출력하지 않는다.
+- Kafka 레코드 시각은 프로듀서 기본값(보낸 시각)이다. `ingest_time`은 파이프라인이 붙이므로 메시지에 넣지 않는다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `sim clickstream setup` | 토픽이 없으면 만든다(파티션 3, 복제 1, `retention.ms=259200000`). 있으면 그대로 두고 설정이 다르면 알린다. **로컬 부트스트랩에서만** 한다 |
+| `sim clickstream status` | 토픽 존재 여부, 파티션별 low/high offset, 합계. 토픽이 없으면 종료 코드 1 |
+| `sim clickstream verify` | 처음부터 **실행 시점의 끝까지** 한 번 읽는다(임시 컨슈머 그룹, offset 저장 없음). 아래 확인 중 하나라도 실패면 종료 코드 1, 메시지가 0건이면 "비어 있음"으로 종료 코드 2 |
+| `sim clickstream reset --yes` | 토픽을 지운다. `--yes`가 없으면 하지 않는다. **로컬 부트스트랩에서만** 한다 |
+
+`verify`가 확인하는 것: ① 모든 메시지가 JSON이고 6개 필드가 있다 ② `event_type`이 `view` 또는 `cart_add` ③ 메시지 키 = 값의 `session_id` ④ 같은 `session_id`는 한 파티션에만 있다 ⑤ `event_id` 중복 없음 ⑥ 같은 파티션·세션 안에서 `event_time`이 줄어들지 않는다 ⑦ 0건이면 비어 있음. 틀린 메시지는 파티션·offset(`p2@17`)만 알리고 내용은 출력하지 않는다.
+
+- **발행 실패는 버리고 센다.** 클릭이 주문 흐름(DB)을 멈추게 하면 안 되기 때문이다. 전송이 실패해도 예외를 던지지 않고, 처음 실패할 때 경고를 한 번만 출력한 뒤 건수만 센다. 종료 요약에 `클릭 발행: 성공 N건, 실패 M건`이 나온다. Kafka가 잠깐 끊겼다 돌아오면 프로듀서가 다시 연결해 새 클릭부터 다시 쌓인다(끊긴 동안 10초 넘게 못 보낸 클릭은 실패로 센다). 끊기는 순간 실제로는 기록됐지만 응답을 못 받은 메시지도 실패로 세므로, 끊김이 있었으면 **실패 건수는 상한값**이다(토픽 건수가 성공 건수보다 조금 많을 수 있다. 중복은 생기지 않는다).
+- **시작할 때 확인:** `--click-sink kafka`는 시작할 때 브로커와 토픽을 한 번 확인한다. 닿지 않거나 토픽이 없으면 방문을 시작하지 않고 종료 코드 1이다. 이 확인은 토픽을 만들지 않는다(`allow.auto.create.topics=false`).
+- **프로듀서 설정:** `acks=all`, `enable.idempotence=true`, `linger.ms=50`, `message.timeout.ms=10000`. 종료할 때(`Ctrl+C`/SIGTERM 포함) 최대 30초 동안 남은 메시지를 보낸다.
+
+| 환경 변수 | 기본값 | 설명 |
+|---|---|---|
+| `KAFKA_BOOTSTRAP` | `localhost:29092` | 브로커 주소. 출력하지 않는다 |
+| `KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT` | `PLAINTEXT` 또는 `SSL` |
+| `KAFKA_SSL_CA_FILE` | | CA 인증서 경로 (`SSL`일 때) |
+| `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | | 클라이언트 인증서·키 경로 (mTLS, 둘은 함께) |
+
+- **TLS는 로컬에서 검증하지 않았다.** 환경 변수를 librdkafka 설정(`ssl.ca.location` 등)으로 연결하는 데까지만 했다.
+- **ECS에서 EKS 안 Kafka로 가는 경로는 아직 없다.** Kafka가 EKS 내부 전용이라 Fargate에서 닿지 않는다. 경로(내부 NLB, 클라이언트 인증서 공급, 네트워크 규칙)는 인프라와 `sim/ecs-image`에서 정한다.
+- **시각:** 클릭 `event_time`은 UTC(`Z`로 끝남)로 나간다(`jsonl`도 같다). "Bronze는 UTC, Silver에서 KST로 한 번만 바꾼다" 규칙과 Debezium 시각 표기에 맞췄다(`sim/cdc-orders`, 이전에는 `+09:00`).
+- **알려진 한계:** 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
 
 ## 로컬 CDC
 

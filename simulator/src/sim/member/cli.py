@@ -102,11 +102,12 @@ def live(
     ] = "normal",
     daily: Annotated[
         float,
-        typer.Option(min=1, envvar="SIM_LIVE_DAILY", help="평상시 하루 평균 가입 수"),
+        typer.Option(
+            min=1,
+            envvar="SIM_LIVE_DAILY",
+            help="normal 모드의 하루 평균 가입 수 (medium·burst 속도의 기준)",
+        ),
     ] = params.NORMAL_DAILY_SIGNUPS,
-    surge_multiplier: Annotated[
-        float, typer.Option(min=1, envvar="SIM_LIVE_SURGE_MULTIPLIER", help="폭주 배율")
-    ] = params.SURGE_MULTIPLIER,
     speed: Annotated[
         float, typer.Option(min=0.001, envvar="SIM_LIVE_SPEED", help="시간 배속 (1 = 실시간)")
     ] = params.DEFAULT_SPEED,
@@ -123,7 +124,7 @@ def live(
 ) -> None:
     """신규 가입을 만들어 member에 한 건씩 넣는다 (로컬 DB 전용, 베이스라인 뒤에 켠다)."""
     if mode not in MODES:
-        raise _fail(f"--mode는 {' 또는 '.join(MODES)} 중 하나여야 합니다.")
+        raise _fail(f"--mode는 {', '.join(MODES)} 중 하나여야 합니다.")
     try:
         config = load_config()
         regions = load_regions(config.region_file)
@@ -136,7 +137,7 @@ def live(
     typer.echo(f"대상 DB: {describe_target(config.database_url)} (로컬 전용)")
     typer.echo(
         f"모드: {mode}  배속: {speed:g}  평상시 하루 가입: {daily:,.0f}명  "
-        f"폭주 배율: {surge_multiplier:g}  제어 파일: {control_file}"
+        f"제어 파일: {control_file}"
     )
     store = DbStore(config.database_url)
     runner = LiveRunner(
@@ -147,7 +148,6 @@ def live(
         seed=seed,
         mode=mode,
         daily=daily,
-        surge_multiplier=surge_multiplier,
         duration=duration,
         max_signups=max_signups,
         out=typer.echo,

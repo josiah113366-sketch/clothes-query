@@ -13,9 +13,9 @@
 
 ## 시뮬레이터가 하는 일
 
-가상 쇼핑몰의 회원(그리고 이후 행동)을 만들어 **RDS(PostgreSQL)에만 쓴다.** Kafka에는 직접 쓰지 않는다. Debezium이 변경 로그를 읽어 Kafka로 보낸다.
+가상 쇼핑몰의 회원(그리고 이후 행동)을 만들어 **RDS(PostgreSQL)에 쓴다.** 주문·결제·회원은 RDS에만 쓰고 Debezium이 변경 로그를 읽어 Kafka로 보낸다. **클릭 로그만 예외로 Kafka(토픽 `clickstream`)에 직접 발행한다.**
 
-모듈은 셋이다: `member`(가입·탈퇴), `behavior`(쇼핑 행동, 나중에), `controller`(모드 전환·장애 주입·주입 기록).
+모듈은 넷이다: `member`(가입·탈퇴), `behavior`(쇼핑 행동), `controller`(모드 전환·장애 주입·주입 기록), `clickstream`(클릭 로그 토픽 만들기·확인).
 
 ## 지켜야 할 규칙
 
@@ -27,7 +27,7 @@
 | 시각은 항상 **시간대 정보가 있는 값**으로 만든다. DB 컬럼은 `timestamptz`다 | Bronze는 UTC, Silver 이후 KST로 한 번만 변환한다는 결정 때문이다 |
 | `created_at`은 시뮬레이터가 넣지 않는다. DB 기본값이 기록한다 | `signup_at`(업무 시각)과 구분한다 |
 | 행동 성향(구매형·구경형 등)은 DB에 넣지 않는다. 시뮬레이터 내부에만 둔다 | 정답이 노출되면 안 된다 |
-| 모듈끼리 서로 import하지 않는다. `member`, `behavior`, `controller`는 `common`만 공유하고, **데이터는 DB로, 제어는 컨트롤러 신호로** 주고받는다 | 모듈을 따로 개발하고 따로 실행하기 위해서다 |
+| 모듈끼리 서로 import하지 않는다. `member`, `behavior`, `controller`, `clickstream`은 `common`만 공유하고, **데이터는 DB로, 제어는 컨트롤러 신호로** 주고받는다 | 모듈을 따로 개발하고 따로 실행하기 위해서다 |
 | 평문 PII 파일(시드 파일)은 `simulator/.local/`에만 둔다. 커밋하지 않는다 | 보안 |
 | 접속 정보는 환경 변수로 받는다. 코드에 넣지 않는다 | 보안 |
 
@@ -44,10 +44,11 @@ simulator/
 ├── data/                  # 지역 목록 CSV 등 (필요한 브랜치에서 추가)
 ├── src/sim/
 │   ├── cli.py             # sim 명령 진입점
-│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 제어 신호, 로깅, 지역 로더
-│   ├── controller/        # 모드 전환, 장애 주입, 주입 기록
+│   ├── common/            # 설정, 시드·난수, DB 연결, 시계, 곡선, 제어 신호, 로깅, 지역 로더
+│   ├── controller/        # 모드 전환, 장애 주입, 주입 기록(정답표 기록)
+│   ├── clickstream/       # 클릭 로그 토픽(clickstream) 만들기·상태·검증·지우기
 │   ├── member/            # 회원 생성 함수, 베이스라인 적재, 신규 가입 실행기
-│   └── behavior/          # (나중에)
+│   └── behavior/          # 쇼핑 행동: 방문, 주문, 결제, 상태 전이
 └── tests/
 ```
 

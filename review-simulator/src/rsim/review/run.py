@@ -20,7 +20,7 @@ rsim run --sink kafka --count 0 --max-rps 0.5
 주문 기반 실행 (--source orders, 2026-10-14 결정: 결제 후 1~14일 뒤 리뷰 → S3 에 날짜별로 저장)
 -------------------------------------------------------------------------------------------
 # 6) 가짜 주문 14일치(하루 1000건)를 만들고, 10월 8일(UTC) 하루에 리뷰 시각이 떨어지는 주문에 리뷰를 단다
-#    → .local/lake/reviews/dt=2026-10-08/part-00000.jsonl (정답은 reviews_truth/)
+#    → .local/lake/reviews/year=2026/month=10/day=08/part-00000.jsonl (정답은 reviews_truth/)
 rsim orders-fake --start 2026-10-01T00:00:00+09:00 --days 14 --per-day 1000
 rsim run --source orders --llm fake --sink lake --date 2026-10-08
 
@@ -65,6 +65,7 @@ def build_events(
     rng: random.Random,
     order: Order | None = None,
     attr_rng: random.Random | None = None,
+    examples_version: str | None = None,
 ) -> tuple[dict, dict]:
     """명세 + 생성된 문장 → (리뷰 이벤트, 정답 이벤트) 두 개를 만든다.
 
@@ -103,11 +104,16 @@ def build_events(
         # 결제 데이터와 리뷰를 레이크에서 조인할 때 쓴다.
         "order_id": order_id,
         # [임시] 아래 3개는 나중에 order·상품 테이블에서 가져온다 (주문 모드에서는 product_id 가 주문 값)
+        # category 는 실제 상품 데이터에서 받지 않으면 null 이다(2026-10-16, catalog.py)
         "product_id": p.product_id,
         "product_name": p.product_name,
         "category": p.category,
         # [임시] 구매 옵션 사이즈·색상, 포토 리뷰 여부 (options.py, 2026-10-14 확정). 나중에 주문 데이터에서
-        **pick_options(p.category, attr_rng or rng),
+        # 상품 정보에 색상이 있으면 option_color 는 그 색 (catalog.py, 2026-10-16)
+        # category 가 없는 상품은 상품 종류로 사이즈 묶음을 고른다
+        **pick_options(
+            p.category, attr_rng or rng, p.info.get("color"), p.info.get("product_type")
+        ),
         "member_id": spec.member_id,  # 주문 모드에서는 주문의 member_id
         # 구매(결제) 시각. 주문 모드에서만 값이 있다 (2026-10-14 확정)
         "purchased_at": order.paid_at.isoformat() if order else None,
@@ -140,6 +146,8 @@ def build_events(
         "generator": {
             "model_id": model_id,
             "prompt_version": PROMPT_VERSION,
+            # 프롬프트 예시 세트 버전 (data/examples/ex-vN.md, 설정 EXAMPLES_VERSION). 예시 버전별 성능 비교용
+            "examples_version": examples_version,
             "style": spec.style,
             "length": spec.length,
         },
@@ -184,7 +192,7 @@ def _order_specs(
         if limit and len(todo) >= limit:
             break
     log.info(
-        "주문 %d건 중 dt=%s(UTC)에 리뷰 시각이 있는 주문 %d건, 이번에 만들 %d건",
+        "주문 %d건 중 %s(UTC)에 리뷰 시각이 있는 주문 %d건, 이번에 만들 %d건",
         len(orders),
         day.isoformat(),
         len(due),
@@ -322,7 +330,16 @@ def run(
                     attrs = order_id_rng(order.order_id, "review-attrs")
                 else:
                     ids, attrs = id_rng, attr_rng
-                review, truth = build_events(spec, gen, generator.model_id, ids, order, attrs)
+                review, truth = build_events(
+                    spec,
+                    gen,
+                    generator.model_id,
+                    ids,
+                    order,
+                    attrs,
+                    # 가짜 생성기는 예시를 안 쓰므로 None
+                    examples_version=getattr(generator, "examples_version", None),
+                )
                 sink.send(review, truth)
                 produced += 1
 

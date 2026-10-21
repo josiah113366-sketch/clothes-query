@@ -40,6 +40,16 @@ class SeedPool:
             rows = [json.loads(line) for line in fh if line.strip()]
         return cls(rows, rng)
 
+    def only(self, sources: tuple[str, ...] | None) -> SeedPool:
+        """말투 예시를 특정 출처에서만 뽑는 새 시드 묶음 (예시 세트 seed_sources, examples.py).
+
+        sources 가 None 이면 그대로 돌려준다. 난수(rng)는 같이 쓴다.
+        상품명 목록(product_names)은 원래 묶음에서 만들므로, 출처를 줄여도 상품·명세는 바뀌지 않는다.
+        """
+        if sources is None:
+            return self
+        return SeedPool([r for r in self.rows if r["source"] in sources], self.rng)
+
     def product_names(self) -> dict[str, list[str]]:
         """카테고리별 상품명 목록 (catalog.py 가 기본 상품 목록을 만들 때 사용)."""
         names: dict[str, set[str]] = defaultdict(set)
@@ -60,10 +70,16 @@ class SeedPool:
         while len(picked) < k and attempts < k * 10:
             attempts += 1
             source = self.rng.choices(list(weights), weights=list(weights.values()))[0]
-            # 같은 카테고리 후보 + 공통(카테고리 없음) 후보를 합쳐서 고른다
-            candidates = self._index.get((source, category), []) + self._index.get(
-                (source, None), []
-            )
+            # 같은 카테고리 후보 + 공통(카테고리 없음) 후보를 합쳐서 고른다.
+            # category 를 모르는 상품(실제 상품 데이터, 2026-10-16)은 그 출처의 모든 카테고리에서 고른다.
+            if category is None:
+                candidates = [
+                    r for (src, _), rows in self._index.items() if src == source for r in rows
+                ]
+            else:
+                candidates = self._index.get((source, category), []) + self._index.get(
+                    (source, None), []
+                )
             if not candidates:
                 continue
             row = self.rng.choice(candidates)

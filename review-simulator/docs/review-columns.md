@@ -30,8 +30,8 @@
 |---|---|---|---|---|
 | product_id | string | W-0006 | ✅🕒 | Kafka 메시지 키. 임시 값, 추후 order 테이블에서 |
 | product_name | string | OO 니트 | ✅🕒 | 임시 값(AI Hub 상품명), 추후 order 테이블에서 |
-| category | string | 여성의류 | ✅🕒 | 임시: 여성의류/남성의류/패션슈즈/잡화, 추후 order 테이블에서 |
-| option_size | string | M | ✅🕒 | 구매 옵션 사이즈. 의류 XS~XXL, 신발 225~280(mm), 잡화 FREE. 임시 값, 추후 주문 데이터에서 (2026-10-14 확정) |
+| category | string | 여성의류 | ✅🕒 | 임시: 여성의류/남성의류/패션슈즈/잡화. 실제 상품 데이터에서는 받지 않으므로 null(2026-10-16, 상품 분류는 상품 테이블 조인으로) |
+| option_size | string | M | ✅🕒 | 구매 옵션 사이즈. 의류 XS~XXL, 신발 225~280(mm), 잡화 FREE. 임시 값, 추후 주문 데이터에서 (2026-10-14 확정). 사이즈는 order 테이블에서 관리될 예정이라 그때 주문 값을 그대로 쓴다 (2026-10-16) |
 | option_color | string | 블랙 | ✅🕒 | 구매 옵션 색상. 임시 값, 추후 주문 데이터에서 (2026-10-14 확정) |
 
 ## 4. 회원·주문 (결제/회원 시뮬레이터와 연결 지점)
@@ -50,7 +50,7 @@
 | rating | int 1~5 | 2 | ✅ | |
 | text | string | … | ✅ | Bedrock 생성 본문 |
 | has_photo | bool | true | ✅ | 포토 리뷰 여부. 이미지는 만들지 않고 표시만, 약 30% (2026-10-14 확정) |
-| source | string | simulator | ✅ | 실제 데이터와 구분 |
+| source | string | simulator | ✅ | 실제 데이터와 구분. `rsim inject` 로 직접 넣은 리뷰는 `manual`(review_id 도 `M-` 로 시작, 2026-10-16) |
 
 ## 6. 정답 (레이크 `reviews_truth/`, Kafka `reviews.truth`. 실제 데이터에는 없음, 학습·채점용)
 
@@ -75,7 +75,7 @@
 - 작성 채널(platform: 앱/웹) → 넣지 않음
 - age_group → 넣음. 임시 값으로 채우고, 나중에 member 테이블에서 member_id 와 같이 가져옴
 - (2026-10-14) order_id 추가, emitted_at·option_size·option_color·purchased_at·has_photo 확정 → review.v2 / review_truth.v2(order_id)
-- (2026-10-14) 리뷰 저장: S3 날짜별 경로(`reviews/dt=YYYY-MM-DD/`, UTC). RDS 에는 넣지 않음
+- (2026-10-14) 리뷰 저장: S3 날짜별 경로(`reviews/year=YYYY/month=MM/day=DD/`, UTC. 2026-10-16 `dt=` 에서 변경). RDS 에는 넣지 않음
 
 ## 남은 결정
 

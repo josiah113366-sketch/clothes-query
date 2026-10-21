@@ -1,15 +1,25 @@
 # EKS 관리자 접속 준비
 
-상태: 결정 — 전용 관리자 역할, 현재 사용자·현재 PC만 먼저 허용. 팀원은 나중에 추가 · 2026-10-14
+상태: 실제 접속 검증 완료 — 전용 관리자 역할, 현재 사용자·현재 PC만 허용. 팀원은 나중에 추가 · 2026-10-16
 
 ## 현재 준비한 것
 
-- EKS 스택이 전용 역할 clothes-query-dev-eks-admin을 만든다. 실제 생성은 마지막 배포 때 진행한다.
+- EKS 스택이 전용 역할 clothes-query-dev-eks-admin을 생성했고 실제 assume 및 kubectl 접속을 확인했다.
 - admin_trusted_principal_arns에 명시된 IAM 사용자/역할만 이 역할을 assume할 수 있다. root·와일드카드·STS session ARN은 입력 검증에서 거부한다.
 - 역할의 AWS 권한은 해당 클러스터의 eks:DescribeCluster로 제한한다. Kubernetes 관리 권한은 EKS access entry와 AmazonEKSClusterAdminPolicy로 부여한다.
 - 현재 사용자 ARN과 현재 공인 IPv4 /32는 stacks/eks/deployment.local.tfvars.json에만 저장했다. 계정·bucket 입력도 비공개이며 비밀키는 저장하지 않았다. 공인 IP는 배포 직전 다시 확인한다.
 - compute/apps의 Kubernetes provider는 EKS state의 admin_role_arn으로 get-token을 실행한다. Terraform의 AWS 배포 신원은 기존 인증을 사용한다.
 - 현재 권한은 해당 EKS 클러스터 전체 관리자다. 계정 전체 AWS AdministratorAccess를 부여하지 않는다.
+
+현재 PC의 기존 kubeconfig는 덮어쓰지 않았다. 작업 폴더에서 아래처럼 Git 제외 설정을 선택하면 된다. 공인 IP가 바뀌면 먼저 허용 CIDR을 갱신해야 한다.
+
+```powershell
+$env:KUBECONFIG = "$PWD\.cache\eks-kubeconfig.private"
+kubectl get nodes
+kubectl get pods -n kafka
+```
+
+airflow namespace는 생성했지만 동료 역할/IP가 없어 동료 권한은 아직 부여하지 않았다. Airflow 담당자에게는 namespace 범위의 배포 권한을 준비하고, chart가 필요한 클러스터 공통 권한은 별도 검토한다. AWS Athena/S3/Secret 권한은 EKS 배포 권한과 별도로 연결한다.
 
 같은 계정의 IAM 사용자를 role trust principal로 직접 지정하면 별도 identity allow 없이 assume할 수 있는 경우가 있다. 다만 명시적 deny·permissions boundary·SCP 등을 확인해야 하며, 역할을 신뢰 목록에 넣는 것만으로 모든 조직에서 역할 전환이 보장되지는 않는다. [IAM 정책 평가](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html)
 
@@ -41,4 +51,4 @@ assume-role-arn은 클러스터 정보 조회용, role-arn은 이후 Kubernetes 
 
 ## 검증 범위
 
-eks/compute/apps validate와 전용 역할·trust·제한된 IAM 권한·관리자 연결·팀원 확장·잘못된 입력 거부 mock plan 6개가 통과했다. 실제 역할 assume, EKS endpoint 접속, kubectl 권한은 리소스 생성 전이라 아직 검증하지 않았다.
+eks/compute/apps validate와 전용 역할·trust·제한된 IAM 권한·관리자 연결·팀원 확장·잘못된 입력 거부 mock plan을 통과했다. 2026-10-16 실제 역할 assume, EKS API 접속과 namespace/노드/Pod 조회·설치를 확인했다. 동료 신원으로의 접속과 namespace 제한 권한은 해당 IAM 정보가 없어 미검증이다.

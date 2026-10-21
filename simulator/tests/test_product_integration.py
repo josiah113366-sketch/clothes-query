@@ -97,7 +97,8 @@ def test_failure_rolls_back_both_tables(conn, tmp_path) -> None:
 
 
 def test_missing_tables_give_a_hint(conn, tmp_path) -> None:
-    conn.execute("DROP TABLE product_variant, product_design")
+    # 004_orders.sql의 order_items가 product_variant를 참조하므로 CASCADE (임시 스키마 안에서만)
+    conn.execute("DROP TABLE product_variant, product_design CASCADE")
     conn.commit()
     with pytest.raises(TableMissingError, match="003_product.sql"):
         run_load(str(write_seed(tmp_path)), 100, conn)

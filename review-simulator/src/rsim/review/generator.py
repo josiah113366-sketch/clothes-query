@@ -22,6 +22,8 @@ import unicodedata
 from typing import ClassVar, Protocol
 
 from .bedrock import converse, response_text, response_usage
+from .catalog import PRODUCT_INFO_FIELDS
+from .examples import load_example_set
 from .scenario import ReviewSpec
 from .seeds import SeedPool
 from .taxonomy import ASPECTS
@@ -54,7 +56,15 @@ log = logging.getLogger(__name__)
 # p5.5: 2026-10-14 속성 11개(라벨 가이드 v3, 활용성·사용감 추가)
 # p5.6: 2026-10-14 evidence(근거 문구) 출력 제거(규칙 13, JSON 형식). 검수 루프가 본문만 보고 판단하므로
 #       근거 문구는 쓰이지 않았고 출력 토큰만 늘렸다.
-PROMPT_VERSION = "p5.6"
+# p5.7: 2026-10-16 lemin 결정. 상품 정보(소재·색상·핏·설명 등, catalog.PRODUCT_INFO_FIELDS)가 있는 상품은
+#       명세에 product_info 를 붙여 그 상품에 어울리는 리뷰를 쓰게 한다(규칙 13). 상품 정보가 없으면 명세는 예전과 같다.
+#       product_info 는 상품을 떠올리는 참고일 뿐 평가 대상이 아니다(aspects 밖 속성은 계속 금지 → 정답 라벨 보호).
+# p5.8: 2026-10-16 지시사항 다이어트(브랜치 sim/review-product-import, 지시서 1단계).
+#       규칙 13개 → 우선순위 한 줄 + 묶음 4개(A 속성·감성, B 길이, C 말투, D 상품·상황) + 예시 블록(지금은 data/examples/ex-vN.md).
+#       우선순위 충돌(예전 12번 "길이 먼저" vs 13번 "규칙 1 우선")을 "속성 → 길이 → 말투"로 통일,
+#       이모티콘은 "쓸 때만", 오타는 오타 말투일 때만, "재구매"는 평가 금지어에서 뺌(재구매 말투 약 30%, taxonomy).
+#       자세한 근거: review-simulator/docs/prompt-diet-p5.8.md
+PROMPT_VERSION = "p5.8"
 
 LENGTH_GUIDE = {
     "short": "한 문장, 40자 이내",
@@ -81,42 +91,50 @@ class Generator(Protocol):
 # 속성 설명은 taxonomy.ASPECTS 에서 자동으로 만들어서 라벨 가이드와 어긋나지 않게 한다.
 _ASPECT_LINES = "\n".join(f"- {name}: {desc}" for name, (_, desc) in ASPECTS.items())
 
-SYSTEM_PROMPT = f"""너는 한국 온라인 패션 쇼핑몰의 상품 리뷰를 쓰는 다양한 실제 구매자들을 흉내 낸다.
+SYSTEM_TEMPLATE = f"""너는 한국 온라인 패션 쇼핑몰의 상품 리뷰를 쓰는 다양한 실제 구매자들을 흉내 낸다.
 요청마다 리뷰 명세 목록이 주어지고, 명세 하나당 리뷰 하나를 쓴다.
+규칙이 부딪히면 ① 속성·감성 ② 길이 ③ 말투 순서로 지킨다.
 
-반드시 지킬 것
-1. 명세의 aspects 에 있는 속성만, 지정된 감성(긍정/중립/부정)으로 평가한다.
-   aspects 에 없는 속성(아래 목록)은 칭찬이든 불만이든 평가하는 말을 넣지 않는다.
-   명세의 do_not_mention 에 있는 속성은 아예 언급하지 않는다. 특히 가격, 재질·촉감(부드러움), 활용성·사용감(편해요, 가벼워요), 색상은
-   습관적으로 덧붙이기 쉬우니 aspects 에 없으면 쓰지 않는다. ("예뻐요", "편해요", "재구매" 같은 말도 평가다)
-   평가는 작성자가 직접 겪은 내용이어야 한다. "교환이 간편하다고 해서" 같은 가정이나 전해 들은 말은 평가로 치지 않는다.
-2. 중립은 "보통이다/무난하다/그저 그렇다" 같은 평가이거나, 같은 속성의 장단점을 같은 비중으로 말하는 것이다.
-   중립 속성에 "예뻐요", "좋아요", "만족" 같은 긍정 표현을 쓰지 않는다. 중립 예시:
-   색상·디자인 "색은 무난해요" / 배송 "배송은 보통이었어요" / 사이즈·핏 "사이즈는 그냥 정사이즈예요"
-   재질·촉감 "원단은 평범해요" / 가격·가성비 "가격은 적당한 편이에요" / 포장 "포장은 그냥 기본이에요"
-3. 별점(rating)과 전체 분위기가 어울려야 한다. (예: 1점인데 전체적으로 만족하는 글은 안 된다)
-4. 지정된 말투(style)와 길이(length)를 따르고, 작성자 연령대(age_group)에 자연스러운 표현을 쓴다(연령대를 본문에 직접 밝히지는 않는다). 예시 리뷰들의 실제 말투(줄임말, 맞춤법 실수, 이모티콘 등)를 참고하되 문장을 베끼지 않는다.
-5. 상품명은 본문에 그대로 쓰지 않는다. 실제 리뷰처럼 "이 옷", "니트", "신발" 정도로 부른다.
-6. 실제 인물 이름, 연락처, 주소 같은 개인정보는 쓰지 않는다.
-7. 명세마다 서로 다른 사람이 쓴 것처럼 시작 문구와 표현을 다양하게 한다.
-8. 존댓말(해요체)을 기본으로 쓴다. 반말은 말투(style)가 "짧은 음슴체"일 때만 "배송 빠름 근데 좀 작음"처럼 명사형으로 끝낸다.
-   "~했다", "~이다", "~네" 처럼 혼잣말(독백체)로 끝나는 문장은 쓰지 않는다.
-9. 이모티콘은 실제 리뷰에서 흔한 "ㅎㅎ", "ㅠㅠ", "ㅜㅜ", "^^" 를 쓴다. "ㅋㅋ"는 드물게만, "흑흑" 같은 의성어는 쓰지 않는다.
-10. 한국어로만 쓴다. 영어 알파벳, 일본어, 한자를 섞지 않고, "CS" 같은 업무 용어도 쓰지 않는다("고객센터", "문의"처럼 쓴다).
-    "핏", "사이즈"처럼 한국 리뷰에서 한글로 굳어진 외래어만 쓴다. 번역투 대신 한국 쇼핑몰 리뷰에서 흔히 보는 표현을 쓴다.
-11. 한 사람이 자기가 산 상품 하나를 받아 보고 쓴 글이다. 앞뒤가 맞아야 한다.
-    처음 꺼낸 상황(선물, 출근용 등)과 등장인물을 끝까지 유지하고, 갑자기 다른 사람이나 상황을 끌어오지 않는다.
-    사이즈 조언("한 치수 크게 사세요")은 aspects 에 사이즈·핏이 있을 때만 쓰고, 그 감성과 맞게 쓴다.
-12. 길이가 가장 먼저 지킬 조건이다. 명세의 max_sentences 문장 이하, max_chars 글자(공백 포함) 이하로 쓴다.
-    max_sentences 가 1 이면 aspects 가 여러 개여도 문장 하나에 짧게 이어 쓴다.
-    (예: "배송 빠르고 핏도 딱 맞아요 ㅎㅎ", "색은 예쁜데 사이즈가 좀 작아요ㅠㅠ")
-    쓰고 나서 문장 수와 글자수를 세어 보고, 넘치면 덜 중요한 말을 지운다.
+A. 속성·감성
+- aspects 에 있는 속성만, 지정된 감성으로 평가한다. do_not_mention 의 속성은 칭찬도 불만도 쓰지 않는다.
+  특히 가격, 촉감(부드러움), 사용감(편해요, 가벼워요), 색상은 습관적으로 덧붙이기 쉬우니 조심한다("예뻐요", "편해요"도 평가다).
+- 중립은 "보통이다/무난하다" 같은 평가이거나 장단점을 같은 비중으로 말하는 것이다. 중립에 "예뻐요, 좋아요"를 쓰지 않는다.
+- 평가는 직접 겪은 내용만 쓴다(가정·전해 들은 말 제외). 별점과 전체 분위기가 맞아야 한다.
 
+B. 길이
+- max_sentences 문장 이하, max_chars 글자(공백 포함) 이하. 1문장이면 속성이 여러 개여도 한 문장에 이어 쓴다.
+  쓰고 나서 세어 보고, 넘치면 덜 중요한 말을 지운다(속성은 지우지 않는다).
+
+C. 말투
+- style 과 age_group 에 맞게 쓰되 연령대를 밝히지 않는다. 명세마다 다른 사람처럼 시작과 표현을 바꾼다.
+- 해요체가 기본이다. 반말은 "짧은 음슴체"일 때만 명사형으로 끝낸다("배송 빠름 근데 좀 작음"). "~했다/~이다/~네" 독백체는 쓰지 않는다.
+- 이모티콘은 쓸 때만 ㅎㅎ, ㅠㅠ, ㅜㅜ, ^^ 중에서 고른다(ㅋㅋ는 드물게). 오타는 오타가 섞인 말투일 때만 넣는다.
+- 한국어로만 쓴다. 영어·일본어·한자, "CS" 같은 업무 용어는 쓰지 않는다("핏", "사이즈" 같은 굳어진 외래어는 된다).
+
+D. 상품·상황
+- 한 사람이 산 상품 하나에 대한 글이다. 처음 꺼낸 상황과 인물을 끝까지 유지한다. 사이즈 조언은 aspects 에 사이즈·핏이 있을 때만 한다.
+- 상품명은 그대로 쓰지 않고 상품 종류나 "이 옷"으로 부른다. 개인정보(이름, 연락처, 주소)는 쓰지 않는다.
+- product_info 가 있으면 그 상품을 받아 본 사람처럼 aspects 평가에 맞는 구체적인 내용을 쓴다.
+  상품 정보는 참고일 뿐 평가 대상이 아니고, 설명 문장을 옮기거나 번역해 넣지 않는다.
+
+예시 (참고만, 그대로 쓰지 않는다)
+{{examples}}
 
 속성 목록 (라벨 기준, 11개)
 {_ASPECT_LINES}
 
 출력: reviews 배열에 명세마다 {{spec_id, text}} 를 넣는다. 제목 없이 본문만 쓴다."""
+
+
+def build_system_prompt(example_lines: str) -> str:
+    """시스템 프롬프트 = 규칙(SYSTEM_TEMPLATE) + 예시 칸.
+
+    예시 칸은 data/examples/ex-vN.md 에서 읽는다(examples.py, 2026-10-16 지시서 2단계).
+    규칙을 바꾸면 PROMPT_VERSION, 예시만 바꾸면 예시 파일 버전(EXAMPLES_VERSION)을 올린다.
+    """
+    # 출력 형식 줄의 {spec_id, text} 를 format 이 자리표시로 읽지 않도록 replace 로 넣는다
+    return SYSTEM_TEMPLATE.replace("{examples}", example_lines)
+
 
 # 출력 형식 지시. Converse API 에는 모델 공통 structured output 이 없어서 프롬프트로 JSON 을 요구하고
 # parse_reviews() 로 직접 꺼낸다. (bench/bench.py 도 같은 문구를 쓴다)
@@ -242,6 +260,15 @@ def generate_checked(gen, specs: list[ReviewSpec]) -> dict[str, dict]:
     return final
 
 
+def product_info(spec: ReviewSpec) -> dict[str, str]:
+    """명세에 붙일 상품 정보. 키는 프롬프트용 한국어 이름(catalog.PRODUCT_INFO_FIELDS), 값이 있는 칸만."""
+    return {
+        label: spec.product.info[key]
+        for key, label in PRODUCT_INFO_FIELDS.items()
+        if spec.product.info.get(key)
+    }
+
+
 def build_user_prompt(
     specs: list[ReviewSpec], examples: list[dict], feedback: dict[str, str] | None = None
 ) -> str:
@@ -257,7 +284,8 @@ def build_user_prompt(
     spec_payload = [
         {
             "spec_id": s.spec_id,
-            "category": s.product.category,
+            # category 가 없는 상품(실제 상품 데이터)은 빼고 product_info 로 상품을 알려 준다(2026-10-16)
+            **({"category": s.product.category} if s.product.category else {}),
             "product_name": s.product.product_name,
             "rating": s.rating,
             "aspects": s.aspects,
@@ -268,6 +296,8 @@ def build_user_prompt(
             **LENGTH_LIMITS_FOR_PROMPT[s.length],
             # p5.1: 명세에 없는 속성 = 언급 금지 목록 (덧붙이면 정답 라벨이 틀어짐)
             "do_not_mention": [a for a in ASPECTS if a not in {x["aspect"] for x in s.aspects}],
+            # p5.7: 상품 정보가 있는 상품만 들어감 (프롬프트용, 리뷰 이벤트 컬럼에는 넣지 않음)
+            **({"product_info": product_info(s)} if s.product.info else {}),
             # p5.3: 재생성일 때만 들어감. 지난 시도에서 검수 모델이 찾은 문제
             **({"fix_previous": feedback[s.spec_id]} if s.spec_id in feedback else {}),
         }
@@ -307,7 +337,11 @@ class ConverseGenerator:
         self.temperature = settings.bedrock_temperature
         self.max_retries = settings.bedrock_max_retries
         self.few_shot_k = settings.few_shot_k
-        self.seeds = seeds
+        # 예시 세트(ex-vN): 시스템 프롬프트 예시 칸 + 말투 예시 출처 제한 (examples.py)
+        self.example_set = load_example_set(settings.examples_dir, settings.examples_version)
+        self.system_prompt = build_system_prompt(self.example_set.lines)
+        self.examples_version = self.example_set.version
+        self.seeds = seeds.only(self.example_set.seed_sources)
         # 누적 토큰 사용량 (비용 확인용, run.py 가 마지막에 출력). 검수 호출은 따로 센다.
         self.usage = {
             "input_tokens": 0,
@@ -350,7 +384,7 @@ class ConverseGenerator:
             api_key=self.api_key,
             region=self.region,
             model_id=self.model_id,
-            system=SYSTEM_PROMPT,
+            system=self.system_prompt,
             user=build_user_prompt(specs, examples, feedback) + JSON_INSTRUCTION,
             # 리뷰 1건 ≈ 최대 300 토큰. 배치 크기에 여유를 두고 잡는다(모자라면 응답이 잘림)
             max_tokens=1000 + 500 * len(specs),
