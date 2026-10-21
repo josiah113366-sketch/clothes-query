@@ -17,3 +17,15 @@ variable "detection_write_prefixes" {
   default = []
 }
 variable "bytes_scanned_cutoff_per_query" { type = number }
+variable "enable_investigation_catalog" {
+  type    = bool
+  default = false
+}
+variable "investigation_database_name" {
+  type    = string
+  default = "agent"
+}
+variable "investigation_write_prefixes" {
+  type    = set(string)
+  default = []
+}

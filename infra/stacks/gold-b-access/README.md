@@ -1,5 +1,11 @@
 # Gold B 접근 준비
 
+후속 저장 계약(2026-10-21): 조사 데이터는 Glue DB `agent`, S3 `agent/`로 분리한다. `enable_investigation_catalog`, `investigation_database_name`, `investigation_write_prefixes`는 비공개 입력으로 활성화한다. 판정의 `detection_write_prefixes`는 `gold_b/anomaly/`, `gold_b/detection_runs/`, `gold_b/reprocess_events/`다. 기존 쿼리 결과 쓰기는 각 `athena-results/` 경로로 유지한다. 조사 역할은 Gold B 쓰기를 받지 않고 판정 역할은 agent 쓰기를 받지 않는다. [후속 작업 기록](../../../docs/tasks/infra-agent-data-write.md).
+
+아래 조회 전용 설명은 최초 적용 이력이다. 후속 변경에서는 조사 Glue DB만 만들며 테이블은 만들지 않는다. 표 이름·DDL·파티션·INSERT SQL을 받은 뒤 실제 업무 INSERT와 필요한 Glue 파티션 변경 권한을 검증한다. 현재 역할에는 Glue 테이블 생성/변경/파티션 생성·S3 삭제를 허용하지 않는다. 경로 권한 준비만으로 Athena INSERT 성공을 보장하지 않는다.
+
+후속 적용은 DB 1개 추가·정책 2개 수정, mock 13건·IAM simulation 32건 통과·후속 변경 없음까지 확인했다. 과거 조회 전용 코드로 재적용하면 쓰기 권한이 회수될 수 있으므로 현재 코드와 비공개 입력을 함께 유지한다.
+
 상태: 2026-10-21 사용자 요청으로 조회용 자원 실제 적용 완료. 기존 network/eks/storage state 이후 독립 key `clothes-query/dev/gold-b-access/terraform.tfstate`를 사용한다. 관리 자원은 workgroup 2개·역할 2개·inline policy 2개·Pod Identity association 2개다. 새 버킷·컴퓨팅·Glue DB/테이블·개발자 권한은 만들지 않는다. namespace/ServiceAccount는 [별도 manifest](../../platform/agent-access/README.md)로 생성해 실제 Pod 신원·합성 S3/Athena 접근·정답표 차단을 검증했다. 업무 Pod와 판정 업무 기록 쓰기는 아직 후속이다.
 
 - `agent/detection-job` → `clothes-query-dev-detection-job`, workgroup `clothes-query-dev-detection`.

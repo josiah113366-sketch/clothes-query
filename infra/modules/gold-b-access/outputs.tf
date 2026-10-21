@@ -9,3 +9,4 @@ output "results_locations" {
 }
 output "service_accounts" { value = { for k, sa in local.workloads : k => { namespace = var.namespace, name = sa } } }
 output "detection_history_writes_configured" { value = length(var.detection_write_prefixes) > 0 }
+output "investigation_database" { value = var.enable_investigation_catalog ? aws_glue_catalog_database.investigation[0].name : null }
