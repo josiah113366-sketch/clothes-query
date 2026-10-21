@@ -1,5 +1,5 @@
-# ecs-simulator stack: ECS Fargate for the trade/member simulator (owner: sim, applied by the owner).
-# VPC/subnets and the data bucket come from the network and storage stacks, so no IDs are written here.
+# ecs-simulator 스택: 거래·회원 시뮬레이터 ECS Fargate (담당: sim, 담당자가 apply).
+# VPC·서브넷과 데이터 버킷은 network·storage 스택 state 에서 받으므로 여기에 ID를 적지 않는다.
 data "terraform_remote_state" "network" {
   backend = "s3"
   config = {

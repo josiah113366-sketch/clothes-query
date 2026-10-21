@@ -57,7 +57,7 @@ resource "aws_ecr_lifecycle_policy" "this" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "keep last ${var.keep_images} images"
+      description  = "keep last ${var.keep_images} images" # AWS 정책 문자열이라 영어로 둔다
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
@@ -80,6 +80,7 @@ resource "aws_ecs_cluster" "this" {
 
 # ------------------------------------------------------------------ 보안 그룹
 # 들어오는 연결은 없다(컨트롤러 화면은 ECS Exec 포트 포워딩으로 본다).
+# 보안 그룹·규칙 설명은 AWS가 영문·숫자·일부 기호만 받아서 영어로 둔다.
 resource "aws_security_group" "task" {
   name        = "${var.name}-task"
   description = "simulator Fargate task (egress only)"
@@ -115,7 +116,7 @@ resource "aws_vpc_security_group_egress_rule" "postgres" {
 
 # ------------------------------------------------------------------ Secret (데이터 오염용 DB 접속 문자열)
 # 값(postgresql://clothes_sim_admin:…@<RDS>:5432/postgres?sslmode=verify-full&sslrootcert=…)은 사용자가 put-secret-value 로 넣는다.
-# 컨트롤러 컨테이너에만 환경변수 DATABASE_URL 로 주입한다.
+# 컨트롤러 컨테이너에만 환경변수 DATABASE_URL 로 주입한다. 설명은 다른 AWS 설명과 같게 영어로 둔다.
 resource "aws_secretsmanager_secret" "database_url" {
   name                    = "${var.name}/sim-admin-database-url"
   description             = "DATABASE_URL for the simulator controller data pollution account (value set by the operator)"
@@ -226,7 +227,7 @@ resource "aws_ecs_task_definition" "this" {
   lifecycle {
     precondition {
       condition     = var.api_url != ""
-      error_message = "api_url (internal ALB URL) is required when image_digest is set."
+      error_message = "image_digest 를 넣었으면 api_url(내부 ALB 주소)도 넣어야 합니다."
     }
   }
 

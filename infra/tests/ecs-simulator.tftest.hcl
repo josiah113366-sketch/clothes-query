@@ -39,7 +39,7 @@ run "base_only_without_image" {
   module { source = "../modules/ecs-simulator" }
   assert {
     condition     = length(aws_ecs_task_definition.this) == 0 && length(aws_ecs_service.this) == 0 && output.service_name == ""
-    error_message = "Without image_digest only the base (ECR, cluster, IAM, SG, secret, logs) is created."
+    error_message = "image_digest 가 없으면 기반(ECR, 클러스터, IAM, SG, Secret, 로그)만 만들어야 한다."
   }
   assert {
     condition = (
@@ -47,7 +47,7 @@ run "base_only_without_image" {
       aws_ecr_repository.this.image_tag_mutability == "IMMUTABLE" &&
       !aws_ecr_repository.this.force_delete
     )
-    error_message = "ECR must be the simulator repository with immutable tags and deletion protection."
+    error_message = "ECR은 시뮬레이터 저장소이고 태그 덮어쓰기 금지·삭제 보호가 있어야 한다."
   }
   assert {
     condition = (
@@ -55,7 +55,7 @@ run "base_only_without_image" {
       aws_vpc_security_group_egress_rule.api_alb.cidr_ipv4 == "10.70.0.0/16" && aws_vpc_security_group_egress_rule.api_alb.from_port == 80 &&
       aws_vpc_security_group_egress_rule.postgres.cidr_ipv4 == "10.70.0.0/16" && aws_vpc_security_group_egress_rule.postgres.from_port == 5432
     )
-    error_message = "Egress: 443 to AWS APIs, 80 and 5432 only inside the VPC. No ingress rules exist."
+    error_message = "나가는 규칙: AWS API 443, VPC 안으로만 80·5432. 들어오는 규칙은 없다."
   }
 }
 
@@ -88,13 +88,13 @@ run "three_containers_share_control_volume" {
       ]) &&
       one(aws_ecs_task_definition.this[0].volume).name == "control"
     )
-    error_message = "One image, three essential containers, same control file on the shared volume, API backend, real-time speed."
+    error_message = "이미지 하나, 필수 컨테이너 3개, 공유 볼륨의 같은 제어 파일, API 백엔드, 실제 시각 배속."
   }
   assert {
     condition = alltrue([for c in jsondecode(aws_ecs_task_definition.this[0].container_definitions) :
       c.name == "controller" ? (length(c.secrets) == 1 && c.secrets[0].name == "DATABASE_URL" && c.secrets[0].valueFrom == "mock-secret-arn") : length(c.secrets) == 0
     ])
-    error_message = "Only the controller receives the data pollution DATABASE_URL."
+    error_message = "데이터 오염용 DATABASE_URL 은 컨트롤러만 받아야 한다."
   }
   assert {
     condition = (
@@ -105,7 +105,7 @@ run "three_containers_share_control_volume" {
       aws_ecs_service.this[0].deployment_maximum_percent == 100 &&
       !one(aws_ecs_service.this[0].network_configuration).assign_public_ip
     )
-    error_message = "One on-demand task, ECS Exec on, never two simulators at once, no public IP."
+    error_message = "온디맨드 태스크 1개, ECS Exec 켬, 시뮬레이터가 동시에 둘 뜨지 않음, public IP 없음."
   }
 }
 

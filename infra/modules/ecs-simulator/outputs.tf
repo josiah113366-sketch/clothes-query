@@ -7,12 +7,12 @@ output "cluster_name" {
 }
 
 output "service_name" {
-  description = "Empty until image_digest is set."
+  description = "image_digest 를 넣기 전에는 빈 값."
   value       = local.deploy ? aws_ecs_service.this[0].name : ""
 }
 
 output "security_group_id" {
-  description = "Task SG. Put it in the rds stack database_clients (private input) for the controller data pollution account."
+  description = "태스크 보안 그룹. 데이터 오염용으로 rds 스택 database_clients(비공개 입력)에 넣는다."
   value       = aws_security_group.task.id
 }
 
