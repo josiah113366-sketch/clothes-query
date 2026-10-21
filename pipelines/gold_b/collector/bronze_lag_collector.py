@@ -177,7 +177,8 @@ class KafkaClient:
         from confluent_kafka.admin import AdminClient
 
         self._timeout = timeout
-        self._admin = AdminClient(dict(config))
+        # 토픽 정보를 물을 때 없는 토픽이 자동으로 생기지 않게 한다 (시뮬레이터와 같은 설정)
+        self._admin = AdminClient({**config, "allow.auto.create.topics": False})
         self._consumer = Consumer({
             **config,
             # 시각만 읽는 임시 그룹. assign만 쓰므로 그룹에 들어가지 않고 커밋도 하지 않는다

@@ -15,6 +15,7 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `tests/samples/` | 형식 검사·뷰·적재 잡 확인용 샘플 메시지와 기대 결과 ([설명](tests/samples/README.md)) |
 | `tests/test_ddl.py` | DDL이 설계 표와 같은지, 샘플이 규칙에 맞는지, 샘플 원장을 시간 폴더 Parquet으로 쓰고 읽을 수 있는지 |
 | `collector/` | Bronze 지연 수집기: ③ `bronze_lag_snapshots`를 1분마다 쌓음 ([설명](collector/README.md)) |
+| `tests/test_lag_collector.py` | 수집기 계산·상태·파일 쓰기 (가짜 Kafka·Connect) |
 | `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`) |
 
 정리 뷰(`payment_conflicts`, `payment_attempts`, `malformed_messages`) SQL은 설계 문서에 있고, 파일은 3단계에서 `views/`에 만든다.
