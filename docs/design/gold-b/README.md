@@ -771,15 +771,15 @@ pipelines/gold_b/
 
 ### 7단계: 재처리 잡 (필수 ②)
 
-- [ ]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
-- [ ]  승인 범위를 시간 폴더 단위로 넓히기
-- [ ]  원본 선택: 3일 안은 Kafka(해당 offset부터), 넘으면 Bronze
-- [ ]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
-- [ ]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
-- [ ]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록
-- [ ]  원본이 없는 구간은 재시도 없이 바로 `FAILED`
-- [ ]  실제 교체 범위를 결과로 넘기기
-- [ ]  `tests/test_reprocess.py` 같은 입력으로 두 번 돌려 결과가 같은지 확인
+- [x]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
+- [x]  승인 범위를 시간 폴더 단위로 넓히기
+- [ ]  원본 선택: 3일 안은 Kafka(해당 offset부터), 넘으면 Bronze (Kafka는 완료. Bronze는 Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정한 뒤)
+- [x]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
+- [x]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
+- [x]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록
+- [x]  원본이 없는 구간은 재시도 없이 바로 `FAILED`
+- [x]  실제 교체 범위를 결과로 넘기기
+- [x]  `tests/test_reprocess.py` 같은 입력으로 두 번 돌려 결과가 같은지 확인
 - [ ]  `dags/gold_b_reprocess.py` 재시도 2번, 한 번에 하나씩 (재영 님과). 재판정은 판정 잡이 `LEDGER_REPLACED`를 읽어 시작하므로 DAG로 잇지 않는다
 - [ ]  PR 올리고 합치기
 
