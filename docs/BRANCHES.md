@@ -108,6 +108,7 @@ gitGraph
 | `infra/pipeline-smoke` | [infra-pipeline-smoke.md](tasks/infra-pipeline-smoke.md) | 검토 대기 | |
 | `infra/generator-was-access` | [infra-generator-was-access.md](tasks/infra-generator-was-access.md) | 실제 연결 완료·검토 대기 | |
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
+| `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
 
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
