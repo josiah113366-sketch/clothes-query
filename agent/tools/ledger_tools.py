@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from guard import GuardError, check_window, validate_sql
 
 PGS = ("PG_A", "PG_B")
-TOPICS = ("payments", "orders", "order-items", "member-events", "clickstream", "reviews.raw")
+TOPICS = ("payments", "orders", "order-items", "members-events", "clickstream")   # 실제 배포된 업무 토픽 5개 (heartbeat 토픽, 아직 없는 reviews.raw는 뺀다)
 STALE_SECONDS = 120   # Gold B 문서의 고장 기준: 2분 넘게 안 쌓이면 멈춘 것
 
 
