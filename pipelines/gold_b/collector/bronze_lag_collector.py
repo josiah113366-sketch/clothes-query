@@ -40,6 +40,7 @@ DEFAULT_BOOTSTRAP = "localhost:29092"          # 시뮬레이터 로컬 Kafka
 DEFAULT_CONNECT_URL = "http://localhost:8083"  # 시뮬레이터 로컬 Connect
 DEFAULT_CONNECTOR = "bronze-s3-sink"
 SECURITY_PROTOCOLS = ("PLAINTEXT", "SSL")
+ADDRESS_FAMILIES = ("any", "v4", "v6")         # librdkafka broker.address.family
 TIMEOUT_SEC = 10.0
 
 # connector_state에 수집기가 붙이는 값 (나머지는 Connect가 주는 RUNNING, PAUSED, FAILED 등)
@@ -74,6 +75,7 @@ class Settings:
     output: str = field(repr=False)
     bootstrap: str = field(default=DEFAULT_BOOTSTRAP, repr=False)
     security_protocol: str = "PLAINTEXT"
+    address_family: str = "any"
     ssl_ca_file: str = field(default="", repr=False)
     ssl_cert_file: str = field(default="", repr=False)
     ssl_key_file: str = field(default="", repr=False)
@@ -98,6 +100,9 @@ class Settings:
         protocol = (get("KAFKA_SECURITY_PROTOCOL") or "PLAINTEXT").upper()
         if protocol not in SECURITY_PROTOCOLS:
             raise ConfigError(f"KAFKA_SECURITY_PROTOCOL은 {', '.join(SECURITY_PROTOCOLS)} 중 하나여야 합니다")
+        family = (get("KAFKA_ADDRESS_FAMILY") or "any").lower()
+        if family not in ADDRESS_FAMILIES:
+            raise ConfigError(f"KAFKA_ADDRESS_FAMILY는 {', '.join(ADDRESS_FAMILIES)} 중 하나여야 합니다")
         cert, key = get("KAFKA_SSL_CERT_FILE"), get("KAFKA_SSL_KEY_FILE")
         if bool(cert) != bool(key):
             raise ConfigError("KAFKA_SSL_CERT_FILE과 KAFKA_SSL_KEY_FILE은 함께 설정해야 합니다")
@@ -108,6 +113,7 @@ class Settings:
             output=output,
             bootstrap=get("KAFKA_BOOTSTRAP") or DEFAULT_BOOTSTRAP,
             security_protocol=protocol,
+            address_family=family,
             ssl_ca_file=get("KAFKA_SSL_CA_FILE"),
             ssl_cert_file=cert,
             ssl_key_file=key,
@@ -160,6 +166,9 @@ def kafka_config(settings: Settings) -> dict[str, object]:
         "security.protocol": settings.security_protocol,
         "logger": _quiet_logger(),
     }
+    if settings.address_family != "any":
+        # Windows 로컬에서 localhost가 IPv6(::1)로 먼저 붙어 그룹 처리 위치 조회가 _TRANSPORT로 실패할 때 v4로 고정한다
+        config["broker.address.family"] = settings.address_family
     if settings.security_protocol == "SSL":
         for key, value in (("ssl.ca.location", settings.ssl_ca_file),
                            ("ssl.certificate.location", settings.ssl_cert_file),

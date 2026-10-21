@@ -40,6 +40,7 @@
 | `KAFKA_BOOTSTRAP` | `localhost:29092` | Kafka 주소 (시뮬레이터와 같은 이름) |
 | `KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT` | `PLAINTEXT` 또는 `SSL`(mTLS) |
 | `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | 없음 | mTLS 인증서 파일 경로 (인증서와 키는 함께) |
+| `KAFKA_ADDRESS_FAMILY` | `any` | `any`, `v4`, `v6`. Windows 로컬에서 `localhost`가 IPv6(`::1`)로 먼저 붙어 측정이 `_TRANSPORT`로 실패하면 `v4` |
 | `GOLD_B_CONNECT_URL` | `http://localhost:8083` | Kafka Connect REST 주소 |
 | `GOLD_B_SINK_CONNECTOR` | `bronze-s3-sink` | 잴 S3 Sink 커넥터 이름 |
 | `GOLD_B_SINK_GROUP` | `connect-<커넥터 이름>` | 그 커넥터의 소비자 그룹 |

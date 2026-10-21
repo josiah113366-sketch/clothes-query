@@ -222,6 +222,14 @@ def test_settings_defaults_and_checks(tmp_path):
             make_settings(tmp_path, **bad)
 
 
+def test_address_family_option(tmp_path):
+    assert "broker.address.family" not in lag.kafka_config(make_settings(tmp_path))
+    config = lag.kafka_config(make_settings(tmp_path, KAFKA_ADDRESS_FAMILY="V4"))
+    assert config["broker.address.family"] == "v4"   # 로컬에서 localhost가 IPv6로 먼저 붙는 문제를 피함
+    with pytest.raises(lag.ConfigError):
+        make_settings(tmp_path, KAFKA_ADDRESS_FAMILY="ipv4")
+
+
 def test_env_file_skips_comments_and_quotes(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("# 주석\nGOLD_B_LAG_TOPICS=orders\nGOLD_B_SINK_CONNECTOR='member-s3-sink'\n\n잘못된 줄\n",
