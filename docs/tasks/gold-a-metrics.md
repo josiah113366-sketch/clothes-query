@@ -34,6 +34,8 @@
 
 ## 완료 확인
 
+2026-10-21 문서 기록: Gold A README에 리뷰 시뮬레이터 재생성의 정상 0건 예외를 후속 고려사항으로 남겼다. 현재 우선순위에서 제외하고 Silver·Gold A 재처리와 구분한다. 정상 0건/생성 실패 구분, 생성기 관리 파일만 변경, Silver 입력 없음 보호와의 연결을 추후 확인한다. 실행 코드 변경은 없으며 상대 링크와 diff 공백만 확인한다.
+
 `python -m pytest pipelines/gold_a/tests -q -p no:cacheprovider --basetemp pipelines/gold_a/.local/pytest-branchsplit`와 `python -m unittest pipelines.test_transactions_flow`를 실행한다.
 
 
