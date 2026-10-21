@@ -71,12 +71,12 @@ python deploy/run_inject.py --file .local/manual/size_spike_1008.csv
 3. **읽기 전용 DB 계정** (DB 관리자가 한 번, master 계정으로 접속해서). 비밀번호는 직접 정해 저장소에 남기지 않는다.
    ```sql
    CREATE ROLE review_sim_ro LOGIN PASSWORD '<비밀번호>';
-   GRANT CONNECT ON DATABASE clothes TO review_sim_ro;
+   GRANT CONNECT ON DATABASE postgres TO review_sim_ro;  -- 테이블은 postgres DB 에 있다(2026-10-21 lemin 확인)
    GRANT USAGE ON SCHEMA public TO review_sim_ro;
    -- 리뷰 시뮬레이터가 읽는 테이블만 (회원은 member_id·age_band 만 쓰지만 테이블 단위 권한이라 SELECT 를 준다)
    GRANT SELECT ON orders, order_items, payments, product_variant, product_design, members TO review_sim_ro;
    ```
-4. **접속 주소 저장**: `python deploy/secret.py --orders-db` → `postgresql://review_sim_ro:<비밀번호>@<RDS 주소>:5432/clothes` 입력.
+4. **접속 주소 저장**: `python deploy/secret.py --orders-db` → `postgresql://review_sim_ro:<비밀번호>@<RDS 주소>:5432/postgres?sslmode=require` 입력 (DB 이름은 postgres).
    localhost(port-forward) 주소는 ECS 에서 못 쓰므로 거절된다. `--orders-db --check` 로 확인.
 5. **이미지 배포**: `python deploy/deploy.py` (0.3.0 이미지에 `--source rds` 와 psycopg 가 들어 있다).
 6. **전환**: `python deploy/switch.py --orders rds` (secret 이 비어 있으면 거절). 되돌리기는 `--orders fake`.
