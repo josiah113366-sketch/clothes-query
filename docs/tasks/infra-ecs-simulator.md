@@ -1,6 +1,6 @@
 # 작업 지시서: infra/ecs-simulator
 
-> 상태: 진행 중 · 브랜치: `infra/ecs-simulator` (최신 `main`, `api/mvp` #44 머지 후) · 짝 작업: `sim/ecs-image`(이미지·실행 문서) · 이전 작업: `api/mvp`
+> 상태: 완료(2026-10-22) · 브랜치: `infra/ecs-simulator` (최신 `main`, `api/mvp` #44 머지 후) · 짝 작업: `sim/ecs-image`(이미지·실행 문서) · 이전 작업: `api/mvp`
 
 ## 목표
 
@@ -46,8 +46,20 @@ ECS Fargate 태스크 1개 (private app subnet, public IP 없음)
 - [x] `terraform fmt`, `validate`
 - [x] mock plan 5개 통과(기반만 / 컨테이너 3개·공유 볼륨·컨트롤러에만 Secret·서비스 설정 / 잘못된 digest·태스크 2개·api_url 없음 거부)
 - [x] 실제 plan(기반): 생성 14, 변경 0, 삭제 0
-- [ ] 사용자 apply 1차(기반) → 이미지 push → apply 2차(태스크 정의·서비스) → 태스크 Running, 컨테이너 3개 재시작 0
+- [x] 사용자 apply 1차(기반) → 이미지 push → apply 2차(태스크 정의·서비스) → 태스크 Running, 컨테이너 3개 재시작 0
 
 ## 작업 결과
 
-(머지 전에 채운다)
+**만든 것.** 위 "만든 것" 그대로다. 태스크 1개(0.5 vCPU / 1GB)에 같은 이미지 컨테이너 3개(controller·member·behavior)를 두고 공유 볼륨 `/control`로 제어 파일을 나눈다. 이미지 digest가 없으면 기반(ECR·클러스터·IAM·SG·Secret·로그)만 만들어 이미지 push 전에 1차 apply를 할 수 있게 했다.
+
+**왜.** 태스크를 나누면 control.json 공유를 다시 설계해야 해서 1태스크로 묶었다. 셋 다 essential이라 하나가 죽으면 태스크째 새로 뜨고, 그래서 "태스크 ID가 그대로면 재시작 0"으로 확인할 수 있다. 이미지 교체를 Terraform apply로 한 것은 태스크 정의를 코드 한 곳에서 관리하기 위해서다.
+
+**확인한 결과.**
+- `fmt`·`validate` 통과, mock plan 5개 통과(최신 `main` 병합 후 다시 실행). `main`에서 온 `eks-access.tftest.hcl`은 로컬 Terraform 1.11에서 파싱되지 않아(override 값 안의 함수 호출) 그 파일을 뺀 복사본에서 돌렸다. 이 브랜치와는 무관하다.
+- 실제 plan(기반) 생성 14 → 사용자 apply 1차, 이미지 push, apply 2차.
+- 2026-10-21 15:55 시작한 태스크 1개가 개정 1로 9시간 넘게 실행 중, 컨테이너 3개 모두 RUNNING, 새 태스크로 바뀐 적 없음(재시작 0). private subnet, public IP 없음, ECS Exec 켜짐.
+- 짝 브랜치(`sim/ecs-image`) 확인 항목: 가입·방문·주문 로그, S3 bronze 새 파일, 컨트롤러 모드 전환과 정답표.
+
+**다음 할 일.**
+- S3 Sink 5분 주기 변경 후 `lag_sec` 정상·폭주 최대치 측정(`connectors/` 별도 PR).
+- 데이터 오염 1회 확인은 `sim/console` 다음의 통합 테스트 브랜치에서 한다.
