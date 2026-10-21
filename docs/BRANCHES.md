@@ -25,7 +25,7 @@
 | `silver` | `pipelines/silver/` | Bronze → Silver Spark 잡 | 시작 전 |
 | `gold-a` | `pipelines/gold_a/` | Gold A(대시보드용) 잡 | 시작 전 |
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
-| `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 시작 전 |
+| `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 사용 중 |
 | `ci` | `.github/` | GitHub Actions | 시작 전 |
 | `api` | `api/` | 업무 API(WAS, FastAPI). 시뮬레이터 → API → RDS·Kafka(clickstream). 설계: `docs/design/api.md` | 시작 전 |
 
@@ -93,9 +93,11 @@ gitGraph
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `docs/branch-rules` | - | 진행 중 | |
+| `docs/branch-rules` | - | 머지됨 (PR #5) | 2026-10-16 |
 | `docs/api-design` | - (설계 문서 `docs/design/api.md`) | 진행 중 | |
 | `docs/data-contracts` | [docs-data-contracts.md](tasks/docs-data-contracts.md) | 검토 대기 | |
+| `docs/agent-anomaly-design` | `design/agent/anomaly-answer-key.md` (PR #28에 포함) | 검토 대기 | |
+| `docs/agent-branches` | - | 검토 대기 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -115,7 +117,11 @@ gitGraph
 ### agent
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `agent/detection-draft` | [agent-detection-draft.md](tasks/agent-detection-draft.md) | 진행 중 | |
+| `agent/detection-draft` | [agent-detection-draft.md](tasks/agent-detection-draft.md) | 머지됨 (PR #14) | 2026-10-21 |
+| `agent/tools-draft` | `agent-tools-draft.md` (PR #30에 포함, 머지되면 링크 가능) | 검토 대기 | |
+| `agent/detect-skeleton` | `agent-detect-skeleton.md` (PR #29에 포함) | 검토 대기 | |
+| `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
+| `agent/skeleton` | `agent-skeleton.md` (`agent/tools-draft` 위에 쌓음, #30 머지 뒤 PR 대상을 `main`으로) | 검토 대기 | |
 
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
