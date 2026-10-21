@@ -1,5 +1,7 @@
 # infra
 
+2026-10-21 입력 공유 결정: 공통 배포값은 추적되는 `deployment.auto.tfvars.json`과 `deployment.backend.hcl`로 관리하고 개인 IP·이메일만 로컬 override에 둔다. Terraform은 공유 auto 파일을 자동 로드한다. [파일 구분·실행 방법·보류 스택](DEPLOYMENT_CONFIG.md)을 먼저 따른다. 아래의 비공개 계정 입력 설명은 이전 기록이다.
+
 2026-10-16 최소 배포 완료: 기존 RDS/S3를 보존하고 NAT 1개·EKS 1.36 Auto Mode·private t3a.large 1대·단일 Kafka를 생성했다. 실제 관리자 접속·20GiB 암호화 EBS·TLS 메시지 생산/소비·JMX를 확인했고 network/EKS/compute 후속 plan은 변경 없음이다. [실행 결과·인수인계](../docs/tasks/infra-deploy-result.md).
 
 2026-10-18 사용자 승인으로 실제 RDS → Kafka → S3 JSON6개 전송·CDC 중단 후 이어받기와 Pod Identity의 다른 prefix 접근 거부를 확인했다. 더미 DB/slot·Kafka/Connect·S3 버전8개·임시 IAM/접속 권한을 정리했다. 노드1대·Kafka4 Pod Ready/재시작0을 유지하고 rds/network/ecr/workload-access 후속 plan은 모두 변경 없음이다. RDS 논리 복제 설정과 데이터 없는 Connect ECR 이미지는 후속 연결 기반으로 남았다. [실제 시험·정리 기록](../docs/tasks/infra-pipeline-smoke.md).

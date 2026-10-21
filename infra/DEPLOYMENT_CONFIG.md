@@ -1,0 +1,59 @@
+# 공유 Terraform 배포 설정
+
+사용자 결정(2026-10-21): 공통 배포값을 Git으로 관리하고 개인정보·인증 비밀을 분리한다. 설정 공유는 AWS 배포 실행이 아니며 자동 apply를 추가하지 않는다.
+
+## 파일과 우선순위
+
+| 파일 | Git | 내용 |
+|---|---|---|
+| `terraform.tfvars` | 추적 | 기존 기본 버전·사양 |
+| `deployment.auto.tfvars.json` | 추적 | 실제 공통 계정·리소스 식별자·배포 설정. Terraform 자동 로드 |
+| `deployment.backend.hcl` | 추적 | 기존 state bucket·region. init에서 명시 지정 |
+| `deployment.local.tfvars.json` | 제외 | 개인 IP·이메일 등 로컬 값. plan에서 필요 시 명시 지정 |
+| `*.tfstate`, `*.tfplan`, `.terraform/`, Secret 파일 | 제외 | 실제 상태·계획·자격증명. 공개하지 않음 |
+
+기존 `terraform.tfvars`보다 `deployment.auto.tfvars.json`이 우선하며, 명시한 `-var-file=deployment.local.tfvars.json`이 공유값보다 우선한다. map 값은 같은 변수 전체를 대체하므로 로컬에서 공통 map 일부만 덮어쓰지 않는다. 오래된 전체 로컬 파일이 남으면 공유 설정을 가릴 수 있어 기존 사용자도 로컬 파일을 정리해야 한다.
+
+계정 ID·SG ID·일반 ARN·bucket 이름·VPC CIDR·namespace·S3 prefix·WAL/NAT 설정은 공유한다. 실제 비밀번호·AWS 키·토큰·개인 공인 IP·이메일은 공유하지 않는다. `sensitive=true`는 Terraform 출력 숨김 표시이며, 공유할 수 있는 식별자도 이 표시가 남아 있을 수 있다. 표시만으로 state가 암호화되는 것은 아니다.
+
+## 사용
+
+AWS CLI에 본인 계정을 설정한 뒤 스택 폴더에서 실행한다. backend/state 소유권과 대상 계정을 확인하며 기존 state key를 바꾸거나 재생성하지 않는다.
+
+```powershell
+terraform init -backend-config=deployment.backend.hcl -lockfile=readonly
+terraform fmt -check
+terraform validate
+
+# 개인 입력이 없는 스택: 공유값이 자동으로 들어간다.
+terraform plan -input=false
+
+# EKS·알림 등 개인 입력이 있는 스택:
+terraform plan -input=false -var-file=deployment.local.tfvars.json
+```
+
+EKS 개인 파일 예시:
+
+```json
+{"public_access_cidrs": ["192.0.2.1/32"]}
+```
+
+알림 개인 파일 예시(실제 주소는 로컬에만 저장):
+
+```json
+{"email_recipients": ["operator@example.invalid"]}
+```
+
+다른 스택의 기존 로컬 파일은 호환을 위해 `{}`로 남겼다. 개인 값이 없으면 생략해도 되고 기존 `-var-file=deployment.local.tfvars.json` 명령을 계속 사용해도 된다. AWS profile·키·SSO 정보는 각 PC에서 관리한다. 개인 입력이 필요한데 파일이 없으면 `-input=false`로 즉시 실패하게 하며 팀원의 개인 값을 대신 하드코딩하지 않는다.
+
+## 범위와 의존 관계
+
+현재 공유 설정은 network/eks/rds/storage/ecr/compute/workload-access/team-access/gold-b-access/agent-development-access/operations-alerts에 준비했다. apps는 기존 backend 위치만 공유한다. `gold-b-access`, `agent-development-access`, `operations-alerts`의 소스는 각각 선행 브랜치/PR을 함께 반영해야 한다. 설정 파일만으로 미반영 모듈이 생기지는 않는다.
+
+`operations-alerts`는 계속 미적용 보류다. `athena-query-base`는 Gold B로 대체된 과거 후보라 이번 전환에서 제외했고 함께 apply하지 않는다. SageMaker·ECS 등 팀원 스택의 이 PC에 없는 배포 입력을 추정해 만들지 않는다. Helm `runtime.local.yaml`은 이번 Terraform 변수 분리 범위에 포함하지 않는다.
+
+이 파일들은 현재 합의된 배포 입력을 공유하는 것이며 AWS 현재 상태 전체를 보장하지 않는다. 노드/서비스가 외부에서 바뀐 경우 별도 plan으로 확인한다. 특히 audit 재활성화 코드는 별도 `infra/eks-audit-restore`에 있고 새 PR은 보류됐으므로 과거 main의 EKS 코드로 audit를 다시 끄지 않도록 확인한다. 이번 정리에서는 apply를 실행하지 않는다.
+
+기존 작업 문서의 '계정 ID/ARN은 항상 비공개'는 이전 정책이다. 현재 입력 방식은 이 문서를 우선한다. 현재 적용 환경과 다른 스택을 무작정 실행하거나 새 공유값을 확인 없이 적용하지 않는다.
+
+과거 network 로컬 파일의 state_bucket은 그 스택에서 선언·사용하지 않는 값이라 공통 tfvars에서 제거했다. 실제 backend bucket은 기존 deployment.backend.hcl에 그대로 유지한다. 그 외 선언된 배포 입력은 분리 전과 같다. 과거 일회성 로컬 스크립트가 전체 입력이 개인 파일에 있다고 가정할 수 있으므로 재사용할 때 공유 파일을 먼저 읽도록 확인한다.
