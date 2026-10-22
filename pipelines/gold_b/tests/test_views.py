@@ -37,3 +37,12 @@ def test_design_has_exactly_these_views():
 @pytest.mark.parametrize("name", NAMES)
 def test_view_file_matches_design(name):
     assert file_sql(name) == design_sql()[name]
+
+
+def test_malformed_messages_keeps_time_folders():
+    """판정·조사 쿼리가 dt·hour 조건으로 그 폴더만 읽을 수 있게, 시간 폴더를 칸으로 내보내고 묶음 기준에도 넣는다."""
+    sql = design_sql()["malformed_messages"]
+    select, group_by = sql.split("FROM", 1)[0], sql.split("GROUP BY", 1)[1]
+    for column in ("dt", "hour"):
+        assert re.search(rf"\b{column}\b", select), column
+        assert re.search(rf"\b{column}\b", group_by), column

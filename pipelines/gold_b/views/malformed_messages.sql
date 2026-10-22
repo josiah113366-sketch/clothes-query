@@ -5,6 +5,7 @@ SELECT topic, kafka_partition, kafka_offset, rule_version,
        MIN(kafka_timestamp)        AS kafka_timestamp,
        COUNT(DISTINCT field)       AS error_count,
        ARRAY_AGG(CAST(ROW(field, reason) AS ROW(field VARCHAR, reason VARCHAR))) AS errors,
-       MIN(loaded_at)              AS loaded_at
+       MIN(loaded_at)              AS loaded_at,
+       dt, hour
 FROM gold_b.malformed_events
-GROUP BY topic, kafka_partition, kafka_offset, rule_version;
+GROUP BY topic, kafka_partition, kafka_offset, rule_version, dt, hour;
