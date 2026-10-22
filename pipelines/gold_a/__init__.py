@@ -92,7 +92,7 @@ def read_rows(uri: str) -> list[dict]:
         except json.JSONDecodeError as exc:
             raise ValueError(f"결과 파일 {uri}:{number}: JSON 파싱 실패") from exc
         if not isinstance(row, dict):
-            raise ValueError("결과 행은 JSON 객체여야 합니다")
+            raise ValueError("결과 행은 JSON 객체여야 합니다")  # noqa: TRY004 - 외부 결과 검증 오류 계약 유지
         rows.append(row)
     return rows
 
@@ -106,11 +106,11 @@ def load_silver(manifest_uri: str, expected: dict, names: list[str]) -> tuple[di
         raise ValueError("Silver manifest의 처리 범위가 요청과 다릅니다")
     outputs = manifest.get("outputs")
     if not isinstance(outputs, dict):
-        raise ValueError("Silver manifest에 outputs가 없습니다")
+        raise ValueError("Silver manifest에 outputs가 없습니다")  # noqa: TRY004 - manifest 검증 오류 계약 유지
     # 거래는 데이터셋명, 회원·리뷰는 파일명을 outputs 키로 사용한다.
     dq_path = outputs.get("dq_results") or outputs.get("dq_results.jsonl")
     if not isinstance(dq_path, str):
-        raise ValueError("Silver 품질 결과 경로가 없습니다")
+        raise ValueError("Silver 품질 결과 경로가 없습니다")  # noqa: TRY004 - manifest 검증 오류 계약 유지
     checks = read_rows(dq_path)
     if not checks or any(row.get("status") != "PASS" or row.get("quarantined_count") != 0 for row in checks):
         raise ValueError("Silver 품질 결과가 불완전하므로 Gold A 갱신을 중단합니다")
@@ -118,7 +118,7 @@ def load_silver(manifest_uri: str, expected: dict, names: list[str]) -> tuple[di
     for name in names:
         path = outputs.get(name)
         if not isinstance(path, str):
-            raise ValueError("Silver manifest에 필요한 결과 경로가 없습니다")
+            raise ValueError("Silver manifest에 필요한 결과 경로가 없습니다")  # noqa: TRY004 - manifest 검증 오류 계약 유지
         loaded[name] = read_rows(path)
     return loaded, {"manifest_path": manifest_uri, "run_id": manifest.get("run_id"),
                     "check_version": manifest.get("check_version"), "dq_results": checks,

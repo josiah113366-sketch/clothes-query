@@ -1,9 +1,10 @@
 """리뷰 원본에서 Silver, Gold A까지 같은 날짜로 연결되는지 확인한다."""
 
 import json
-import pytest
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 from pipelines.gold_a.reviews import run_aggregate, search_reviews
 from pipelines.silver.reviews import run

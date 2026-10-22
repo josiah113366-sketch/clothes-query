@@ -275,7 +275,7 @@ Gold B 뷰가 최신 결과만 담고 있어 과거 원천 범위로 고정할 �
 | ☐ 원본 보존 | 성철: [#32 CDC/Sink](https://github.com/josiah113366-sketch/clothes-query/pull/32), connectors/bronze-s3-sink.yaml | Kafka 행별 위치·시각 보존 방식, timestamp 유형, 실제 샘플. 경로 날짜 설정만으로 각 행 정보가 보존되는 것은 아님 |
 | ☐ 공통 기준 | 현지·은서: [#20 계약](https://github.com/josiah113366-sketch/clothes-query/pull/20) | 비교 필드·오류 제외·미등록 코드 정책과 적용 버전. 문서 머지가 모든 제안 수용은 아님 |
 | ☐ Silver 추적 | 현지: [#26 Silver](https://github.com/josiah113366-sketch/clothes-query/pull/26) 및 이번 후속 로컬 변경 | current.json → impact_candidates/격리 → Bronze 파일·줄·Kafka 참조 연결. 후속 변경은 기존 #26에 포함됐다고 보지 않음 |
-| ☐ Gold B 입력 | 은서: pipelines/gold-b, 확인일 현재 해당 head의 PR 없음 | 실제 중복 제거 뷰 이름·보존 컬럼·격리 조회·과거 범위 고정·실행 기록. PR이 생기면 이 표에 링크 추가 |
+| ☐ Gold B 입력 | 은서: [#36 원장 정의](https://github.com/josiah113366-sketch/clothes-query/pull/36), main 머지됨 | DDL·샘플만 반영됐다. 정리 뷰의 해시·버전 출력·격리 조회·과거 범위 고정·실행 기록은 후속 구현에서 확인 |
 | ☐ Gold A 기준 | 현지: [#34 Gold A](https://github.com/josiah113366-sketch/clothes-query/pull/34) | inputs의 Silver 실행 참조, KST 계산·PARTIAL/held_scopes 처리. Gold A 결과와 같은 Silver 묶음으로 기대값 계산 |
 | ☐ 탐지 결과 연결 | 주현: [#28 이상 이력](https://github.com/josiah113366-sketch/clothes-query/pull/28), [#29 판정 잡](https://github.com/josiah113366-sketch/clothes-query/pull/29) | 대조 상태를 어떻게 기록·알림할지. WAITING/NOT_COMPARABLE을 업무 장애로 오탐하지 않기 |
 | ☐ 조사 조회 | 주현: [#30 조사 도구](https://github.com/josiah113366-sketch/clothes-query/pull/30) | 실행·차이·오류 참조 조회와 접근 권한. 도구가 이미 연결됐다고 가정하지 않음 |

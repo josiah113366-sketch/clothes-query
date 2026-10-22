@@ -1,10 +1,19 @@
-상태: 진행 중
+상태: 완료 · main 반영 승인 대기
 
 # Gold A 지표 분리
 
 브랜치: `pipelines/gold-a` (기존 `gold-a/metrics`에서 이름 변경). 최초 생성 시 최신 `main`에서 선행 Silver 커밋을 포함했다. 선행 Silver 브랜치는 `pipelines/silver`다. Silver 브랜치가 먼저 반영되면 이 브랜치의 PR 차이는 Gold A 파일과 이 작업 문서만 남는다.
 
 ## 범위
+
+### 2026-10-22 main 통합 정리
+
+- 사용자 요청으로 기존 구현을 최신 origin/main(9db1dd2)과 로컬 통합했다. #34가 main이 아닌 Silver에 머지됐던 Gold A 코드와 후속 리뷰 KST 계약·정상 0건 재생성 고려사항을 보존했다.
+- #35 Kafka 추적·#45 R6 고정 실행 기록·#55 공통 지문과 승인된 Silver 호출을 함께 보존했다. 기존 승인된 unit_price 5,900원·규칙 0.1.1을 통합하고 정상 테스트 입력을 일치시켰다. 검사 버전은 transactions.v8, 주문 합계 검사 버전 items-sum-v1, 지문 버전 payment-content.v1로 구분한다.
+- 통합 검증: Silver·Gold A·거래 연결 테스트 55개 통과(11.27초). 각 단계의 29/30/36개 검증과 전체 통합 검증을 구분한다. 실제 AWS·DAG·A/B 대조 잡은 실행하거나 새로 구현하지 않았다.
+- 추가 정책 변경은 하지 않았다. 시각 입력 형식·정밀도/오프셋 범위·UUID 표기·정수 저장 범위, Gold B UNKNOWN 정책·정리 뷰 지문 출력·버전 혼재·처리 완료 범위는 후속 합의/보완 대상이다.
+- 자동 승인 검토가 명시적 push·머지 승인 부족으로 원격 반영을 거부했다. 로컬 정리와 검증까지 완료하고 원격 push·PR 생성·main 머지는 대기한다. 기존 브랜치와 커밋은 삭제하거나 재작성하지 않았다.
+- 최신 Ruff 규칙과 충돌하던 기존 Gold A import 순서를 정리했다. 외부 manifest/결과 검증의 기존 ValueError 계약은 유지하도록 해당 TRY004에 이유를 붙였다. Silver 공통 입출력·거래·지문·Gold A Ruff 검사 및 전체 diff 공백 검사 통과. 통합본은 pipelines/gold-a에 모여 있으며 기존 3개 PR은 #35 → #45 → #55 순서로 반영한 뒤 Gold A의 main 대상 PR을 제출할 수 있다.
 
 2026-10-22 사용자 승인: 리뷰 분석 입력 선택과 Gold A 집계는 KST 작성일 기준으로 명확히 한다. 기존 Silver UTC/KST 변환 및 날짜 경계 처리는 유지하고 공통 계약·Silver/Gold A README에 Bronze UTC 보관, SageMaker의 ID/본문 분석, 다음 날 분석 시 원래 작성일 귀속, DAG 입력 범위 연결 요구를 기록한다. 실행 코드·모델 담당 코드 변경 및 AWS 작업은 없다. 상대 링크·기존 함수와의 정합성·diff 공백을 확인하며 문서 변경만으로 새 테스트를 만들지 않는다.
 

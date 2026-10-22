@@ -19,7 +19,7 @@
 | checked_at | 시간대 포함 ISO 문자열 / TIMESTAMP(UTC) | 입력의 금액 검사 계산 완료 후 기록한 실행 단위 시각. 주문/결제 업무 시각이 아님 |
 | order_id | 문자열 / STRING | 검사한 주문 |
 | check_name | 문자열 / STRING | order_item_total_match |
-| check_version | 문자열 / STRING | items-sum-v1. manifest의 파이프라인 검사 버전 transactions.v7과 구분 |
+| check_version | 문자열 / STRING | items-sum-v1. manifest의 파이프라인 검사 버전 transactions.v8과 구분 |
 | status | 문자열 / STRING | PASS/MISMATCH/UNVERIFIED/PENDING_REFERENCE/ITEM_ERROR |
 | order_total_amount | 정수 / BIGINT | 주문 총액 |
 | item_total_amount | 정수 또는 null / BIGINT | 계산한 상품 합계. 검사 불가이면 null |
@@ -136,7 +136,7 @@ Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 �
 - 실패 코드 누락・미등록・성공 결제의 실패 코드, 0 이하 금액・단가를 분리한다. 원천 YAML의 5개 실패 코드만 허용한다. 미등록 코드 허용과 Gold B UNKNOWN 분류는 합의 전 제안이며 실행하지 않는다.
 - `input_count = accepted_count + duplicate_count + quarantined_count`다. accepted_count는 중복 제거 후 채택한 입력 기록 수이며 주문 현재 상태 출력 수와 다를 수 있다. 오류는 행당 첫 사유를 기록하고, conflict_count/pending_count는 격리 행 수의 부분집합이다.
 - 오류·대기 정보가 있는 데이터셋은 INCOMPLETE다. 후속 Gold A/저장 코드는 **모든 dq_results를 확인**해 영향 범위를 완전한 결과로 표시하지 않아야 한다. 정상 출력이 존재한다는 것만으로 전체 처리 완료로 판단하지 않는다.
-- `check_version=transactions.v5`는 계산 코드 버전이다. 공통 YAML 버전/내용 해시는 별도 format_rules에 기록한다. 원본 파일/줄・실행 ID를 남기지만 파일 이름의 시작 offset에 줄 번호를 더해 Kafka 행 offset을 추정하지 않는다.
+- `check_version=transactions.v8`는 계산 코드 버전이다. 공통 YAML 버전/내용 해시는 별도 format_rules에 기록한다. 원본 파일/줄・실행 ID를 남기지만 파일 이름의 시작 offset에 줄 번호를 더해 Kafka 행 offset을 추정하지 않는다.
 
 ### 공통 YAML 실행 연결
 

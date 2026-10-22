@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import argparse
-import json
 import csv
 import io
-from decimal import Decimal, ROUND_HALF_UP
+import json
 from collections import defaultdict
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
-from . import (_uri, _read_text, _write_text, read_rows, load_silver, save_gold,
-               load_products, connect_reviews, replacement)
+from . import (
+    _read_text,
+    _uri,
+    _write_text,
+    connect_reviews,
+    load_products,
+    load_silver,
+    read_rows,
+    replacement,
+    save_gold,
+)
 
 OUTPUT_FILE = "part-00000.jsonl"
 
@@ -216,7 +225,7 @@ def _check_score_baseline(base: str) -> None:
     legacy = {"mentioned_review_count", "positive_review_count", "neutral_review_count", "negative_review_count", "negative_rate"}
     path = previous.get("outputs", {}).get("review_aspect_daily.jsonl")
     if not isinstance(path, str):
-        raise ValueError("기존 점수 집계 파일 경로가 없습니다")
+        raise ValueError("기존 점수 집계 파일 경로가 없습니다")  # noqa: TRY004 - 기존 결과 검증 오류 계약 유지
     if any(not required.issubset(row) or legacy.intersection(row) for row in read_rows(path)):
         raise ValueError("기존 속성 결과에 다른 형식이 섞여 있습니다. 전체 재집계하세요")
 
