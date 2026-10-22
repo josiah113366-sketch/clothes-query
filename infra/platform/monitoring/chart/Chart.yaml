@@ -1,0 +1,5 @@
+apiVersion: v2
+name: clothes-query-monitoring
+description: Small development monitoring stack on a dedicated EKS Auto Mode pool
+type: application
+version: 0.1.0

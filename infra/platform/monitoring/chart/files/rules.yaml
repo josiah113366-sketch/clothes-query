@@ -1,0 +1,52 @@
+groups:
+- name: infrastructure
+  rules:
+  - alert: MonitoringTargetDown
+    expr: up == 0
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'Metrics target unavailable: {{ $labels.job }}'
+  - alert: MissingKafkaTarget
+    expr: absent(up{job="clothes-query-kafka"})
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'No discovered target: clothes-query-kafka'
+  - alert: MissingConnectTarget
+    expr: absent(up{job="clothes-query-connect"})
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'No discovered target: clothes-query-connect'
+  - alert: MissingLagTarget
+    expr: absent(up{job="clothes-query-kafka-lag"})
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'No discovered target: clothes-query-kafka-lag'
+  - alert: KafkaUnderReplicated
+    expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: Kafka has under-replicated partitions
+  - alert: ConnectTaskNotRunning
+    expr: kafka_connect_task_status{status!="running"} == 1
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'Connect task is not running: {{ $labels.connector }}'
+  - alert: CDCDisconnected
+    expr: debezium_postgres_connected{context="streaming"} == 0
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: CDC streaming connection is disconnected
