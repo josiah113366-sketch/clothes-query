@@ -1,1 +1,4 @@
 PyYAML==6.0.3
+boto3==1.43.71
+pyarrow==26.0.0
+tzdata==2026.3
