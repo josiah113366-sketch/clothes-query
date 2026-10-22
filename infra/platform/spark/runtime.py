@@ -43,7 +43,7 @@ def properties(placement):
         "spark.driver.memoryOverhead": "512m",
         "spark.executor.instances": "1",
         "spark.executor.cores": "1",
-        "spark.kubernetes.executor.request.cores": "1" if placement == "dedicated" else "500m",
+        "spark.kubernetes.executor.request.cores": "500m",
         "spark.kubernetes.executor.limit.cores": "1",
         "spark.executor.memory": "1g",
         "spark.executor.memoryOverhead": "512m",
@@ -51,6 +51,14 @@ def properties(placement):
         "spark.sql.shuffle.partitions": "4",
         "spark.kubernetes.submission.waitAppCompletion": "true",
     }
+    if placement == "dedicated":
+        settings.update({
+            "spark.dynamicAllocation.enabled": "true",
+            "spark.dynamicAllocation.minExecutors": "1",
+            "spark.dynamicAllocation.initialExecutors": "1",
+            "spark.dynamicAllocation.maxExecutors": "2",
+            "spark.dynamicAllocation.shuffleTracking.enabled": "true",
+        })
     return "\n".join(f"{k} {v}" for k, v in settings.items()) + "\n"
 
 
@@ -68,6 +76,12 @@ def resources(placement="dedicated"):
             {"apiGroups": [""], "resources": ["pods", "services", "configmaps"], "verbs": ["create", "get", "list", "watch", "patch", "update", "delete"]},
             {"apiGroups": [""], "resources": ["pods/log", "events"], "verbs": ["get", "list", "watch"]},
         ]))
+        if name == "submitter":
+            # Spark 4.2's NetworkPolicyFeatureStep applies an executor ingress policy.
+            objects[-1]["rules"].append({
+                "apiGroups": ["networking.k8s.io"], "resources": ["networkpolicies"],
+                "verbs": ["create", "get", "patch", "delete"],
+            })
         objects.append(obj("RoleBinding", "spark-" + name,
             subjects=[{"kind": "ServiceAccount", "name": "spark-" + name, "namespace": "spark"}],
             roleRef={"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "spark-" + name}))

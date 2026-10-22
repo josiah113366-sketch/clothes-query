@@ -32,6 +32,6 @@ jobs:
       - name: Check disabled defaults and Spark manifests without AWS
         run: |
           python -m pip install -r infra/platform/spark/requirements.txt
-          python -m unittest discover -s infra/platform/spark -p test_runtime.py -v
+          python -m unittest discover -s infra/platform/spark -p 'test_*.py' -v
           python infra/platform/spark/runtime.py --output .cache/spark-dedicated.yaml
           python infra/platform/spark/runtime.py --placement shared-memory --output .cache/spark-shared.yaml

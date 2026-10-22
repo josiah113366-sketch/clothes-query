@@ -1,12 +1,18 @@
 # Spark 실행 기반 및 공용 메모리 확대 대안 준비
 
-상태: 코드 준비·검증 완료, 실제 미적용·로컬 브랜치 보관
+상태: 상시 배포 비활성, 임시 클라우드 시험 실패 원인 수정·리소스 정리 완료, 로컬 브랜치 보관
 
 ## 사용자 결정과 범위
+
+2026-10-22 추가 결정: Spark 전용 노드풀로 준비하며, 작업이 없을 때 0대까지 축소한다. 공용 메모리 확대안은 참고용으로 보존한다. 실행 주기와 처리 대상·이미지·노드 타입·확장 상한은 미정이다. 기존 빈 노드 10분 정리 후보와 비활성 기본값을 유지하며 실제 배포는 하지 않는다.
 
 사용자는 실제 노드를 생성하지 않고 Spark 실행 기반을 준비하도록 요청했다. 이후 별도 노드 대신 공용 노드 메모리를 늘리는 대안도 검토하도록 추가했다. 두 후보를 분리하고 기본 활성화를 금지한다. 업무 Spark 코드·DAG·데이터는 만들거나 변경하지 않는다.
 
 ## 완료 확인
+
+추가 결정: 최초 노드 타입은 t3a.large로 선택했다. S3 외 RDS·Kafka 직접 읽기도 검토 범위에 포함하며 실제 읽기 대상·DB 계정·Kafka 토픽/인증·출력 경로·확장 상한은 미정이다. 아직 예시 용량 설정을 확정값으로 바꾸거나 실제 연결 권한을 적용하지 않았다.
+
+추가 사용자 선택: S3 Bronze → Spark → Silver/Gold 처리 흐름. 정확한 경로·출력 계약과 업무 Spark 이미지는 미정이며, 기존 Python 코드를 자동으로 Spark로 전환하지 않는다. 아직 데이터 접근 권한이나 리소스를 적용하지 않았다.
 
 - [x] 최신 main `194ff3a`에서 브랜치 생성, 기존 작업 보존.
 - [x] Spark 전용 NodePool opt-in 변수, 기본 비활성 및 공유 auto tfvars 명시.
@@ -17,6 +23,22 @@
 - [x] 변경/미적용 범위 최종 점검·로컬 커밋.
 
 ## 작업 결과
+
+2026-10-22 사용자 요청으로 짧은 합성 시험을 진행했다. 공식 이미지 digest 고정·전이 의존성 4개 충돌 수정·기본 이미지 빌드와 네트워크 없는 로컬 Spark 계산/커넥터 클래스 로딩은 통과했다. 추가 jar 10개의 버전/체크섬을 기록했다. 이미지는 약 2.07GB(비압축)다.
+
+임시 클라우드 시험 2회에서 전용 t3a.large 노드 생성·이미지 pull·제출기 실행을 확인했으나, Spark 4.2 NetworkPolicyFeatureStep의 NetworkPolicy PATCH 권한 부족(403)으로 제출이 실패했다. submitter Role에 namespace 한정 NetworkPolicy create/get/patch/delete를 코드로 추가했다. 로컬 회귀 포함 12개 검사가 통과했으며 수정 후 클라우드 실행은 반복하지 않았다. 따라서 Executor 1→2 증감·전체 처리 자원·10분 자동 축소는 미검증이다.
+
+각 시험의 namespace·노드풀·ECR을 삭제하고 EC2 2대 모두 terminated를 확인했다. 기존 노드 2대와 업무 데이터/권한은 유지했고 공유 enabled=false도 유지한다. Terraform apply/state 변경은 하지 않았다. private 상세 증거는 .cache/spark-live-smoke-first-summary.json, spark-live-smoke-summary.json, spark-final-audit.json에 보관한다. 아래는 최초 준비 단계의 기록이며 최신 실행 결과는 이 단락을 우선한다.
+
+Spark 4.2.0 선택 후 기본 이미지 Dockerfile·Maven 연결 의존성 POM·jar 충돌 검사와 안내서를 준비했다. 기본 Spark/Hadoop 버전 확인과 비특권 실행을 구성했고 jar 충돌 시 기존 파일을 바꾸기 전에 중단한다. registry digest 조회는 HTTP 401로 미확정이며 빌드 이미지도 digest를 전달받아야 한다. Docker 실행·Maven 의존성 해결·클래스 로딩·실제 접속·ECR push는 하지 않았다. 이미지 완성으로 보고하지 않는다.
+
+이미지 책임 결정: 인프라는 기본 Spark 이미지와 연결 라이브러리를 준비하고, 팀원은 업무 코드를 추가한다. 기본 버전 선택이 다음 단계이며 이미지를 만들거나 업로드한 상태는 아니다.
+
+최신 Executor 선택: 전용 프로필은 Driver 1개 + Executor 초기/최소 1개·최대 2개의 동적 할당과 shuffle tracking을 준비한다. 한 대분 노드 한도에 맞춰 Executor CPU request를 500m로 조정했다. 최대 요청량 1500m/4.5GiB이며 실제 실행 검증은 아직 하지 않았다. 공용 참고 프로필은 고정 1개를 유지한다.
+
+최신 결정 반영: t3a.large 한 대분(2CPU/8GiB) 한도를 공유 compute auto tfvars와 전용 예시에 명시했다. enabled=false를 유지했으며 실제 노드 생성/권한 적용은 하지 않았다. Executor 수·자동 확장과 출력 경로는 후속 결정 대상이다.
+
+후속 준비: 사용자 승인 범위에 맞춰 connections.example.yaml에 S3/RDS/Kafka 입력과 출력·checkpoint의 미정 필드를 분리했다. 모든 source는 비활성이며 runtime.py와 미연결인 계약 예시임을 명시했다. 실제 권한과 Secret·DB/Kafka 연결은 적용하지 않았다. 선택한 t3a.large의 확장 상한은 다음 사용자 결정 후 설정에 반영한다.
 
 실제 Kubernetes/AWS API를 변경하지 않았다. Terraform apply·실제 인프라 plan·Job 제출·Docker 실행·S3 더미 데이터 입력·이미지 업로드를 하지 않았다. S3 역할은 예시만 있고 기존 workload bindings/네트워크 정책을 바꾸지 않았다. NodePool과 공유 CPU 후보는 아직 선택·성능 검증되지 않았다.
 
