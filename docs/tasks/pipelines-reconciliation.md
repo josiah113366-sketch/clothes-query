@@ -1,4 +1,4 @@
-상태: 진행 중 · 브랜치: `pipelines/reconciliation`
+상태: 완료 · 브랜치: `pipelines/reconciliation`
 
 # Kafka 원본 추적과 결제 대조 설계
 
@@ -33,3 +33,4 @@
 - main 기준 Silver 테스트 29개 통과(2.19초), 변경 실행 파일 Ruff 및 git diff --check 통과. Gold A 코드는 main에 없으므로 47개 전체 검증은 최초 작업 브랜치의 과거 기록이며 이번 제출 검증 수와 구분한다.
 - 현재 제출 범위는 계약 설계·Silver 추적 코드·기존 거래 테스트·Silver 설명·브랜치 등록·이 지시서다. 기존 Silver 지시서는 변경하지 않는다.
 - 메타데이터 관측은 입력 완료 증거가 아니며 모든 실행의 coverage_status는 UNVERIFIED다. 실제 비교 어댑터와 합의된 완료 범위 증거가 준비되기 전에는 대조 잡을 실행하지 않는다.
+- 2026-10-22 main 통합: 최신 origin/main을 병합하고 브랜치 대장의 양쪽 등록을 보존해 충돌을 해결했다. Silver 29개 통과(2.36초), 실행 파일 Ruff 및 diff 공백 검사 통과. 실제 대조 잡을 구현한 것으로 표시하지 않는다.

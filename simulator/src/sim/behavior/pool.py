@@ -39,11 +39,20 @@ class MemberPool:
         ids = tuple(sorted(member_ids))
         if not ids:
             raise ValueError("회원이 없습니다. sim member baseline을 먼저 실행하세요.")
+        if ids == self.member_ids:
+            return  # 바뀐 게 없으면 가중치를 다시 계산하지 않는다
         self.member_ids = ids
         self._cumulative = list(accumulate(member_weight(self.seed, m) for m in ids))
 
     def __len__(self) -> int:
         return len(self.member_ids)
+
+    def discard(self, member_id: str) -> bool:
+        """목록에서 뺀다(주문 API가 ACTIVE가 아니라고 거절한 회원). 마지막 한 명은 남긴다."""
+        if member_id not in self.member_ids or len(self.member_ids) == 1:
+            return False
+        self.update([m for m in self.member_ids if m != member_id])
+        return True
 
     def sample(self, rng: SimRandom) -> str:
         target = rng.random.random() * self._cumulative[-1]
