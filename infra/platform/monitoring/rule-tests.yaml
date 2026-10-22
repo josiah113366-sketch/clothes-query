@@ -1,0 +1,38 @@
+rule_files: [chart/files/rules.yaml]
+evaluation_interval: 1m
+tests:
+  - name: disappeared Connect target is not silently healthy
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-kafka"}'
+        values: '1+0x6'
+      - series: 'up{job="clothes-query-kafka-lag"}'
+        values: '1+0x6'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MissingConnectTarget
+        exp_alerts:
+          - exp_labels: {job: clothes-query-connect, severity: warning}
+            exp_annotations:
+              summary: 'No discovered target: clothes-query-connect'
+  - name: transient scrape failure does not page immediately
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-api",instance="api:80"}'
+        values: '1 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MonitoringTargetDown
+        exp_alerts: []
+  - name: sustained scrape failure becomes visible
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-api",instance="api:80"}'
+        values: '0+0x6'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MonitoringTargetDown
+        exp_alerts:
+          - exp_labels: {job: clothes-query-api, instance: 'api:80', severity: warning}
+            exp_annotations:
+              summary: 'Metrics target unavailable: clothes-query-api'

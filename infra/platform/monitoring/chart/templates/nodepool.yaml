@@ -1,0 +1,42 @@
+{{- if ne .Release.Namespace "monitoring" }}
+{{- fail "Install this chart explicitly in namespace monitoring" }}
+{{- end }}
+{{- if .Values.nodePool.create }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: {{ .Values.nodePool.name }}
+spec:
+  limits:
+    cpu: {{ .Values.nodePool.cpuLimit | quote }}
+    memory: {{ .Values.nodePool.memoryLimit }}
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m
+    budgets:
+      - nodes: "1"
+  template:
+    spec:
+      expireAfter: 336h
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: {{ .Values.nodePool.nodeClass }}
+      taints:
+        - key: {{ .Values.nodePool.taintKey }}
+          value: {{ .Values.nodePool.taintValue }}
+          effect: NoSchedule
+      requirements:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: [{{ .Values.nodePool.instanceType | quote }}]
+        - key: kubernetes.io/arch
+          operator: In
+          values: [amd64]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: [on-demand]
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: {{ .Values.nodePool.zones | toJson }}
+{{- end }}

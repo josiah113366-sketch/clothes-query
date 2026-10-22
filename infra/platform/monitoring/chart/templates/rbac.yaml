@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-prometheus
+  namespace: {{ .Release.Namespace }}
+---
+# Prometheus discovers Kafka Pods only. No Secret or node proxy permissions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: monitoring-prometheus-discovery
+  namespace: kafka
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: monitoring-prometheus-discovery
+  namespace: kafka
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-prometheus
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: monitoring-prometheus-discovery
+{{- if .Values.metricsServer.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-metrics-server
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clothes-query-monitoring-metrics-reader
+rules:
+  - apiGroups: [""]
+    resources: [nodes/metrics]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [nodes, pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clothes-query-monitoring-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-metrics-server
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: clothes-query-monitoring-metrics-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clothes-query-monitoring-auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-metrics-server
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: clothes-query-monitoring-auth-reader
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-metrics-server
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clothes-query-monitoring-resource-usage
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules:
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods, nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.metrics.k8s.io
+spec:
+  group: metrics.k8s.io
+  version: v1beta1
+  groupPriorityMinimum: 100
+  versionPriority: 100
+  # The aggregated server uses its generated serving certificate (upstream default).
+  # Kubelet TLS verification remains enabled in metrics-server.
+  insecureSkipTLSVerify: true
+  service:
+    name: monitoring-metrics-server
+    namespace: {{ .Release.Namespace }}
+    port: 443
+{{- end }}
