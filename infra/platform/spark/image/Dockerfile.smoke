@@ -1,0 +1,2 @@
+FROM clothes-query-spark-base:4.2.0-smoke
+COPY --chown=185:185 smoke.py /opt/jobs/infra_smoke.py
