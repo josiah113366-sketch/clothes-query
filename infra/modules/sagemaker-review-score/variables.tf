@@ -54,11 +54,11 @@ variable "bucket_arn" {
 
 variable "review_input_prefix" {
   description = <<-EOT
-    점수화할 리뷰가 있는 prefix. 리뷰 시뮬레이터가 <이 값>/year=yyyy/month=mm/day=dd/ 파티션으로 쓴다.
+    점수화할 리뷰가 있는 prefix. 2026-10-22 결정: Bronze 가 아니라 Silver 리뷰를 읽는다. Silver 파이프라인(pipelines/silver/reviews.py)이 <이 값>/scopes/<시작일>_<종료일>/year=/month=/day=/part-00000.jsonl (KST 작성일)로 쓴다.
     역할은 이 아래 읽기만 한다. 정답 라벨(reviews_truth)·ground_truth·gold_b 는 일부러 권한을 주지 않는다.
   EOT
   type        = string
-  default     = "bronze/reviews"
+  default     = "silver/reviews"
 }
 
 variable "work_prefix" {
@@ -72,15 +72,29 @@ variable "work_prefix" {
 }
 
 variable "output_prefix" {
-  description = "점수 결과 CSV(review_id,aspect,score)를 쓰는 prefix. 역할은 쓰기만. 2026-10-21 결정: silver/review-score/output"
+  description = <<-EOT
+    점수 결과를 쓰는 prefix. 역할은 쓰기만. 2026-10-22 결정(model_version 은 경로가 아니라 스키마 열):
+      <output_prefix>/year=YYYY/month=MM/day=DD/scores_<model_version>.parquet  (날짜는 KST 후기 작성일)
+    같은 날짜·같은 model_version 으로 다시 실행하면 그 파일만 덮어쓴다. 다른 버전 파일은 그대로 남는다.
+  EOT
   type        = string
-  default     = "silver/review-score/output"
+  default     = "silver/review_aspect_scores"
 }
 
 variable "error_prefix" {
-  description = "오류가 난 건/실패 요약을 쓰는 prefix. 역할은 쓰기만. 2026-10-21 결정: silver/review-score/error"
+  description = "파싱 실패 등 오류 건을 쓰는 prefix. 역할은 쓰기만. <error_prefix>/year=/month=/day=/errors_<model_version>.jsonl"
   type        = string
-  default     = "silver/review-score/error"
+  default     = "silver/review_aspect_scores_error"
+}
+
+variable "model_version" {
+  description = "출력 열 model_version 과 파일명에 쓰는 모델 버전 이름(영문·숫자·._-). SSM 설정에 담겨 스크립트가 기본값으로 쓴다. 모델을 바꾸면 이 값도 바꾼다."
+  type        = string
+  default     = "2.4b_score_s2c"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]+$", var.model_version))
+    error_message = "model_version 은 영문·숫자·점·밑줄·하이픈만 쓸 수 있다."
+  }
 }
 
 # ------------------------------------------------------------------ 컨테이너 이미지 (AWS 공개 Deep Learning Container)

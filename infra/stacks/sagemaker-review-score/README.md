@@ -9,9 +9,15 @@ apply 는 인프라 담당(재영)이 plan 을 확인한 뒤 실행한다. 모�
 - 만드는 것(9개): Job 실행 IAM 역할 + 정책 4개(S3, CloudWatch, ECR(AWS 공개 이미지), VPC ENI), 보안 그룹(나가는 443 만) + 규칙,
   스크립트용 SSM 파라미터, Airflow 가 붙일 `launcher` IAM 정책(어떤 역할에도 자동으로 붙지 않음).
 - 만들지 않는 것: Processing Job(Airflow 태스크가 호출마다 생성), 스케줄(실행은 Airflow silver DAG 종료 신호 기반), 이메일 알림·월 예산(2026-10-21 요청으로 제외), 버킷·VPC, 모델/코드 업로드.
-- 권한 요약: 읽기 `bronze/reviews/*`·`review-score/model/*`·`review-score/code/*`, 쓰기 `silver/review-score/output/*`·`silver/review-score/error/*` 뿐.
+- 권한 요약: 읽기 `silver/reviews/*`(Silver 리뷰, Bronze 아님)·`review-score/model/*`·`review-score/code/*`, 쓰기 `silver/review_aspect_scores/*`·`silver/review_aspect_scores_error/*` 뿐.
   `reviews_truth/`·`ground_truth/`·`gold_b/` 접근 불가.
-- 결과 위치(결정): 점수 `s3://<버킷>/silver/review-score/output/`, 오류 `s3://<버킷>/silver/review-score/error/`.
+- 결과 위치(결정, 2026-10-22): 점수 `s3://<버킷>/silver/review_aspect_scores/year=YYYY/month=MM/day=DD/scores_<model_version>.parquet` (날짜는 KST 후기 작성일, `model_version` 은 경로가 아니라 CSV 열),
+  오류 `s3://<버킷>/silver/review_aspect_scores_error/year=/month=/day=/errors_<model_version>.jsonl`.
+  **파티션은 실행한 날이 아니라 후기의 작성일(KST)** 이다. `score_batch.py` 가 후기 행의 `review_date_kst`(없으면 `created_at_kst`, `created_at`)를 읽어 각 후기를 자기 작성일 폴더에 나눠 쓰므로, 입력 파일에 여러 날짜가 섞여 있어도 날짜별로 알맞은 파티션에 들어간다.
+  작성일을 알 수 없는 후기는 `--date`(없으면 입력 키의 `year=/month=/day=`)를 쓰고, 그것도 없으면 점수를 매기지 않고 오류 경로의 `no_review_date/` 에 남긴다. 실행 요약은 결과 경로 맨 위의 `_summary_scores_<model_version>_<실행시각>.json` 이다.
+  주의: 날짜별 파일은 그 실행에서 처리한 후기만 담는다. 같은 날짜·같은 `model_version` 을 일부 후기만 담은 입력으로 다시 쓰면 그 날짜 파일이 그 후기들만으로 바뀐다(입력은 하루치 전체여야 한다).
+  같은 날짜·같은 `model_version` 으로 다시 실행하면 **그 파일만 덮어쓴다**(파티션 덮어쓰기 방식, DB·테이블 포맷 없음). 다른 버전 파일은 남고, 버킷 버저닝으로 이전 내용도 남는다.
+  Parquet 열: `review_id`(string), `aspect`(string), `score`(int32), `model_version`(string), `analyzed_at`(timestamp, UTC). 요약은 같은 폴더의 `_summary_scores_<model_version>.json`(`_` 로 시작해 Spark/Athena 가 데이터로 읽지 않음).
 - 비용: 만들어 두기만 하면 0. 실행 비용은 Job 시간만큼: ml.g4dn.xlarge 시간당 약 0.994 USD, 1,000건 약 27분 ≒ 0.46 USD/회(개인 계정 실측). 유휴 비용 없음.
 - 출력: `role_arn`, `role_name`, `security_group_id`, `config_parameter_name`, `image_uri`, `launcher_policy_arn`.
 
@@ -74,7 +80,7 @@ Job 은 Terraform 이 아니라 API 호출로 만든다. 정식 하루 1회 실�
 2. `CreateProcessingJob` 으로 Job `review-score-<날짜-시각>` 을 요청한다.
 3. SageMaker 가 GPU 인스턴스를 띄우고 S3 의 모델(`review-score/model/2.4b_score_s2c/`)·코드(`review-score/code/score_batch.py`)·입력 파일을 내려받는다.
 4. 컨테이너에서 `pip install transformers==4.53.3 accelerate` 후 `score_batch.py` 를 실행한다.
-5. 끝나면 결과를 `silver/review-score/output/<Job 이름>/` 에 올리고 인스턴스가 사라진다(실행 시간만큼만 과금).
+5. 끝나면 결과를 `silver/review_aspect_scores/year=/month=/day=/` 에, 오류를 `..._error/` 같은 날짜 경로에 올리고 인스턴스가 사라진다(실행 시간만큼만 과금).
 
 ### 사전 조건 (모두 확인 후 실행)
 
@@ -85,7 +91,7 @@ Job 은 Terraform 이 아니라 API 호출로 만든다. 정식 하루 1회 실�
 | 모델·코드가 S3 에 있음 | `upload_model.py`(모델), `aws s3 cp deploy/score_batch.py s3://<버킷>/review-score/code/score_batch.py`(코드) |
 | GPU 쿼터 1 이상 | 위 "GPU 할당량 확인". 0 이면 Job 이 `ResourceLimitExceeded` 로 시작하지 못한다 |
 | 권한 | `launcher_policy_arn` 과 같은 권한: Job 생성/조회/중지(`review-score-*`), 실행 역할 `iam:PassRole`, SSM 읽기 |
-| 입력 파일 | `score_batch.py` 는 **파일 하나**(CSV `review_id,text` 또는 JSONL)만 읽는다. S3 키로 지정 |
+| 입력 파일 | `score_batch.py` 는 **파일 하나**(Silver 리뷰 `part-00000.jsonl` 등, `review_id`·`text` 필드)만 읽는다. S3 키로 지정 |
 | 환경 | Python 3 + `boto3` (GPU/torch 불필요) |
 
 ```powershell
@@ -93,7 +99,7 @@ Job 은 Terraform 이 아니라 API 호출로 만든다. 정식 하루 1회 실�
 aws ssm get-parameter --name /clothes-query/dev/sagemaker-review-score/config --region ap-northeast-1 --query "Parameter.Value" --output text
 
 # 입력 파일 존재 확인
-aws s3 ls s3://<버킷>/bronze/reviews/year=2026/month=10/day=20/
+aws s3 ls s3://<버킷>/silver/reviews/scopes/ --recursive | findstr part-00000   # Silver 리뷰 파일 키 찾기
 ```
 
 ### 실행
@@ -102,10 +108,10 @@ aws s3 ls s3://<버킷>/bronze/reviews/year=2026/month=10/day=20/
 cd review-analysis
 
 # 1) 요청 내용만 출력 (Job 을 만들지 않음, 과금 없음). 역할·이미지·입력/출력 경로·서브넷이 맞는지 본다
-python deploy/run_processing_job.py --input-key bronze/reviews/year=2026/month=10/day=20/part-00000.jsonl --dry-run
+python deploy/run_processing_job.py --input-key silver/reviews/scopes/<시작일>_<종료일>/year=2026/month=10/day=20/part-00000.jsonl --dry-run
 
 # 2) 실제 실행 (여기서부터 과금). --wait 면 30초마다 상태를 출력하고 끝나면 실행 시간을 알려 준다
-python deploy/run_processing_job.py --input-key bronze/reviews/year=2026/month=10/day=20/part-00000.jsonl --wait
+python deploy/run_processing_job.py --input-key silver/reviews/scopes/<시작일>_<종료일>/year=2026/month=10/day=20/part-00000.jsonl --wait
 ```
 
 | 옵션 | 설명 |
@@ -132,12 +138,13 @@ aws sagemaker stop-processing-job --processing-job-name <Job 이름> --region ap
 ### 결과 확인
 
 ```bash
-aws s3 ls s3://<버킷>/silver/review-score/output/<Job 이름>/
-aws s3 cp s3://<버킷>/silver/review-score/output/<Job 이름>/scores.csv .
+aws s3 ls s3://<버킷>/silver/review_aspect_scores/year=2026/month=10/day=20/
+aws s3 cp s3://<버킷>/silver/review_aspect_scores/year=2026/month=10/day=20/scores_2.4b_score_s2c.parquet .
+# 내용 확인(로컬): python -c "import pyarrow.parquet as pq; print(pq.read_table('scores_2.4b_score_s2c.parquet').to_pandas().head())"  (pandas 필요) 또는 pq.read_table(...).to_pylist()[:5]
 ```
 
-- `scores.csv` 는 `review_id,aspect,score`(속성별 한 행, 점수 -2~2)이고 `scores.csv.summary.json` 에 건수와 실패 목록이 있다.
-- 오류 파일(`silver/review-score/error/`)은 아직 자동으로 만들어지지 않는다(열린 질문 참고). 실패 건은 summary.json 과 로그에서 본다.
+- `scores_<model_version>.parquet` 는 `review_id,aspect,score,model_version,analyzed_at`(속성별 한 행, 점수 -2~2)이고 `_summary_scores_<model_version>.json` 에 건수와 실패 목록이 있다(같은 폴더, `_` 로 시작해 데이터로 읽히지 않는다). 컨테이너는 시작 때 `pip install pyarrow` 를 한다.
+- 파싱에 실패한 후기는 `silver/review_aspect_scores_error/year=/month=/day=/errors_<model_version>.jsonl` 에 쓴다(실패가 없어도 빈 파일을 써서 이전 실행 결과를 지운다).
 
 ### 자주 나는 문제
 
@@ -154,7 +161,7 @@ aws s3 cp s3://<버킷>/silver/review-score/output/<Job 이름>/scores.csv .
 ## 열린 질문 (결정 필요)
 
 1. **입력 모으기**: 입력이 `year=/month=/day=` 파티션 여러 파일이고 `score_batch.py` 는 파일 하나만 읽는다. Airflow 태스크가 날짜를 정해 입력 prefix 를 넘기고, `score_batch.py` 가 prefix 의 JSONL 여러 개를 읽도록 바꿔야 한다(`review-analysis` 영역, 별도 PR).
-2. **error 경로 철자**: 요청에 `review-sorce/error` 로 적혀 있어 오타로 보고 `review-score/error` 로 만들었다.
+2. **재점수화 정책**: 같은 날짜를 다른 `model_version` 으로 다시 점수화하면 파일이 따로 쌓인다. 소비 쪽(Gold)이 어느 버전을 쓸지 정해야 한다.
 3. **GPU 쿼터**: 위 명령으로 확인 필요(자격증명에 조회 권한이 없어 확인하지 못함).
 4. **로그 그룹**: Job 로그는 계정 공용 `/aws/sagemaker/ProcessingJobs`(보존 기간 무기한)에 쌓인다. Terraform 으로 만들지 않았다.
 

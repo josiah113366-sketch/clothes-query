@@ -66,9 +66,10 @@ resource "aws_iam_role" "processing" {
 }
 
 # S3: 읽기/쓰기를 prefix 단위로 나눈다.
-#   - 리뷰 입력(bronze/reviews/*)  : 읽기만. reviews_truth/, ground_truth/, gold_b/ 는 prefix 가 달라 접근할 수 없다.
+#   - 리뷰 입력(silver/reviews/*)  : 읽기만. Silver 리뷰(KST 작성일 파티션)를 읽는다. Bronze·reviews_truth/·ground_truth/·gold_b/ 는 prefix 가 달라 접근할 수 없다.
+#     (같은 scope 폴더 안의 격리 레코드·품질 결과 파일도 이 prefix 아래라 읽을 수 있다. 읽기 전용이다.)
 #   - 모델·코드(<work>/model, code): 읽기만.
-#   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 덮어쓰기 대신 새 파일(실행별 하위 경로)로 쓰는 것을 스크립트 규칙으로 둔다.
+#   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 결과는 <output_prefix>/year=/month=/day=/scores_<model_version>.parquet 로, 같은 날짜·같은 model_version 재실행은 그 파일만 덮어쓴다(S3 버저닝으로 이전 버전은 남는다).
 data "aws_iam_policy_document" "processing_s3" {
   statement {
     sid     = "ReadReviewsModelCode"
@@ -246,7 +247,7 @@ resource "aws_iam_policy" "launcher" {
 # ------------------------------------------------------------------ 스크립트용 설정 묶음
 # run_processing_job.py 가 Terraform 을 몰라도 되게 이 값 하나만 읽는다(ecs-review-simulator 와 같은 방식).
 # 버킷 이름·계정 ID 가 들어 있어 저장소에는 두지 않고 SSM 에만 둔다.
-# 스크립트가 읽어서 쓸 것: role_arn, image_uri, instance_type, volume_size_gb, max_runtime_seconds, job_name_prefix,
+# 스크립트가 읽어서 쓸 것: model_version, role_arn, image_uri, instance_type, volume_size_gb, max_runtime_seconds, job_name_prefix,
 #   s3 경로 4개, network(use_vpc=true 일 때만 값이 있음), tags(Job 의 Tags 에 그대로 넣기, 비용 추적용 Component).
 resource "aws_ssm_parameter" "config" {
   name        = var.config_parameter_name
@@ -262,6 +263,7 @@ resource "aws_ssm_parameter" "config" {
     job_name_prefix     = var.job_name_prefix
     bucket              = var.bucket_name
     review_input_root   = "s3://${var.bucket_name}/${var.review_input_prefix}"
+    model_version       = var.model_version
     model_prefix        = "s3://${var.bucket_name}/${var.work_prefix}/model/"
     code_prefix         = "s3://${var.bucket_name}/${var.work_prefix}/code/"
     output_prefix       = "s3://${var.bucket_name}/${var.output_prefix}/"
