@@ -50,6 +50,8 @@ EKS 개인 파일 예시:
 
 2026-10-22 후속 dashboard-access는 eks/storage state 이후 독립 key를 사용하는 승인 화면 권한 스택이다. namespace/ServiceAccount·workgroup·결과 경로·스캔 상한도 공유 auto 파일에서 관리한다. 실제 인증 Secret은 별도 승인/비공개 공급 대상이다. gold-b-access의 investigation_bedrock_profiles는 모델 담당자 확정 전 빈 map을 유지한다.
 
+`gold-b-catalog`는 기존 storage state만 읽는 독립 Glue DB 스택이다. 기존 버킷 이름을 state에서 받아 DB location을 지정하며 backend key는 clothes-query/dev/gold-b-catalog/terraform.tfstate다. 사용자 요청에 따라 database.sql 대신 Terraform으로 DB를 관리하고 표 DDL은 Athena에서 별도로 등록한다.
+
 현재 공유 설정은 network/eks/rds/storage/ecr/compute/workload-access/team-access/gold-b-access/agent-development-access/operations-alerts에 준비했다. apps는 기존 backend 위치만 공유한다. Gold B·조사 쓰기·Airflow·개발 접근 소스는 #40·#50·#41·#49로 main에 반영됐다. `operations-alerts` 소스는 여전히 별도 보류 브랜치에 있고 설정 파일만으로 미반영 모듈이 생기지는 않는다.
 
 `operations-alerts`는 계속 미적용 보류다. `athena-query-base`는 Gold B로 대체된 과거 후보라 이번 전환에서 제외했고 함께 apply하지 않는다. SageMaker·ECS 등 팀원 스택의 이 PC에 없는 배포 입력을 추정해 만들지 않는다. Helm `runtime.local.yaml`은 이번 Terraform 변수 분리 범위에 포함하지 않는다.
