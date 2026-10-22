@@ -24,6 +24,8 @@
 
 ## 작업 결과
 
+최신 업무 연결 준비: 동료가 제공한 Bronze 주문/주문상품/결제 JSON Lines 경로와 Silver·Gold A run/manifest 공개 계약을 전달 명세에 반영했다. prepare_trade_access.py는 읽기/쓰기 경로 계획을 로컬로 출력하고, namespace·계정·실행 요청 JSON prefix가 있어야 기존 workload-access 입력에 Driver/Executor 권한을 병합하는 검토 파일을 만든다. 기존 binding 보존과 충돌/경로 확장/보호 경로 거부를 검사했다. 현재 20개 로컬 검사를 통과했다. 삭제·multipart 정리·Glue 권한과 영구 ECR/업무 이미지·DAG는 아직 적용하지 않았다. 전달 문안을 handoff/message-to-pipelines.md에 작성했다. AWS 리소스 생성·권한 변경·이미지 push·업무 데이터 읽기/쓰기는 이번 작업에서 하지 않았다.
+
 최신 후속 결과: 사용자가 권한 수정 후 재시험을 요청했다. Spark 4.2 NetworkPolicy 권한의 실제 API 검사를 통과했고 EKS t3a.large 한 대에서 Driver 실행·합성 계산·Executor 1→2→1개 증감이 성공했다. 표본 합산 최대는 CPU 약 1.40 vCPU·메모리 약 1.64GiB였고 업무 성능 보장은 아니다. 임시 namespace·노드풀·ECR을 정리하고 EC2 terminated와 기존 노드 2대 유지까지 확인했다. 후속 시험 종료 시각은 2026-10-22 16:35 KST다. 10분 자동 축소를 기다린 검증은 아니다.
 
 추가 결정 없이 진행한 로컬 준비: runtime.py에 namespace·이름 접두사·노드풀 입력을 추가하되 기본값을 유지했다. 계정·RBAC·설정·제출 Job 참조가 함께 바뀌는지와 잘못된 이름 거부를 검증했고 현재 검사 14개가 통과했다. Silver·Gold A 전달 명세와 적용 순서/로그 확인 계약을 준비했으며 namespace 공유·계정 이름·S3 prefix·영구 ECR·DAG 공급 방식은 확정하지 않았다. 로컬 기본 이미지의 Python 3.10.12를 확인했다. 이 추가 준비에서는 AWS/Kubernetes 변경·업무 DAG 작성·이미지 push·새 노드 생성은 하지 않았다.

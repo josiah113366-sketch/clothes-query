@@ -13,25 +13,27 @@ pending:
   namespace: null
   namespace_shared_with_gold_b: null
   service_account_prefix: null
-  python_version_requirement: null
+  python_version_requirement: match_provided_base_image
   business_image_digest: null
   ecr_repository: null
-  code_and_rules_delivery: null
+  code_and_rules_delivery: same_business_image_for_driver_and_executors
+  config_request_prefix_uri: null
+  config_request_uri: null
   dag_repository_path: null
   dag_delivery_method: null
   inputs:
-    orders: {uri: null, format: null}
-    order_items: {uri: null, format: null}
-    payments: {uri: null, format: null}
-  input_date_partition_rule: null
+    orders: {uri: 's3://clothes-query-datalake/bronze/orders/', format: json_lines}
+    order_items: {uri: 's3://clothes-query-datalake/bronze/order-items/', format: json_lines}
+    payments: {uri: 's3://clothes-query-datalake/bronze/payments/', format: json_lines}
+  input_date_partition_rule: UTC_Kafka_record_date_folders__KST_business_date_aggregation
   outputs:
-    silver_uri: null
-    gold_a_uri: null
+    silver_uri: 's3://clothes-query-datalake/silver/runtime/trade/'
+    gold_a_uri: 's3://clothes-query-datalake/gold_a/runtime/trade/'
     run_records_uri: null
     temporary_uri: null
-  write_mode_and_rerun_rule: null
+  write_mode_and_rerun_rule: immutable_run_outputs__publish_only_after_completion__keep_previous_on_failure
   delete_prefixes: null
-  glue_access_required: null
+  glue_access_required: true
   glue_databases_and_operations: null
   silver_entry_file: null
   silver_arguments: null
@@ -41,6 +43,19 @@ pending:
   test_date_range: null
   test_data_size_estimate: null
   expected_result: null
+
+supplied_contract:
+  bucket: clothes-query-datalake
+  input_partition_layout: year=YYYY/month=MM/day=DD/
+  entry_file_proposal: local:///opt/pipelines/pipelines/spark_batch.py
+  entry_implemented: false
+  argument_proposal: ['--config-uri', '<fixed-request-json-uri>']
+  run_request_fields: [run_id, job, inputs, output_root, input_complete, scope]
+  run_records: manifest.json_and_completed_run_id_json_and_current_json_under_each_output_root
+  publication_guard: incomplete_Silver_quality_blocks_Gold_A_publication
+  product_snapshot_uri: null
+  s3_committer: null
+  permanent_successful_run_deletion: false
 
 colleague_proposal:
   first_run: manual

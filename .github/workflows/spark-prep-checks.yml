@@ -36,3 +36,4 @@ jobs:
           python infra/platform/spark/runtime.py --output .cache/spark-dedicated.yaml
           python infra/platform/spark/runtime.py --placement shared-memory --output .cache/spark-shared.yaml
           python infra/platform/spark/runtime.py --namespace example-jobs --name-prefix example-work --node-pool example-spark-pool --output .cache/spark-custom.yaml
+          python infra/platform/spark/prepare_trade_access.py --plan-output .cache/silver-gold-a-access-plan.json
