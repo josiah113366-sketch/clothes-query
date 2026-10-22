@@ -1,6 +1,6 @@
 # eks module
 
-개발 비용 절감을 위해 EKS 관리 로그 중 audit는 수집하지 않는다. api/authenticator/controllerManager/scheduler는 유지하고 로그 그룹은 30일 보관한다. 감사 로그 중단 이후 Kubernetes 작업의 중앙 감사 기록은 남지 않는다. [적용 기록](../../../docs/tasks/infra-eks-audit-cost.md).
+사용자 요청으로 audit 수집 중단을 취소하고 EKS 관리 로그 5종(api/audit/authenticator/controllerManager/scheduler)을 다시 수집한다. 로그 그룹은 기존 30일 보관을 유지한다. 중단 기간의 감사 로그가 소급 복구되지는 않는다. [복구 기록](../../../docs/tasks/infra-eks-audit-restore.md), [이전 중단 기록](../../../docs/tasks/infra-eks-audit-cost.md).
 
 전용 관리자 역할을 생성하고 `admin_trusted_principal_arns`의 사용자/역할만 assume하도록 준비한다. 선택 `admin_role_arns`는 별도 기존 관리자 역할용이다. `admin_role_arn` 출력은 compute/apps의 Kubernetes 인증에 사용한다. 현재 사용자·현재 PC부터 시작하며 팀원 추가 절차는 [접속 준비](../../EKS_ACCESS.md)를 따른다.
 
