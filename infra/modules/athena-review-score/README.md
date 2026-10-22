@@ -1,7 +1,7 @@
 # athena-review-score module (초안)
 
-리뷰 점수 결과를 Iceberg 테이블에 MERGE 로 반영하기 위한 Athena/Glue 기반: Glue 데이터베이스, Athena 워크그룹, Airflow 가 붙일 IAM 정책(`athena_runner`), 스크립트용 SSM 설정.
-Iceberg 테이블·staging 외부 테이블은 Terraform 이 아니라 Athena DDL(`stacks/athena-review-score/sql/`)로 만든다. 각 리소스 설명은 `main.tf` 주석.
+리뷰 점수 결과를 Iceberg 테이블에 MERGE 로 반영하기 위한 Athena/Glue 기반: Glue 데이터베이스, Iceberg 테이블·staging 외부 테이블, Athena 워크그룹, Airflow 가 붙일 IAM 정책(`athena_runner`), 스크립트용 SSM 설정.
+각 리소스 설명은 `main.tf` 주석.
 호출 스택: [stacks/athena-review-score](../../stacks/athena-review-score/README.md).
 
 | 입력 | 설명 |

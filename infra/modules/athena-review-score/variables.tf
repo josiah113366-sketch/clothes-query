@@ -65,13 +65,13 @@ variable "database_name" {
 }
 
 variable "table_name" {
-  description = "Iceberg 테이블 이름. 테이블은 Terraform 이 아니라 sql/create_table.sql(Athena DDL)로 만든다."
+  description = "Iceberg 테이블 이름. Terraform(Glue 테이블 리소스)이 만든다."
   type        = string
   default     = "review_aspect_scores"
 }
 
 variable "staging_table_name" {
-  description = "staging Parquet 을 읽는 Hive 외부 테이블 이름(sql/create_staging_table.sql)."
+  description = "staging Parquet 을 읽는 Hive 외부 테이블 이름. Terraform 이 만든다."
   type        = string
   default     = "staging_review_aspect_scores"
 }
