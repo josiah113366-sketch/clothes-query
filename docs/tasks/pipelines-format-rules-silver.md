@@ -1,4 +1,4 @@
-상태: 완료 · 브랜치: `pipelines/format-rules-silver` · PR 준비
+상태: 완료 · 브랜치: `pipelines/format-rules-silver` · main 대상 PR 제출
 
 # Silver 회원·클릭 공통 입력 검사 연결
 
@@ -9,7 +9,7 @@
 - 오류의 field/code/rule_id를 기존 격리 기록에 연결하고 실행 시 읽은 규칙 버전·SHA-256·경로를 품질 결과와 manifest에 남긴다. CLI --rules-path로 동일한 규칙 파일을 지정할 수 있게 한다.
 - 기존 테스트 파일의 정상 입력을 UUID·상품 키 형식에 맞추고 입력 오류·재실행·이전 공개 결과 보호를 확인한다. 새 테스트 파일은 만들지 않는다.
 - 공통 YAML·Gold B 코드·거래 실패 코드 정책·Gold A 코드는 수정하지 않는다. 미등록 코드 수용은 담당자의 후속 공통 규약 변경을 받은 뒤 별도 작업으로 적용한다.
-- 회원·클릭 검사 버전은 members.v2·clicks.v2로 구분한다. push·PR 생성·머지는 별도 승인 전까지 하지 않는다.
+- 회원·클릭 검사 버전은 members.v2·clicks.v2로 구분한다. 사용자가 수정 완료 후 push·PR 생성을 승인했다. 머지는 별도 승인 전까지 하지 않는다.
 
 ## 완료 확인
 
@@ -26,3 +26,4 @@
 - 공통 YAML·지문 함수·Gold B·거래 실행 코드·Gold A는 변경하지 않았다. 사용자 결정으로 미등록 실패 코드는 0.2.0의 INVALID_VALUE 격리를 유지하며 수용·품질 경고 확장안은 보류한다. Gold B 샘플의 기대값 정리는 담당자 범위이며 이 PR에 섞지 않는다.
 - Gold A는 별도 브랜치에서 0.2.0 main과 동기화하고, 시험 상품 키를 10자리·클릭 이벤트 키를 UUID로 맞췄다. 두 PR 파일을 임시 복사본에서 함께 검증해 전체 pipelines 106개 통과·1개 건너뜀(14.15초)을 확인했다. Gold A와 Silver 브랜치는 서로 병합하지 않았다.
 - 사용자가 요청한 이름 순서에 따라 pipelines/silver-format-rules를 pipelines/format-rules-silver로 바꾸고 작업 지시서와 대장도 맞췄다. 규칙은 0.2.0 그대로이며 이번 변경이 0.3.0 정책을 포함하지 않는 것을 확인했다.
+- 제출 전 Silver README의 미연결 설명과 이전 코드 버전을 현재 코드에 맞췄다. 재검증: Silver·공통 검사기·Gold B 시험 88개 통과·1개 건너뜀(4.31초, pyarrow 미설치), 변경 Python 코드 Ruff 및 git diff --check 통과. 운영 S3·Airflow 실행은 검증하지 않았다.
