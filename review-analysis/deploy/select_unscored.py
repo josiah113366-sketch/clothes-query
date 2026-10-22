@@ -109,7 +109,13 @@ def output_key(unscored_prefix, day, stamp):
 
 def select_unscored(s3, athena, bucket, input_key, unscored_prefix, athena_cfg, model_version_no, date=None, dry_run=False, now=None):
     """미점수 후기만 골라 새 입력 파일을 쓰고 결과 dict 를 돌려준다. 0건이면 output_key 는 None."""
-    text = s3.get_object(Bucket=bucket, Key=input_key)['Body'].read().decode('utf-8-sig')
+    try:
+        text = s3.get_object(Bucket=bucket, Key=input_key)['Body'].read().decode('utf-8-sig')
+    except Exception as e:   # 입력 파일이 없으면 트레이스백 대신 알기 쉬운 메시지와 0 이 아닌 종료 코드로 끝낸다
+        code = getattr(e, 'response', {}).get('Error', {}).get('Code') if hasattr(e, 'response') else None
+        if code in ('NoSuchKey', '404'):
+            raise SystemExit(f'입력 파일이 없습니다: s3://{bucket}/{input_key}')
+        raise
     rows = read_jsonl_lines(text)
     sql = log_query(athena_cfg['database'], athena_cfg['log_table'], model_version_no, rows)
     scored = run_athena_ids(athena, athena_cfg['workgroup'], sql)
