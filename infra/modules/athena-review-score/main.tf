@@ -51,10 +51,10 @@ resource "aws_glue_catalog_database" "this" {
 # Glue API 로 Iceberg 테이블을 만든다. 데이터·메타데이터는 table_location(S3) 아래에 Iceberg 가 관리한다.
 # 스키마 필드 id 는 Iceberg 가 열을 식별하는 번호다(이름을 바꿔도 같은 열로 취급). 한 번 정하면 바꾸지 않는다.
 # 파티션: review_date(후기 작성일, KST) 그대로(identity). 실행한 날이 아니다.
+# 주의: description 을 넣지 않는다. Glue 가 Iceberg 테이블 생성 시 description 을 저장하지 않아 plan 에 매번 diff 가 생긴다(첫 apply 로 확인).
 resource "aws_glue_catalog_table" "scores" {
   name          = var.table_name
   database_name = aws_glue_catalog_database.this.name
-  description   = "review aspect scores (Iceberg). partitioned by review_date (KST)"
 
   open_table_format_input {
     iceberg_input {

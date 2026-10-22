@@ -5,17 +5,17 @@ variable "aws_region" {
 }
 
 variable "expected_account_id" {
-  description = "TF_VAR_expected_account_id 로 비공개로 넘긴다. 잘못된 AWS 계정 사용을 막는다."
+  description = "공유 배포 설정 deployment.auto.tfvars.json 의 값(자동 로드). 잘못된 AWS 계정 사용을 막는다."
   type        = string
   sensitive   = true
   validation {
     condition     = can(regex("^[0-9]{12}$", var.expected_account_id))
-    error_message = "승인된 팀 AWS 계정 ID(12자리)를 비공개로 넘겨야 한다."
+    error_message = "승인된 팀 AWS 계정 ID(12자리)가 필요하다. deployment.auto.tfvars.json 을 확인한다."
   }
 }
 
 variable "state_bucket" {
-  description = "팀 state 버킷(deployment.backend.hcl 의 bucket 과 같은 값). storage output 을 읽는 데 쓴다. 비공개 tfvars 에만 둔다."
+  description = "팀 state 버킷(deployment.backend.hcl 의 bucket 과 같은 값). storage output 을 읽는 데 쓴다. 공유 배포 설정 deployment.auto.tfvars.json 에 있다."
   type        = string
   sensitive   = true
 }

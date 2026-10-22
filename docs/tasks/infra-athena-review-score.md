@@ -25,7 +25,7 @@
 ## 시작 전 확인 (Claude가 한다)
 
 - 브랜치가 최신 `main` 에서 만들어졌는지, `sagemaker-review-score` 변경이 main 에 반영됐는지
-- 팀 계정 자격증명이 있고 `TF_VAR_expected_account_id` 와 state 버킷이 같은 계정인지
+- 팀 계정 자격증명이 있고 공유 설정 `deployment.auto.tfvars.json` 의 `expected_account_id` 와 state 버킷이 같은 계정인지
 - storage 스택이 apply 되어 있는지(output `bucket_name`, `bucket_arn` 필요)
 - Athena 엔진 v3, Iceberg `MERGE`/`OPTIMIZE`/`VACUUM` 문법이 도쿄 리전에서 지원되는지(공식 문서 확인)
 
@@ -37,7 +37,7 @@
 - 스크립트용 SSM 설정 파라미터(워크그룹, DB, 테이블, S3 위치)
 
 ### 2. 스택 `infra/stacks/athena-review-score/`
-- backend key `clothes-query/dev/athena-review-score/terraform.tfstate`, 비공개 값은 gitignore 된 `deployment.*` 파일에만
+- backend key `clothes-query/dev/athena-review-score/terraform.tfstate`, 계정 ID·state 버킷은 추적되는 `deployment.auto.tfvars.json`·`deployment.backend.hcl`(공통 배포 설정 규칙, `infra/DEPLOYMENT_CONFIG.md`), 개인 값은 `deployment.local.tfvars.json`(Git 제외)
 - 이름 접두사 `clothes-query-dev-athena-review-score`, 태그 `Component=athena-review-score`, storage 스택을 remote state 로 읽음
 - README 와 `sql/` 템플릿: `merge.sql`, `optimize.sql`, `vacuum.sql`, `read_latest.sql`
 - `infra/README.md` 스택 표 한 줄
@@ -67,7 +67,7 @@
 - [x] `terraform init -backend=false` 후 `terraform validate`
 - [x] `terraform plan` → 첫 plan 은 6 create, 0 change, 0 destroy (초안 작성 시점)
 - [ ] apply 후 `terraform plan` 이 변경 없음
-- [ ] apply 후 SSM 파라미터 JSON 에 `workgroup`·`database`·`table_location`·`staging_location` 이 있고, 계정 ID·버킷 이름이 저장소 파일에는 없음 (`git grep`)
+- [ ] apply 후 SSM 파라미터 JSON 에 `workgroup`·`database`·`table_location`·`staging_location` 이 있고, 계정 ID·버킷 이름이 공유 설정 파일(`deployment.*`) 밖의 코드·문서에는 하드코딩돼 있지 않음 (`git grep`)
 - [ ] apply 로 만들어진 Iceberg 테이블·staging 테이블을 Athena 가 읽음(`SELECT`), 이후 plan 에 변경 없음(`ignore_changes` 동작 확인)
 - [ ] 샘플 staging 1일치로 `merge.sql` 2회 실행 → 두 번째는 행 수가 늘지 않음(멱등), `score` 변경 시 갱신됨
 - [ ] 같은 날짜를 다른 `model_version` 으로 반영 → 행이 따로 쌓임

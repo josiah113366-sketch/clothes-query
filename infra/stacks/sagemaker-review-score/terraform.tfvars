@@ -1,4 +1,4 @@
-# 팀이 같이 보는 비밀 아닌 값. 계정 ID·state 버킷·이메일은 deployment.local.tfvars(Git 제외)에 둔다.
+# 팀이 같이 보는 기본값. 계정 ID·state 버킷은 deployment.auto.tfvars.json(공유, 추적), 개인 값은 deployment.local.tfvars.json(Git 제외)에 둔다.
 use_vpc             = true
 review_input_prefix = "silver/reviews"
 work_prefix         = "review-score"

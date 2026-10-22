@@ -19,21 +19,21 @@ Airflow(silver DAG 종료) → SageMaker Job → S3 staging(Parquet, year=/month
 
 그림: 세션에서 공유한 `iceberg-flow.svg` 참고(저장소 미포함).
 
-## 실행 (Terraform)
+## 실행
 
-비공개 입력은 Git 제외 파일에만 둔다 (`deployment.backend.hcl`, `deployment.local.tfvars`).
+공통 배포값(계정 ID, state 버킷)은 추적되는 `deployment.auto.tfvars.json`(자동 로드)과 `deployment.backend.hcl` 에 있다([DEPLOYMENT_CONFIG.md](../../DEPLOYMENT_CONFIG.md)).
+이 스택은 개인 입력이 없다. 개인 값이 필요해지면 `deployment.local.tfvars.json`(Git 제외)에 JSON 으로 두고 plan 에 `-var-file` 로 지정한다.
 
 ```powershell
 cd infra/stacks/athena-review-score
-# 비공개 파일 2개 (커밋 안 됨): deployment.backend.hcl (bucket, region), deployment.local.tfvars (terraform.tfvars.example 복사)
-$env:TF_VAR_expected_account_id = "<계정 ID>"
+# AWS CLI 에 본인 계정(팀 계정)을 설정한 뒤
 
 terraform init -backend=false -lockfile=readonly   # 정적 검사
 terraform fmt -check
 terraform validate
 
 terraform init -backend-config=deployment.backend.hcl -lockfile=readonly
-terraform plan -input=false -var-file=deployment.local.tfvars -out=athena-review-score.tfplan
+terraform plan -input=false -out=athena-review-score.tfplan
 terraform apply athena-review-score.tfplan      # plan 을 확인한 담당자가 실행
 ```
 

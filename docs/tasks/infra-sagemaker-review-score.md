@@ -12,7 +12,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 
 - 루트 `CLAUDE.md`, `infra/CLAUDE.md`, `review-analysis/CLAUDE.md`
 - `review-analysis/deploy/README.md`, `run_processing_job.py`, `score_batch.py`
-- `infra/stacks/ecs-review-simulator/README.md` (같은 방식의 선행 스택: 비공개 입력, remote state, SSM 설정)
+- `infra/stacks/ecs-review-simulator/README.md` (같은 방식의 선행 스택: remote state, SSM 설정)
 - `infra/stacks/network/`, `infra/stacks/storage/` (output 을 remote state 로 받는다)
 
 ## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
@@ -27,7 +27,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 ## 시작 전 확인 (Claude가 한다)
 
 - 브랜치가 `infra/sagemaker-review-score` 이고 최신 `main` 을 반영했는지 (apply 직전에 다시 확인)
-- 팀 계정 자격증명이 있고 `TF_VAR_expected_account_id` 가 그 계정인지, state 버킷이 같은 계정 것인지
+- 팀 계정 자격증명이 있고 공유 설정 `deployment.auto.tfvars.json` 의 `expected_account_id` 가 그 계정인지, state 버킷이 같은 계정 것인지
 - network·storage 스택이 이미 apply 되어 있는지 (output 이 있어야 plan 이 된다)
 - `ml.g4dn.xlarge for processing job usage` 쿼터가 1 이상인지 (스택 README 의 명령)
 
@@ -39,7 +39,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - 보안 그룹(나가는 443 만, `use_vpc=true`), SSM 설정 파라미터(JSON), launcher IAM 정책(Job 생성/조회/중지·PassRole·SSM 읽기)
 
 ### 2. 스택 `infra/stacks/sagemaker-review-score/`
-- backend key `clothes-query/dev/sagemaker-review-score/terraform.tfstate`, 비공개 값은 gitignore 된 `deployment.backend.hcl`·`deployment.local.tfvars`
+- backend key `clothes-query/dev/sagemaker-review-score/terraform.tfstate`, 계정 ID·state 버킷은 추적되는 `deployment.auto.tfvars.json`·`deployment.backend.hcl`(2026-10-22 공통 배포 설정 규칙, `infra/DEPLOYMENT_CONFIG.md`), 개인 값은 `deployment.local.tfvars.json`(Git 제외)
 - 이름 접두사 `clothes-query-dev-sagemaker-review-score`, 태그 `Component=sagemaker-review-score`
 - README 와 `infra/README.md` 스택 표
 
@@ -67,7 +67,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - [x] `terraform plan` → 첫 plan 은 9 create, 0 change, 0 destroy
 - [x] GPU 쿼터 조회 명령 실행 결과가 1 이상 (또는 증설 승인) ← 2026-10-21 강사님께 증설 요청하여 확인
 - [x] apply 후 `terraform plan` 이 변경 없음
-- [x] apply 후 SSM 파라미터 JSON 에 `role_arn`·`network`·`output_prefix`·`error_prefix` 가 있고, 계정 ID·버킷 이름이 저장소 파일에는 없음 (`git grep`)
+- [x] apply 후 SSM 파라미터 JSON 에 `role_arn`·`network`·`output_prefix`·`error_prefix` 가 있고, 계정 ID·버킷 이름이 공유 설정 파일(`deployment.*`) 밖의 코드·문서에는 하드코딩돼 있지 않음 (`git grep`)
 - [x] (후속 PR 이후) 100건 입력으로 Job 1회 실행 → `silver/review_aspect_scores/` 날짜 파티션에 Parquet, 실패 건은 `silver/review_aspect_scores_error/` 에 기록
 
 ## README 갱신
