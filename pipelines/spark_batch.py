@@ -15,7 +15,7 @@ from pyspark.sql import functions as F
 
 from pipelines.format_rules import DEFAULT_RULES, FormatError, FormatRules
 from pipelines.payment_fingerprint import FingerprintError
-from pipelines.silver import products, transactions
+from pipelines.silver import clicks, products, transactions
 from pipelines.silver.common import (
     RowError,
     decode_record,
@@ -365,13 +365,16 @@ def execute(spark, config):
         from pipelines.gold_a.reviews import execute_reviews
 
         return execute_reviews(spark, config)
-    if not isinstance(config, dict) or set(config) - {"job", "run_id", "inputs", "output_root", "input_complete", "max_order_rows"}:
+    if not isinstance(config, dict) or set(config) - {"job", "run_id", "inputs", "output_root", "input_complete", "max_order_rows", "max_click_rows"}:
         raise ValueError("지원하지 않는 Spark 실행 설정 필드입니다")
-    if config.get("job") != "trade" or config.get("input_complete") is not True:
-        raise ValueError("첫 Spark 실행은 전체 이력·참조를 준비한 trade 작업입니다")
+    if config.get("job") not in {"trade", "funnels"} or config.get("input_complete") is not True:
+        raise ValueError("거래·퍼널 실행에는 전체 이력·참조 입력 준비 확인이 필요합니다")
+    job = config["job"]
     names = {"orders", "order_items", "payments", "designs", "variants"}
+    if job == "funnels":
+        names.add("clicks")
     if set(config.get("inputs", {})) != names:
-        raise ValueError("주문·주문상품·결제·상품 스냅샷 입력 다섯 개가 필요합니다")
+        raise ValueError("거래·상품 스냅샷 및 퍼널 작업의 클릭 입력을 확인하세요")
     output = config.get("output_root")
     if not isinstance(output, str) or not output.strip() or output.startswith("s3a://"):
         raise ValueError("출력은 s3:// URI 또는 로컬 경로로 지정하세요")
@@ -392,6 +395,8 @@ def execute(spark, config):
     configure_storage(spark, output)
     if type(config.get("max_order_rows", 10000)) is not int or not 1 <= config.get("max_order_rows", 10000) <= 100000:
         raise ValueError("주문당 행 한도는 1~100,000입니다")
+    if type(config.get("max_click_rows", 10000)) is not int or not 1 <= config.get("max_click_rows", 10000) <= 100000:
+        raise ValueError("클릭 ID당 행 한도는 1~100,000입니다")
     inputs, inventory = resolve_inputs(config["inputs"])
     raw = None
     for name in ("orders", "order_items", "payments"):
@@ -402,6 +407,7 @@ def execute(spark, config):
     base = output + "/silver/runtime/trade/runs/" + run_id
     tables["_cache"][-1].count()
     checked_at = datetime.now(timezone.utc).isoformat()
+    click_tables, click_manifest = None, None
     try:
         silver = save_tables(tables, base, run_id, checked_at)
         silver.update(status="INCOMPLETE" if tables["quarantined_records"].limit(1).count() else "PASS", inputs=inputs,
@@ -413,24 +419,74 @@ def execute(spark, config):
         channel = output + "/silver/runtime/trade"
         _write_json(channel + "/completed/" + run_id + ".json", silver)
         _write_json(channel + "/current.json", silver)
-        if silver["status"] != "PASS":
-            raise ValueError("Silver 품질 미완료: Parquet 검사 결과는 저장했고 Gold A는 갱신하지 않았습니다")
+        if job == "funnels":
+            click_tables = clicks.build_clicks_spark(spark, inputs["clicks"], max_key_rows=config.get("max_click_rows", 10000))
+            click_base = output + "/silver/runtime/clicks/runs/" + run_id
+            click_manifest = save_tables(click_tables, click_base, run_id, checked_at)
+            click_manifest.update(status="INCOMPLETE" if click_tables["quarantined_records"].limit(1).count() else "PASS",
+                                  input_objects=[item for item in inventory if item["dataset"] == "clicks"],
+                                  input_completeness="DECLARED_COMPLETE", check_version=clicks.CHECK_VERSION,
+                                  code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"))
+            verify_inputs(inventory)
+            _write_json(click_base + "/manifest.json", click_manifest)
+            channel = output + "/silver/runtime/clicks"
+            _write_json(channel + "/completed/" + run_id + ".json", click_manifest)
+            _write_json(channel + "/current.json", click_manifest)
         product_raw = read_source(spark, "product_design", [_spark_uri(p) for p in inputs["designs"]]).unionByName(
             read_source(spark, "product_variant", [_spark_uri(p) for p in inputs["variants"]]))
         catalog = build_catalog(product_raw)
         try:
-            gold_base = output + "/gold_a/runtime/trade/runs/" + run_id
+            gold_base = output + "/gold_a/runtime/" + job + "/runs/" + run_id
             product_manifest = save_tables(catalog, base + "/products", run_id, checked_at)
             product_manifest["status"] = "PASS"
             _write_json(base + "/products/manifest.json", product_manifest)
             stored = {name: spark.read.parquet(_spark_uri(path)) for name, path in silver["outputs"].items()}
             stored_catalog = {name: spark.read.parquet(_spark_uri(path)) for name, path in product_manifest["outputs"].items()}
-            gold_tables = build_sales(stored, stored_catalog)
+            from pipelines.gold_a import (
+                merge_spark_scopes,
+                plan_spark_holds,
+                previous_spark_gold,
+            )
+
+            names = (["funnel_session_product", "funnel_daily"] if job == "funnels" else
+                     ["order_sales_hourly", "product_sales_daily"])
+            channel = output + "/gold_a/runtime/" + job
+            previous = previous_spark_gold(channel)
+            stored_clicks = ({name: spark.read.parquet(_spark_uri(path)) for name, path in click_manifest["outputs"].items()}
+                             if click_manifest else None)
+            holds, affected, context, click_context, pairs, prior_tables = plan_spark_holds(stored, previous, names, stored_clicks)
+            entire_hold = any(not row["key"] for row in holds)
+            healthy = dict(stored)
+            for name in ("orders_current", "silver_order_items", "payment_attempts"):
+                if entire_hold:
+                    healthy[name] = stored[name].limit(0)
+                elif affected:
+                    healthy[name] = stored[name].filter(~F.col("order_id").isin(sorted(affected)))
+            if job == "funnels":
+                from pipelines.gold_a.funnels import build_funnels_spark
+
+                healthy_clicks = dict(stored_clicks)
+                if entire_hold:
+                    healthy_clicks["click_events"] = stored_clicks["click_events"].limit(0)
+                elif pairs:
+                    pair_frame = spark.createDataFrame(pairs, "session_id string, article_id string")
+                    healthy_clicks["click_events"] = stored_clicks["click_events"].join(pair_frame, ["session_id", "article_id"], "left_anti")
+                gold_tables = build_funnels_spark(healthy_clicks, healthy, stored_catalog, _scoped=bool(holds))
+            else:
+                gold_tables = build_sales(healthy, stored_catalog)
+            gold_tables = merge_spark_scopes(gold_tables, prior_tables, holds, previous)
             gold = save_tables(gold_tables, gold_base, run_id, checked_at)
-            gold.update(status="PASS", silver_manifest=base + "/manifest.json", products_manifest=base + "/products/manifest.json")
+            gold.update(status="PARTIAL" if holds else "PASS", silver_manifest=base + "/manifest.json",
+                        products_manifest=base + "/products/manifest.json", held_scopes=holds,
+                        held_context=context if holds else [], held_click_context=click_context if holds else [],
+                        published_at=datetime.now(timezone.utc).isoformat(), previous_run_id=(previous or {}).get("run_id"),
+                        check_version="gold-a.spark-scoped.v1")
+            if job == "funnels":
+                gold.update(silver_clicks_manifest=click_base + "/manifest.json",
+                            cohort_policy="first-view-kst; same-session-product; entire-supplied-history; no-cutoff")
             verify_inputs(inventory)
             _write_json(gold_base + "/manifest.json", gold)
-            channel = output + "/gold_a/runtime/trade"
+            channel = output + "/gold_a/runtime/" + job
             _write_json(channel + "/completed/" + run_id + ".json", gold)
             _write_json(channel + "/current.json", gold)
             return gold
@@ -438,12 +494,15 @@ def execute(spark, config):
             for cached in catalog["_cache"]:
                 cached.unpersist()
     finally:
+        if click_tables is not None:
+            for cached in click_tables["_cache"]:
+                cached.unpersist()
         for cached in tables["_cache"]:
             cached.unpersist()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Spark Silver → Gold A 거래·리뷰 집계")
+    parser = argparse.ArgumentParser(description="Spark Silver → Gold A 거래·리뷰·퍼널 집계")
     parser.add_argument("--config-uri", required=True)
     args = parser.parse_args()
     if args.config_uri.startswith("s3://"):
