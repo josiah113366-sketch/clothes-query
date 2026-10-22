@@ -47,6 +47,8 @@ kubectl -n airflow port-forward svc/airflow-api-server 8080:8080
 
 Kafka와 같은 단일 compute 노드를 공유하고 본체 병렬 작업 한도는 1이다. 이 설정은 고가용성이나 업무 5분 SLA를 보장하지 않는다. 실제 판정 이미지·Athena 쿼리·S3 쓰기 prefix가 확정되면 CPU/메모리/DB 연결과 전체 실행 시간을 다시 측정해야 한다. 조사 역할의 `ground_truth/` 차단과 별개로, 광범위한 IAM 그룹 권한이 있는 개발자 사용자의 권한을 제한했다고 주장하지 않는다.
 
-노드 교체 시 재배치를 위한 hostname 제거는 PR #74의 후속 수정으로 준비한다. Git과 로컬 values 수정만으로 실행 중인 Deployment가 바뀌지는 않는다. 실제 반영은 위 Helm 재배포가 필요하고 Recreate 전략상 잠시 중단될 수 있다. S3 task 로그·RDS 메타데이터·기존 인증 Secret은 그대로 사용한다. 장애 복구·노드 강제 종료 시험은 별도이며 이번 코드 수정에서 수행하지 않는다.
+2026-10-22 사용자 승인 후 hostname 제거를 실제 Helm revision 4에 반영했다. 배포 직전 작업 없음·DAG 일시정지를 재확인했고 본체 3개는 compute 노드풀만 선택하며 모두 Ready다. API health 200, 메타데이터 DB·scheduler·DAG processor healthy, DAG import 오류 0건, 기존 노드 2대 유지를 확인했다. S3 task 로그·RDS 메타데이터·인증·이미지는 기존 설정을 유지했다. 재배포는 Recreate라 잠시 중단됐으며 무중단 배포를 검증한 것은 아니다.
+
+설치 확인용 Pod의 hostname 제거 코드는 PR #74의 DAG 변경이 main에 머지된 뒤 Git bundle에 반영된다. 현재 등록된 설치 확인용 DAG는 paused로 유지하고 실행하지 않았다. 실제 노드를 강제 종료하는 장애 복구 시험은 별도로 수행해야 한다.
 
 [과거 로컬 검증](local-smoke/README.md)은 별도 일회용 PostgreSQL과 Docker 환경의 결과다. 당시의 로컬 성공을 현재 EKS 업무 실행 성공으로 간주하지 않는다.

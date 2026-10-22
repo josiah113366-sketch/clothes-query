@@ -1,6 +1,6 @@
 # 데이터·Airflow 연결 작업 통합 공유
 
-상태: 초안 PR #74 공유 완료, 노드 고정 제거 코드·로컬 설정 검증 완료, 실제 배포 대기
+상태: 초안 PR #74 공유 완료, Airflow 본체 노드 고정 제거 실제 적용·사후 확인 완료, 업무 연결 대기
 
 ## 범위
 
@@ -25,4 +25,14 @@
 
 이 후속은 코드·로컬 설정 준비다. 클러스터의 hostname 고정은 아직 유지되며 Helm 재배포 후 제거 여부를 확인해야 한다. 노드/Pod 강제 종료·업무 DAG 실행·AWS/Helm 적용은 하지 않는다.
 
+위 문단은 코드 준비 당시 상태다. 이후 사용자가 현재 작업이 없는 시점에 실제 반영을 요청해 아래처럼 적용했다.
+
 검증: 실제 로컬 runtime 입력으로 Helm 렌더한 4개 workload의 노드풀 배치를 통과했다. 수정 전 고정은 거부하고 nodeName·필수 hostname affinity도 거부했다. 본체 Deployment 3개는 nodeSelector 외 Pod spec이 동일함을 비교했다. 설치 확인용 DAG의 KPO도 노드풀 선택만 사용하는 것을 AST로 확인했다. 실제 노드 장애 복구·실행 중 클러스터 변경을 시험한 결과는 아니다.
+
+### 실제 적용 결과 (2026-10-22 20:21 KST 사후 확인)
+
+- 현재 Helm user values를 비공개 보존하고 hostname 한 키만 제거한 후보를 만들었다. 이전/후보 렌더의 모든 객체를 비교해 해당 nodeSelector 외 변경이 없음을 확인하고 서버 dry-run을 통과했다. 배포 직전 DAG 모두 paused·실행/대기 작업 0건·values/revision 불변을 재확인했다.
+- 동일 chart 1.22.0·Airflow 3.3.2·이미지·인증·Git bundle·S3/DB 설정에서 Helm upgrade --reset-values --atomic을 수행했다. revision 3→4 deployed. 마이그레이션 확인 Job 성공, 본체 3개 Ready/restart 0, 실제 selector에 hostname 없음. 재시작 중 일시 중단은 있었다.
+- API health HTTP 200, metadatabase/scheduler/dag_processor healthy, Git 설치 확인용 DAG 2개 paused·import error 0, 실행/대기 작업 0건. 기존 노드 2대 동일, WAS·Kafka·모니터링·Argo CD의 기존 활성 Deployment 정상과 Kafka broker Ready 확인.
+- 설치 확인용 DAG의 KPO 변경은 PR #74 main 머지 후 공급된다. 현재 main의 과거 probe는 paused로 유지한다. 업무 DAG·Bedrock·업무 표·이미지를 적용한 결과는 아니며 강제 노드 장애 시험도 하지 않았다.
+- 상세 values·렌더·관측 결과는 Git 제외 .cache/airflow-placement-*.private.* 및 airflow-after-placement-health.private.json에 보관한다. 인증 값·state·plan은 커밋하지 않는다.
