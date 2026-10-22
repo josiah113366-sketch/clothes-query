@@ -69,7 +69,7 @@ resource "aws_iam_role" "processing" {
 #   - 리뷰 입력(silver/reviews/*)  : 읽기만. Silver 리뷰(KST 작성일 파티션)를 읽는다. Bronze·reviews_truth/·ground_truth/·gold_b/ 는 prefix 가 달라 접근할 수 없다.
 #     (같은 scope 폴더 안의 격리 레코드·품질 결과 파일도 이 prefix 아래라 읽을 수 있다. 읽기 전용이다.)
 #   - 모델·코드(<work>/model, code): 읽기만.
-#   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 결과는 <output_prefix>/year=/month=/day=/scores_<model_version>.parquet 로, 같은 날짜·같은 model_version 재실행은 그 파일만 덮어쓴다(S3 버저닝으로 이전 버전은 남는다).
+#   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 결과는 <output_prefix>(= staging)/year=/month=/day=/scores_<model_version>_<실행시각>.parquet 로 쌓인다(파일명이 겹치지 않아 덮어쓰기 없음).
 data "aws_iam_policy_document" "processing_s3" {
   statement {
     sid     = "ReadReviewsModelCode"

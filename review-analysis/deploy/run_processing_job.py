@@ -2,10 +2,11 @@
 역할·이미지·서브넷·태그·S3 경로는 Terraform(infra/stacks/sagemaker-review-score)이 만든 SSM 파라미터에서 읽는다. 코드에 계정 ID·버킷 이름을 두지 않는다.
 실행: python deploy/run_processing_job.py --input-key <Silver 후기 파일 S3 키> [--date 2026-10-20] [--model-version 2.4b_score_s2c] [--wait] [--dry-run]
       (입력은 후기 파일 하나의 S3 키. score_batch.py가 파일 하나만 읽는다)
-결과: 각 후기를 **자기 작성일(KST)** 폴더에 쓴다: <output_prefix>year=YYYY/month=MM/day=DD/scores_<model_version>.parquet (+ <output_prefix>_summary_*.json).
+결과: 각 후기를 **자기 작성일(KST)** 폴더에 쓴다: <output_prefix>year=YYYY/month=MM/day=DD/scores_<model_version>_<실행시각>.parquet (+ <output_prefix>_summary_*.json).
+      output_prefix 는 Iceberg MERGE 의 입력(staging)이다. 열은 review_id,aspect,score,model_version,analyzed_at,review_date(후기 작성일).
       작성일은 후기 행(review_date_kst 등)에서 읽는다. 행에 없으면 --date, 없으면 입력 키의 year=/month=/day= 를 쓰고, 그것도 없으면 점수를 매기지 않고 오류(no_review_date)에 남긴다.
-      같은 날짜·같은 model_version 으로 다시 쓰면 그 파일만 덮어쓴다(다른 model_version 파일은 그대로). 실행한 날짜는 경로에 쓰지 않는다.
-오류: 파싱 실패 후기는 <error_prefix>year=YYYY/month=MM/day=DD/errors_<model_version>.jsonl"""
+      파일명에 실행시각이 들어가 같은 날짜·같은 model_version 을 다시 실행해도 덮어쓰지 않고 새 파일이 쌓인다(중복은 merge.sql 이 처리). 실행한 날짜는 경로에 쓰지 않는다.
+오류: 파싱 실패 후기는 <error_prefix>year=YYYY/month=MM/day=DD/errors_<model_version>_<실행시각>.jsonl (실패가 있을 때만)"""
 import argparse
 import json
 import re
@@ -58,8 +59,8 @@ def build_request(c, input_key, instance=None, max_seconds=None, name=None, date
             s3_input('code', f'{c["code_prefix"]}score_batch.py', '/opt/ml/processing/code'),
             s3_input('input', f's3://{c["bucket"]}/{input_key}', '/opt/ml/processing/input'),
         ],
-        # score_batch.py 가 컨테이너 출력 폴더 안에 year=/month=/day=/ 하위 폴더를 만들고, SageMaker 가 그 구조 그대로 S3 접두사 아래에 올린다.
-        # 같은 날짜·같은 model_version 이면 그 파일만 덮어쓴다
+        # score_batch.py 가 컨테이너 출력 폴더 안에 year=/month=/day=/ 하위 폴더를 만들고, SageMaker 가 그 구조 그대로 S3 접두사(staging) 아래에 올린다.
+        # 파일명에 실행시각이 들어가 같은 날짜·버전을 다시 실행해도 덮어쓰지 않는다
         ProcessingOutputConfig=dict(Outputs=[
             dict(OutputName='scores', S3Output=dict(S3Uri=c['output_prefix'], LocalPath='/opt/ml/processing/output', S3UploadMode='EndOfJob')),
             dict(OutputName='errors', S3Output=dict(S3Uri=c['error_prefix'], LocalPath='/opt/ml/processing/errors', S3UploadMode='EndOfJob')),

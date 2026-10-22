@@ -136,7 +136,7 @@ resource "aws_glue_catalog_table" "scores" {
 }
 
 # ------------------------------------------------------------------ staging 외부 테이블 (MERGE 의 입력)
-# SageMaker Job 이 <staging>/year=/month=/day=/scores_<model_version>.parquet 로 쓴 파일을 읽는 일반(Hive) 외부 테이블.
+# SageMaker Job 이 <staging>/year=/month=/day=/scores_<model_version>_<실행시각>.parquet 로 쓴 파일을 읽는 일반(Hive) 외부 테이블.
 # 파티션 프로젝션: 파티션을 등록하지 않아도 경로 규칙(year=YYYY/month=MM/day=DD)만 맞으면 Athena 가 알아서 찾는다.
 resource "aws_glue_catalog_table" "staging" {
   name          = var.staging_table_name
@@ -201,6 +201,11 @@ resource "aws_glue_catalog_table" "staging" {
     columns {
       name = "analyzed_at"
       type = "timestamp"
+    }
+    # 후기 작성일(KST). SageMaker Job 이 같은 이름의 Parquet 열(date)로 쓴다. MERGE 가 Iceberg 파티션 열 review_date 를 이 값으로 채운다.
+    columns {
+      name = "review_date"
+      type = "date"
     }
   }
 }

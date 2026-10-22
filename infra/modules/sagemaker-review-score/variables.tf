@@ -73,16 +73,17 @@ variable "work_prefix" {
 
 variable "output_prefix" {
   description = <<-EOT
-    점수 결과를 쓰는 prefix. 역할은 쓰기만. 2026-10-22 결정(model_version 은 경로가 아니라 스키마 열):
-      <output_prefix>/year=YYYY/month=MM/day=DD/scores_<model_version>.parquet  (날짜는 KST 후기 작성일)
-    같은 날짜·같은 model_version 으로 다시 실행하면 그 파일만 덮어쓴다. 다른 버전 파일은 그대로 남는다.
+    점수 결과를 쓰는 prefix. 역할은 쓰기만. 2026-10-22 결정: 최종 테이블이 아니라 Iceberg MERGE 의 입력(staging)이다.
+    athena-review-score 스택의 staging_prefix 와 같아야 한다(그 스택의 staging 테이블이 이 경로를 읽는다). model_version 은 경로가 아니라 스키마 열이다.
+      <output_prefix>/year=YYYY/month=MM/day=DD/scores_<model_version>_<실행시각>.parquet  (날짜는 KST 후기 작성일)
+    파일명에 실행시각이 들어가 같은 날짜를 다시 실행해도 파일이 겹치지 않고 쌓인다(중복은 MERGE 의 dedupe 가 처리).
   EOT
   type        = string
-  default     = "silver/review_aspect_scores"
+  default     = "staging/review-score"
 }
 
 variable "error_prefix" {
-  description = "파싱 실패 등 오류 건을 쓰는 prefix. 역할은 쓰기만. <error_prefix>/year=/month=/day=/errors_<model_version>.jsonl"
+  description = "파싱 실패 등 오류 건을 쓰는 prefix. 역할은 쓰기만. <error_prefix>/year=/month=/day=/errors_<model_version>_<실행시각>.jsonl (실패가 있을 때만)"
   type        = string
   default     = "silver/review_aspect_scores_error"
 }

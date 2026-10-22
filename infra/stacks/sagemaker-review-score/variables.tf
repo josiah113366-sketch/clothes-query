@@ -45,9 +45,9 @@ variable "work_prefix" {
 }
 
 variable "output_prefix" {
-  description = "점수 결과 prefix(쓰기 전용). 결정: silver/review_aspect_scores/year=/month=/day=/scores_<model_version>.parquet"
+  description = "점수 결과 prefix(쓰기 전용). 결정(2026-10-22): Iceberg MERGE 의 입력 staging. athena-review-score 스택의 staging_prefix 와 같아야 한다. staging/review-score/year=/month=/day=/scores_<model_version>_<실행시각>.parquet"
   type        = string
-  default     = "silver/review_aspect_scores"
+  default     = "staging/review-score"
 }
 
 variable "error_prefix" {

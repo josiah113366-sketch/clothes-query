@@ -34,7 +34,7 @@ variable "bucket_arn" {
 variable "staging_prefix" {
   description = <<-EOT
     SageMaker Job 이 점수 결과(Parquet)를 임시로 쓰는 prefix. 테이블이 아니라 "MERGE 의 입력"이다.
-    Job 이 <staging_prefix>/year=YYYY/month=MM/day=DD/scores_<model_version>.parquet 로 쓰고, Athena 의 Hive 외부 테이블이 이를 읽는다.
+    Job 이 <staging_prefix>/year=YYYY/month=MM/day=DD/scores_<model_version>_<실행시각>.parquet 로 쓰고, Athena 의 Hive 외부 테이블이 이를 읽는다.
     MERGE 로 테이블에 반영한 뒤에는 지워도 된다(정리는 Airflow 태스크 또는 별도 수명주기 규칙 — 열린 질문).
   EOT
   type        = string

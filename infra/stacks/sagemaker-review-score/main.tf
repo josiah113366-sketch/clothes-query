@@ -32,7 +32,7 @@ module "sagemaker_review_score" {
   vpc_id     = data.terraform_remote_state.network.outputs.vpc_id
   subnet_ids = data.terraform_remote_state.network.outputs.app_subnet_ids
 
-  # storage 스택: 팀 데이터 버킷. 입력 silver/reviews/ 읽기, 모델·코드 review-score/ 읽기, 결과 silver/review_aspect_scores/·오류 silver/review_aspect_scores_error/ 쓰기.
+  # storage 스택: 팀 데이터 버킷. 입력 silver/reviews/ 읽기, 모델·코드 review-score/ 읽기, 결과 staging/review-score/(Iceberg MERGE 입력)·오류 silver/review_aspect_scores_error/ 쓰기.
   bucket_name         = data.terraform_remote_state.storage.outputs.bucket_name
   bucket_arn          = data.terraform_remote_state.storage.outputs.bucket_arn
   review_input_prefix = var.review_input_prefix

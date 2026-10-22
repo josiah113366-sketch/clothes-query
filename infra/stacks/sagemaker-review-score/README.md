@@ -9,15 +9,15 @@ apply 는 인프라 담당(재영)이 plan 을 확인한 뒤 실행한다. 모�
 - 만드는 것(9개): Job 실행 IAM 역할 + 정책 4개(S3, CloudWatch, ECR(AWS 공개 이미지), VPC ENI), 보안 그룹(나가는 443 만) + 규칙,
   스크립트용 SSM 파라미터, Airflow 가 붙일 `launcher` IAM 정책(어떤 역할에도 자동으로 붙지 않음).
 - 만들지 않는 것: Processing Job(Airflow 태스크가 호출마다 생성), 스케줄(실행은 Airflow silver DAG 종료 신호 기반), 이메일 알림·월 예산(2026-10-21 요청으로 제외), 버킷·VPC, 모델/코드 업로드.
-- 권한 요약: 읽기 `silver/reviews/*`(Silver 리뷰, Bronze 아님)·`review-score/model/*`·`review-score/code/*`, 쓰기 `silver/review_aspect_scores/*`·`silver/review_aspect_scores_error/*` 뿐.
-  `reviews_truth/`·`ground_truth/`·`gold_b/` 접근 불가.
-- 결과 위치(결정, 2026-10-22): 점수 `s3://<버킷>/silver/review_aspect_scores/year=YYYY/month=MM/day=DD/scores_<model_version>.parquet` (날짜는 KST 후기 작성일, `model_version` 은 경로가 아니라 CSV 열),
-  오류 `s3://<버킷>/silver/review_aspect_scores_error/year=/month=/day=/errors_<model_version>.jsonl`.
-  **파티션은 실행한 날이 아니라 후기의 작성일(KST)** 이다. `score_batch.py` 가 후기 행의 `review_date_kst`(없으면 `created_at_kst`, `created_at`)를 읽어 각 후기를 자기 작성일 폴더에 나눠 쓰므로, 입력 파일에 여러 날짜가 섞여 있어도 날짜별로 알맞은 파티션에 들어간다.
-  작성일을 알 수 없는 후기는 `--date`(없으면 입력 키의 `year=/month=/day=`)를 쓰고, 그것도 없으면 점수를 매기지 않고 오류 경로의 `no_review_date/` 에 남긴다. 실행 요약은 결과 경로 맨 위의 `_summary_scores_<model_version>_<실행시각>.json` 이다.
-  주의: 날짜별 파일은 그 실행에서 처리한 후기만 담는다. 같은 날짜·같은 `model_version` 을 일부 후기만 담은 입력으로 다시 쓰면 그 날짜 파일이 그 후기들만으로 바뀐다(입력은 하루치 전체여야 한다).
-  같은 날짜·같은 `model_version` 으로 다시 실행하면 **그 파일만 덮어쓴다**(파티션 덮어쓰기 방식, DB·테이블 포맷 없음). 다른 버전 파일은 남고, 버킷 버저닝으로 이전 내용도 남는다.
-  Parquet 열: `review_id`(string), `aspect`(string), `score`(int32), `model_version`(string), `analyzed_at`(timestamp, UTC). 요약은 같은 폴더의 `_summary_scores_<model_version>.json`(`_` 로 시작해 Spark/Athena 가 데이터로 읽지 않음).
+- 권한 요약: 읽기 `silver/reviews/*`(Silver 리뷰, Bronze 아님)·`review-score/model/*`·`review-score/code/*`, 쓰기 `staging/review-score/*`(점수 결과)·`silver/review_aspect_scores_error/*`(오류) 뿐.
+- 결과 위치(결정, 2026-10-22): 점수는 최종 테이블이 아니라 **staging** 에 쌓는다 — `s3://<버킷>/staging/review-score/year=YYYY/month=MM/day=DD/scores_<model_version>_<실행시각>.parquet`.
+  [athena-review-score](../athena-review-score/README.md) 스택의 staging 테이블이 이 경로를 읽고, Athena `MERGE` 가 Iceberg 테이블(`review_aspect_scores`)에 반영한다. 두 스택의 `staging_prefix`/`output_prefix` 는 같아야 한다.
+  **파티션은 실행한 날이 아니라 후기의 작성일(KST)** 이다. `score_batch.py` 가 후기 행의 `review_date_kst`(없으면 `created_at_kst`, `created_at`)를 읽어 각 후기를 자기 작성일 폴더에 나눠 쓰므로, 입력 파일에 여러 날짜가 섞여 있어도 날짜별로 알맞은 폴더에 들어간다.
+  작성일을 알 수 없는 후기는 `--date`(없으면 입력 키의 `year=/month=/day=`)를 쓰고, 그것도 없으면 점수를 매기지 않고 오류 경로의 `no_review_date/` 에 남긴다.
+  staging 은 **쌓이는 방식**이다: 파일명에 실행시각이 들어가 같은 날짜·같은 `model_version` 을 다시 실행해도 파일이 덮어써지지 않고 새로 생긴다. 중복은 `merge.sql` 이 `(review_id, aspect, model_version, review_date)` 별로 `analyzed_at` 이 가장 최근인 행만 남겨 처리한다.
+  Parquet 열: `review_id`(string), `aspect`(string), `score`(int32), `model_version`(string), `analyzed_at`(timestamp, UTC), `review_date`(date, 후기 작성일 KST — Iceberg 파티션 열을 채운다).
+  실행 요약은 staging 맨 위의 `_summary_scores_<model_version>_<실행시각>.json`(`_` 로 시작해 Athena/Spark 가 데이터로 읽지 않음)이다.
+  오류 `s3://<버킷>/silver/review_aspect_scores_error/year=/month=/day=/errors_<model_version>_<실행시각>.jsonl`(실패가 있을 때만).
 - 비용: 만들어 두기만 하면 0. 실행 비용은 Job 시간만큼: ml.g4dn.xlarge 시간당 약 0.994 USD, 1,000건 약 27분 ≒ 0.46 USD/회(개인 계정 실측). 유휴 비용 없음.
 - 출력: `role_arn`, `role_name`, `security_group_id`, `config_parameter_name`, `image_uri`, `launcher_policy_arn`.
 
@@ -80,7 +80,7 @@ Job 은 Terraform 이 아니라 API 호출로 만든다. 정식 하루 1회 실�
 2. `CreateProcessingJob` 으로 Job `review-score-<날짜-시각>` 을 요청한다.
 3. SageMaker 가 GPU 인스턴스를 띄우고 S3 의 모델(`review-score/model/2.4b_score_s2c/`)·코드(`review-score/code/score_batch.py`)·입력 파일을 내려받는다.
 4. 컨테이너에서 `pip install transformers==4.53.3 accelerate` 후 `score_batch.py` 를 실행한다.
-5. 끝나면 결과를 `silver/review_aspect_scores/year=/month=/day=/` 에, 오류를 `..._error/` 같은 날짜 경로에 올리고 인스턴스가 사라진다(실행 시간만큼만 과금).
+5. 끝나면 결과를 `staging/review-score/year=/month=/day=/` 에, 오류를 `silver/review_aspect_scores_error/` 의 같은 날짜 경로에 올리고 인스턴스가 사라진다(실행 시간만큼만 과금).
 
 ### 사전 조건 (모두 확인 후 실행)
 
@@ -138,13 +138,13 @@ aws sagemaker stop-processing-job --processing-job-name <Job 이름> --region ap
 ### 결과 확인
 
 ```bash
-aws s3 ls s3://<버킷>/silver/review_aspect_scores/year=2026/month=10/day=20/
-aws s3 cp s3://<버킷>/silver/review_aspect_scores/year=2026/month=10/day=20/scores_2.4b_score_s2c.parquet .
-# 내용 확인(로컬): python -c "import pyarrow.parquet as pq; print(pq.read_table('scores_2.4b_score_s2c.parquet').to_pandas().head())"  (pandas 필요) 또는 pq.read_table(...).to_pylist()[:5]
+aws s3 ls s3://<버킷>/staging/review-score/year=2026/month=10/day=20/
+aws s3 cp s3://<버킷>/staging/review-score/year=2026/month=10/day=20/scores_2.4b_score_s2c_<실행시각>.parquet .
+# 내용 확인(로컬): python -c "import pyarrow.parquet as pq; print(pq.read_table('scores_2.4b_score_s2c_<실행시각>.parquet').to_pandas().head())"  (pandas 필요) 또는 pq.read_table(...).to_pylist()[:5]
 ```
 
-- `scores_<model_version>.parquet` 는 `review_id,aspect,score,model_version,analyzed_at`(속성별 한 행, 점수 -2~2)이고 `_summary_scores_<model_version>.json` 에 건수와 실패 목록이 있다(같은 폴더, `_` 로 시작해 데이터로 읽히지 않는다). 컨테이너는 시작 때 `pip install pyarrow` 를 한다.
-- 파싱에 실패한 후기는 `silver/review_aspect_scores_error/year=/month=/day=/errors_<model_version>.jsonl` 에 쓴다(실패가 없어도 빈 파일을 써서 이전 실행 결과를 지운다).
+- `scores_<model_version>_<실행시각>.parquet` 는 `review_id,aspect,score,model_version,analyzed_at,review_date`(속성별 한 행, 점수 -2~2)이고 `_summary_scores_<model_version>_<실행시각>.json` 에 건수와 실패 목록이 있다(`_` 로 시작해 데이터로 읽히지 않는다). 컨테이너는 시작 때 `pip install pyarrow` 를 한다.
+- 파싱에 실패한 후기는 `silver/review_aspect_scores_error/year=/month=/day=/errors_<model_version>_<실행시각>.jsonl` 에 쓴다(실패가 있을 때만, 실행마다 새 파일).
 
 ### 자주 나는 문제
 

@@ -85,7 +85,7 @@
 - **무엇을 만들었나:** `infra/modules/athena-review-score/`, `infra/stacks/athena-review-score/` (+ `sql/`).
 - **왜 그렇게 했나:** 파일 덮어쓰기(A)는 입력이 하루 전체여야 하고 늦은 후기마다 전체를 재점수화한다. Iceberg MERGE 는 행 단위 upsert 로 늦은 후기·정정·재점수화를 DB 서버 없이 처리한다.
   테이블은 Terraform 으로 만든다(Glue 테이블 리소스의 `open_table_format_input` 이 Iceberg 스키마·파티션 사양을 지원, 앞선 "Terraform 으로 불가" 설명은 정정). apply 검증 전이다(안 되면 Athena DDL 로 만드는 방식으로 바꾼다).
-- **입력과 출력:** 입력 `staging/review-score/year=/month=/day=/scores_<model_version>.parquet`(SageMaker Job 출력). 출력 Iceberg 테이블 `<database>.review_aspect_scores`(파티션 `review_date`).
+- **입력과 출력:** 입력 `staging/review-score/year=/month=/day=/scores_<model_version>_<실행시각>.parquet`(열에 `review_date` 포함, 실행마다 새 파일)(SageMaker Job 출력). 출력 Iceberg 테이블 `<database>.review_aspect_scores`(파티션 `review_date`).
   연동 값은 SSM `/clothes-query/dev/athena-review-score/config` 와 `runner_policy_arn` output.
 - **확인한 결과:** fmt·validate 통과, 첫 plan 6 create / 0 change / 0 destroy. Athena 에서의 테이블 읽기·SQL 실행은 아직 하지 않았다.
 - **알려진 한계·남은 일:** SQL 실제 검증, SageMaker 출력 prefix 변경, Airflow 태스크, staging·결과 정리 정책(수명주기), 사라진 속성 처리, Gold 의 버전 선택 규칙, 타임스탬프 타입 확인.
