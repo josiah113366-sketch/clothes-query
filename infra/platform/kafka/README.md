@@ -50,7 +50,7 @@ Kafka request 합계는 1.5 vCPU/6Gi, Connect는 0.5 vCPU/2Gi다. 운영자 0.2 
 
 Debezium 기본 토픽 이름의 점·밑줄은 [chart의 `resourceName`](chart/README.md)으로 Kubernetes 리소스 이름과 분리할 수 있다. [로컬 CDC 검사](local-smoke/README.md)는 임시 DB에서 실제 전달과 재시작 후 전달을 확인하며 EKS/RDS 검증을 대체하지 않는다.
 
-- Kafka client listener는 내부 9093만 제공하며 TLS 서버 인증과 client 인증서 인증을 요구한다. 외부 LoadBalancer·Ingress·평문 listener를 만들지 않는다.
+- Kafka client listener는 내부 9093만 제공하며 TLS 서버 인증과 client 인증서 인증을 요구한다. Kafka 브로커용 외부 LoadBalancer·평문 listener는 만들지 않는다. Kafka UI 화면만 [ingress](../ingress/README.md)의 허용 IP 제한 ALB로 연다.
 - User Operator가 KafkaUser와 같은 이름의 TLS Secret(`user.crt`, `user.key`, `ca.crt` 등)을 `kafka` namespace에 만든다. Connect는 자신의 Secret와 cluster CA를 직접 참조한다. 업무 클라이언트 ACL은 literal topic/group만 허용한다. `IdempotentWrite`는 Kafka가 요구하는 cluster 범위 작업이며 관리자 권한을 부여하지 않는다.
 - broker listener의 NetworkPolicy는 지정한 client namespace와 Connect Pod만 허용한다. NetworkPolicy는 Strimzi가 생성하며 실제 CNI의 적용을 확인해야 한다. 다른 namespace의 Consumer/Producer는 TLS Secret을 그 namespace에 공급할 별도 절차가 필요하다. 이 chart는 인증서를 복사하거나 모든 Secret 조회 RBAC를 주지 않는다.
 - Connect REST는 기본 내부 Service이며 Strimzi의 NetworkPolicy를 유지한다. `KafkaConnector` CR 관리만 켜고, 담당자에게 필요한 namespace RBAC만 별도로 부여한다. REST·Connector 쓰기 권한은 DB 자격증명 사용 권한과 함께 취급한다.
