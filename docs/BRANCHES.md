@@ -155,6 +155,11 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
+| `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 검토 대기 | |
+
+
+| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 검토 대기 | |
+| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 머지됨 (#35) | 2026-10-22 |
 
 ### gold-b
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
