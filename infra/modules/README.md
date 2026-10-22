@@ -1,5 +1,7 @@
 # Terraform modules
 
+- [dashboard-access](dashboard-access/README.md): 승인 화면 전용 Pod Identity·Athena·이상/리포트 읽기와 재처리 이력 경로 쓰기. 행 상태 제한은 앱 담당.
+
 각 모듈은 스택에서 호출하며 직접 배포하지 않는다. provider와 backend는 호출 스택에서 설정한다. AWS provider는 기존 bootstrap과 같은 6.68.0 lock을 사용한다.
 
 - [network](network/README.md): 2개 AZ의 public/app/db subnet, AZ별 NAT, S3 Gateway Endpoint
