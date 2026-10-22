@@ -7,7 +7,8 @@
 - [development-values.yaml](development-values.yaml): LocalExecutor, API·scheduler·DAG processor 각 1개, 본체 requests 합계 300m/1152Mi. 본체는 compute 노드풀만 사용한다. 비공개 runtime override에서 현재 노드 hostname을 지정해 이번 검증이 새 노드를 만들지 않게 한다.
 - 내장 PostgreSQL·Redis·PgBouncer·triggerer·StatsD·추가 ALB·PVC는 사용하지 않는다. `workers.celery.persistence`도 꺼서 LocalExecutor scheduler에 기본 PVC가 생기지 않게 한다. 업데이트 전략은 Recreate라 업데이트 중 중단될 수 있다.
 - [prepare_metadata.py](prepare_metadata.py): 일회성 비공개 Pod에서 전용 DB·계정만 생성·검증한다. 역할은 superuser/DB 생성/역할 생성/복제 권한이 없고 연결 한도는 16이다. 기존 업무 테이블을 변경하지 않는다. RDS CA와 `sslmode=verify-full`을 사용한다.
-- metadata connection·Fernet·API secret·JWT·Simple Auth 비밀번호를 각각 기존 Kubernetes Secret 참조로 공급한다. 원본은 Secrets Manager에서 비공개 관리한다. 실제 값·계정·엔드포인트·이미지 digest·버킷은 공개 파일에 쓰지 않는다.
+- metadata connection·Fernet·API secret·JWT·Simple Auth 비밀번호를 각각 기존 Kubernetes Secret 참조로 공급한다. 원본은 Secrets Manager에서 비공개 관리한다. 실제 인증 값과 비공개 runtime override는 공개 파일에 쓰지 않는다. 승인된 공통 식별자는 [공유 설정 정책](../../DEPLOYMENT_CONFIG.md)을 따른다.
+- DAG 원본은 이 저장소 main의 `infra/platform/airflow/dags/`다. 이미지에 이미 있는 Git provider 0.5.0과 git을 사용하는 GitDagBundle이 60초 간격으로 가져온다. 실행별 Git 버전을 기록하며 sidecar·추가 PVC·정적 Git 자격증명은 사용하지 않는다. 신규 DAG는 기본 paused다.
 - task 로그는 기존 S3의 `airflow-logs/`로 보낸다. `workload-access`의 scheduler 역할은 해당 prefix 읽기/쓰기, API 역할은 읽기만 허용한다. 이 두 binding은 기존 비공개 tfvars에도 유지해야 한다. 새 CloudWatch 로그 수집은 추가하지 않는다.
 - [agent-pod-rbac.yaml](agent-pod-rbac.yaml): scheduler에 `agent` namespace Pod 생성·조회·정리와 로그 읽기만 허용한다. Secrets 읽기나 다른 namespace Pod 생성은 허용하지 않는다. 판정·조사 Pod는 기존 `agent/detection-job`, `agent/investigation-agent` ServiceAccount와 각각의 EKS Pod Identity를 사용한다.
 
@@ -17,10 +18,10 @@
 2. 전용 DB·계정, CA ConfigMap, 인증 Secret 5개를 비공개 공급한다. master 비밀번호가 필요한 bootstrap Secret/Pod는 준비 직후 삭제한다.
 3. S3 task 로그용 Pod Identity와 위 RBAC를 준비한다. `gold-b-access`의 기존 agent namespace/ServiceAccount가 먼저 있어야 한다.
 4. 이미지 digest·현재 노드 hostname·S3 log 경로를 gitignored `runtime.local.yaml`로 공급한다. 공식 chart archive checksum을 index와 대조하고 이미지를 digest로 고정한다.
-5. 합성 검증 DAG를 ConfigMap `airflow-infra-dags`, 이미지/노드 설정을 `airflow-infra-probe-runtime`으로 공급한다. 공개 DAG 파일에는 실행 이미지 URI·hostname을 넣지 않는다.
+5. Git DAG 경로 접근을 확인하고 이미지/노드 설정을 `airflow-infra-probe-runtime`으로 공급한다. 기존 `airflow-infra-dags` ConfigMap은 이전 배포 복구용으로만 남고 현재 values에서는 마운트하지 않는다. 공개 DAG 파일에는 비밀값을 넣지 않는다.
 6. `helm template`와 서버 dry-run에서 새 PVC/Ingress/DB/ClusterRole가 없는지, init/Job를 포함한 requests와 이미지 고정을 확인한다. 그 뒤 `helm upgrade --install airflow <검증한-chart> -n airflow -f development-values.yaml -f runtime.local.yaml --atomic --wait --wait-for-jobs --timeout 10m`을 실행한다.
 
-Helm 렌더에 `metadata.namespace`가 없는 객체가 있으므로 렌더를 kubectl로 검사·적용할 때도 `-n airflow`를 명시한다. DAG는 ConfigMap 디렉터리 대신 `subPath`로 단일 파일을 마운트해 Airflow의 재귀 링크 탐색을 피한다. 이 파일을 갱신하면 해당 파일을 사용하는 본체 Pod를 재시작해야 한다. API 시작 점검 유예는 5분이며 인증/정상 상태 점검을 끄지 않는다.
+Helm 렌더에 `metadata.namespace`가 없는 객체가 있으므로 렌더를 kubectl로 검사·적용할 때도 `-n airflow`를 명시한다. DAG 변경은 Git PR 리뷰·수동 머지 후 bundle 갱신으로 공급하므로 매번 ConfigMap이나 Pod를 갱신하지 않는다. Git 공급 설정이나 이미지/환경변수를 변경하는 Helm 배포는 Recreate로 본체를 재생성한다. API 시작 점검 유예는 5분이며 인증/정상 상태 점검을 끄지 않는다. Helm 1.22.0 dagBundleConfigList kwargs schema는 배열을 허용하지 않아 선택적인 sparse_dirs를 사용하지 않는다.
 
 Simple Auth Manager는 기존 비밀번호 파일도 쓰기 모드로 연다. 읽기 전용 Secret을 직접 지정하면 PermissionError가 나므로, API init에서 Secret 원본을 Pod 전용 emptyDir의 권한 0600 파일로 복사한다. 원본과 실제 값은 로그에 출력하지 않는다. API 재생성 시 동일한 Secret 원본에서 복구한다.
 

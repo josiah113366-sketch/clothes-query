@@ -1,0 +1,14 @@
+# Container env fragment; no application or Deployment is created by this file.
+env:
+  - name: AIRFLOW_API_BASE_URL
+    value: http://airflow-api-server.airflow.svc.cluster.local:8080
+  - name: AIRFLOW_API_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: airflow-api-client
+        key: username
+  - name: AIRFLOW_API_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: airflow-api-client
+        key: password
