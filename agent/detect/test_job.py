@@ -5,6 +5,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 
+import job
 from job import floor_tick, pending_replacements, regular_run, run_once
 from rules import r3_bronze_lag
 from rules import Config, anomaly_id
@@ -291,5 +292,9 @@ check("재판정 재시도: 이상 줄이 두 번 쌓이지 않음", (rd1 > 0, l
 check("재판정 재시도: 순찰 기록 REDETECT가 한 줄만", len(q4("SELECT * FROM gold_b.detection_runs WHERE kind = 'REDETECT'")), 1)
 check("재판정 재시도: 이전 시도가 쓴 이상 줄을 옛 이상으로 착각하지 않음 (옛 이상이 없었으니 NO_ANOMALY_BEFORE)", [x["result"] for x in s2["redetected"]], ["NO_ANOMALY_BEFORE"])
 check("재판정 재시도: VERIFIED가 한 줄만", len(q4("SELECT * FROM gold_b.reprocess_events WHERE step = 'VERIFIED'")), 1)
+# Athena일 때만 시간 폴더(dt) 조건이 붙는다 (스캔량 상한 대응). 앞뒤 하루씩 덮는다
+fa, fb = datetime(2026, 10, 21, 23, 55), datetime(2026, 10, 22, 0, 5)
+check("폴더 조건: Athena는 앞뒤 하루씩", job._folder(fa, fb, Config(dialect="athena")), " AND dt BETWEEN '2026-10-20' AND '2026-10-23'")
+check("폴더 조건: sqlite는 없음", job._folder(fa, fb, CFG), "")
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
