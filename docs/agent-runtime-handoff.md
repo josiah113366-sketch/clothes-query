@@ -6,7 +6,7 @@
 |---|---|---|
 | DAG | 이 저장소 main의 infra/platform/airflow/dags/, GitDagBundle 60초 갱신, 신규 DAG paused | DAG 파일, 필요한 provider/의존성, 자원·timeout 계약 |
 | 판정 이미지 | ECR clothes-query-dev/detection-job, agent/detection-job SA, clothes-query-dev-detection workgroup | 이미지 digest, 실행 명령·환경변수·DAG |
-| 조사 이미지 | ECR clothes-query-dev/investigation-agent, agent/investigation-agent SA, clothes-query-dev-investigation workgroup | 이미지 digest, 최종 추론 프로필 ID, 실행 명령·환경변수·DAG |
+| 조사 이미지 | ECR clothes-query-dev/investigation-agent, agent/investigation-agent SA, clothes-query-dev-investigation workgroup | 이미지 digest, 실행 명령·환경변수·DAG. 추론 프로필은 JP Haiku로 확정, 권한 적용 전 |
 | 승인 화면 | dashboard/approval-dashboard SA, clothes-query-dev-dashboard workgroup, athena-results/dashboard/ | 앱 Deployment·이미지, 승인 SQL, 재처리 DAG ID/conf |
 
 ## 이미지 push
@@ -27,7 +27,7 @@ Airflow 내부 주소와 토큰 호출 방식은 [대시보드 연결 안내](..
 
 ## Bedrock
 
-도쿄에서 조회한 후보는 apac.amazon.nova-lite-v1:0, jp.anthropic.claude-haiku-4-5-20251001-v1:0이다. 담당자가 최종 프로필을 선택하면 해당 프로필과 조회된 목적지 모델 ARN만 연결할 변수 구조를 준비했다. 현재 값은 비어 있어 호출 권한은 추가되지 않았고 실제 추론도 실행하지 않았다. APAC 프로필은 도쿄 외 국가 리전에도 라우팅되며 JP 프로필은 도쿄·오사카다.
+담당자가 jp.anthropic.claude-haiku-4-5-20251001-v1:0을 최종 선택했고 Nova는 제외했다. 해당 프로필과 조회된 목적지 모델 ARN만 연결할 변수 구조를 준비했다. 공유 입력은 아직 비어 있어 호출 권한은 추가되지 않았고 실제 Pod 추론도 실행하지 않았다. JP 프로필의 목적지는 도쿄·오사카로 확인한 이력이 있으며 실제 정책 적용 전에 ARN을 재조회한다.
 
 IAM의 Converse 호출 권한은 bedrock:InvokeModel이며 목적지 모델 허용은 bedrock:InferenceProfileArn 조건으로 선택한 프로필에 묶는다. [AWS 공식 전제 조건](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-prereq.html).
 

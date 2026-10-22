@@ -1,6 +1,6 @@
 # 현재 Airflow DAG 공급·확인 절차
 
-2026-10-22 실제 Airflow에서 읽기 전용으로 확인했다. 이 문서는 **현재 실행 중인 상태**를 설명한다. main의 development-values.yaml에는 아직 최초 ConfigMap 방식이 남아 있으므로 그 파일만으로 재배포하지 않는다. GitDagBundle 적용 코드는 `infra/agent-runtime-connections` 브랜치에 보관되어 있고 별도 검토가 필요하다.
+2026-10-22 실제 Airflow에서 읽기 전용으로 확인한 DAG 공급 절차다. `infra/data-runtime-share`는 GitDagBundle 적용 코드와 이 안내서를 함께 담는다. 이 PR이 머지되기 전 main의 최초 ConfigMap 방식 values와 구분한다. 배포에는 기존 비공개 runtime override가 필요하며 이 문서 통합 과정에서 재배포하지 않았다.
 
 ## 현재 경로
 

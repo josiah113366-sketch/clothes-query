@@ -48,7 +48,7 @@ EKS 개인 파일 예시:
 
 ## 범위와 의존 관계
 
-2026-10-22 후속 dashboard-access는 eks/storage state 이후 독립 key를 사용하는 승인 화면 권한 스택이다. namespace/ServiceAccount·workgroup·결과 경로·스캔 상한도 공유 auto 파일에서 관리한다. 실제 인증 Secret은 별도 승인/비공개 공급 대상이다. gold-b-access의 investigation_bedrock_profiles는 모델 담당자 확정 전 빈 map을 유지한다.
+2026-10-22 후속 dashboard-access는 eks/storage state 이후 독립 key를 사용하는 승인 화면 권한 스택이다. namespace/ServiceAccount·workgroup·결과 경로·스캔 상한도 공유 auto 파일에서 관리한다. 실제 인증 Secret은 비공개로 공급한다. gold-b-access의 investigation_bedrock_profiles는 JP Haiku 모델 선택이 끝났지만 아직 적용 전이라 빈 map을 유지한다. 모델 선택과 권한 적용 완료를 구분한다.
 
 `gold-b-catalog`는 기존 storage state만 읽는 독립 Glue DB 스택이다. 기존 버킷 이름을 state에서 받아 DB location을 지정하며 backend key는 clothes-query/dev/gold-b-catalog/terraform.tfstate다. 사용자 요청에 따라 database.sql 대신 Terraform으로 DB를 관리하고 표 DDL은 Athena에서 별도로 등록한다.
 
