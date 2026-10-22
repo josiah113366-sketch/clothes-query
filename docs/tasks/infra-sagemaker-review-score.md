@@ -1,6 +1,6 @@
 # 작업 지시서: infra/sagemaker-review-score
 
-> 상태: 검토 대기 (apply 완료, AWS 실행 확인 완료) · 브랜치: `infra/sagemaker-review-score` · 다음 작업: `review-model/score-batch-airflow` (입력 모으기·실행 스크립트 개선, 별도 PR)
+> 상태: 작업 완료 (apply 완료, AWS 실행 확인 완료) · 브랜치: `infra/sagemaker-review-score` · 다음 작업: `review-model/score-batch-airflow` (입력 모으기·실행 스크립트 개선, 별도 PR)
 
 ## 목표
 
@@ -20,7 +20,8 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - 2026-10-21 팀 관리자 승인으로 개인 계정이 아닌 **팀 계정**에 만든다.
 - 알림 이메일(실패 알림 SNS)과 월 예산은 만들지 않는다.
 - 실행은 EventBridge 스케줄이 아니라 **Airflow silver DAG 종료 신호**로 Airflow 가 시작한다.
-- 결과는 `s3://<버킷>/silver/review-score/output/`, 오류는 `s3://<버킷>/silver/review-score/error/` 에 쓴다.
+- 결과는 `s3://<버킷>/silver/review_aspect_scores/year=/month=/day=/scores_<model_version>.parquet`, 오류는 `silver/review_aspect_scores_error/year=/month=/day=/` 에 쓴다(2026-10-22 변경, 같은 날짜·버전 재실행은 그 파일만 덮어쓴다).
+- 입력은 Bronze 가 아니라 **Silver 리뷰**(`silver/reviews/`)를 읽는다(2026-10-22 변경).
 - 실측(개인 계정, 도쿄, `ml.g4dn.xlarge`, AWS PyTorch DLC): 1,000건 약 27분, 시간당 0.994 USD, 1회 약 0.46 USD.
 
 ## 시작 전 확인 (Claude가 한다)
@@ -33,7 +34,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 ## 만드는 것
 
 ### 1. 모듈 `infra/modules/sagemaker-review-score/`
-- Job 실행 IAM 역할: 읽기 `bronze/reviews/*`·`review-score/model/*`·`review-score/code/*`, 쓰기 `silver/review-score/output/*`·`error/*`,
+- Job 실행 IAM 역할: 읽기 `silver/reviews/*`·`review-score/model/*`·`review-score/code/*`, 쓰기 `silver/review_aspect_scores/*`·`silver/review_aspect_scores_error/*`,
   CloudWatch 로그·지표, AWS 공개 DLC 이미지 pull, VPC ENI. 정답 라벨·gold_b 접근 없음
 - 보안 그룹(나가는 443 만, `use_vpc=true`), SSM 설정 파라미터(JSON), launcher IAM 정책(Job 생성/조회/중지·PassRole·SSM 읽기)
 
@@ -67,7 +68,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - [x] GPU 쿼터 조회 명령 실행 결과가 1 이상 (또는 증설 승인) ← 2026-10-21 강사님께 증설 요청하여 확인
 - [x] apply 후 `terraform plan` 이 변경 없음
 - [x] apply 후 SSM 파라미터 JSON 에 `role_arn`·`network`·`output_prefix`·`error_prefix` 가 있고, 계정 ID·버킷 이름이 저장소 파일에는 없음 (`git grep`)
-- [x] (후속 PR 이후) 100건 입력으로 Job 1회 실행 → `silver/review-score/output/` 에 CSV, 실패 건은 `error/` 에 기록
+- [x] (후속 PR 이후) 100건 입력으로 Job 1회 실행 → `silver/review_aspect_scores/` 날짜 파티션에 Parquet, 실패 건은 `silver/review_aspect_scores_error/` 에 기록
 
 ## README 갱신
 
@@ -80,7 +81,7 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - **무엇을 만들었나:** `infra/modules/sagemaker-review-score/`, `infra/stacks/sagemaker-review-score/` (위 "만드는 것").
 - **왜 그렇게 했나:** Job 은 호출마다 이름·입력 날짜가 달라 Terraform 리소스가 될 수 없고 Airflow 가 시작하므로, 실행 기반과 설정(SSM)만 코드로 둔다.
   스케줄·알림·예산은 요청으로 제외. 이미지는 AWS 공개 DLC 를 써서 팀 ECR 이 필요 없다.
-- **입력과 출력:** 입력 `bronze/reviews/` 읽기, 모델·코드 `review-score/` 읽기. 출력 `silver/review-score/output/`, 오류 `silver/review-score/error/`.
+- **입력과 출력:** 입력 `silver/reviews/` 읽기, 모델·코드 `review-score/` 읽기. 출력 `silver/review_aspect_scores/year=/month=/day=/scores_<model_version>.parquet`(열 `review_id,aspect,score,model_version,analyzed_at`), 오류 `silver/review_aspect_scores_error/`.
   Airflow 와는 SSM 파라미터 `/clothes-query/dev/sagemaker-review-score/config` 와 `launcher_policy_arn` output 으로 맞춘다.
 - **확인한 결과:** fmt·validate 통과, 첫 plan 9 create / 0 change / 0 destroy, apply 후 plan 변경 없음. 2026-10-21 GPU 쿼터 증설 후 팀 AWS 에서 모델/코드 업로드부터 Job 실행·결과 확인까지 진행해 이상 없음(작성자 확인, 상세 수치는 PR 본문에 첨부).
 - **알려진 한계·남은 일:** launcher 정책 연결(Airflow 역할), `score_batch.py`·`run_processing_job.py` 수정(별도 PR), 오류 파일 기록 방식 결정,

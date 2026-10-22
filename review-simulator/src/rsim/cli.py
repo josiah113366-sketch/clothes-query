@@ -37,7 +37,8 @@ class Llm(str, Enum):
 
 class Source(str, Enum):
     random = "random"  # 가상 시계 + 무작위 상품 (예전 방식)
-    orders = "orders"  # 주문 파일에서 결제 후 1~14일이 지난 주문에 리뷰 (2026-10-14 구상)
+    rds = "rds"  # RDS orders 테이블에서 결제 후 0~7일(당일 포함) 주문 항목에 리뷰 (2026-10-21 lemin 결정)
+    orders = "orders"  # 주문 파일에서 결제 후 0~7일(당일 포함) 주문에 리뷰 (2026-10-14 구상, 2026-10-21 에 1~14일 → 0~7일)
 
 
 class SinkKind(str, Enum):
@@ -73,12 +74,15 @@ def run(
     sink: Annotated[SinkKind, typer.Option(help="결과를 보낼 곳")] = SinkKind.stdout,
     source: Annotated[
         Source,
-        typer.Option(help="random: 무작위 상품 / orders: 주문 파일 기반(결제 후 1~14일, 날짜별)"),
+        typer.Option(
+            help="random: 무작위 상품 / orders: 주문 파일 기반 / rds: RDS orders 테이블 기반"
+            " (orders·rds 는 결제 후 0~7일, 날짜별)"
+        ),
     ] = Source.random,
     count: Annotated[
         int | None,
         typer.Option(
-            help="만들 리뷰 수. random 기본 10(0 이면 멈출 때까지), orders 기본 0(그날 주문 전부)"
+            help="만들 리뷰 수. random 기본 10(0 이면 멈출 때까지), orders·rds 기본 0(그날 주문 전부)"
         ),
     ] = None,
     max_rps: Annotated[float, typer.Option(help="초당 전송 상한. 0 이면 제한 없음")] = 0.0,
@@ -106,7 +110,7 @@ def run(
         datetime | None,
         typer.Option(
             formats=["%Y-%m-%d"],
-            help="--source orders 날짜(UTC, 예: 2026-10-08). 그날 리뷰 시각인 주문만. 없으면 어제",
+            help="--source orders·rds 날짜(UTC, 예: 2026-10-08). 그날 리뷰 시각인 주문만. 없으면 어제",
         ),
     ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="디버그 로그 출력")] = False,

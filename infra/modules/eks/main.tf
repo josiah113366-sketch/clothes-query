@@ -57,7 +57,7 @@ resource "aws_eks_cluster" "this" {
     public_access_cidrs     = var.allow_public_api_from_anywhere ? ["0.0.0.0/0"] : var.public_access_cidrs
   }
   upgrade_policy { support_type = "STANDARD" }
-  enabled_cluster_log_types = ["api", "authenticator", "controllerManager", "scheduler"]
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
   depends_on                = [aws_iam_role_policy_attachment.cluster, aws_iam_role_policy_attachment.node, aws_cloudwatch_log_group.cluster]
 }
 resource "aws_eks_access_entry" "node" {

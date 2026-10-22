@@ -14,7 +14,109 @@ from pipelines.format_rules import (
     FormatRules,
     RuleConfigError,
 )
+from pipelines.payment_fingerprint import (
+    CONTENT_FIELDS,
+    FingerprintError,
+    canonical_payment_content,
+    payment_fingerprint,
+)
 from pipelines.silver.transactions import build_silver, run
+
+
+def fingerprint_example():
+    return {"order_id": "o-1", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
+            "amount": 20000, "status": "SUCCESS", "failure_code": None,
+            "requested_at": "2026-10-21T06:00:00Z",
+            "completed_at": "2026-10-21T06:00:02.123Z"}
+
+
+def test_payment_fingerprint_fixed_vector_and_time_equivalence():
+    original = fingerprint_example()
+    copy = deepcopy(original)
+    expected = (b'["o-1",1,"CARD","PG_A",20000,"SUCCESS",null,'
+                b'"2026-10-21T06:00:00.000000Z","2026-10-21T06:00:02.123000Z"]')
+    assert canonical_payment_content(original) == expected
+    assert payment_fingerprint(original) == {
+        "payment_content_hash": "efad032726ae5d4a0ab003e0e99175c4a372076e9d5e26a5c5d7a2b0235979fa",
+        "fingerprint_version": "payment-content.v1"}
+    kst = dict(reversed(list(original.items())))
+    kst.update(requested_at="2026-10-21T15:00:00.000000+09:00",
+               completed_at="2026-10-21T15:00:02.123000+09:00", payment_id="other",
+               kafka_offset=999, loaded_at="later", __op="r", __source_ts_ms=1)
+    assert payment_fingerprint(kst) == payment_fingerprint(original)
+    assert original == copy
+
+
+def test_payment_fingerprint_detects_every_business_field_change():
+    base = {**fingerprint_example(), "status": "FAILED", "failure_code": "PG_TIMEOUT"}
+    changes = {"order_id": "o-2", "attempt_no": 2, "method": "BANK_TRANSFER", "pg": "PG_B",
+               "amount": 20001, "status": "SUCCESS", "failure_code": "PG_ERROR",
+               "requested_at": "2026-10-21T06:00:00.000001Z",
+               "completed_at": "2026-10-21T06:00:02.123001Z"}
+    assert tuple(changes) == CONTENT_FIELDS
+    for field, value in changes.items():
+        changed = {**base, field: value}
+        if field == "status":
+            changed["failure_code"] = None
+        assert payment_fingerprint(changed) != payment_fingerprint(base), field
+    assert payment_fingerprint({**base, "order_id": " o-1"}) != payment_fingerprint(base)
+
+
+def test_payment_fingerprint_rejects_lossy_or_missing_inputs_without_policy_changes():
+    base = fingerprint_example()
+    cases = [("amount", "20000"), ("amount", 20000.0), ("amount", True), ("amount", 0),
+             ("attempt_no", False), ("attempt_no", 0), ("pg", " "), ("failure_code", ""),
+             ("status", "PENDING"), ("completed_at", "2026-10-21T06:00:02"),
+             ("completed_at", "2026-10-21T06:00:02.1234567Z"),
+             ("completed_at", "2026-02-30T06:00:02Z")]
+    for field, value in cases:
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint({**base, field: value})
+        assert caught.value.field == field
+    for field in CONTENT_FIELDS:
+        missing = dict(base)
+        missing.pop(field)
+        if field == "failure_code":
+            assert payment_fingerprint(missing) == payment_fingerprint(base)
+            continue
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(missing)
+        assert caught.value.field == field
+    with pytest.raises(FingerprintError):
+        payment_fingerprint({**base, "status": "FAILED"})
+    # 허용 목록은 입력 검사기의 역할이며 지문 함수가 UNKNOWN으로 바꾸지 않는다.
+    unknown = {**base, "status": "FAILED", "failure_code": "PG_NEW_ERROR"}
+    assert payment_fingerprint(unknown)["fingerprint_version"] == "payment-content.v1"
+    with pytest.raises(FormatError):
+        FormatRules().validate("payments", {**payment(), "status": "FAILED",
+                                            "failure_code": "PG_NEW_ERROR"})
+
+
+def test_fingerprint_yaml_null_compatibility_and_original_time_precision():
+    rules = FormatRules()
+    success = payment()
+    omitted = dict(success)
+    omitted.pop("failure_code")
+    original = deepcopy(omitted)
+    rules.validate("payments", omitted)
+    assert canonical_payment_content(omitted) == canonical_payment_content(success)
+    assert payment_fingerprint(omitted) == payment_fingerprint(success)
+    assert omitted == original and "failure_code" not in omitted
+    for invalid in ({**omitted, "status": "FAILED"},
+                    {**success, "status": "FAILED"},
+                    {**success, "failure_code": ""}, {**success, "failure_code": " "}):
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(invalid)
+        assert caught.value.field == "failure_code"
+    for field in ("requested_at", "completed_at"):
+        raw = {**success, field: success[field].replace(":00+", ":00.1234567+")}
+        # 입력 검사 후에도 원문을 보존하고 시각 변환 전에 지문 정밀도를 검사한다.
+        before = deepcopy(raw)
+        rules.validate("payments", raw)
+        assert raw == before
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(raw)
+        assert caught.value.field == field
 
 
 def fixture_id(label):
@@ -30,7 +132,7 @@ def fixture_id(label):
 def order(identifier="00000000-4000-8000-0000-000000000009", **changes):
     return {
         "order_id": fixture_id(identifier), "member_id": "00000000-4000-8000-0000-000000000008", "session_id": "00000000-4000-8000-0000-00000000001f",
-        "status": "PLACED", "status_reason": None, "total_amount": 1000,
+        "status": "PLACED", "status_reason": None, "total_amount": 11800,
         "ordered_at": "2026-10-14T00:00:00+09:00",
         "updated_at": "2026-10-14T00:00:00+09:00", **changes,
     }
@@ -39,7 +141,7 @@ def order(identifier="00000000-4000-8000-0000-000000000009", **changes):
 def payment(identifier="00000000-4000-8000-0000-000000000011", **changes):
     return {
         "payment_id": fixture_id(identifier), "order_id": "00000000-4000-8000-0000-000000000009", "attempt_no": 1,
-        "method": "CARD", "pg": "PG_A", "amount": 1000,
+        "method": "CARD", "pg": "PG_A", "amount": 11800,
         "status": "SUCCESS", "failure_code": None,
         "requested_at": "2026-10-14T00:01:00+09:00",
         "completed_at": "2026-10-14T00:02:00+09:00", **changes,
@@ -48,6 +150,88 @@ def payment(identifier="00000000-4000-8000-0000-000000000011", **changes):
 
 def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
+
+
+def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_path):
+    raw = payment()
+    original = deepcopy(raw)
+    utc = {**raw, "requested_at": "2026-10-13T15:01:00Z",
+           "completed_at": "2026-10-13T15:02:00Z"}
+    source = tmp_path / "input"
+    source.mkdir()
+    for name, rows in (("orders", [order()]), ("items", []), ("payments", [raw, utc])):
+        (source / f"{name}.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    manifest = run(*(str(source / f"{name}.jsonl") for name in ("orders", "items", "payments")),
+                   str(tmp_path / "output"))
+    saved = [json.loads(line) for line in Path(manifest["outputs"]["payment_attempts"])
+             .read_text(encoding="utf-8").splitlines()]
+    assert len(saved) == 1
+    row = saved[0]
+    assert {key: row[key] for key in payment_fingerprint(raw)} == payment_fingerprint(utc)
+    assert row["amount"] == 11800
+    assert row["completed_at_utc"] == "2026-10-13T15:02:00+00:00"
+    assert row["completed_at_kst"] == "2026-10-14T00:02:00+09:00"
+    assert raw == original
+
+
+def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
+    raw = payment()
+    conflict = build_silver([order()], [], [raw, {**raw, "amount": 1001}])
+    assert conflict["payment_attempts"] == []
+    assert len(conflict["quarantined_records"]) == 2
+    assert {row["error_code"] for row in conflict["quarantined_records"]} == {"CONTENT_CONFLICT"}
+    for field in ("requested_at", "completed_at"):
+        invalid = {**raw, field: raw[field].replace("+09:00", ".1234567+09:00")}
+        result = build_silver([order()], [], [raw, invalid])
+        assert result["payment_attempts"] == []
+        issues = result["quarantined_records"]
+        assert any(row["field"] == field and row["error_code"] == "INVALID_VALUE" for row in issues)
+        assert summary(result, "payments")["status"] == "INCOMPLETE"
+
+
+def test_kafka_trace_observations_and_conflict_references(tmp_path):
+    from pipelines.silver.common import kafka_reference, load_jsonl
+
+    trace = {"kafka_topic": "payments", "kafka_partition": 0, "kafka_offset": 10,
+             "kafka_timestamp": "2026-10-13T15:02:01+00:00",
+             "kafka_timestamp_type": "CreateTime"}
+    bad = kafka_reference({**trace, "kafka_timestamp": "2026-10-21T10:00:00",
+                           "kafka_timestamp_type": "unknown", "text": "must not copy"})
+    assert bad["status"] == "INVALID"
+    assert bad["errors"] == ["kafka_timestamp", "kafka_timestamp_type"]
+    assert "text" not in bad and "timestamp" not in bad
+    source = tmp_path / "input"
+    source.mkdir()
+    paths = [source / (name + ".jsonl") for name in ("orders", "items", "payments")]
+    rows = [payment(**trace), payment(**trace),
+            payment(**{**trace, "kafka_offset": 12}, pg="PG_B"),
+            payment("other", kafka_offset=True), payment("untraced")]
+    paths[0].write_text(json.dumps(order()) + "\n", encoding="utf-8")
+    paths[1].write_text("", encoding="utf-8")
+    paths[2].write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    result = run(*(str(path) for path in paths), str(tmp_path / "output"))
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    obs = manifest["kafka_observations"]["payments"]
+    assert obs["coverage_status"] == "UNVERIFIED"
+    assert obs["row_counts"] == {"VALID": 3, "INVALID": 1, "MISSING": 1}
+    assert obs["partitions"] == [{"topic": "payments", "partition": 0,
+                                  "min_offset": 10, "max_offset": 12,
+                                  "row_count": 3, "unique_offset_count": 2}]
+    candidates = [json.loads(line) for line in Path(result["outputs"]["impact_candidates"])
+                  .read_text(encoding="utf-8").splitlines()]
+    assert [r["source"]["kafka"]["offset"] for r in candidates
+            if r["source_dataset"] == "payments" and r["source"]["kafka"]["status"] == "VALID"] == [10, 10, 12]
+    errors = [json.loads(line) for line in Path(result["outputs"]["quarantined_records"])
+              .read_text(encoding="utf-8").splitlines()]
+    conflicts = [r for r in errors if r["record_key"] == payment()["payment_id"]]
+    assert {r["kafka_reference"]["offset"] for r in conflicts} == {10, 12}
+    assert all(r["source_file"] == str(paths[2].resolve()) for r in conflicts)
+    # 추적 정보 차이는 업무 중복·내용 충돌 판정에 섞지 않는다.
+    loaded, _ = load_jsonl(str(paths[2]), allow_cdc=True)
+    identical = build_silver([order()], [], [loaded[0], {**loaded[1], "_input_source": loaded[2]["_input_source"]}])
+    assert len(identical["payment_attempts"]) == 1
+    assert not identical["quarantined_records"]
 
 
 def test_yaml_contract_validates_uuid_enums_reasons_and_times():
@@ -74,7 +258,7 @@ def test_yaml_contract_validates_uuid_enums_reasons_and_times():
 def test_yaml_is_the_executed_rule_source_and_proposals_are_not_applied(tmp_path):
     document = yaml.safe_load(DEFAULT_RULES.read_text(encoding="utf-8"))
     item = {"order_item_id": fixture_id("rule-item"), "order_id": order()["order_id"],
-            "article_id": "0001", "quantity": 2, "unit_price": 500}
+            "article_id": "0001", "quantity": 2, "unit_price": 5900}
     document["source_rules"]["order_items"]["fields"]["quantity"]["minimum"] = 3
     custom = tmp_path / "rules.yaml"
     custom.write_text(yaml.safe_dump(document), encoding="utf-8")
@@ -125,7 +309,7 @@ def test_failure_codes_follow_source_allowlist_and_preserve_valid_failed_attempt
     result = build_silver([order()], [], payments)
     assert not result["quarantined_records"]
     assert {row["failure_code"] for row in result["payment_attempts"]} == set(codes)
-    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.1.0"
+    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.2.0"
 
 
 def test_missing_unknown_and_non_string_failure_codes_have_distinct_errors():
@@ -168,7 +352,7 @@ def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
     rows = {
         "orders": [order(__op="r", __source_ts_ms=1000)],
         "items": [{"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
-                   "quantity": 1, "unit_price": 1000, "__op": "r", "__source_ts_ms": 1000}],
+                   "quantity": 1, "unit_price": 11800, "__op": "r", "__source_ts_ms": 1000}],
         "payments": [payment(__op="c", __source_ts_ms=2000),
                      payment(amount=2000, __op="c", __source_ts_ms=2000)],
     }
@@ -187,22 +371,22 @@ def test_flat_cdc_file_loading_keeps_every_conflict_candidate(tmp_path):
 
 def test_order_item_sum_requires_complete_input_and_counts_duplicates_once():
     item = {"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
-            "quantity": 2, "unit_price": 500}
-    unchecked = build_silver([order(total_amount=1200)], [item], [], input_complete=False)
+            "quantity": 2, "unit_price": 5900}
+    unchecked = build_silver([order(total_amount=12000)], [item], [], input_complete=False)
     assert summary(unchecked, "orders")["amount_checks"][0]["status"] == "UNVERIFIED"
     assert not unchecked["quarantined_records"]
     passed = build_silver([order()], [item, dict(item)], [payment()], input_complete=True)
-    assert summary(passed, "orders")["amount_checks"][0]["item_total_amount"] == 1000
+    assert summary(passed, "orders")["amount_checks"][0]["item_total_amount"] == 11800
     assert summary(passed, "orders")["amount_checks"][0]["status"] == "PASS"
     assert len(passed["orders_current"]) == 1
-    result = build_silver([order(total_amount=1200), order("00000000-4000-8000-0000-00000000000a")],
+    result = build_silver([order(total_amount=12000), order("00000000-4000-8000-0000-00000000000a")],
                          [item, {**item, "order_item_id": "00000000-4000-8000-0000-000000000005", "order_id": "00000000-4000-8000-0000-00000000000a"}],
-                         [payment(amount=1200), payment("00000000-4000-8000-0000-00000000001c", order_id="00000000-4000-8000-0000-00000000000a")], input_complete=True)
+                         [payment(amount=12000), payment("00000000-4000-8000-0000-00000000001c", order_id="00000000-4000-8000-0000-00000000000a")], input_complete=True)
     assert [row["order_id"] for row in result["orders_current"]] == ["00000000-4000-8000-0000-00000000000a"]
     assert [row["order_id"] for row in result["order_status_history"]] == ["00000000-4000-8000-0000-00000000000a"]
     assert [row["payment_id"] for row in result["payment_attempts"]] == ["00000000-4000-8000-0000-00000000001c"]
     issue = next(row for row in result["quarantined_records"] if row["error_code"] == "ORDER_TOTAL_MISMATCH")
-    assert (issue["order_total_amount"], issue["item_total_amount"], issue["amount_difference"]) == (1200, 1000, -200)
+    assert (issue["order_total_amount"], issue["item_total_amount"], issue["amount_difference"]) == (12000, 11800, -200)
 
 
 def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches():
@@ -211,7 +395,7 @@ def test_missing_or_invalid_items_do_not_become_zero_or_partial_sum_mismatches()
     assert summary(missing, "orders")["amount_checks"][0]["status"] == "PENDING_REFERENCE"
     assert all(row["error_code"] != "ORDER_TOTAL_MISMATCH" for row in missing["quarantined_records"])
     item = {"order_item_id": "00000000-4000-8000-0000-000000000004", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "0001",
-            "quantity": 1, "unit_price": 500}
+            "quantity": 1, "unit_price": 5900}
     broken = build_silver([order()], [item, {**item, "order_item_id": "00000000-4000-8000-0000-000000000005", "unit_price": 0}],
                           [payment()], input_complete=True)
     check = summary(broken, "orders")["amount_checks"][0]
@@ -287,7 +471,7 @@ def test_retry_sequence_and_amount_failures_do_not_remove_unrelated_success():
 
 
 def test_history_item_totals_and_invalid_shapes():
-    item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1", "quantity": 2, "unit_price": 500}
+    item = {"order_item_id": "00000000-4000-8000-0000-000000000001", "order_id": "00000000-4000-8000-0000-000000000009", "article_id": "A-1", "quantity": 2, "unit_price": 5900}
     result = build_silver(
         [order(), order(status="PAID", updated_at="2026-10-14T00:02:00+09:00")],
         [item, dict(item), {**item, "order_item_id": "00000000-4000-8000-0000-000000000003", "unit_price": 0}],
@@ -295,7 +479,7 @@ def test_history_item_totals_and_invalid_shapes():
     )
     assert result["orders_current"][0]["status"] == "PAID"
     assert len(result["order_status_history"]) == 2
-    assert result["silver_order_items"][0]["item_amount"] == 1000
+    assert result["silver_order_items"][0]["item_amount"] == 11800
     assert summary(result, "order_items")["duplicate_count"] == 1
     assert summary(result, "orders")["status"] == "PASS"
     assert summary(result, "payments")["status"] == "INCOMPLETE"
@@ -324,6 +508,8 @@ def test_local_files_reexecution_and_failed_publish_preserve_previous_result(tmp
     second = run(*args)
     assert first["output_counts"] == second["output_counts"]
     for name in first["outputs"]:
+        if name == "order_amount_checks":
+            continue  # 실행 ID·검사 시각은 재실행마다 바뀌며 업무 판정값은 별도 검증한다.
         assert Path(first["outputs"][name]).read_bytes() == Path(second["outputs"][name]).read_bytes()
     manifest = Path(second["manifest_path"])
     previous = manifest.read_bytes()
@@ -354,3 +540,70 @@ def test_document_input_does_not_silently_interpret_cdc_or_overwrite_source(tmp_
     assert not output.exists()
     with pytest.raises(ValueError, match="겹치지"):
         run(str(source), str(source), str(source), str(tmp_path))
+
+
+def test_r6_output_fixed_evidence_recheck_and_failed_manifest(tmp_path, monkeypatch):
+    from datetime import datetime
+
+    source = tmp_path / "input"
+    source.mkdir()
+    locations = [source / (name + ".jsonl") for name in ("orders", "items", "payments")]
+    item = {"order_item_id": fixture_id("r6-item"), "order_id": order()["order_id"],
+            "article_id": "0001", "quantity": 2, "unit_price": 5900}
+    output = tmp_path / "output"
+
+    def execute(total=12800, complete=True, items=None):
+        values = ([order(total_amount=total)], [item] if items is None else items,
+                  [payment(amount=total)])
+        for path, rows in zip(locations, values, strict=True):
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        return run(*(str(path) for path in locations), str(output), input_complete=complete)
+
+    def check_row(manifest):
+        rows = [json.loads(line) for line in Path(manifest["outputs"]["order_amount_checks"])
+                .read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["run_id"] == manifest["run_id"]
+        assert row["checked_at"] == manifest["checked_at"]
+        assert datetime.fromisoformat(row["checked_at"]).utcoffset().total_seconds() == 0
+        assert row["check_name"] == "order_item_total_match"
+        assert row["check_version"] == "items-sum-v1"
+        assert row["source_manifest"] == manifest["fixed_manifest_path"]
+        assert json.loads(Path(row["source_manifest"]).read_text(encoding="utf-8")) == manifest
+        return row
+
+    first = execute()
+    fixed = Path(first["fixed_manifest_path"])
+    evidence = fixed.read_bytes()
+    first_row = check_row(first)
+    assert (first_row["status"], first_row["amount_difference"]) == ("MISMATCH", -1000)
+    second = execute()
+    second_row = check_row(second)
+    assert second_row["run_id"] != first_row["run_id"]
+    assert second_row["status"] == "MISMATCH"
+    third = execute(11800)
+    assert (check_row(third)["status"], check_row(third)["amount_difference"]) == ("PASS", 0)
+    assert fixed.read_bytes() == evidence  # 최신 참조가 바뀌어도 과거 근거는 그대로다.
+    for manifest, expected in ((execute(complete=False), "UNVERIFIED"),
+                               (execute(items=[]), "PENDING_REFERENCE"),
+                               (execute(items=[{**item, "unit_price": 0}]), "ITEM_ERROR")):
+        row = check_row(manifest)
+        assert row["status"] == expected
+        assert row["item_total_amount"] is None and row["amount_difference"] is None
+
+    current = Path(first["manifest_path"])
+    before = current.read_bytes()
+    runs_before = set(current.parent.joinpath("runs").iterdir())
+    original = Path.write_text
+
+    def fail_fixed(path, *args, **kwargs):
+        if path.name == "manifest.json":
+            raise OSError("fixed manifest write failed")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_fixed)
+    with pytest.raises(OSError, match="fixed manifest"):
+        execute()
+    assert current.read_bytes() == before
+    assert set(current.parent.joinpath("runs").iterdir()) == runs_before

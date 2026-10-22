@@ -1,0 +1,93 @@
+[
+  {
+    "name": "click_view",
+    "description": "정상 클릭 (키 = session_id)",
+    "kafka": {"topic": "clickstream", "partition": 2, "offset": 18340, "timestamp": "2026-10-21T06:03:10Z", "key": "00000000-4000-8000-0000-0000000000d1"},
+    "value": {"event_id": "00000000-4000-8000-0000-0000000000e1", "event_type": "view", "member_id": "00000000-4000-8000-0000-0000000000c1", "article_id": "0108775015", "event_time": "2026-10-21T15:03:09+09:00", "session_id": "00000000-4000-8000-0000-0000000000d1"},
+    "expected": {"payment_events": false, "malformed": []}
+  },
+  {
+    "name": "click_renamed_session_id",
+    "description": "필드 이름 변경 (session_id → sessionId). 시나리오 3 시연용",
+    "kafka": {"topic": "clickstream", "partition": 2, "offset": 18342, "timestamp": "2026-10-21T06:03:11Z", "key": "00000000-4000-8000-0000-0000000000d1"},
+    "value": {"event_id": "00000000-4000-8000-0000-0000000000e2", "event_type": "cart_add", "member_id": "00000000-4000-8000-0000-0000000000c1", "article_id": "0108775015", "event_time": "2026-10-21T15:03:10+09:00", "sessionId": "00000000-4000-8000-0000-0000000000d1"},
+    "expected": {"payment_events": false, "malformed": [{"field": "session_id", "reason": "MISSING_FIELD"}]}
+  },
+  {
+    "name": "click_bad_event_type",
+    "description": "허용되지 않는 event_type",
+    "kafka": {"topic": "clickstream", "partition": 0, "offset": 9001, "timestamp": "2026-10-21T06:03:20Z", "key": "00000000-4000-8000-0000-0000000000d2"},
+    "value": {"event_id": "00000000-4000-8000-0000-0000000000e3", "event_type": "purchase", "member_id": "00000000-4000-8000-0000-0000000000c2", "article_id": "0110065001", "event_time": "2026-10-21T15:03:19+09:00", "session_id": "00000000-4000-8000-0000-0000000000d2"},
+    "expected": {"payment_events": false, "malformed": [{"field": "event_type", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "click_article_id_number",
+    "description": "article_id가 문자열이 아니라 숫자 (앞자리 0이 사라짐)",
+    "kafka": {"topic": "clickstream", "partition": 0, "offset": 9002, "timestamp": "2026-10-21T06:03:25Z", "key": "00000000-4000-8000-0000-0000000000d2"},
+    "value": {"event_id": "00000000-4000-8000-0000-0000000000e4", "event_type": "view", "member_id": "00000000-4000-8000-0000-0000000000c2", "article_id": 110065001, "event_time": "2026-10-21T15:03:24+09:00", "session_id": "00000000-4000-8000-0000-0000000000d2"},
+    "expected": {"payment_events": false, "malformed": [{"field": "article_id", "reason": "TYPE_MISMATCH"}]}
+  },
+  {
+    "name": "order_placed",
+    "description": "정상 주문",
+    "kafka": {"topic": "orders", "partition": 0, "offset": 500, "timestamp": "2026-10-21T06:00:55Z"},
+    "value": {"order_id": "00000000-4000-8000-0000-0000000000b1", "member_id": "00000000-4000-8000-0000-0000000000c1", "session_id": "00000000-4000-8000-0000-0000000000d1", "status": "PLACED", "status_reason": null, "total_amount": 39000, "ordered_at": "2026-10-21T06:00:50Z", "updated_at": "2026-10-21T06:00:50Z", "__op": "c", "__source_ts_ms": 1792562455000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": []}
+  },
+  {
+    "name": "order_bad_status",
+    "description": "허용되지 않는 주문 상태",
+    "kafka": {"topic": "orders", "partition": 1, "offset": 501, "timestamp": "2026-10-21T06:05:00Z"},
+    "value": {"order_id": "00000000-4000-8000-0000-0000000000b2", "member_id": "00000000-4000-8000-0000-0000000000c2", "session_id": "00000000-4000-8000-0000-0000000000d2", "status": "LOST", "status_reason": null, "total_amount": 25900, "ordered_at": "2026-10-21T06:01:05Z", "updated_at": "2026-10-21T06:05:00Z", "__op": "u", "__source_ts_ms": 1792562700000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "status", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "order_item_ok",
+    "description": "정상 주문상품",
+    "kafka": {"topic": "order-items", "partition": 0, "offset": 800, "timestamp": "2026-10-21T06:00:56Z"},
+    "value": {"order_item_id": "00000000-4000-8000-0000-0000000000f1", "order_id": "00000000-4000-8000-0000-0000000000b1", "article_id": "0108775015", "quantity": 1, "unit_price": 39000, "__op": "c", "__source_ts_ms": 1792562455100, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": []}
+  },
+  {
+    "name": "order_item_low_price",
+    "description": "unit_price가 최솟값 5,900보다 작음",
+    "kafka": {"topic": "order-items", "partition": 1, "offset": 801, "timestamp": "2026-10-21T06:01:06Z"},
+    "value": {"order_item_id": "00000000-4000-8000-0000-0000000000f2", "order_id": "00000000-4000-8000-0000-0000000000b2", "article_id": "0110065001", "quantity": 1, "unit_price": 3000, "__op": "c", "__source_ts_ms": 1792562466000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "unit_price", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "order_item_zero_quantity",
+    "description": "quantity가 0",
+    "kafka": {"topic": "order-items", "partition": 1, "offset": 802, "timestamp": "2026-10-21T06:01:07Z"},
+    "value": {"order_item_id": "00000000-4000-8000-0000-0000000000f3", "order_id": "00000000-4000-8000-0000-0000000000b2", "article_id": "0110065001", "quantity": 0, "unit_price": 25900, "__op": "c", "__source_ts_ms": 1792562466100, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "quantity", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "member_ok",
+    "description": "정상 회원 이벤트 (PII 없는 10컬럼)",
+    "kafka": {"topic": "members-events", "partition": 0, "offset": 3000, "timestamp": "2026-10-21T05:59:00Z"},
+    "value": {"member_id": "00000000-4000-8000-0000-0000000000c1", "signup_at": "2026-10-21T05:58:59Z", "signup_channel": "app", "gender": "F", "age_band": "30s", "region_sigungu": "마포구", "marketing_consent": true, "status": "ACTIVE", "withdrawn_at": null, "created_at": "2026-10-21T05:58:59Z", "__op": "c", "__source_ts_ms": 1792562339000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": []}
+  },
+  {
+    "name": "member_with_pii_column",
+    "description": "개인정보 컬럼(email)이 들어옴. 샘플이라 값은 넣지 않고 <redacted>로 둠",
+    "kafka": {"topic": "members-events", "partition": 1, "offset": 3001, "timestamp": "2026-10-21T06:09:00Z"},
+    "value": {"member_id": "00000000-4000-8000-0000-0000000000c3", "signup_at": "2026-10-21T06:08:59Z", "signup_channel": "web", "gender": "M", "age_band": "20s", "region_sigungu": "수원시", "marketing_consent": false, "status": "ACTIVE", "withdrawn_at": null, "created_at": "2026-10-21T06:08:59Z", "email": "<redacted>", "__op": "c", "__source_ts_ms": 1792562939000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "email", "reason": null}], "note": "PII 컬럼의 오류 사유는 설계에 없음 (4가지 중 무엇인지 2단계에서 정함)"}
+  },
+  {
+    "name": "review_ok",
+    "description": "정상 리뷰 (review.v2, 키 = product_id). 운영에서는 이 토픽이 비어 있을 수 있음",
+    "kafka": {"topic": "reviews.raw", "partition": 0, "offset": 40, "timestamp": "2026-10-21T06:10:00Z", "key": "W-0006"},
+    "value": {"schema_version": "review.v2", "event_id": "00000000-4000-8000-0000-000000000101", "event_type": "review_created", "review_id": "R-000000000001", "created_at": "2026-10-21T15:09:58+09:00", "emitted_at": "2026-10-21T06:10:00+00:00", "product_id": "W-0006", "product_name": "샘플 니트", "category": null, "option_size": "M", "option_color": "블랙", "member_id": "C-0000000001", "order_id": null, "purchased_at": null, "age_group": "30대", "rating": 4, "text": "<본문 생략>", "has_photo": false, "source": "simulator"},
+    "expected": {"payment_events": false, "malformed": [], "note": "리뷰 규칙은 민혁 님 컬럼 확정 후. 지금은 rating만 확인"}
+  },
+  {
+    "name": "review_bad_rating",
+    "description": "rating이 1~5 밖",
+    "kafka": {"topic": "reviews.raw", "partition": 0, "offset": 41, "timestamp": "2026-10-21T06:10:05Z", "key": "W-0006"},
+    "value": {"schema_version": "review.v2", "event_id": "00000000-4000-8000-0000-000000000102", "event_type": "review_created", "review_id": "R-000000000002", "created_at": "2026-10-21T15:10:03+09:00", "emitted_at": "2026-10-21T06:10:05+00:00", "product_id": "W-0006", "product_name": "샘플 니트", "category": null, "option_size": "L", "option_color": "블랙", "member_id": "C-0000000002", "order_id": null, "purchased_at": null, "age_group": "40대", "rating": 6, "text": "<본문 생략>", "has_photo": false, "source": "simulator"},
+    "expected": {"payment_events": false, "malformed": [{"field": "rating", "reason": "INVALID_VALUE"}]}
+  }
+]

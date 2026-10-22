@@ -188,11 +188,11 @@ def redetect(query, write, cfg: Config, now: datetime, item):
     rid, ws, we = item["request_id"], item["window_start"], item["window_end"]
     start, end = datetime.fromisoformat(str(ws)), datetime.fromisoformat(str(we))
     run_id = f"{start:%Y%m%dT%H%MZ}-RD-{rid}"     # 요청과 교체 구간으로 정해서, 실패한 작업을 다시 돌려도 같은 번호가 된다(이중 저장 방지)
-    prior = query(f"""SELECT DISTINCT rule_id, scope_type, scope_key FROM gold_b.anomaly
+    prior_rows = query(f"""SELECT * FROM gold_b.anomaly
 WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)} AND rule_id NOT IN ('R3_BRONZE_LAG', '{R6_RULE}')
   AND run_id <> '{run_id}'""")   # 교체된 시간대와 겹치는 옛 판정 (R3, R6은 재처리가 안 바꾸는 값이라 비교에서 뺀다. 자기 번호의 줄도 뺀다)
     key = lambda r: (r["rule_id"], r["scope_type"], r["scope_key"])   # 규칙·대상이 같으면 같은 이상 (R5는 순찰·재판정의 시간 기준이 달라 id로 비교할 수 없다)
-    prior_ids = {key(r) for r in prior}
+    prior_ids = {key(r) for r in prior_rows}
     rows, tick = [], start + timedelta(minutes=STEP_MIN)
     while True:   # 정규 순찰과 같은 5분 시각으로 훑는다. 비율 규칙은 구간이 끝난 지 3분 뒤를 보므로, 교체 구간의 끝까지 덮을 때까지 한 번 더 훑는다
         rows += judge(query, cfg, tick, run_id, now, as_of=None, bounds=(start, end))
@@ -206,8 +206,18 @@ WHERE window_end > {_ts(start, cfg)} AND window_start < {_ts(end, cfg)} AND rule
     new_ids = {key(r) for r in unique}
     done = {r["anomaly_id"] for r in query(f"SELECT anomaly_id FROM gold_b.anomaly WHERE run_id = '{run_id}'")}   # 앞선 시도가 이미 쓴 줄은 다시 쓰지 않는다
     fresh = [r for r in unique if r["anomaly_id"] not in done]
-    if fresh:
-        write("anomaly", fresh)
+    latest = {}                                               # 같은 이상(anomaly_id)의 가장 최근 줄 (뷰 anomaly_current와 같은 기준)
+    for r in prior_rows:
+        cur = latest.get(r["anomaly_id"])
+        if cur is None or (str(r["detected_at"]), r["run_id"]) > (str(cur["detected_at"]), cur["run_id"]):
+            latest[r["anomaly_id"]] = r
+    # 재처리 뒤 사라진 이상은 RESOLVED 줄을 새로 쌓는다. 그래야 anomaly_current만 읽어도 해결된 것으로 보인다 (이미 쓴 줄은 다시 쓰지 않는다)
+    resolved = [dict(r, run_id=run_id, status="RESOLVED", detected_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+                     evidence_ref=json.dumps({"resolved_by_request": rid, "redetect_run_id": run_id, "original_run_id": r["run_id"]}))
+                for r in latest.values()
+                if key(r) not in new_ids and r["status"] != "RESOLVED" and r["anomaly_id"] not in done]
+    if fresh or resolved:
+        write("anomaly", fresh + resolved)
     if not query(f"SELECT run_id FROM gold_b.detection_runs WHERE run_id = '{run_id}'"):
         write("detection_runs", [_run_record(run_id, "REDETECT", rid, start, end, now, len(unique))])
     remaining = prior_ids & new_ids
