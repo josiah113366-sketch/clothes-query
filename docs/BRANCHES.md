@@ -155,6 +155,7 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
+| `pipelines/silver-format-rules` | [pipelines-silver-format-rules.md](tasks/pipelines-silver-format-rules.md) | 로컬 구현·검증 완료, 원격 제출 전 | |
 | `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 검토 대기 | |
 
 

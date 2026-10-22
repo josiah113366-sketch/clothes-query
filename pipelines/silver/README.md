@@ -1,5 +1,15 @@
 # Silver 입력·출력 현황
 
+## 공통 규약 연결: 거래·회원·클릭
+
+- 거래(`orders`, `order_items`, `payments`), 회원(`members`), 클릭(`clickstream`)의 업무 필드는 `pipelines/format_rules.py`가 공통 YAML을 읽어 검사한다. 규약 0.2.0의 원본은 `docs/contracts/format_rules.yaml`이다.
+- 회원·클릭 실행도 `--rules-path`로 동일한 규칙 파일을 지정할 수 있다. 실행 시작에 한 번 읽은 규칙의 version·sha256·path·consumer를 dq_results와 current.json의 format_rules에 기록한다. 실행 중 파일을 다시 읽지 않는다.
+- 공통 입력 오류는 기존 격리 기록에 field·error_code·rule_id로 남긴다. 규칙 파일 누락·정의 오류·해당 데이터셋 규칙 누락은 실행을 중단해 이전 공개 결과를 유지한다.
+- 회원은 UUID·성별/가입 경로/연령대 허용 값·탈퇴 시각 조건·금지 개인정보 필드를 검사한다. 금지 필드의 값은 오류에 복사하지 않는다. CDC 변경 종류·원천 순서·현재 상태 복원은 기존 Silver 처리다.
+- 클릭은 이벤트·회원·세션 UUID와 상품 키 숫자 10자리를 검사한다. 기존 이벤트 중복·내용 충돌 처리와 event_time의 UTC/KST 변환은 유지한다.
+- 회원·클릭 처리 버전은 members.v2·clicks.v2다. 읽을 수 없는 업무 시각은 공통 규약의 INVALID_VALUE, 탈퇴 회원의 시각 누락은 MISSING_FIELD로 기록한다. 기존 회원 한 키 보류·클릭 같은 키 보류도 유지한다.
+- 리뷰·상품은 자체 검사 경로를 유지한다. 미등록 결제 실패 코드는 0.2.0에서 계속 격리하며, 수용·품질 경고 정책은 후속 공통 규약 PR에서 별도 적용한다.
+
 ## 결정: 결제 내용 지문 저장
 
 - 거래 Silver는 공통 YAML 입력 검사 후 `pipelines/payment_fingerprint.py`를 호출한다. 시각 변환 전 원본의 `requested_at`, `completed_at` 문자열을 전달한다.

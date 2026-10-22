@@ -8,6 +8,8 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pipelines.format_rules import FormatError
+
 
 class RowError(ValueError):
     def __init__(self, field: str, code: str, message: str):
@@ -82,8 +84,10 @@ def collect_unique(rows: list[dict], name: str, key_field: str, normalize,
             continue
         try:
             normalized[index] = normalize(raw)
-        except RowError as exc:
+        except (RowError, FormatError) as exc:
             reject(index, exc.field, exc.code, str(exc))
+            if isinstance(exc, FormatError):
+                errors[index]["rule_id"] = exc.rule_id
 
     selected = {}
     for key, indices in groups.items():
@@ -309,8 +313,10 @@ def collect_latest(rows: list[dict], name: str, key_field: str, normalize,
             continue
         try:
             normalized[index] = normalize(raw)
-        except RowError as exc:
+        except (RowError, FormatError) as exc:
             reject(index, exc.field, exc.code, str(exc))
+            if isinstance(exc, FormatError):
+                errors[index]["rule_id"] = exc.rule_id
         else:
             if key is None:
                 reject(index, key_field, "MISSING_FIELD", "고유 식별 키가 없습니다")

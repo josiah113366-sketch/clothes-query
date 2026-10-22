@@ -8,3 +8,4 @@
 
 - 입력과 실행 방법은 `pipelines/silver/README.md`를 따른다.
 - 거래 Silver는 합의된 컬럼으로 계산 규칙만 구현했다. 실제 주문·결제 Bronze 연결은 샘플 확인 후 진행한다.
+- 거래·회원·클릭의 업무 입력 검사는 공통 YAML과 `pipelines/format_rules.py`를 사용한다. 회원·클릭도 실행별 규칙 버전·내용 해시와 격리 rule_id를 남긴다. 리뷰·상품 검사는 별도다.

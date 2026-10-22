@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import tempfile
@@ -11,6 +10,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
+
+from pipelines.format_rules import DEFAULT_RULES, FormatRules, RuleConfigError
 
 from .common import RowError, collect_latest, decode_record, publish_bundle
 
@@ -20,15 +21,7 @@ PARTITION = re.compile(
     r"members-events\+\d+\+\d+\.json$"
 )
 OUTPUT_FILE = "part-00000.jsonl"
-FIELDS = (
-    "member_id",
-    "age_band",
-    "gender",
-    "signup_channel",
-    "region_sigungu",
-    "marketing_consent",
-    "status",
-)
+CHECK_VERSION = "members.v2"
 
 
 def _location(uri: str) -> tuple[str, str]:
@@ -93,17 +86,9 @@ def _timestamp(value: object, field: str) -> datetime:
     return result
 
 
-def _normalize(raw: dict[str, object]) -> tuple[str, int, dict[str, object]]:
-    for field in FIELDS:
-        value = raw.get(field)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            raise RowError(field, "MISSING_FIELD", "필수 정보가 없습니다")
-    if not isinstance(raw["member_id"], str):
-        raise RowError("member_id", "TYPE_MISMATCH", "member_id는 문자열이어야 합니다")
-    if not isinstance(raw["marketing_consent"], bool):
-        raise RowError("marketing_consent", "TYPE_MISMATCH", "marketing_consent는 boolean이어야 합니다")
-    if raw["status"] not in ("ACTIVE", "WITHDRAWN"):
-        raise RowError("status", "INVALID_VALUE", "지원하지 않는 회원 상태입니다")
+def _normalize(raw: dict[str, object], rules: FormatRules) -> tuple[str, int, dict[str, object]]:
+    # 업무 필드 기준은 YAML에 모으고 CDC 변경 종류·순서는 Silver에서 검사한다.
+    rules.validate("members", raw)
     if raw.get("__op") not in ("r", "c", "u"):
         raise RowError("__op", "INVALID_VALUE", "지원하지 않는 CDC 변경 종류입니다")
     source_ts = raw.get("__source_ts_ms")
@@ -115,8 +100,6 @@ def _normalize(raw: dict[str, object]) -> tuple[str, int, dict[str, object]]:
     withdrawn = (
         None if withdrawn_value is None else _timestamp(withdrawn_value, "withdrawn_at")
     )
-    if (raw["status"] == "WITHDRAWN") != (withdrawn is not None):
-        raise RowError("withdrawn_at", "INVALID_VALUE", "status와 withdrawn_at이 일치하지 않습니다")
     row = {
         "member_id": raw["member_id"],
         "age_band": raw["age_band"],
@@ -134,15 +117,19 @@ def _normalize(raw: dict[str, object]) -> tuple[str, int, dict[str, object]]:
     return str(raw["member_id"]), source_ts, row
 
 
-def build_quality(input_root: str, through: date) -> tuple[dict, list[str]]:
+def build_quality(input_root: str, through: date, rules: FormatRules | None = None) -> tuple[dict, list[str]]:
+    rules = rules if rules is not None else FormatRules()
+    if "members" not in rules.datasets:
+        raise RuleConfigError("회원 데이터셋의 공통 규칙이 없습니다")
     files = _input_files(input_root, through)
     if not files:
         raise FileNotFoundError("지정 날짜까지의 회원 Bronze 파일이 없습니다")
     inputs = [decode_record(line, uri, number)
               for uri in files for number, line in enumerate(_lines(uri), 1) if line.strip()]
     rows, issues, summary = collect_latest(
-        inputs, "members", "member_id", lambda raw: _normalize(raw)[2], "source_ts_ms", "members.v1")
+        inputs, "members", "member_id", lambda raw: _normalize(raw, rules)[2], "source_ts_ms", CHECK_VERSION)
     summary["through_date_utc"] = through.isoformat()
+    summary["format_rules"] = rules.reference()
     return {"members_current": rows, "quarantined_records": issues, "dq_results": [summary]}, files
 
 
@@ -165,17 +152,20 @@ def _write_text(uri: str, body: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def run(input_root: str, output_root: str, through: date) -> tuple[int, int, str]:
+def run(input_root: str, output_root: str, through: date,
+        rules_path: str | Path | None = None) -> tuple[int, int, str]:
+    rules = FormatRules(DEFAULT_RULES if rules_path is None else rules_path)
     if output_root.startswith("s3://"):
         raise ValueError("첫 버전은 로컬 Silver 출력만 지원합니다")
     if not input_root.startswith("s3://"):
         source, target = Path(input_root).resolve(), Path(output_root).resolve()
         if source == target or source in target.parents or target in source.parents:
             raise ValueError("입력과 출력 경로는 서로 겹치지 않아야 합니다")
-    result, files = build_quality(input_root, through)
+    result, files = build_quality(input_root, through, rules)
     base = str(Path(output_root).resolve() / "silver" / "members_current" / f"as_of={through}")
     manifest = publish_bundle(base, {name + ".jsonl": rows for name, rows in result.items()}, {
-        "status": result["dq_results"][0]["status"], "check_version": "members.v1",
+        "status": result["dq_results"][0]["status"], "check_version": CHECK_VERSION,
+        "format_rules": rules.reference(),
         "through_date_utc": through.isoformat(), "input_files": files,
         "input_count": result["dq_results"][0]["input_count"],
     }, _write_text)
@@ -187,8 +177,9 @@ def main() -> None:
     parser.add_argument("--input-root", required=True, help="bronze/members-events 경로")
     parser.add_argument("--output-root", required=True, help="로컬 결과 루트")
     parser.add_argument("--through-date", type=date.fromisoformat, required=True, help="UTC 수집 날짜")
+    parser.add_argument("--rules-path", help="공통 입력 규칙 YAML. 생략하면 저장소 기본 규칙")
     args = parser.parse_args()
-    count, files, path = run(args.input_root, args.output_root, args.through_date)
+    count, files, path = run(args.input_root, args.output_root, args.through_date, args.rules_path)
     print(f"회원 Bronze {files}개 파일 → Silver 현재 회원 {count}행: {path}")
     print(f"품질·완료 상태 확인: {Path(args.output_root).resolve() / 'silver/members_current' / f'as_of={args.through_date}' / 'current.json'}")
 
