@@ -13,6 +13,7 @@
 | `staging_log_prefix`, `log_table_prefix` | 후기별 점수 로그 staging prefix(기본 `staging/review-score-log`)와 로그 Iceberg 테이블 위치(기본 `silver/review_score_log_iceberg`) |
 | `results_prefix` | Athena 쿼리 결과 위치(기본 `athena-results/review-score`) |
 | `database_name`, `table_name`, `staging_table_name` | Glue DB·점수 테이블 이름 |
+| `latest_view_name` | Gold 가 읽는 Athena 뷰 이름(기본 `review_aspect_scores_latest`, 후기마다 `model_version_no` 최대 결과). Glue `VIRTUAL_VIEW` 로 생성 |
 | `log_table_name`, `staging_log_table_name` | 후기별 점수 로그 테이블(Iceberg)과 그 staging 외부 테이블 이름 |
 | `bytes_scanned_cutoff` | 쿼리당 스캔 한도(기본 10GB, 최소 10MB) |
 | `config_parameter_name` | 스크립트가 읽는 SSM 파라미터 이름 |

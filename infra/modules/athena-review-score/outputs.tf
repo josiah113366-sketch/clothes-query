@@ -20,3 +20,8 @@ output "config_parameter_name" {
   description = "스크립트가 읽는 SSM 파라미터 이름."
   value       = aws_ssm_parameter.config.name
 }
+
+output "latest_view_name" {
+  description = "Gold 가 읽는 Athena 뷰 이름(후기마다 model_version_no 최대 결과). 데이터베이스는 database_name output."
+  value       = aws_glue_catalog_table.latest_view.name
+}

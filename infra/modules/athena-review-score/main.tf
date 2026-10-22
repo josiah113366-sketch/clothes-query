@@ -382,6 +382,74 @@ resource "aws_glue_catalog_table" "staging_log" {
   }
 }
 
+# ------------------------------------------------------------------ Gold 읽기용 Athena 뷰 (후기마다 model_version_no 최대 결과)
+# Athena 뷰는 Glue 에 table_type = VIRTUAL_VIEW 인 테이블로 저장되고, view_original_text 는 "/* Presto View: <base64(JSON)> */" 형식이다.
+# JSON 에는 뷰의 SQL(originalSql), 카탈로그/스키마, 열 이름과 Athena 타입이 들어간다. Athena 콘솔의 CREATE VIEW 가 만드는 것과 같은 모양이다.
+#
+# 뷰 정의에 WHERE 를 넣지 않는다. Gold 가 `WHERE review_date BETWEEN ...` 로 거르면 옵티마이저가 조건을 뷰 안으로 밀어 넣어 파티션 프루닝이 된다.
+# 윈도우 함수의 PARTITION BY 에 review_date 를 함께 넣은 이유: 후기 하나의 review_date 는 변하지 않으므로 결과는 같고,
+# review_date 가 윈도우 파티션 키에 들어 있어야 review_date 조건을 윈도우 아래(테이블 스캔)로 밀어 내릴 수 있다. (실제로 밀리는지는 EXPLAIN 으로 확인 — README 참고)
+# SELECT 는 열 이름을 명시한다(ADD COLUMNS 로 model_version_no 가 테이블 맨 끝에 있어서 순서에 기대면 안 된다).
+# 미검증: Terraform 으로 만든 뷰를 Athena 가 정상 뷰로 읽는지는 첫 apply 에서 확인한다. 안 되면 이 리소스를 빼고 Athena `CREATE OR REPLACE VIEW` 로 만든다.
+locals {
+  latest_view_sql = <<-EOT
+    SELECT review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date
+    FROM (
+      SELECT review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date,
+             max(model_version_no) OVER (PARTITION BY review_id, review_date) AS max_no
+      FROM "${aws_glue_catalog_database.this.name}"."${var.table_name}"
+    )
+    WHERE model_version_no = max_no
+  EOT
+
+  # 뷰 열: Presto(Athena) 타입과 Glue(Hive) 타입을 같이 둔다. 타입은 실제 Iceberg 테이블 열과 정확히 같아야 한다.
+  latest_view_columns = [
+    { name = "review_id", presto = "varchar", glue = "string" },
+    { name = "aspect", presto = "varchar", glue = "string" },
+    { name = "score", presto = "integer", glue = "int" },
+    { name = "model_version", presto = "varchar", glue = "string" },
+    { name = "model_version_no", presto = "decimal(4,1)", glue = "decimal(4,1)" },
+    { name = "analyzed_at", presto = "timestamp(6)", glue = "timestamp" },
+    { name = "review_date", presto = "date", glue = "date" },
+  ]
+
+  latest_view_json = jsonencode({
+    originalSql  = trimspace(local.latest_view_sql)
+    catalog      = "awsdatacatalog"
+    schema       = aws_glue_catalog_database.this.name
+    owner        = "trino"
+    runAsInvoker = false
+    columns      = [for c in local.latest_view_columns : { name = c.name, type = c.presto }]
+  })
+}
+
+resource "aws_glue_catalog_table" "latest_view" {
+  name          = var.latest_view_name
+  database_name = aws_glue_catalog_database.this.name
+  table_type    = "VIRTUAL_VIEW"
+
+  parameters = {
+    presto_view = "true"
+    comment     = "Presto View"
+  }
+
+  view_original_text = "/* Presto View: ${base64encode(local.latest_view_json)} */"
+  view_expanded_text = "/* Presto View */"
+
+  storage_descriptor {
+    dynamic "columns" {
+      for_each = local.latest_view_columns
+      content {
+        name = columns.value.name
+        type = columns.value.glue
+      }
+    }
+  }
+
+  # 뷰가 읽는 점수 테이블이 먼저 있어야 한다.
+  depends_on = [aws_glue_catalog_table.scores]
+}
+
 # ------------------------------------------------------------------ Athena 워크그룹
 # 이 워크그룹으로 실행한 쿼리는 아래 설정이 강제된다(쿼리마다 결과 위치를 따로 지정할 수 없다).
 # 비용: Athena 는 스캔한 데이터량 기준으로 과금한다(단가는 도쿄 리전 요금표에서 확인). bytes_scanned_cutoff 가 폭주 쿼리를 막는다.
@@ -506,6 +574,7 @@ resource "aws_ssm_parameter" "config" {
     staging_location     = "s3://${var.bucket_name}/${var.staging_prefix}/"
     table_location       = "s3://${var.bucket_name}/${var.table_prefix}/"
     results_location     = "s3://${var.bucket_name}/${var.results_prefix}/"
+    latest_view          = var.latest_view_name
     runner_policy_name   = aws_iam_policy.athena_runner.name
   })
 }

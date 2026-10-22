@@ -86,6 +86,12 @@ variable "staging_table_name" {
   default     = "staging_review_aspect_scores"
 }
 
+variable "latest_view_name" {
+  description = "Gold 가 읽는 Athena 뷰 이름(후기마다 model_version_no 최대 결과). Terraform 이 Glue 뷰로 만든다."
+  type        = string
+  default     = "review_aspect_scores_latest"
+}
+
 variable "bytes_scanned_cutoff" {
   description = "쿼리당 스캔 한도(바이트, 최소 10MB). 기본 10GB."
   type        = number

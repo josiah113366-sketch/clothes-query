@@ -103,6 +103,15 @@ variable "staging_table_name" {
   default     = "staging_review_aspect_scores"
 }
 
+variable "latest_view_name" {
+  description = <<-EOT
+    Gold 가 읽는 Athena 뷰 이름. "후기마다 model_version_no 가 가장 큰 결과"만 보여 준다(그 번호의 속성 전부).
+    Gold 는 이 뷰를 review_date 범위로 걸러 읽는다. 뷰는 Glue 테이블(VIRTUAL_VIEW)로 Terraform 이 만든다.
+  EOT
+  type        = string
+  default     = "review_aspect_scores_latest"
+}
+
 variable "bytes_scanned_cutoff" {
   description = "쿼리 하나가 스캔할 수 있는 최대 바이트(비용 안전장치). 최소 10,000,000 (10MB). 기본 10GB."
   type        = number

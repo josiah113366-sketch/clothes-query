@@ -5,7 +5,7 @@
 
 - 선행: bootstrap(state 버킷), storage(데이터 버킷). 후행/연동: [sagemaker-review-score](../sagemaker-review-score/README.md) 의 출력 prefix 를 staging 으로 바꾸는 별도 변경이 필요하다.
 - backend key: `clothes-query/dev/athena-review-score/terraform.tfstate`.
-- 만드는 것(8개): Glue 데이터베이스, **Iceberg 테이블 2개**(점수 `review_aspect_scores`, 후기별 점수 로그 `review_score_log`, 둘 다 파티션 `review_date`)와 **staging 외부 테이블 2개**(점수, 로그. Glue 테이블 리소스), Athena 워크그룹(엔진 v3, 결과 위치, 쿼리당 스캔 10GB 한도, 설정 강제), Airflow 용 IAM 정책 `athena_runner`(어떤 역할에도 자동으로 붙지 않음), 스크립트용 SSM 파라미터.
+- 만드는 것(9개): **Gold 읽기용 Athena 뷰 `review_aspect_scores_latest`**, Glue 데이터베이스, **Iceberg 테이블 2개**(점수 `review_aspect_scores`, 후기별 점수 로그 `review_score_log`, 둘 다 파티션 `review_date`)와 **staging 외부 테이블 2개**(점수, 로그. Glue 테이블 리소스), Athena 워크그룹(엔진 v3, 결과 위치, 쿼리당 스캔 10GB 한도, 설정 강제), Airflow 용 IAM 정책 `athena_runner`(어떤 역할에도 자동으로 붙지 않음), 스크립트용 SSM 파라미터.
 - 만들지 않는 것: 버킷·S3 수명주기(storage 소유), MERGE/OPTIMIZE/VACUUM 실행(Airflow), SageMaker 스택 변경.
 - 비용: 만들어 두기만 하면 0. Athena 는 쿼리가 스캔한 데이터량 기준 과금(단가는 도쿄 리전 요금표 확인), 쿼리 결과·Iceberg 파일은 S3 저장 요금.
 
@@ -27,7 +27,7 @@ flowchart LR
   GL["Glue Data Catalog<br/>DB · Iceberg/staging 테이블 4개"]
   IC[("Iceberg 점수 테이블<br/>review_aspect_scores")]
   LG[("Iceberg 점수 로그 테이블<br/>review_score_log")]
-  GD["Gold / 대시보드<br/>후기마다 model_version_no 최대 결과"]
+  GD["Gold / 대시보드<br/>review_aspect_scores_latest 뷰를 review_date 로 걸러 읽기"]
   MT["정기 유지보수<br/>OPTIMIZE · VACUUM"]
 
   AF --> SEL
@@ -45,7 +45,7 @@ flowchart LR
   AT <--> GL
   AT -->|"upsert + 빠진 속성 삭제"| IC
   AT -->|"upsert"| LG
-  IC --> GD
+  IC -->|"뷰: 후기마다 번호 최대 결과"| GD
   AF -.->|"주 1회 예정"| MT
   MT --> IC
 ```
@@ -90,7 +90,7 @@ terraform apply athena-review-score.tfplan      # plan 을 확인한 담당자�
 | 2 | `merge_log.sql` | 매일, **`merge.sql` 뒤에**. 후기별 점수 로그 upsert | `database`, `log_table`, `staging_log_table`, `year`, `month`, `day`, `model_version`, `model_version_no` |
 | 3 | `optimize.sql` | 정기(예: 주 1회) | `database`, `table`, `since` |
 | 4 | `vacuum.sql` | 정기(OPTIMIZE 뒤) | `database`, `table` |
-| - | `read_latest.sql` | 읽기: 후기마다 `model_version_no` 최대 결과 | `database`, `table`, `date` |
+| - | `read_latest.sql` | 읽기 예시(하루치, 테이블 직접). Gold 는 뷰 `review_aspect_scores_latest` 를 쓴다 | `database`, `table`, `date` |
 
 **apply 후 첫 적용 순서** (기존 테이블이 이미 있을 때): ① Terraform apply(로그 테이블 2개 생성, staging 열 추가) → ② `migrate_add_model_version_no.sql` 4문장을 하나씩 실행 → ③ 새 `score_batch.py` 를 S3 `review-score/code/` 에 업로드 → ④ Job 실행 → ⑤ `merge.sql` → `merge_log.sql`.
 점수 테이블은 `ignore_changes` 라서 Terraform 이 새 열을 추가하지 않는다(그래서 ②가 필요). 로그 테이블은 새로 만들어지므로 처음부터 열이 있다.
@@ -105,6 +105,35 @@ aws athena get-query-execution --query-execution-id <ID> --region ap-northeast-1
 ```
 
 (Git Bash 에서는 SSM 이름 앞에 `MSYS_NO_PATHCONV=1` 이 필요하다.)
+
+## Gold 가 읽는 방법: 뷰 `review_aspect_scores_latest`
+
+Gold 는 점수 테이블이 아니라 **뷰**를 읽는다. 뷰가 "후기마다 `model_version_no` 가 가장 큰 결과(그 번호의 속성 전부)"를 돌려준다.
+뷰 이름은 `latest_view_name` 변수(기본 `review_aspect_scores_latest`)이고 output `latest_view_name`·SSM 설정의 `latest_view` 로도 확인한다. 데이터베이스는 `clothes_query_dev_review_score`.
+
+```sql
+SELECT review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date
+FROM clothes_query_dev_review_score.review_aspect_scores_latest
+WHERE review_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-31';
+```
+- 열: `review_id, aspect, score(−2~+2), model_version(이름), model_version_no(번호 "x.y"), analyzed_at(UTC), review_date(후기 작성일 KST)`. 뷰를 만들 때 열 이름을 명시해서 점수 테이블의 열 순서(ADD COLUMNS 로 끝에 붙은 `model_version_no`)와 무관하다.
+- **파티션 프루닝**: 뷰 정의에는 WHERE 가 없다. Gold 가 `review_date` 로 거르면 옵티마이저가 그 조건을 뷰 안으로 밀어 넣어 해당 날짜 파티션만 읽는다. 윈도우의 `PARTITION BY` 에 `review_id` 와 함께 `review_date` 를 넣었기 때문에 가능하다(후기 하나의 `review_date` 는 변하지 않아 결과는 같다). 실제로 밀리는지는 `EXPLAIN` 으로 확인한다(아래).
+- 이 뷰는 읽기 전용이다. 쓰기(MERGE 등)는 점수 테이블에 한다.
+- 권한: 뷰를 읽는 쪽(Gold)은 뷰와 점수 테이블에 대한 Glue 읽기, 점수 테이블 S3 prefix 읽기, Athena 워크그룹 사용 권한이 필요하다(Gold 의 역할은 이 스택 소관이 아니다).
+- 뷰 정의 변경은 Terraform 으로 한다(`modules/athena-review-score/main.tf` 의 `latest_view_sql`). 콘솔에서 `CREATE OR REPLACE VIEW` 로 고치면 Terraform 과 어긋난다.
+- **미검증**: Terraform 이 만든 뷰(`VIRTUAL_VIEW` + `Presto View` base64 JSON)를 Athena 가 정상 뷰로 읽는지, 파티션 프루닝이 되는지는 첫 apply 에서 확인한다. 안 되면 이 리소스를 빼고 Athena `CREATE OR REPLACE VIEW review_aspect_scores_latest AS <같은 SELECT>` 로 만든다.
+
+**apply 후 확인 쿼리** (PowerShell, 앞서 정의한 `Run-Athena`/`Show` 사용)
+```powershell
+$VIEW = "$($A.database).$($A.latest_view)"
+Show (Run-Athena "SELECT count(*) AS rows, count(DISTINCT review_id) AS reviews FROM $VIEW")                       # 점수 테이블과 같거나(버전이 하나뿐일 때) 적음
+Show (Run-Athena "SELECT model_version_no, count(DISTINCT review_id) AS reviews FROM $VIEW GROUP BY 1")             # 후기마다 최대 번호만 남았는지(버전별 후기 수)
+Show (Run-Athena "SELECT * FROM $VIEW WHERE review_date = DATE '2026-10-21' LIMIT 5")                              # 읽힘
+# 파티션 프루닝 확인: 실행 계획에서 review_date 조건이 테이블 스캔까지 내려갔는지 본다
+$q = Run-Athena "EXPLAIN SELECT * FROM $VIEW WHERE review_date = DATE '2026-10-21'"
+Show $q
+```
+`EXPLAIN` 결과에서 `review_aspect_scores` 스캔 부분에 `review_date = DATE '2026-10-21'`(또는 constraint)가 보이면 프루닝된 것이다. `Show` 의 `$A.latest_view` 가 비어 있으면 `$A` 를 SSM 에서 다시 읽는다.
 
 ## SageMaker 스택과의 연결
 

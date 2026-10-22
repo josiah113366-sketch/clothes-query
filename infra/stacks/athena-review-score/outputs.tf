@@ -18,3 +18,8 @@ output "config_parameter_name" {
   description = "스크립트가 읽는 SSM 파라미터 이름."
   value       = module.athena_review_score.config_parameter_name
 }
+
+output "latest_view_name" {
+  description = "Gold 가 읽는 Athena 뷰 이름(후기마다 model_version_no 최대 결과)."
+  value       = module.athena_review_score.latest_view_name
+}
