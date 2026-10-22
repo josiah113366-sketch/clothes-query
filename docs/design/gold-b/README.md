@@ -652,9 +652,9 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 성철 | 결제 데이터 계약, 결과 시각을 정하면 바로 저장 | 중복 제거와 재시도 구분, 늦은 데이터 방지 | 필요 |
 | 성철 | 시나리오별 시연 모드(3배·10배), 평소 변동 | 탐지 기준과 허용 지연 | 필요 |
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
-| 현지 | 공통 형식 검사 코드(`pipelines/format_rules.py`)를 Gold B도 쓰는 방법: 규칙표의 `gold_b` 사용 승인, 한 메시지의 오류를 전부 돌려주는 함수, 클릭·회원·리뷰 규칙에 필요한 종류(10자리 문자열, true/false 값, 최댓값, 개인정보 컬럼 금지) | Gold B와 Silver가 같은 규칙으로 판단 | 필요 (규칙표 `docs/contracts/format_rules.yaml`은 PR #20으로 머지됨) |
-| 현지 | `unit_price` 최솟값 5,900 (계약 초안은 1) | 같은 메시지를 다르게 판단하지 않기 | 필요 |
-| 현지 | 결제 지문 규칙(필드 9개의 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 | Silver와 Gold B가 같은 함수로 같은 지문을 만들기 | 필요 |
+| 현지 | 공통 형식 검사 코드(`pipelines/format_rules.py`)를 Gold B도 쓰는 방법: 규칙표의 `gold_b` 사용 승인, 한 메시지의 오류를 전부 돌려주는 함수, 클릭·회원·리뷰 규칙에 필요한 종류(10자리 문자열, true/false 값, 최댓값, 개인정보 컬럼 금지) | Gold B와 Silver가 같은 규칙으로 판단 | 완료 (#63, 규칙표 0.2.0) |
+| 현지 | `unit_price` 최솟값 5,900 (계약 초안은 1) | 같은 메시지를 다르게 판단하지 않기 | 완료 (#63) |
+| 현지 | 결제 지문 규칙(필드 9개의 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 | Silver와 Gold B가 같은 함수로 같은 지문을 만들기 | 완료 (#55) |
 | 현지 | Silver 격리 기준 일치 | 같은 메시지를 다르게 판단하지 않기 | 필요 |
 | 현지 | 격리 해제와 Silver 재처리 방식 (upsert / 구간 교체), Silver 처리 범위 기록 | 같은 승인으로 Silver·Gold A를 다시 돌리기 | 필요 |
 | 현지 | `payment_attempts` 이름 겹침, Gold A 데이터셋 이름 | 발표와 문서에서 헷갈리지 않기 | 필요 |
@@ -735,15 +735,15 @@ pipelines/gold_b/
 - [ ]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인 (이 PC에서는 Spark가 안 떠서 DDL과 설계 표 비교, pyarrow 시간 폴더 왕복으로 대신 확인)
 - [ ]  Athena에서 `CREATE DATABASE gold_b`, 테이블 생성, 빈 조회 확인 (권한 준비 후)
 - [x]  `reprocess_events` 최종 컬럼을 주현 님께 공유 (#29 리뷰, #36 리뷰 요청)
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#36, 2026-10-22)
 
 ### 2단계: 정제·형식 검사
 
 (현지 님과 공용 모듈 위치·분담 먼저 확정)
 
-- [ ]  규칙표에 6개 토픽 규칙 추가 (`docs/contracts/format_rules.yaml`과 합칠지 현지 님과)
+- [x]  규칙표에 토픽 규칙 추가: 공통 `docs/contracts/format_rules.yaml`에 회원·클릭·리뷰 추가 (#63). 회원·클릭은 #65로 Silver와 공동 규칙. `reviews.raw`를 검사할지는 형식 검사 때 정함
 - [ ]  CDC 표시 읽기 (`__op = c` 또는 `r`)
-- [ ]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, 규칙은 현지 님과 확정)
+- [x]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, #55)
 - [ ]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록)
 - [ ]  `raw_sample` 마스킹 (필드 이름 유지, 값만 가림)
 - [ ]  `tests/test_format_check.py` 샘플로 검사 결과 확인
