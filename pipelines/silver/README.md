@@ -1,5 +1,14 @@
 # Silver 입력·출력 현황
 
+## 결정: 결제 내용 지문 저장
+
+- 거래 Silver는 공통 YAML 입력 검사 후 `pipelines/payment_fingerprint.py`를 호출한다. 시각 변환 전 원본의 `requested_at`, `completed_at` 문자열을 전달한다.
+- 정상 `payment_attempts`에 `payment_content_hash`(SHA-256 소문자 64자리)와 `fingerprint_version`(`payment-content.v1`)을 저장한다. 기존 UTC·KST 시각 컬럼과 금액은 유지한다.
+- 같은 `payment_id`의 같은 버전·같은 지문은 동일 내용 재수신으로 1건만 남기고, 지문이 다르면 기존 내용 충돌 처리에 따라 해당 키 전체를 격리한다. 주문 연결·금액 검사도 계속 적용한다.
+- 공통 함수가 시각을 UTC 소수초 6자리로 통일하므로 같은 순간의 UTC·KST 표현은 같은 지문이다. 6자리 초과 정밀도 등 지문 입력 오류는 `INVALID_VALUE`로 격리하고 같은 키의 정상 후보도 보류한다. 시간대를 추측하거나 정밀도를 조용히 버리지 않는다.
+- Silver 검사 버전은 `transactions.v8`이다. YAML 입력 규칙 버전·지문 버전과 역할이 다르다. Gold B 호출 연결·원천 처리 완료 범위 확인·실제 A/B 대조 잡은 이번 변경에 포함하지 않는다.
+
+
 ## R6용 주문 금액 검사 출력
 
 기존 금액 검사를 다시 만들지 않고 dq_results의 amount_checks를 `order_amount_checks.jsonl`로 펼친다. 로컬 거래 실행 완료 후 current.json의 outputs.order_amount_checks로 읽는다. 실행 1회 × 검사 종류 × 주문당 1행이며 중복 소비 키는 run_id/check_name/order_id다. 기존 dq_results·quarantined_records도 유지한다. R6가 두 파일의 오류 건수를 합산하면 같은 오류가 중복될 수 있다.
@@ -44,7 +53,7 @@ R6는 MISMATCH만 금액 불일치로 본다. UNVERIFIED는 입력 준비 미확
 - 거래 manifest의 kafka_observations는 입력별 메타데이터 VALID/INVALID/MISSING 건수와 토픽·파티션별 관측 min/max offset·행 수·고유 offset 수다. 정상·격리 전 입력을 기록하므로 오류 후보도 추적한다.
 - coverage_status=UNVERIFIED는 항상 유지한다. 관측 범위는 원천의 전체 범위·연속성·양쪽 처리 완료를 증명하지 않는다. Kafka 시각을 무조건 브로커 도착 시각으로 간주하지 않는다.
 - 누락·잘못된 추적 필드는 해당 상태와 필드명만 기록하고 업무 품질 판정과 분리한다. 기존 메타데이터 없는 입력은 동작하지만 정확한 Kafka 대조는 확인 불가다. source_ts_ms 또는 파일명으로 Kafka 위치·시각을 채우지 않는다.
-- 검사 버전 transactions.v6. 실제 Gold B 스냅샷·범위 증거·비교 계약이 없으므로 현재 실행은 MATCH/MISMATCH를 판정하지 않는다.
+- 추적 기능은 transactions.v6에서 추가됐고 현재 통합 검사 버전은 transactions.v8이다. 실제 Gold B 스냅샷·범위 증거·비교 계약이 없으므로 현재 실행은 MATCH/MISMATCH를 판정하지 않는다.
 
 ## 결정: 회원 현재 상태 (`members_current`)
 

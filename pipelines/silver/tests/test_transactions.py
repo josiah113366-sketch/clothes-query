@@ -14,7 +14,109 @@ from pipelines.format_rules import (
     FormatRules,
     RuleConfigError,
 )
+from pipelines.payment_fingerprint import (
+    CONTENT_FIELDS,
+    FingerprintError,
+    canonical_payment_content,
+    payment_fingerprint,
+)
 from pipelines.silver.transactions import build_silver, run
+
+
+def fingerprint_example():
+    return {"order_id": "o-1", "attempt_no": 1, "method": "CARD", "pg": "PG_A",
+            "amount": 20000, "status": "SUCCESS", "failure_code": None,
+            "requested_at": "2026-10-21T06:00:00Z",
+            "completed_at": "2026-10-21T06:00:02.123Z"}
+
+
+def test_payment_fingerprint_fixed_vector_and_time_equivalence():
+    original = fingerprint_example()
+    copy = deepcopy(original)
+    expected = (b'["o-1",1,"CARD","PG_A",20000,"SUCCESS",null,'
+                b'"2026-10-21T06:00:00.000000Z","2026-10-21T06:00:02.123000Z"]')
+    assert canonical_payment_content(original) == expected
+    assert payment_fingerprint(original) == {
+        "payment_content_hash": "efad032726ae5d4a0ab003e0e99175c4a372076e9d5e26a5c5d7a2b0235979fa",
+        "fingerprint_version": "payment-content.v1"}
+    kst = dict(reversed(list(original.items())))
+    kst.update(requested_at="2026-10-21T15:00:00.000000+09:00",
+               completed_at="2026-10-21T15:00:02.123000+09:00", payment_id="other",
+               kafka_offset=999, loaded_at="later", __op="r", __source_ts_ms=1)
+    assert payment_fingerprint(kst) == payment_fingerprint(original)
+    assert original == copy
+
+
+def test_payment_fingerprint_detects_every_business_field_change():
+    base = {**fingerprint_example(), "status": "FAILED", "failure_code": "PG_TIMEOUT"}
+    changes = {"order_id": "o-2", "attempt_no": 2, "method": "BANK_TRANSFER", "pg": "PG_B",
+               "amount": 20001, "status": "SUCCESS", "failure_code": "PG_ERROR",
+               "requested_at": "2026-10-21T06:00:00.000001Z",
+               "completed_at": "2026-10-21T06:00:02.123001Z"}
+    assert tuple(changes) == CONTENT_FIELDS
+    for field, value in changes.items():
+        changed = {**base, field: value}
+        if field == "status":
+            changed["failure_code"] = None
+        assert payment_fingerprint(changed) != payment_fingerprint(base), field
+    assert payment_fingerprint({**base, "order_id": " o-1"}) != payment_fingerprint(base)
+
+
+def test_payment_fingerprint_rejects_lossy_or_missing_inputs_without_policy_changes():
+    base = fingerprint_example()
+    cases = [("amount", "20000"), ("amount", 20000.0), ("amount", True), ("amount", 0),
+             ("attempt_no", False), ("attempt_no", 0), ("pg", " "), ("failure_code", ""),
+             ("status", "PENDING"), ("completed_at", "2026-10-21T06:00:02"),
+             ("completed_at", "2026-10-21T06:00:02.1234567Z"),
+             ("completed_at", "2026-02-30T06:00:02Z")]
+    for field, value in cases:
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint({**base, field: value})
+        assert caught.value.field == field
+    for field in CONTENT_FIELDS:
+        missing = dict(base)
+        missing.pop(field)
+        if field == "failure_code":
+            assert payment_fingerprint(missing) == payment_fingerprint(base)
+            continue
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(missing)
+        assert caught.value.field == field
+    with pytest.raises(FingerprintError):
+        payment_fingerprint({**base, "status": "FAILED"})
+    # 허용 목록은 입력 검사기의 역할이며 지문 함수가 UNKNOWN으로 바꾸지 않는다.
+    unknown = {**base, "status": "FAILED", "failure_code": "PG_NEW_ERROR"}
+    assert payment_fingerprint(unknown)["fingerprint_version"] == "payment-content.v1"
+    with pytest.raises(FormatError):
+        FormatRules().validate("payments", {**payment(), "status": "FAILED",
+                                            "failure_code": "PG_NEW_ERROR"})
+
+
+def test_fingerprint_yaml_null_compatibility_and_original_time_precision():
+    rules = FormatRules()
+    success = payment()
+    omitted = dict(success)
+    omitted.pop("failure_code")
+    original = deepcopy(omitted)
+    rules.validate("payments", omitted)
+    assert canonical_payment_content(omitted) == canonical_payment_content(success)
+    assert payment_fingerprint(omitted) == payment_fingerprint(success)
+    assert omitted == original and "failure_code" not in omitted
+    for invalid in ({**omitted, "status": "FAILED"},
+                    {**success, "status": "FAILED"},
+                    {**success, "failure_code": ""}, {**success, "failure_code": " "}):
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(invalid)
+        assert caught.value.field == "failure_code"
+    for field in ("requested_at", "completed_at"):
+        raw = {**success, field: success[field].replace(":00+", ":00.1234567+")}
+        # 입력 검사 후에도 원문을 보존하고 시각 변환 전에 지문 정밀도를 검사한다.
+        before = deepcopy(raw)
+        rules.validate("payments", raw)
+        assert raw == before
+        with pytest.raises(FingerprintError) as caught:
+            payment_fingerprint(raw)
+        assert caught.value.field == field
 
 
 def fixture_id(label):
@@ -48,6 +150,44 @@ def payment(identifier="00000000-4000-8000-0000-000000000011", **changes):
 
 def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
+
+
+def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_path):
+    raw = payment()
+    original = deepcopy(raw)
+    utc = {**raw, "requested_at": "2026-10-13T15:01:00Z",
+           "completed_at": "2026-10-13T15:02:00Z"}
+    source = tmp_path / "input"
+    source.mkdir()
+    for name, rows in (("orders", [order()]), ("items", []), ("payments", [raw, utc])):
+        (source / f"{name}.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    manifest = run(*(str(source / f"{name}.jsonl") for name in ("orders", "items", "payments")),
+                   str(tmp_path / "output"))
+    saved = [json.loads(line) for line in Path(manifest["outputs"]["payment_attempts"])
+             .read_text(encoding="utf-8").splitlines()]
+    assert len(saved) == 1
+    row = saved[0]
+    assert {key: row[key] for key in payment_fingerprint(raw)} == payment_fingerprint(utc)
+    assert row["amount"] == 1000
+    assert row["completed_at_utc"] == "2026-10-13T15:02:00+00:00"
+    assert row["completed_at_kst"] == "2026-10-14T00:02:00+09:00"
+    assert raw == original
+
+
+def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
+    raw = payment()
+    conflict = build_silver([order()], [], [raw, {**raw, "amount": 1001}])
+    assert conflict["payment_attempts"] == []
+    assert len(conflict["quarantined_records"]) == 2
+    assert {row["error_code"] for row in conflict["quarantined_records"]} == {"CONTENT_CONFLICT"}
+    for field in ("requested_at", "completed_at"):
+        invalid = {**raw, field: raw[field].replace("+09:00", ".1234567+09:00")}
+        result = build_silver([order()], [], [raw, invalid])
+        assert result["payment_attempts"] == []
+        issues = result["quarantined_records"]
+        assert any(row["field"] == field and row["error_code"] == "INVALID_VALUE" for row in issues)
+        assert summary(result, "payments")["status"] == "INCOMPLETE"
 
 
 def test_kafka_trace_observations_and_conflict_references(tmp_path):
