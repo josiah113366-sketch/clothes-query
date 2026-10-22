@@ -1,0 +1,92 @@
+# 작업 지시서: infra/athena-review-score
+
+> 상태: 초안 (코드·validate·plan 작성, 방식 확정 대기) · 브랜치: `infra/athena-review-score` (제안) · 다음 작업: `review-model/score-to-iceberg` (Airflow 태스크·SageMaker 출력 경로 변경)
+
+## 목표
+
+리뷰 점수 결과(`review_id, aspect, score, model_version, analyzed_at`)를 파일 덮어쓰기 대신 **Iceberg 테이블에 MERGE 로 반영**하는 Athena/Glue 기반을 Terraform 으로 만든다(방식 D).
+이번 브랜치는 기반(Glue DB, Athena 워크그룹, Airflow 용 IAM 정책, SSM 설정)과 SQL 템플릿까지다. Airflow 태스크, SageMaker 출력 경로 변경, 실제 데이터 이행은 만들지 않는다.
+
+## 먼저 읽을 것
+
+- 루트 `CLAUDE.md`, `infra/CLAUDE.md`
+- `docs/tasks/infra-sagemaker-review-score.md` (선행 작업: 점수화 Job 기반, 결과 경로·파티션 결정)
+- `infra/stacks/sagemaker-review-score/README.md` (현재 방식 A: 날짜+모델버전별 파일 덮어쓰기)
+- `pipelines/silver/README.md` (Silver 리뷰 입력 구조, KST 작성일 파티션)
+- `infra/stacks/storage/` (데이터 버킷, remote state 로 받음)
+
+## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
+
+- 2026-10-22 결정: 점수 결과는 Parquet 이고, 날짜 파티션은 **후기 작성일(KST)** 이다(실행한 날이 아님). `model_version` 은 경로가 아니라 열이다.
+- 2026-10-22 결정: 결과 관리 방식은 **D(Iceberg + MERGE)** 로 진행한다(A 덮어쓰기와 비교 후). 작업은 작업 지시서와 Terraform 초안부터 한다.
+- 방식 A(날짜+모델버전별 파일 덮어쓰기)로 이미 만든 `sagemaker-review-score` 스택은 그대로 둔다. 전환(출력 prefix 를 staging 으로 변경)은 별도 변경이다.
+- 하루 후기 수와 늦게 오는 후기 빈도는 아직 모른다. 이 값이 확정되면 D 가 과한지 다시 판단한다(한 번에 처리 가능한 양: 현재 실측으로 Job 당 약 2,200건, 최대 실행시간 3600초).
+
+## 시작 전 확인 (Claude가 한다)
+
+- 브랜치가 최신 `main` 에서 만들어졌는지, `sagemaker-review-score` 변경이 main 에 반영됐는지
+- 팀 계정 자격증명이 있고 `TF_VAR_expected_account_id` 와 state 버킷이 같은 계정인지
+- storage 스택이 apply 되어 있는지(output `bucket_name`, `bucket_arn` 필요)
+- Athena 엔진 v3, Iceberg `MERGE`/`OPTIMIZE`/`VACUUM` 문법이 도쿄 리전에서 지원되는지(공식 문서 확인)
+
+## 만드는 것
+
+### 1. 모듈 `infra/modules/athena-review-score/`
+- Glue 데이터베이스, Athena 워크그룹(엔진 v3, 결과 위치, 쿼리당 스캔 10GB 한도, 설정 강제)
+- Airflow 가 붙일 IAM 정책 `athena_runner`: 해당 워크그룹의 Athena 쿼리, 해당 DB·테이블의 Glue 읽기/`CreateTable`·`UpdateTable`, S3 staging 읽기·테이블 prefix 읽기/쓰기/삭제·결과 prefix 읽기/쓰기
+- 스크립트용 SSM 설정 파라미터(워크그룹, DB, 테이블, S3 위치)
+
+### 2. 스택 `infra/stacks/athena-review-score/`
+- backend key `clothes-query/dev/athena-review-score/terraform.tfstate`, 비공개 값은 gitignore 된 `deployment.*` 파일에만
+- 이름 접두사 `clothes-query-dev-athena-review-score`, 태그 `Component=athena-review-score`, storage 스택을 remote state 로 읽음
+- README 와 `sql/` 템플릿: `create_table.sql`, `create_staging_table.sql`, `merge.sql`, `optimize.sql`, `vacuum.sql`, `read_latest.sql`
+- `infra/README.md` 스택 표 한 줄
+
+## 만들지 않는 것
+
+- Iceberg 테이블·staging 외부 테이블 생성 실행(Athena DDL, apply 후 사람이 한 번 실행하거나 Airflow 초기화 태스크) → 후속
+- MERGE/OPTIMIZE/VACUUM 를 실행하는 Airflow 태스크, 정기 일정 → Airflow 담당 또는 후속 브랜치
+- `stacks/sagemaker-review-score` 의 출력 prefix 변경과 Job 역할 쓰기 권한 변경 → 후속 변경(이미 apply 된 스택이라 별도 plan)
+- S3 수명주기 규칙(staging·Athena 결과 정리) → storage 스택 소유라 이 스택에서 하지 않음
+- `athena_runner` 정책을 Airflow 역할에 붙이는 일 → Airflow 담당 또는 workload-access 후속
+- 기존 Parquet 시험 결과(`silver/review_aspect_scores/`)의 이행·삭제
+
+## 작업 순서
+
+1. 시작 전 확인을 하고, **계획을 먼저 제시해 사용자 확인을 받는다**
+2. 모듈 → 스택 → `sql/` → README 순으로 작성한다
+3. `terraform fmt` → `validate` → `plan` (destroy/replace 가 있으면 먼저 알린다)
+4. 재영이 plan 확인 후 apply, 결과를 PR 에 첨부한다
+5. apply 후 `sql/create_*.sql` 을 Athena 에서 실행해 테이블을 만들고 `merge.sql` 을 샘플 1일치로 시험한다(문법 검증)
+6. "완료 확인"을 실행하고 결과를 이 문서 맨 아래에 기록한다
+
+## 완료 확인
+
+아래를 **실제로 실행**해서 결과를 보고한다.
+
+- [x] `terraform fmt -check -recursive` (스택·모듈)
+- [x] `terraform init -backend=false` 후 `terraform validate`
+- [x] `terraform plan` → 첫 plan 은 4 create, 0 change, 0 destroy (초안 작성 시점)
+- [ ] apply 후 `terraform plan` 이 변경 없음
+- [ ] apply 후 SSM 파라미터 JSON 에 `workgroup`·`database`·`table_location`·`staging_location` 이 있고, 계정 ID·버킷 이름이 저장소 파일에는 없음 (`git grep`)
+- [ ] `create_table.sql`·`create_staging_table.sql` 이 Athena(워크그룹)에서 성공
+- [ ] 샘플 staging 1일치로 `merge.sql` 2회 실행 → 두 번째는 행 수가 늘지 않음(멱등), `score` 변경 시 갱신됨
+- [ ] 같은 날짜를 다른 `model_version` 으로 반영 → 행이 따로 쌓임
+- [ ] `optimize.sql`·`vacuum.sql` 이 오류 없이 실행되고 `read_latest.sql` 이 기대한 결과를 냄
+- [ ] 쿼리당 스캔 한도(10GB)와 워크그룹 설정 강제가 적용됨(콘솔 확인)
+
+## README 갱신
+
+- `infra/stacks/athena-review-score/README.md`, `infra/modules/athena-review-score/README.md` (작성함)
+- `infra/README.md` 스택 표 (작성함), `docs/BRANCHES.md` 대장 한 줄 (작성함, 머지 때 상태 변경)
+
+## 작업 결과 (머지 전에 작성한다. 사람과 AI가 나중에 이 브랜치가 무엇을 했는지 읽는 곳이다)
+
+- **한 줄 요약:** (초안) 점수 결과를 Iceberg 테이블에 MERGE 로 반영하기 위한 Glue DB·Athena 워크그룹·IAM 정책·SSM 설정과 SQL 템플릿.
+- **무엇을 만들었나:** `infra/modules/athena-review-score/`, `infra/stacks/athena-review-score/` (+ `sql/`).
+- **왜 그렇게 했나:** 파일 덮어쓰기(A)는 입력이 하루 전체여야 하고 늦은 후기마다 전체를 재점수화한다. Iceberg MERGE 는 행 단위 upsert 로 늦은 후기·정정·재점수화를 DB 서버 없이 처리한다.
+  테이블 생성은 Terraform 의 Glue 테이블 리소스가 Iceberg 파티션 사양을 정할 수 없어 Athena DDL 로 둔다.
+- **입력과 출력:** 입력 `staging/review-score/year=/month=/day=/scores_<model_version>.parquet`(SageMaker Job 출력). 출력 Iceberg 테이블 `<database>.review_aspect_scores`(파티션 `review_date`).
+  연동 값은 SSM `/clothes-query/dev/athena-review-score/config` 와 `runner_policy_arn` output.
+- **확인한 결과:** fmt·validate 통과, 첫 plan 4 create / 0 change / 0 destroy. Athena 에서의 SQL 실행은 아직 하지 않았다.
+- **알려진 한계·남은 일:** SQL 실제 검증, SageMaker 출력 prefix 변경, Airflow 태스크, staging·결과 정리 정책(수명주기), 사라진 속성 처리, Gold 의 버전 선택 규칙, 타임스탬프 타입 확인.

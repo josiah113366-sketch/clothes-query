@@ -33,9 +33,9 @@ variable "use_vpc" {
 }
 
 variable "review_input_prefix" {
-  description = "점수화할 리뷰 prefix(읽기 전용). 리뷰 시뮬레이터가 year=/month=/day= 파티션으로 쓰는 곳."
+  description = "점수화할 리뷰 prefix(읽기 전용). 결정(2026-10-22): Bronze 가 아니라 Silver 리뷰(silver/reviews, KST 작성일 파티션)."
   type        = string
-  default     = "bronze/reviews"
+  default     = "silver/reviews"
 }
 
 variable "work_prefix" {
@@ -45,15 +45,21 @@ variable "work_prefix" {
 }
 
 variable "output_prefix" {
-  description = "점수 결과 prefix(쓰기 전용). 결정: silver/review-score/output"
+  description = "점수 결과 prefix(쓰기 전용). 결정: silver/review_aspect_scores/year=/month=/day=/scores_<model_version>.parquet"
   type        = string
-  default     = "silver/review-score/output"
+  default     = "silver/review_aspect_scores"
 }
 
 variable "error_prefix" {
-  description = "오류 파일 prefix(쓰기 전용). 결정: silver/review-score/error"
+  description = "오류 파일 prefix(쓰기 전용). 결정: silver/review_aspect_scores_error/year=/month=/day=/"
   type        = string
-  default     = "silver/review-score/error"
+  default     = "silver/review_aspect_scores_error"
+}
+
+variable "model_version" {
+  description = "출력 열·파일명의 model_version(SSM 설정 기본값). 모델을 바꾸면 같이 바꾼다."
+  type        = string
+  default     = "2.4b_score_s2c"
 }
 
 variable "instance_type" {
