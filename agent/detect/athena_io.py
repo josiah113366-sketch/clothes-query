@@ -1,7 +1,7 @@
 """Athena 연결: 판정 잡이 바깥 세상과 만나는 두 함수 `query(sql)`, `write(표, 줄)`을 진짜로 만든다.
 
   query(sql)       -> 줄 목록(dict). Athena에 쿼리를 보내고 끝날 때까지 기다린 뒤 결과를 타입에 맞게 바꿔 돌려준다.
-  write(표, 줄 목록) -> Athena `INSERT INTO`로 새 줄을 추가한다. 허용된 표 3개(anomaly, detection_runs, reprocess_events)만 쓴다.
+  write(표, 줄 목록) -> Athena `INSERT INTO`로 새 줄을 추가한다. 허용된 표(TABLE_SPECS)만 쓴다.
 
 boto3 클라이언트는 밖에서 넣을 수 있다(`client=`). 시험은 가짜 클라이언트로 하고, 진짜 Athena에서는 아직 돌려 보지 않았다.
 결과 저장 위치는 workgroup 설정이 정한다(코드에 경로를 적지 않는다).
@@ -9,27 +9,46 @@ boto3 클라이언트는 밖에서 넣을 수 있다(`client=`). 시험은 가�
 import time
 from datetime import datetime
 
-# 쓸 수 있는 표와 컬럼 타입. 표 정의(DDL)는 Gold B 담당과 확정 전이라 **이 파일이 코드 쪽 기준**이다 (제안).
-#   partition_by=(시각 컬럼): 시각 컬럼의 날짜(dt)와 시(hour)를 파티션 컬럼으로 함께 쓴다 (Gold B 원장과 같은 시간 폴더 방식, 확정 전)
+# 쓸 수 있는 표와 컬럼 타입. 표 정의(DDL)는 agent/ddl/*.sql이고, 이 목록과 같은지 agent/ddl/test_ddl.py가 확인한다.
+#   database: 표가 있는 Glue 데이터베이스 (조사 에이전트 표는 gold_b 밖의 agent)
+#   partitions: 파티션 컬럼 이름 (dt = 날짜, hour = 시). 값은 partition_by 시각 컬럼(UTC)에서 만든다. 파티션이 없으면 빈 목록
 TABLE_SPECS = {
     "anomaly": {
+        "database": "gold_b",
         "columns": {"run_id": "string", "anomaly_id": "string", "rule_id": "string", "rule_version": "string", "anomaly_type": "string",
                     "source_table": "string", "window_start": "timestamp", "window_end": "timestamp", "scope_type": "string",
                     "scope_key": "string", "metric": "string", "observed_value": "double", "baseline_value": "double",
                     "baseline_kind": "string", "sample_size": "bigint", "episode_start": "timestamp", "episode_end": "timestamp",
                     "evidence_ref": "string", "status": "string", "detected_at": "timestamp"},
-        "partition_by": "detected_at",
+        "partition_by": "detected_at", "partitions": ("dt",),
     },
     "detection_runs": {
+        "database": "gold_b",
         "columns": {"run_id": "string", "kind": "string", "request_id": "string", "judged_from": "timestamp", "judged_to": "timestamp",
                     "started_at": "timestamp", "anomaly_count": "bigint"},
-        "partition_by": "started_at",
+        "partition_by": "started_at", "partitions": ("dt",),
     },
-    "reprocess_events": {
+    "reprocess_events": {     # 은서 님 DDL(양이 적어 시간 폴더 없음)과 같다. 이 잡이 쓰는 줄은 REDETECTED, VERIFIED
+        "database": "gold_b",
         "columns": {"request_id": "string", "step": "string", "at": "timestamp", "actor": "string", "reason": "string",
                     "window_start": "timestamp", "window_end": "timestamp", "rule_version": "string", "source": "string",
-                    "attempt": "bigint", "parent_request_id": "string", "detail": "string"},
-        "partition_by": "at",
+                    "attempt": "int", "parent_request_id": "string", "detail": "string"},
+        "partition_by": None, "partitions": (),
+    },
+    # 아래 둘은 조사 에이전트가 쓴다 (판정 잡 역할은 못 쓴다. 쓰는 쪽 코드는 조사 에이전트 진입점에서 연결)
+    "investigation_reports": {
+        "database": "agent",
+        "columns": {"report_id": "string", "anomaly_id": "string", "investigation_run_id": "string", "created_at": "timestamp",
+                    "cause_layer": "string", "conclusion": "string", "claims": "string", "trace": "string", "problems": "string",
+                    "model_id": "string"},
+        "partition_by": "created_at", "partitions": ("dt",),
+    },
+    "investigation_runs": {
+        "database": "agent",
+        "columns": {"run_id": "string", "anomaly_id": "string", "started_at": "timestamp", "finished_at": "timestamp", "status": "string",
+                    "report_id": "string", "cause_layer": "string", "turns": "bigint", "tool_calls": "bigint",
+                    "rejected_submissions": "bigint", "model_id": "string", "error": "string"},
+        "partition_by": "started_at", "partitions": ("dt",),
     },
 }
 MAX_QUERY_BYTES = 200_000      # Athena 쿼리 문자열 한도(256KB)보다 낮게 잡은 한 번에 보내는 INSERT의 크기 (임의 값)
@@ -121,8 +140,8 @@ class AthenaIO:
             extra = set(r) - set(spec["columns"])
             if extra:
                 raise ValueError(f"{table} 표에 없는 컬럼입니다: {sorted(extra)}")
-        cols = list(spec["columns"])
-        head = f"INSERT INTO {self.database}.{table} ({', '.join(_q(c) for c in cols)}, dt, hour) VALUES "
+        cols = list(spec["columns"]) + list(spec["partitions"])
+        head = f"INSERT INTO {spec['database']}.{table} ({', '.join(_q(c) for c in cols)}) VALUES "
         batch, size = [], len(head)
         for r in rows:
             values = _row_sql(r, spec)
@@ -145,18 +164,20 @@ def _lit(value, type_name):
     if type_name == "timestamp":
         dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("T", " "))
         return f"TIMESTAMP '{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
-    if type_name in ("bigint", "double"):
+    if type_name in ("int", "bigint", "double"):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"숫자 컬럼에 숫자가 아닌 값이 들어왔습니다: {type(value).__name__}")
-        return repr(int(value)) if type_name == "bigint" else repr(float(value))
+        return repr(float(value)) if type_name == "double" else repr(int(value))
     return "'" + str(value).replace("'", "''") + "'"
 
 
 def _row_sql(row, spec):
     parts = [_lit(row.get(c), t) for c, t in spec["columns"].items()]
-    pt = row.get(spec["partition_by"])
-    if pt is None:
-        raise ValueError(f"파티션 기준 컬럼 {spec['partition_by']}가 비어 있습니다")
-    dt = pt if isinstance(pt, datetime) else datetime.fromisoformat(str(pt).replace("T", " "))
-    parts += [f"'{dt:%Y-%m-%d}'", f"'{dt:%H}'"]
+    if spec["partitions"]:
+        pt = row.get(spec["partition_by"])
+        if pt is None:
+            raise ValueError(f"파티션 기준 컬럼 {spec['partition_by']}가 비어 있습니다")
+        dt = pt if isinstance(pt, datetime) else datetime.fromisoformat(str(pt).replace("T", " "))
+        values = {"dt": f"'{dt:%Y-%m-%d}'", "hour": f"'{dt:%H}'"}
+        parts += [values[name] for name in spec["partitions"]]
     return "(" + ", ".join(parts) + ")"

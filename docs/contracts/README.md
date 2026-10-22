@@ -7,13 +7,13 @@
 | 파일 | 역할 |
 |---|---|
 | 이 문서 | 데이터의 의미, 계층별 역할, 중복・격리・재처리・대조 약속 |
-| [format_rules.yaml](format_rules.yaml) | Silver가 읽는 원천 필수 컬럼・타입・허용 값・조건 검사와 별도 합의 대기 제안 |
+| [format_rules.yaml](format_rules.yaml) | Silver와 Gold B가 같이 읽는 원천 필수 컬럼・타입・허용 값・조건 검사와 별도 합의 대기 제안 |
 
-두 파일을 하나의 공통 계약 작업으로 관리한다. YAML의 필드 목록을 이 문서에 다시 복사하지 않는다. 사용자 승인으로 `source_rules`를 공통 검사기 `pipelines/format_rules.py`와 거래 Silver에 연결했다. Gold B는 아직 연결하지 않았다. 로컬 기본 경로는 이 폴더의 format_rules.yaml이며 CLI --rules-path로 명시할 수 있다. 운영 배포 방식과 Gold B 연결은 공동 검토 대상이다.
+두 파일을 하나의 공통 계약 작업으로 관리한다. YAML의 필드 목록을 이 문서에 다시 복사하지 않는다. 사용자 승인으로 `source_rules`를 공통 검사기 `pipelines/format_rules.py`와 거래 Silver에 연결했다. 0.2.0에서 Gold B 사용도 승인했다(`runtime_connected.gold_b=true`). Gold B 형식 검사 코드의 실제 호출은 Gold B 작업(`pipelines/gold-b-format-check`)에서 연결한다. 로컬 기본 경로는 이 폴더의 format_rules.yaml이며 CLI --rules-path로 명시할 수 있다. 운영 배포 방식과 Gold B 실제 호출 연결은 공동 검토 대상이다.
 
-YAML 전체 status=proposed는 경로 간 미합의 제안을 포함한다는 뜻이다. 실행하는 원천 규칙만 source_rules_status=decided, version=0.1.0으로 구분한다. runtime_connected는 소비 경로별 상태(silver=true, gold_b=false)를 나타낸다. proposed_changes를 원천 검사에 자동으로 합치지 않는다.
+YAML 전체 status=proposed는 경로 간 미합의 제안을 포함한다는 뜻이다. 실행하는 원천 규칙만 source_rules_status=decided, version=0.2.0으로 구분한다. runtime_connected는 소비 경로별 상태(silver=true, gold_b=true)를 나타낸다. proposed_changes를 원천 검사에 자동으로 합치지 않는다.
 
-현재 범위는 주문・주문상품・결제다. 회원・클릭・리뷰・AI 결과 계약은 이번 YAML에 추측해서 추가하지 않는다. Gold A 지표의 상세 정의는 Gold A 설계에서 관리하고, 여기에는 다른 경로와 맞출 접점만 남긴다.
+범위는 주문・주문상품・결제와, 0.2.0에서 더한 회원(`members`, DB 정의)・클릭(`clickstream`, 시뮬레이터 이벤트)・리뷰(`reviews`, Silver가 받는 review.v2 기준, 리뷰 컬럼 확정 전)다. 데이터셋마다 원천을 `source`로 적는다. AI 결과 계약은 넣지 않는다. Silver는 거래에 이어 회원·클릭의 업무 입력 검사도 공통 검사기에 연결한다. 회원 CDC 순서·현재 상태 복원과 클릭 중복·충돌 처리는 Silver에 유지한다. 리뷰는 자체 코드로 검사한다. Gold A 지표의 상세 정의는 Gold A 설계에서 관리하고, 여기에는 다른 경로와 맞출 접점만 남긴다.
 
 ## 2. 근거와 상태 읽는 법
 
@@ -104,7 +104,7 @@ Gold A의 시간별 승인 금액・성공 주문 수는 같은 기간의 사업
 
 YAML의 `source_rules`는 현재 DDL을 충실히 옮긴 기준이다. `proposed_changes`의 UNKNOWN 허용안을 합의하기 전에는 소비 검사 기준으로 자동 적용하지 않는다. 향후 허용한다면 실패 코드의 열거 제한을 변경하고, 분류표에 없는 비어 있지 않은 코드를 통과시키도록 같은 버전으로 반영해야 한다. UNKNOWN은 분류 규칙이며 분류 실행은 Gold B 뷰의 책임이다.
 
-현재 Silver는 YAML source_rules의 허용 목록을 실제로 읽는다. Gold B 연결과 UNKNOWN 분류는 미적용이다. 이번 수정으로 원천 DB 허용값을 변경하지 않는다. 이전의 runtime_connected=false 단일 값은 경로별 연결 상태로 대체했다.
+현재 Silver는 YAML source_rules의 허용 목록을 실제로 읽는다. Gold B는 사용을 승인했지만 실제 호출 연결과 UNKNOWN 분류는 미적용이다. 이번 수정으로 원천 DB 허용값을 변경하지 않는다. 이전의 runtime_connected=false 단일 값은 경로별 연결 상태로 대체했다.
 
 ### 내용 충돌
 
@@ -170,7 +170,7 @@ Gold B 원장은 두 컬럼 보존 정의를 반영했지만 실제 호출/원�
 | 주문 생성 수 | `ordered_at` KST 시간대에 주문당 1회 | Gold A 기준안 |
 | 결제 성공・승인 금액 | 성공 결제의 `completed_at` 기준. 현재 주문 상태가 PAID인 행만 고르지 않음 | Gold A 기준안 |
 
-상품 원가・수량 등 추가 최소값을 추측해 넣지 않는다. 현재 DDL의 주문상품 단가는 0보다 큰 값이며, 5,900원 하한은 별도 합의 없이 공통 검사에 넣지 않는다. 취소・환불 차감과 순매출은 Gold A 지표 설계에서 따로 결정한다.
+주문상품 단가는 0.2.0부터 5,900원 이상으로 검사한다. DDL은 0보다 큰 값만 요구하지만, 상품 시드의 가격 규칙(5,900원 이상, `docs/tasks/sim-product-seed.md`)에 맞춘 업무 기준이며 Silver와 Gold B가 같이 적용한다(Gold B 제안, 2026-10-22). 상품 원가・수량 등 다른 추가 최소값은 추측해 넣지 않는다. 취소・환불 차감과 순매출은 Gold A 지표 설계에서 따로 결정한다.
 
 ## 7. 공통 검사 연결
 
@@ -181,6 +181,8 @@ YAML은 CDC 봉투를 해석하고 원천 타입을 정규화한 뒤의 업무 �
 - 데이터셋 키 `order_items`는 원천 이름이다. Kafka 토픽 `order-items`와 실제 Bronze 경로 매핑은 별도 입력 설정이다.
 - 오류 사유는 PARSE_ERROR / MISSING_FIELD / TYPE_MISMATCH / INVALID_VALUE로 맞추는 제안이다. 내용 충돌은 단일 행 형식 오류와 별도로 기록한다.
 - 정수는 bool이나 소수로 대체하지 않는다. timestamp는 시간대가 있는 시각으로 해석하고, UTC와 KST를 서로 다른 순간으로 저장하지 않는다.
+- 공통 검사기는 첫 오류 하나를 내는 `validate()`(Silver)와 한 행의 오류를 전부 돌려주는 `errors()`(Gold B)를 함께 제공한다. `errors()`는 필드마다 첫 오류 하나, 들어오면 안 되는 필드, 조건 검사 순서이며, 오류가 난 필드를 쓰는 조건 검사는 건너뛰어 한 필드에 오류는 하나다. 두 함수의 첫 오류는 같다.
+- 0.2.0에서 참/거짓 타입(`boolean`), 문자열 전체 모양(`pattern`), 들어오면 안 되는 필드(`forbidden_fields`)를 더했다. 금지 필드가 들어오면 값은 남기지 않고 그 필드 이름으로 INVALID_VALUE를 낸다.
 
 필드 검사 조건의 세부 목록은 YAML에서 관리하고, 변경 시 버전과 source_rules_status를 함께 검토한다. 이 문서에는 동일 목록을 중복 유지하지 않는다. 자체 규칙 형식이며 범용 검증 도구의 표준 스키마가 아니다. 중복 키・알 수 없는 규칙/타입/조건・잘못된 참조・적용 미승인 상태는 실행 실패로 처리하며 기본값으로 통과시키지 않는다.
 
@@ -315,4 +317,4 @@ Gold B 뷰가 최신 결과만 담고 있어 과거 원천 범위로 고정할 �
 4. Silver・Gold B를 같은 버전으로 연결하고, 같은 범위로 최초 결과 비교.
 5. 처리 범위 기록을 기준으로 Silver → Gold A 재처리 연결과 복구 검증 구체화.
 
-공통 검사기와 거래 Silver 연결까지 로컬 구현했다. Gold B 연결・DAG・자동 대조・운영 배포는 별도다. 공통 계약의 경로 간 제안을 모두 합의 또는 구현한 것으로 표시하지 않는다.
+공통 검사기와 거래·회원·클릭 Silver 연결까지 로컬 구현했다. Gold B 연결・DAG・자동 대조・운영 배포는 별도다. 공통 계약의 경로 간 제안을 모두 합의 또는 구현한 것으로 표시하지 않는다.

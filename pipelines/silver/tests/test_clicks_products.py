@@ -1,14 +1,21 @@
 """클릭 식별·상품 연결·공통 로컬 입출력을 실제 오류 사례로 확인한다."""
 import json
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
-from pipelines.silver.clicks import build_clicks, run as run_clicks
-from pipelines.silver.products import build_products, run as run_products
+import pytest
+
+from pipelines.format_rules import FormatRules, RuleConfigError
+from pipelines.silver.clicks import build_clicks
+from pipelines.silver.clicks import run as run_clicks
+from pipelines.silver.products import build_products
+from pipelines.silver.products import run as run_products
 
 
 def click(identifier="E-1", **changes):
-    return {"event_id": identifier, "event_type": "view", "member_id": "M-test",
-            "article_id": "0000000001", "session_id": "S-test",
+    return {"event_id": str(uuid5(NAMESPACE_URL, identifier)), "event_type": "view",
+            "member_id": "00000000-4000-8000-0000-000000000008",
+            "article_id": "0000000001", "session_id": "00000000-4000-8000-0000-00000000001f",
             "event_time": "2026-10-13T15:10:00+00:00", **changes}
 
 
@@ -30,7 +37,8 @@ def test_click_repeated_visit_is_not_duplicate_and_conflicts_are_not_selected():
     events = [click(), click(), click("E-2"), click("E-conflict"),
               click("E-conflict", event_type="cart_add"), click("E-bad", event_type="purchase")]
     result = build_clicks(events)
-    assert [row["event_id"] for row in result["click_events"]] == ["E-1", "E-2"]
+    assert [row["event_id"] for row in result["click_events"]] == sorted(
+        [click()["event_id"], click("E-2")["event_id"]])
     assert result["click_events"][0]["event_date_kst"] == "2026-10-14"
     assert result["click_events"][0]["article_id"] == "0000000001"
     quality = result["dq_results"][0]
@@ -89,3 +97,38 @@ def test_local_snapshots_keep_source_locations_and_publish_complete_result_sets(
         "quarantined_records": 0, "dq_results": 2,
     }
     assert json.loads(Path(manifest["manifest_path"]).read_text(encoding="utf-8")) == manifest
+
+
+def test_click_shared_rules_preserve_rule_ids_and_same_key_blocking():
+    for field, value, code in (("event_id", "bad-id", "INVALID_VALUE"),
+                               ("member_id", "bad-id", "INVALID_VALUE"),
+                               ("session_id", "bad-id", "INVALID_VALUE"),
+                               ("article_id", "123", "INVALID_VALUE"),
+                               ("event_time", "not-a-time", "INVALID_VALUE")):
+        raw = click(**{field: value})
+        result = build_clicks([raw])
+        assert result["click_events"] == []
+        issue = result["quarantined_records"][0]
+        assert (issue["field"], issue["error_code"]) == (field, code)
+        assert issue["rule_id"].startswith("clickstream.fields." + field)
+        assert result["dq_results"][0]["format_rules"] == FormatRules().reference()
+    blocked = build_clicks([click(), click(article_id="123")])
+    assert blocked["click_events"] == []
+    assert {r["error_code"] for r in blocked["quarantined_records"]} == {"INVALID_VALUE", "DEPENDENCY_BLOCKED"}
+
+
+def test_click_rule_metadata_and_bad_rules_preserve_published_result(tmp_path):
+    source = tmp_path / "clicks.jsonl"
+    source.write_text(json.dumps(click()) + "\n", encoding="utf-8")
+    first = run_clicks(str(source), str(tmp_path / "output"))
+    assert first["format_rules"] == FormatRules().reference()
+    assert first["check_version"] == "clicks.v2"
+    dq = json.loads(Path(first["outputs"]["dq_results"]).read_text(encoding="utf-8"))
+    assert dq["format_rules"] == first["format_rules"]
+    pointer = Path(first["manifest_path"])
+    previous = pointer.read_bytes()
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("version: first\nversion: second\n", encoding="utf-8")
+    with pytest.raises(RuleConfigError):
+        run_clicks(str(source), str(tmp_path / "output"), rules_path=broken)
+    assert pointer.read_bytes() == previous
