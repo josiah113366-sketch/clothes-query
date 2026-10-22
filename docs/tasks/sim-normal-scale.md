@@ -35,7 +35,8 @@ normal 모드의 양을 5배로 올리고 배송 완료를 앞당긴다. 시간�
 ## 완료 확인
 
 - [ ] `ruff check .`, `ruff format --check .`, `pytest` 통과
-- [ ] ECS(배속 1)에서 normal 1시간 주문 수가 곡선 기대치 근처인지 (사용자)
+- [x] ECS 재배포(태스크 정의 :2, 2026-10-22 10:17:58 KST 시작). 목 10시대 기대 방문 약 7.7/초 → 로그 10초당 65~90(평균 약 78)
+- [ ] normal 1시간 주문 수가 기대치(목 10시대 약 1,250건/시) 근처인지 (사용자)
 - [ ] EKS API가 burst(초당 약 35요청)에서 5xx 없이 버티는지 (사용자)
 
 ## README 갱신
@@ -46,7 +47,7 @@ normal 모드의 양을 5배로 올리고 배송 완료를 앞당긴다. 시간�
 
 - **한 줄 요약:** normal 방문·가입 5배, 배송 3~6시간
 - **무엇을 만들었나:** `simulator/src/sim/behavior/params.py`, `simulator/src/sim/member/params.py`, 테스트 2개(배송 시간 범위, 느린 INSERT 테스트는 하루 5,000명으로 고정), `simulator/README.md`
-- **확인한 결과:** ruff 통과, pytest 412 통과
+- **확인한 결과:** ruff 통과, pytest 412 통과. ECS 재배포 후 방문 속도가 기대치와 맞음(10초당 평균 약 78, 기대 77). **3일 분석 시작점: 2026-10-22 10:18 KST**
 - **알려진 한계·남은 일:**
   - `docs/design/agent/anomaly-answer-key.md`가 "하루 주문 약 5,000건 확정"을 전제로 탐지 시간을 쟀다 → agent 담당에게 알려 다시 재야 한다
   - 재시작하면 예약 큐가 사라져 이미 `SHIPPED`인 주문은 `DELIVERED`로 넘어가지 않는다
