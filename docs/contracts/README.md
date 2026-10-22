@@ -186,6 +186,26 @@ YAML은 CDC 봉투를 해석하고 원천 타입을 정규화한 뒤의 업무 �
 
 ## 9. 다음 합의와 적용 순서
 
+### 리뷰 분석 날짜 계약 — KST 작성일 (2026-10-22 결정)
+
+비즈니스 분석 날짜는 리뷰 created_at의 Asia/Seoul 날짜로 통일한다. SageMaker 실행일·결과 생성일·emitted_at 날짜로 리뷰 집계일을 바꾸지 않는다. 아래 계약은 리뷰 실행 연결용이며 거래 format_rules.yaml에 리뷰 규칙을 추가하는 변경은 아니다.
+
+| 구간 | 날짜 기준과 처리 |
+|---|---|
+| Bronze 리뷰 원본 | 시뮬레이터 LakeSink가 created_at의 UTC 날짜로 year/month/day 폴더에 보관 |
+| Silver 리뷰 | normalize_review에서 created_at_utc·created_at_kst·review_date_kst 생성. 출력 year/month/day는 KST 작성일 |
+| SageMaker 입력 선택 | Silver의 지정 KST 작성일 범위에 속한 리뷰 ID·본문을 사용. 이미 KST인 값에 9시간을 다시 더하지 않음 |
+| SageMaker 결과 | review_id/aspect/score. 현재 점수화 코드는 날짜 변환·작성일 파티셔닝을 하지 않고 작업 이름별 출력 위치에 저장 |
+| Gold A 리뷰 집계 | review_id로 해당 Silver 리뷰와 연결해 review_date_kst로 별점·속성 점수 집계. 모델 분석이 다음 날 끝나도 원래 작성일에 반영 |
+
+예: 2026-10-22T00:30:00+09:00은 UTC 2026-10-21T15:30:00Z와 같은 순간이다. Bronze에서는 UTC 21일 폴더, Silver·Gold A에서는 KST 22일에 속한다. KST 하루 D는 UTC D-1일 15:00 이상~D일 15:00 미만이며, Silver는 D-1·D의 UTC 폴더를 읽은 뒤 KST 날짜로 필터링한다. 날짜 범위 끝은 작성일 기준 포함이나 실제 시각 구간 끝은 제외한다.
+
+입력 시각은 Z 또는 +09:00 등 시간대가 명시되어야 한다. Silver는 시간대 없는 시각을 거부하며 원천 시간대를 임의로 추정하지 않는다. 이미 KST인 입력도 astimezone 변환이므로 중복으로 9시간을 더하지 않는다.
+
+후속 DAG/모델 입력 생성기는 모델 작업과 Silver 고정 실행 참조·대상 KST 시작/종료일·리뷰 ID 목록/건수·모델 버전을 연결할 기록을 남겨야 한다. Airflow의 UTC logical_date/ds나 SageMaker 작업 이름에 있는 날짜를 리뷰 작성일로 대신 쓰지 않는다. 필요한 날짜는 Asia/Seoul로 명시적으로 산정한다. 모델 입력 생성·작업 실행·완료 확인·입력 범위 기록의 자동 연결은 아직 구현 완료가 아니다.
+
+### 공통 계약 후속 적용
+
 1. Gold B의 `order_id` 필수화, 실패 코드 누락과 UNKNOWN 처리, 내용 충돌 기록에 대한 반영 확인.
 2. 규칙 파일 형식・최종 위치・버전 배포와 검사 코드 분담 확정.
 3. 실제 주문 CDC・Bronze 샘플로 입력 변환과 원본 추적 필드 확인.

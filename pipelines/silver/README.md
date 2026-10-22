@@ -19,6 +19,10 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 
 ## 결정: 현재 구현된 리뷰 입력
 
+**2026-10-22 날짜 기준 확인:** 리뷰 비즈니스 분석 범위는 KST 작성일이다. Bronze 폴더는 UTC 작성일을 유지하고 Silver가 UTC/KST 표현을 모두 만든다. 예: KST 22일 00:30 리뷰는 Bronze UTC 21일 폴더에서 읽어 Silver KST 22일 폴더로 출력한다. KST D일 실행은 UTC D-1·D 폴더를 읽고 review_date_kst로 선택한다. 시간대가 있는 KST 입력에는 9시간을 다시 더하지 않는다.
+
+SageMaker에는 선택한 Silver 범위의 review_id/text를 전달하고, 작업 실행일이 달라도 Gold A는 원래 review_date_kst로 집계한다. 실제 모델 입력 생성·DAG 연결은 후속이며 [공통 날짜 계약](../../docs/contracts/README.md#리뷰-분석-날짜-계약--kst-작성일-2026-10-22-결정)을 따른다.
+
 | 항목 | 기준 |
 |---|---|
 | 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/year=YYYY/month=MM/day=DD/*.jsonl` (UTC 작성일) |

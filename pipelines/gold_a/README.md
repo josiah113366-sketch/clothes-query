@@ -57,6 +57,10 @@ python -m pipelines.gold_a.reviews aspects --silver-root S --products-root S --o
 
 ### 리뷰 분석 결과
 
+**작성일 기준: KST.** 분석할 리뷰는 Silver의 review_date_kst 범위로 선택한다. SageMaker는 해당 리뷰의 ID·본문을 점수화하며 현재 출력 CSV에는 날짜가 없다. Gold A가 review_id로 원래 Silver 리뷰와 연결해 KST 작성일에 귀속한다. 22일 작성 리뷰를 23일에 분석해도 22일 집계다. 분석일·작업 출력 폴더·emitted_at을 작성일로 사용하지 않는다. Bronze의 UTC 폴더를 KST로 바꾸는 요구는 아니다.
+
+DAG에서 모델 작업과 Silver 입력 실행·KST 날짜 범위를 연결해 전달해야 한다. 이 자동 실행/완료 연결은 후속이며 [공통 날짜 계약](../../docs/contracts/README.md#리뷰-분석-날짜-계약--kst-작성일-2026-10-22-결정)을 따른다.
+
 입력은 JSONL `review_id, aspect, score, model_version` 또는 실제 score_batch.py의 CSV `review_id,aspect,score`다. CSV에는 --model-version으로 출처 버전을 명시한다. score는 정수 -2,-1,0,1,2만 허용하며 bool·실수·누락을 거부한다. sentiment만 있는 기록에서 점수를 추정하지 않는다. 모델 추론은 이 코드의 역할이 아니다.
 
 점수 기준은 review-analysis/README.md, docs/absa-label-guide.md 3-1, deploy/score_batch.py 프롬프트를 따른다. +2 분명한 만족, +1 약한 만족, 0 보통·혼재, -1 약한 불만, -2 분명한 불만이다. 라벨 가이드의 3분류 파생 기준은 미정이므로 부호로 긍정/중립/부정을 자동 생성하지 않는다.
