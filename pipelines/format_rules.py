@@ -4,10 +4,10 @@ validate()는 첫 오류 하나를 내고(Silver), errors()는 한 행의 오류
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-import re
 from uuid import UUID
 
 import yaml
@@ -48,7 +48,7 @@ def _object(value, allowed, required):
 
 
 def _aware_time(value):
-    parsed = datetime.fromisoformat(value)
+    parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("시간대 없음")
     return parsed

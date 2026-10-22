@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import tempfile
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -222,7 +222,7 @@ def publish(s3, local, remote, replacements):
 def execute(config, s3, workspace, code_ref):
     validate(config)
     job = config["job"]
-    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ-") + uuid4().hex
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ-") + uuid4().hex
     workspace = Path(workspace).resolve()
     if workspace.exists() and any(workspace.iterdir()):
         raise ValueError("이전 실행이 섞이지 않도록 비어 있는 작업 폴더를 지정하세요")
@@ -249,7 +249,7 @@ def execute(config, s3, workspace, code_ref):
         members.run(paths["members"], str(silver), date.fromisoformat(config["through_date"]))
     silver_manifests = publish(s3, silver / "silver", silver_base, refs)
     record = {"runtime_run_id": run_id, "job": job, "code_ref": code_ref,
-              "completed_at": datetime.now(UTC).isoformat(), "inputs": inventory,
+              "completed_at": datetime.now(timezone.utc).isoformat(), "inputs": inventory,
               "request": config, "coverage_status": "UNVERIFIED",
               "silver_manifests": silver_manifests,
               "status": "PASS" if all(m["status"] == "PASS" for m in silver_manifests) else "INCOMPLETE"}
@@ -269,7 +269,7 @@ def execute(config, s3, workspace, code_ref):
             gold_reviews.run_aspects(str(silver), str(gold), start, end, str(silver), paths["analysis"],
                                     config["model_version"], paths.get("mapping"))
     if job != "members":
-        record = {**record, "completed_at": datetime.now(UTC).isoformat(),
+        record = {**record, "completed_at": datetime.now(timezone.utc).isoformat(),
                   "gold_manifests": publish(s3, gold / "gold_a", gold_base, refs),
                   "review_scores": "PROVIDED" if "analysis" in paths else "NOT_REQUESTED"}
         channel = f"{output}/gold_a/runtime/{job}"

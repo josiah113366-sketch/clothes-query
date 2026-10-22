@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import tempfile
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -88,7 +87,7 @@ def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -118,10 +117,10 @@ def normalize_review(raw: dict[str, object]) -> dict[str, object]:
         "product_name": raw.get("product_name"),
         "category": raw.get("category"),
         "order_id": raw.get("order_id"),
-        "created_at_utc": created.astimezone(UTC).isoformat(),
+        "created_at_utc": created.astimezone(timezone.utc).isoformat(),
         "created_at_kst": kst.isoformat(),
         "review_date_kst": kst.date().isoformat(),
-        "emitted_at_utc": emitted.astimezone(UTC).isoformat(),
+        "emitted_at_utc": emitted.astimezone(timezone.utc).isoformat(),
         "rating": rating,
         "text": raw["text"],
         "option_size": raw.get("option_size"),

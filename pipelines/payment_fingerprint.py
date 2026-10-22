@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 
 FINGERPRINT_VERSION = "payment-content.v1"
@@ -37,7 +37,7 @@ def _utc_time(value: object, field: str) -> str:
         # 7자리 이상 소수초를 datetime이 조용히 절삭하지 못하게 먼저 제한한다.
         raise FingerprintError(field)
     try:
-        parsed = datetime.fromisoformat(value).astimezone(UTC)
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value).astimezone(timezone.utc)
     except (ValueError, OverflowError):
         raise FingerprintError(field) from None
     return parsed.isoformat(timespec="microseconds").replace("+00:00", "Z")

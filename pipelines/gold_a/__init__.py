@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from functools import wraps
 from inspect import signature
 from pathlib import Path
@@ -238,7 +238,7 @@ def save_gold(base: str, result: dict[str, list[dict]], inputs: dict, reprocess:
             raise ValueError("Gold A 고유 키 중복")
     return publish_bundle(base, result, {"status": "PASS", "inputs": inputs,
                           "reprocess": reprocess, "previous_result": previous_ref,
-                          "published_at": datetime.now(UTC).isoformat(),
+                          "published_at": datetime.now(timezone.utc).isoformat(),
                           "check_version": "gold-a.metrics.v2"}, _write_text)
 
 
@@ -334,7 +334,7 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
                 for issue in issues]}
 
     def kst(value):
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
         if parsed.tzinfo is None:
             raise ValueError("시간대가 없는 후보 시각")
         return parsed.astimezone(ZoneInfo("Asia/Seoul"))
@@ -420,13 +420,13 @@ def save_scoped_gold(base: str, result: dict, inputs: dict, holds: list[dict],
     try:
         return publish_bundle(base, result, {"status": "PARTIAL" if holds else "PASS", "inputs": inputs,
             "held_scopes": holds, "held_context": context if holds else [],
-            "published_at": datetime.now(UTC).isoformat(), "check_version": "gold-a.scoped.v1"}, _write_text)
+            "published_at": datetime.now(timezone.utc).isoformat(), "check_version": "gold-a.scoped.v1"}, _write_text)
     except Exception as exc:
         # 숫자 공개 실패는 이전 포인터를 유지한다. 오류 메시지/원문 대신 유형만 기록한다.
         from uuid import uuid4
         try:
             _write_text(_uri(base, "failed-runs", "failed-" + uuid4().hex + ".json"), json.dumps({
-                "status": "FAILED", "failed_at": datetime.now(UTC).isoformat(),
+                "status": "FAILED", "failed_at": datetime.now(timezone.utc).isoformat(),
                 "error_type": type(exc).__name__, "previous_run_id": (previous or {}).get("run_id")}, indent=2))
         except OSError:
             pass  # 저장소 자체 장애라면 실패 기록도 불가능할 수 있다. 원래 실패는 다시 전달한다.

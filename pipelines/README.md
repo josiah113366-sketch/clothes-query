@@ -1,108 +1,103 @@
 # 데이터 파이프라인
 
-## 운영 실행 연결 · 수동 배치
+## 운영 실행 연결 · Spark 거래 배치
 
-`pipelines.batch`는 S3 입력을 임시 폴더에 내려받아 기존 Silver·Gold A를 실행하고 결과의 로컬 파일 참조를 S3로 바꿔 저장한다. 계산 기준·형식 규약은 그대로다. 선행 Gold A #67의 main 반영이 필요하다. 아직 운영에 배포한 것은 아니다.
+최종 실행 엔진은 **Spark**다. 기존 `batch.py`는 단일 Python 시제품·검증용으로 보존하고 운영 DAG에서는 호출하지 않는다. 현재 Spark 전환 범위는 거래 Silver와 시간별/상품별 판매 Gold A다. 리뷰·퍼널·회원 Spark 전환과 실제 운영 배포가 끝났다고 표시하지 않는다.
 
-### 실행 이미지와 DAG
+### 실행 환경·이미지
 
-저장소 루트에서 빌드한다. `CODE_REF`에는 배포할 실제 Git 커밋을 넣는다. Dockerfile 전용 ignore는 .local 원문·캐시·자격증명·테스트를 빌드 컨텍스트에서 제외한다.
+인프라가 확인한 Spark 4.2.0 / Python 3.10.12 / Java 21 / Scala 2.13을 사용한다. 운영 이미지는 발행 예정인 팀 기본 ECR 이미지 digest를 SPARK_IMAGE 빌드 인자로 지정해 확장한다. 공식 apache/spark:4.2.0 기본값은 로컬 검증용이다. Hadoop 3.5.0에 맞춰 hadoop-aws 3.5.0, AWS SDK v2 bundle 2.35.4, analyticsaccelerator-s3 1.3.1, wildfly-openssl 2.2.5.Final, spark-hadoop-cloud_2.13 4.2.0을 포함한다. 버전은 공식 이미지 및 Hadoop POM으로 확인했다. Driver·Executor는 같은 이미지 digest·코드·YAML·지문 함수를 사용한다. Python 3.10은 PyArrow 25.0.1, Python 3.11 이상 참조 실행은 26.0.0을 설치한다. Spark Parquet 저장은 Spark 자체 writer를 사용한다.
 
 ```powershell
-docker build -f pipelines/Dockerfile --build-arg CODE_REF=<Git-커밋> -t <ECR-이미지>:<태그> .
+docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미지>@sha256:<digest> --build-arg CODE_REF=<Git-커밋> -t <업무-ECR-이미지>:<태그> .
 ```
 
-빌드 후 이미지 push·digest 확인을 하고, Airflow DAG processor와 scheduler에 아래 JSON 환경 변수 `AIRFLOW_PIPELINE_RUNTIME`을 공급한다. 실제 namespace·ServiceAccount·노드 배치는 인프라 담당자와 확정한다. AWS 정적 키는 넣지 않고 Pod Identity를 사용한다.
+이미지는 Spark 공식 Kubernetes entrypoint를 사용한다. 코드 위치는 `/opt/pipelines`, 진입점은 `local:///opt/pipelines/pipelines/spark_batch.py`다. 원문·.local·캐시·시험 파일은 이미지에서 제외한다.
+
+### 실행 요청 JSON
+
+```json
+{
+  "job": "trade", "run_id": "trade-20261022-001",
+  "output_root": "s3://<데이터-버킷>/", "input_complete": true,
+  "inputs": {
+    "orders": ["s3://<데이터-버킷>/bronze/orders/"],
+    "order_items": ["s3://<데이터-버킷>/bronze/order-items/"],
+    "payments": ["s3://<데이터-버킷>/bronze/payments/"],
+    "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
+    "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"]
+  }
+}
+```
+
+접두사는 `/`로 끝낸다. Driver는 파일 목록·ETag·크기만 고정하고 Executor가 JSON Lines 본문을 읽는다. 확장자는 .json/.jsonl을 지원한다. 기본 제한은 최대 10,000개 파일, 파일당 64MiB, 주문당 10,000행이다. 주문당 한도는 max_order_rows(1~100,000)로 조정 가능하다. 초과 시 임의로 자르지 않고 실행 실패다.
+
+거래는 필요한 변경 이력·주문상품·결제를 함께 준비한다. UTC 수집 날짜 폴더를 KST 일별 매출로 바로 취급하지 않는다. input_complete는 실행자의 준비 확인이며 원천 완전성을 증명하지 않는다. 입력 객체 ETag를 공개 전 다시 확인하지만 이는 특정 버전 직접 읽기·Kafka watermark 검증을 대신하지 않는다. 상품 JSONL 스냅샷의 실제 S3 위치는 아직 확인이 필요하다.
+
+### Spark 처리 방식
+
+- 행별 공통 YAML 검사·지문 계산은 Executor에서 수행한다.
+- DataFrame groupBy/join으로 전체 ID 오류·주문 경계를 넘는 충돌을 검사한다.
+- 주문별 데이터를 분산해 기존 복원·금액 검사 함수를 Executor에서 재사용한다. 전체 업무 데이터를 Driver로 collect하지 않는다. 주문 하나의 입력에는 위 행 수 한도를 적용한다.
+- 연결 불명 주문상품 오류가 모든 주문 합계 검사에 미치는 영향도 전달한다. source_record_id·실제 원본 파일/줄로 추적하며 source_row_number는 주문 묶음 내 순번이다.
+- Silver를 Parquet으로 저장하고 품질/완료 manifest를 공개한다. Gold A는 저장된 Silver Parquet을 다시 읽어 Spark SQL로 주문·매출·상품 판매를 집계한다.
+- 품질 미완료면 Silver 검사·R6 근거는 보존하고 Gold A 갱신을 중단한다. 상품 기준정보 품질/연결 오류도 Gold A 공개를 중단한다.
+
+### Airflow 제출 설정
+
+인프라 확인 기준 Airflow는 main의 `infra/platform/airflow/dags/`를 약 60초마다 동기화한다. DAG 파일은 main 반영 후 발견되며 신규 DAG는 기본 일시정지 상태다. 별도 DAG ConfigMap/subPath 마운트를 추가하는 방식으로 안내하지 않는다. DAG processor·scheduler에는 AIRFLOW_PIPELINE_RUNTIME JSON을 공급해야 한다. DAG 발견과 실행 권한·이미지 준비는 별개다.
 
 ```json
 {
   "image": "<ECR-이미지>@sha256:<64자리-digest>",
   "namespace": "pipelines",
-  "service_account": "silver-gold-a",
-  "node_selector": {"kubernetes.io/hostname": "<승인된-공용-노드>"}
+  "submitter_service_account": "<제출기-SA>",
+  "driver_service_account": "<Driver-SA>",
+  "executor_service_account": "<Executor-SA>",
+  "node_selector": {"<전용노드-라벨>": "<값>"},
+  "spark_conf": {"spark.sql.shuffle.partitions": "8"}
 }
 ```
 
-업무 DAG 파일은 `infra/platform/airflow/dags/silver_gold_a.py`다. 기존 infra 확인용 DAG를 교체하지 말고 같은 배포 방식으로 별도 마운트한다. 현재 ConfigMap/subPath 방식에서는 Helm 마운트 설정 추가와 관련 Pod 재시작도 필요하다. 파일을 Git에 넣는 것만으로 배포되지 않는다. 자세한 배포 구조는 [Airflow 안내](../infra/platform/airflow/README.md)를 따른다.
+제출기→Driver→Executor의 RBAC·Pod Identity/S3 권한은 인프라가 연결한다. Driver는 Executor Pod·Service·ConfigMap을 관리할 권한이 필요하다. 실행 파일·공통 YAML은 이미지에 포함하므로 별도 업로드가 필요 없다. 요청 JSON 읽기와 manifest 저장은 Driver, S3 Parquet 입출력은 Driver/Executor에서 수행한다.
 
-Airflow `silver_gold_a_batch`는 schedule 없음·초기 paused·동시 실행 1개·자동 재시도 0회다. 실행 한 번에 trade/reviews/funnels/members 중 하나를 선택한다. 서로 다른 작업의 품질 실패가 다른 실행을 막지는 않는다. 필요 시 DAG를 unpause한 뒤 수동 Trigger한다. 기존 agent 신원 사용이나 namespace/IAM 생성은 이 DAG가 하지 않는다.
-
-### 수동 실행 입력
-
-Airflow Trigger의 Configuration 예시다. URI는 실제 파일/접두사로 교체한다. 접두사는 반드시 `/`로 끝내며 JSON/JSONL 전체 하위 객체를 읽는다. 거래·퍼널은 하루치 주문만 잘라 최신 상태를 추측하지 않는다. 필요한 변경 이력과 참조를 준비한 뒤에만 `input_complete: true`를 선언한다. 이는 Kafka 완료 범위 검증이 아니다.
+Airflow DAG ID는 `silver_gold_a_batch`, schedule 없음·초기 paused·max_active_runs=1·자동 재시도 0이다. Trigger conf는 다음과 같다.
 
 ```json
-{
-  "batch": {
-    "job": "trade",
-    "output_root": "s3://<데이터-버킷>/",
-    "input_complete": true,
-    "inputs": {
-      "orders": ["s3://<데이터-버킷>/bronze/orders/"],
-      "order_items": ["s3://<데이터-버킷>/bronze/order-items/"],
-      "payments": ["s3://<데이터-버킷>/bronze/payments/"],
-      "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
-      "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"]
-    }
-  }
-}
+{"config_uri":"s3://<버킷>/<실행요청>/trade-20261022-001.json"}
 ```
 
-| job | 필수 입력 | 날짜·선택 입력 |
-|---|---|---|
-| trade | orders/order_items/payments/designs/variants | input_complete=true, 날짜 부분 필터 없음 |
-| funnels | 위 5개 + clicks | input_complete=true. 전체 세션 이력을 준비 |
-| reviews | reviews/designs/variants | start_date/end_date: KST 작성일. mapping: 선택 고정 JSONL 파일, analysis: 선택 고정 JSONL/CSV 파일 + model_version |
-| members | members | through_date: UTC 수집일까지 전체 이력 |
+제출기는 spark-submit --master k8s://https://kubernetes.default.svc --deploy-mode cluster로 제출한다. `spark.kubernetes.submission.waitAppCompletion=true`로 Driver의 최종 종료까지 기다린다. 제출 명령 접수만으로 성공 처리하지 않는다. Executor는 min/initial=1, max=2, shuffle tracking을 사용한다. 자원 기본값은 코드의 초기 제안이며 실제 노드 allocatable·인프라 설정으로 조정한다.
 
-reviews 입력은 `s3://<버킷>/bronze/reviews/`, members 입력은 `s3://<버킷>/bronze/members-events/`처럼 year/month/day를 포함하는 접두사 하나다. 리뷰는 KST 시작일 전날 UTC부터 종료일 UTC까지 읽는다. 분석 파일이 없으면 별점 집계만 생성하며 점수 집계를 완료했다고 표시하지 않는다. 이 실행기는 SageMaker 모델을 호출하지 않는다.
-
-분석을 포함한 리뷰 요청은 다음과 같다. `model_version`은 실제 생성한 모델 버전과 맞춘다.
-
-```json
-{
-  "batch": {
-    "job": "reviews", "output_root": "s3://<데이터-버킷>/",
-    "start_date": "2026-10-21", "end_date": "2026-10-21", "model_version": "<모델-버전>",
-    "inputs": {
-      "reviews": ["s3://<데이터-버킷>/bronze/reviews/"],
-      "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
-      "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"],
-      "analysis": ["s3://<데이터-버킷>/silver/review-score/output/<완료된-모델-작업>/scores.csv"]
-    }
-  }
-}
-```
-
-상품 입력은 기존 products.py가 정의한 JSONL 스냅샷 2개다. 아직 실제 S3 상품 스냅샷 위치는 확인하지 않았다. DB를 자동 조회하거나 원천 CSV를 자동 변환하지 않는다. 모델 완료·실패 목록의 완전성도 자동 증명하지 않는다.
-
-### S3 결과와 읽는 순서
-
-예시 output_root가 버킷 루트일 때 다음에 쓴다. 하위 루트를 지정하면 그 아래에 생성한다.
+### S3 결과와 완료 공개
 
 ```text
-silver/runtime/<job>/
-  runs/<runtime_run_id>/...     고정 Silver 결과·manifest·R6 검사
-  completed/<runtime_run_id>.json   완료된 Silver 실행 목록
-  current.json                 최신 Silver 실행 참조
-gold_a/runtime/<job>/
-  runs/<runtime_run_id>/...     고정 Gold A 결과·manifest
-  completed/<runtime_run_id>.json   완료된 Gold A 실행 목록
-  current.json                 최신 Gold A 실행 참조
+silver/runtime/trade/runs/<run_id>/<데이터셋>/part-*.parquet
+silver/runtime/trade/runs/<run_id>/manifest.json
+silver/runtime/trade/runs/<run_id>/products/<상품데이터셋>/part-*.parquet
+silver/runtime/trade/runs/<run_id>/products/manifest.json
+silver/runtime/trade/completed/<run_id>.json
+silver/runtime/trade/current.json
+
+gold_a/runtime/trade/runs/<run_id>/<집계데이터셋>/part-*.parquet
+gold_a/runtime/trade/runs/<run_id>/manifest.json
+gold_a/runtime/trade/completed/<run_id>.json
+gold_a/runtime/trade/current.json
 ```
 
-1. 조회할 계층·작업의 current.json 또는 미처리 completed 기록을 읽는다.
-2. silver_manifests/gold_manifests의 uri → 해당 고정 manifest의 outputs를 따라간다. `runs/` 전체를 합치지 않는다.
-3. R6는 `silver/runtime/trade/completed/`의 미처리 실행을 순서대로 읽고 거래 manifest의 outputs.order_amount_checks로 이동한다. 내부 run_id/check_name/order_id를 중복 소비 키로 사용한다. runtime_run_id는 외부 실행과 연결하는 별도 식별자다. 목록 조회 권한·소비 체크포인트는 판정 담당자와 연결해야 한다.
-4. Silver 품질 INCOMPLETE도 완료 목록에 남긴다. 이 경우 작업은 실패 처리하고 Gold A를 갱신하지 않는다. 회원은 Gold A 결과를 만들지 않는다.
+데이터셋은 기존 orders_current/order_status_history/silver_order_items/payment_attempts/quarantined_records/dq_results/order_amount_checks/impact_candidates와 상품 기준정보 2개, Gold A 판매 집계 2개다. manifest.outputs로 정확한 데이터셋 폴더를 찾는다. 고정 part 파일명을 가정하거나 runs 전체를 합치지 않는다. schema와 output_counts, Spark application ID·버전, 규칙/코드 버전, 입력 메타데이터도 기록한다.
 
-다운로드 전 목록·ETag를 고정하고 IfMatch로 변경된 입력을 거부한다. 원본 URI·ETag·버전 ID(있는 경우)·SHA-256와 코드 커밋을 실행 기록에 남긴다. S3 목록은 원천 입수 완전성의 증명이 아니므로 coverage_status는 UNVERIFIED다. 기본 다운로드 한도는 128MiB, max_download_bytes로 최대 1GiB까지 명시 가능하다. 현재 계산은 메모리 배치이므로 실제 크기로 자원·시간을 측정해야 한다.
+UTC 업무 시각과 R6 checked_at은 Parquet TIMESTAMP_MICROS(세션 UTC), KST 오프셋 시각은 STRING, 판매 날짜는 DATE, 금액·수량은 BIGINT다. 원본 참조·format_rules 등 중첩 메타데이터 일부는 JSON STRING이다. 정확한 물리 스키마는 manifest.schemas에 저장한다. 거대한 DQ 배열 대신 상세는 격리·R6·영향 후보 테이블의 행으로 보존한다.
 
-결과 객체 저장 후 계층별 완료 목록과 current를 공개한다. Gold A 실패 시 Silver 검사는 읽을 수 있고 이전 Gold A current를 유지한다. 파일 안의 원본 참조·R6 source_manifest도 S3 경로로 변환한다. 겹친 실행이 최신 참조를 조용히 덮지 않도록 current 쓰기는 ETag 조건을 사용하지만 분산 트랜잭션·실행 잠금은 아니다. 단일 DAG 외부에서 같은 작업을 병렬 실행하지 않는다. 실패한 미공개 객체 정리와 보관 기간은 운영 정책으로 별도 결정한다. 삭제 권한은 사용하지 않는다.
+모든 데이터셋 저장 후 해당 계층 완료 기록을 공개한다. 실패 시 이전 공개 참조를 유지한다. 재실행은 새 run_id로 수행하고 기존 run_id 폴더를 덮어쓰지 않는다. R6는 미처리 Silver completed를 순서대로 읽어 order_amount_checks를 소비한다. 행 부재·검사 대기는 해소로 보지 않는다. 동일 작업을 DAG 외부에서 병렬 실행하지 않는다.
 
-이번 버전은 매번 제공된 전체 입력으로 새 스냅샷을 만든다. 기존 Gold A의 부분 병합·scope-aware 복구, 시간대 재처리 승인 DAG, 정기 스케줄, 실제 A/B 대조 잡은 자동 연결하지 않는다. Parquet 라이브러리는 이미지에 포함하지만 기존 실행기의 JSONL 입력·출력 형식을 Parquet으로 바꾸지는 않는다.
+S3 저장은 Hadoop S3A magic committer를 사용한다. Parquet·커미터 작업 객체를 위한 Put/Get/List, 미완료 업로드 Abort·multipart 관련 작업과 Spark 작업용 객체 정리 권한이 필요하다. Bronze는 읽기 전용이며 기존 정상 결과의 일괄 삭제를 구현하지 않는다. 로컬 S3 에뮬레이터 검증에서는 각 데이터셋 폴더 아래 __magic_job-*/ 작업 키가 생성되고 완료 후 정리됐다. DeleteObject는 silver/runtime/trade/runs/*/__magic_job-*/* 및 gold_a/runtime/trade/runs/*/__magic_job-*/* 작업 키로 제한하는 안을 인프라와 검증한다. 상품 하위 데이터셋도 이 실행 prefix 안에 포함된다. AbortMultipartUpload·ListMultipartUploadParts는 최종 Parquet 객체의 업로드에도 필요하므로 magic 임시 키에만 제한하면 안 된다. ListBucketMultipartUploads는 버킷 수준 권한이며 prefix 제한 지원 여부를 확인해 연결한다. 이 검증은 실제 AWS IAM 검증을 대신하지 않는다. 로컬 shuffle은 Pod 임시 디스크이며 S3 tmp 폴더가 아니다.
 
-이 브랜치는 `pipelines/silver/`의 정제 코드와 `pipelines/gold_a/`의 비즈니스 지표 코드를 담는다. Gold A는 선행 Silver 결과를 입력으로 쓴다.
+### 배포·조회 연결에서 남은 사항
+
+Gold A #67 main 반영, ECR 업로드·digest 고정, namespace·세 실행 신원/RBAC·S3 권한·전용 노드 자원·main DAG 동기화/실행 설정·실제 입력 첫 실행이 필요하다. Glue/Athena 테이블 생성·파티션 등록·공개된 run_id 선택은 아직 연결하지 않았다. current.json 갱신만으로 Athena가 최신 결과를 고르는 것으로 간주하지 않는다. 업무 조회는 공개 실행, R6는 모든 완료 검사 실행을 읽도록 별도 조회 계약이 필요하다.
+
+리뷰·퍼널·회원 Spark 전환, 시간대 부분 재처리 승인 DAG, 실제 A/B 대조 잡·모델 호출은 이번 거래 Spark 검증의 완료 범위가 아니다.
 
 ## 공통 결제 지문
 

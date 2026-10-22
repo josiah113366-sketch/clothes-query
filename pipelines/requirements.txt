@@ -1,4 +1,5 @@
 PyYAML==6.0.3
 boto3==1.43.71
-pyarrow==26.0.0
+pyarrow==25.0.1; python_version < '3.11'
+pyarrow==26.0.0; python_version >= '3.11'
 tzdata==2026.3
