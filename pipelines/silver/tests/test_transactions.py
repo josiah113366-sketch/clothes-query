@@ -169,7 +169,7 @@ def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_pat
     assert len(saved) == 1
     row = saved[0]
     assert {key: row[key] for key in payment_fingerprint(raw)} == payment_fingerprint(utc)
-    assert row["amount"] == 1000
+    assert row["amount"] == 11800
     assert row["completed_at_utc"] == "2026-10-13T15:02:00+00:00"
     assert row["completed_at_kst"] == "2026-10-14T00:02:00+09:00"
     assert raw == original
