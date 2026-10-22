@@ -24,3 +24,4 @@
 - 실행에 규칙을 한 번 읽고 품질 결과·manifest에 version/sha256/path/consumer를 남긴다. 회원·클릭 CLI에 --rules-path를 추가했다. 기존 회원/클릭 시험 ID를 UUID로 맞췄다.
 - 회원·클릭 집중 검증 9개 통과(1.87초). Silver·공통 검사기·Gold B 샘플 회귀 88개 통과·1개 건너뜀(4.23초). 건너뛴 것은 pyarrow 미설치에 따른 Gold B Parquet 시험이다. 변경 코드·기존 테스트 Ruff 및 diff 공백 검사 통과.
 - 공통 YAML·지문 함수·Gold B·거래 실행 코드·Gold A는 변경하지 않았다. 미등록 실패 코드 수용 정책은 은서의 후속 규약을 기다린다. push·PR 생성·머지는 하지 않았다.
+- Gold A는 별도 브랜치에서 0.2.0 main과 동기화하고, 시험 상품 키를 10자리·클릭 이벤트 키를 UUID로 맞췄다. 두 PR 파일을 임시 복사본에서 함께 검증해 전체 pipelines 106개 통과·1개 건너뜀(14.15초)을 확인했다. Gold A와 Silver 브랜치는 서로 병합하지 않았다.
