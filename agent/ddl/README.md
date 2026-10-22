@@ -19,7 +19,7 @@
 
 ## 만드는 순서 (Athena 쿼리 편집기 또는 스크립트, 한 번에 하나씩)
 
-1. `database_agent.sql` (이미 만들어져 있으면 그대로 두어도 된다)
+1. ~~`database_agent.sql`~~ **실행하지 않는다.** Glue의 `agent` 데이터베이스는 인프라 Terraform(gold-b-access 모듈)이 이미 만들어 두었다. 먼저 만들면 Terraform이 import해야 한다(Gold B 담당 리뷰). 파일은 DB 정의를 남겨 두려는 참고용이다. `gold_b` 데이터베이스는 Gold B 담당이 인프라 담당에게 요청해 만든다
 2. `anomaly.sql`, `detection_runs.sql`, `investigation_reports.sql`, `investigation_runs.sql`
 3. `views/anomaly_current.sql`
 
@@ -27,7 +27,7 @@
 
 ## 첫 쓰기 시험 (진짜 Athena에서 한 번 확인할 것)
 
-시간 폴더 자동 인식(파티션 프로젝션)을 쓰는 표에 `INSERT INTO`가 잘 되는지는 **아직 확인하지 못했다.** 표를 만든 뒤 판정용 workgroup으로 이 순서로 확인한다.
+시간 폴더 자동 인식(파티션 프로젝션)을 쓰는 표에 `INSERT INTO`가 되는지는 **인프라 담당이 임시 표(이 DDL과 같은 형식)와 실제 판정 ServiceAccount로 확인했다**(1행 쓰기·조회 성공, 추가 Glue 파티션 권한도 불필요, 2026-10-22). 우리 표를 만든 뒤에도 판정용 workgroup으로 아래 순서로 한 번 더 확인한다.
 
 ```sql
 INSERT INTO gold_b.detection_runs (run_id, kind, request_id, judged_from, judged_to, started_at, anomaly_count, dt)

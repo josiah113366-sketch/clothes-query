@@ -20,7 +20,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gold_b.anomaly (
   episode_start   TIMESTAMP COMMENT '이어진 이상 기간 시작 (아직 비어 있음)',
   episode_end     TIMESTAMP COMMENT '이어진 이상 기간 끝 (아직 비어 있음)',
   evidence_ref    STRING    COMMENT '조사가 볼 곳과 근거 (JSON 문자열)',
-  status          STRING    COMMENT 'OPEN, RESOLVED (R6 해소 줄). INVESTIGATING, REPORTED는 예약',
+  status          STRING    COMMENT 'OPEN, RESOLVED (R6 해소 줄, 재처리 뒤 사라진 이상의 해소 줄). INVESTIGATING, REPORTED는 예약',
   detected_at     TIMESTAMP COMMENT '판정 잡이 기록한 시각 (UTC)'
 )
 PARTITIONED BY (dt STRING)

@@ -32,7 +32,7 @@ TABLE_SPECS = {
         "database": "gold_b",
         "columns": {"request_id": "string", "step": "string", "at": "timestamp", "actor": "string", "reason": "string",
                     "window_start": "timestamp", "window_end": "timestamp", "rule_version": "string", "source": "string",
-                    "attempt": "bigint", "parent_request_id": "string", "detail": "string"},
+                    "attempt": "int", "parent_request_id": "string", "detail": "string"},
         "partition_by": None, "partitions": (),
     },
     # 아래 둘은 조사 에이전트가 쓴다 (판정 잡 역할은 못 쓴다. 쓰는 쪽 코드는 조사 에이전트 진입점에서 연결)
@@ -164,10 +164,10 @@ def _lit(value, type_name):
     if type_name == "timestamp":
         dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("T", " "))
         return f"TIMESTAMP '{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
-    if type_name in ("bigint", "double"):
+    if type_name in ("int", "bigint", "double"):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"숫자 컬럼에 숫자가 아닌 값이 들어왔습니다: {type(value).__name__}")
-        return repr(int(value)) if type_name == "bigint" else repr(float(value))
+        return repr(float(value)) if type_name == "double" else repr(int(value))
     return "'" + str(value).replace("'", "''") + "'"
 
 

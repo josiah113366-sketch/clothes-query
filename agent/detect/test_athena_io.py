@@ -139,5 +139,13 @@ try:
     check("진입점: workgroup이 없으면 종료", "통과됨", "종료")
 except SystemExit:
     check("진입점: workgroup이 없으면 종료", "종료", "종료")
+from athena_io import TABLE_SPECS, _lit
+check("reprocess_events.attempt는 Gold B DDL과 같은 int", TABLE_SPECS["reprocess_events"]["columns"]["attempt"], "int")
+check("int 컬럼: 정수는 그대로, NULL은 NULL, 문자는 거부", (_lit(2, "int"), _lit(None, "int")), ("2", "NULL"))
+try:
+    _lit("2", "int")
+    check("int 컬럼: 문자는 거부", "통과됨", "거부")
+except ValueError:
+    check("int 컬럼: 문자는 거부", "거부", "거부")
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
