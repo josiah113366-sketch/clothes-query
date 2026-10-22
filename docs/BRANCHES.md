@@ -104,12 +104,13 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
+| `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
 | `infra/agent-development-access` | [infra-agent-development-access.md](tasks/infra-agent-development-access.md) | 실제 적용·PR #49 검토 대기 | |
 | `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
 | `infra/gold-b-access-prep` | [infra-gold-b-access-prep.md](tasks/infra-gold-b-access-prep.md) | 조회 기반 적용·실제 Pod 접근 검증 완료 | |
 | `infra/agent-data-write` | [infra-agent-data-write.md](tasks/infra-agent-data-write.md) | 실제 적용·PR #50 검토 대기 | |
-| `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | 실제 적용 완료·검토 대기 | |
 | `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | 머지됨 (PR #11) | 2026-10-16 |
 | `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | 머지됨 (infra/ready에 통합) | 2026-10-16 |
 | `infra/deploy-result` | [infra-deploy-result.md](tasks/infra-deploy-result.md) | 머지됨 | 2026-10-16 |

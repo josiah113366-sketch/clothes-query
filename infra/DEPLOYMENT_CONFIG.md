@@ -52,7 +52,7 @@ EKS 개인 파일 예시:
 
 `operations-alerts`는 계속 미적용 보류다. `athena-query-base`는 Gold B로 대체된 과거 후보라 이번 전환에서 제외했고 함께 apply하지 않는다. SageMaker·ECS 등 팀원 스택의 이 PC에 없는 배포 입력을 추정해 만들지 않는다. Helm `runtime.local.yaml`은 이번 Terraform 변수 분리 범위에 포함하지 않는다.
 
-이 파일들은 현재 합의된 배포 입력을 공유하는 것이며 AWS 현재 상태 전체를 보장하지 않는다. 노드/서비스가 외부에서 바뀐 경우 별도 plan으로 확인한다. 특히 audit 재활성화 코드는 별도 `infra/eks-audit-restore`에 있고 새 PR은 보류됐으므로 과거 main의 EKS 코드로 audit를 다시 끄지 않도록 확인한다. 이번 정리에서는 apply를 실행하지 않는다.
+이 파일들은 현재 합의된 배포 입력을 공유하는 것이며 AWS 현재 상태 전체를 보장하지 않는다. 노드/서비스가 외부에서 바뀐 경우 별도 plan으로 확인한다. EKS 코드는 실제 활성 상태와 맞춰 audit를 포함한 관리 로그 5종을 수집한다. 예전 audit 비활성화 코드나 저장 plan을 재사용하지 말고 최신 main에서 plan을 새로 만든다. [설정 일치 확인 기록](../docs/tasks/infra-eks-audit-restore.md)을 따른다. 공통 설정 공유와 코드 정리 과정에서는 apply를 실행하지 않는다.
 
 기존 작업 문서의 '계정 ID/ARN은 항상 비공개'는 이전 정책이다. 현재 입력 방식은 이 문서를 우선한다. 현재 적용 환경과 다른 스택을 무작정 실행하거나 새 공유값을 확인 없이 적용하지 않는다.
 
