@@ -142,6 +142,7 @@ gitGraph
 | `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
 | `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
 | `agent/ddl` | `agent-ddl.md` (이 대장 PR 다음에 PR) | 진행 중 | |
+| `agent/approval` | [agent-approval.md](tasks/agent-approval.md) | 진행 중 | |
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
