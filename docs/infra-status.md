@@ -59,6 +59,7 @@ Spark 최초 용량은 전용 t3a.large 한 대분(2 CPU·8GiB), Driver 1개·Ex
 - 모델은 `jp.anthropic.claude-haiku-4-5-20251001-v1:0`으로 확정됐다. Nova는 제외하며 해당 프로필·조회한 목적지 ARN만 investigation-agent 역할에 연결할 예정이다. 이 공유에는 권한 활성화를 포함하지 않는다.
 - #54 검토에서 조사 전부 ERROR여도 프로세스 exit 0으로 끝나는 동작을 가짜 모델로 재현했다. 수정 요청 권장 항목이며 이 인프라 묶음에서 앱 코드를 변경하지 않는다. #62·#64 코드 검토와 로컬 검사 통과는 실제 이미지 빌드·클러스터 실행 완료를 뜻하지 않는다.
 - 현재 Airflow Git bundle은 main의 `infra/platform/airflow/dags/`를 읽는다. 별도 `agent/dags/` 파일은 추가 bundle 연결 없이 자동으로 읽히지 않는다. 신규 DAG는 기본 paused다.
+- Airflow 본체 3개의 특정 hostname 고정은 후속 읽기 전용 조회에서도 확인했다. PR #74에서 로컬 runtime 키 제거·설치 확인용 Pod의 노드풀 선택·최종 렌더 검사와 재배포 안내를 준비했다. 4개 workload 렌더와 본체 3개의 배치 조건 외 spec 동일성 검사는 통과했다. **실제 클러스터는 아직 고정 상태**이며 Helm 재배포가 필요하다. 단일 replica/Recreate의 중단 시간과 애플리케이션 장애 복구는 별도다.
 - #69 공유 ALB 템플릿은 main에 있지만 실제 적용·listener/target/접근 시험은 이번에 확인하지 않았다. 템플릿의 외부 포트는 Dashboard 80, Airflow 8080, Kafka UI 8081이며 과거 논의 포트와 구분한다.
 - 업무 SQL·품질 분기·모델 선택·승인 상태 제한은 각 앱 담당 범위다. 인프라는 경로·배포·실행 권한·자원·연결 검증을 맡는다.
 - Gold B 담당자의 그림은 Kafka 직접 입력 Spark Streaming과 별도 지연 수집기를 상시 운영하는 설계다. Silver·Gold A 배치와 구분하며 Spark 노드가 항상 0으로 내려간다고 가정하지 않는다. 실행 이미지·checkpoint·자원·배치 확정과 실측 전이며 이번에는 인지 사항만 기록한다.

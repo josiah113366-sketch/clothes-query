@@ -1,6 +1,6 @@
 # 데이터·Airflow 연결 작업 통합 공유
 
-상태: 로컬 통합·검증 완료, 초안 PR 준비
+상태: 초안 PR #74 공유 완료, 노드 고정 제거 코드·로컬 설정 검증 완료, 실제 배포 대기
 
 ## 범위
 
@@ -17,4 +17,12 @@
 - [x] Terraform fmt 통과, backend·자격증명 없는 격리 복사본에서 dashboard-access/gold-b-catalog/gold-b-access 및 test root validate 통과, mock plan 7개 통과.
 - [x] Airflow chart schema/render 통과: Deployment 3개·Git bundle·paused 기본값·이전 DAG ConfigMap 미마운트·새 PVC/Ingress/노드 미생성 확인.
 - [x] 공통 문서 추가 위치를 조정한 뒤 세 공유 브랜치를 합치는 임시 tree 검사 통과. 원본 브랜치 커밋 불변·민감 파일 제외·diff 검사 확인.
-- [ ] 초안 PR 공유, 팀원 검토·승인·머지.
+- [x] 초안 PR #74 공유 완료. 팀원 검토·승인·머지는 대기.
+
+## 후속: 특정 노드 hostname 고정 제거
+
+사용자가 노드 장애 후 재배치가 막히는 설정의 수정을 요청했다. 읽기 전용 조회에서 API·scheduler·DAG processor 3개가 기존 compute 노드 hostname에 고정된 것을 확인했다. 비공개 로컬 runtime 파일에서 hostname을 제거하고 공용 compute 노드풀은 유지한다. 해당 파일은 커밋하지 않는다. 설치 확인용 Pod도 노드풀을 선택한다. 최종 렌더 검사는 hostname·nodeName·개별 노드를 지정한 필수 affinity를 거부한다. 차트 schema가 null selector를 거부하므로 null overlay 대신 원본 키 삭제·완전한 runtime 입력·--reset-values 방식으로 안내한다.
+
+이 후속은 코드·로컬 설정 준비다. 클러스터의 hostname 고정은 아직 유지되며 Helm 재배포 후 제거 여부를 확인해야 한다. 노드/Pod 강제 종료·업무 DAG 실행·AWS/Helm 적용은 하지 않는다.
+
+검증: 실제 로컬 runtime 입력으로 Helm 렌더한 4개 workload의 노드풀 배치를 통과했다. 수정 전 고정은 거부하고 nodeName·필수 hostname affinity도 거부했다. 본체 Deployment 3개는 nodeSelector 외 Pod spec이 동일함을 비교했다. 설치 확인용 DAG의 KPO도 노드풀 선택만 사용하는 것을 AST로 확인했다. 실제 노드 장애 복구·실행 중 클러스터 변경을 시험한 결과는 아니다.
