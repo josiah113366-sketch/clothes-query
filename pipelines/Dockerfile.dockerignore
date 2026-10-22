@@ -9,3 +9,13 @@
 !docs/
 !docs/contracts/
 !docs/contracts/format_rules.yaml
+**/.local
+**/.local/**
+**/__pycache__
+**/__pycache__/**
+**/tests
+**/tests/**
+**/.pytest_cache
+**/*.env
+**/.env
+**/test_*.py

@@ -30,5 +30,5 @@
 - 운영 어댑터 시험 8개 통과: 실제 판매·퍼널·리뷰 점수·회원 실행, 금액 MISMATCH의 R6 보존, 이전 Gold A 유지, 원본 변경/누락/크기 초과, Gold 업로드 실패, UTC/KST 리뷰 범위와 Windows 긴 경로 참조. 가짜 S3를 사용했으며 실제 운영 데이터 처리 검증이 아니다.
 - 전체 pipelines 115개 통과(17.19초), 변경 Python Ruff·구문 검사·git diff --check 통과, 로컬 pip check 통과.
 - Windows 로컬 Airflow 실행은 os.register_at_fork 미지원으로 실패했다. 실행 중인 EKS Airflow 3.3.2 DAG processor에서 소스를 메모리로만 파싱해 DAG ID/두 태스크/선행 관계·수동 단일 실행·Pod 신원 설정·BATCH_CONFIG JSON 템플릿을 확인했다. DAG 파일 저장·배포·Trigger·업무 Pod 생성은 하지 않았다.
-- Docker 클라이언트는 있으나 로컬 Linux 엔진 파이프가 없어 이미지 빌드는 실행하지 못했다. Docker 엔진 준비 후 이미지 빌드·로컬 실행·push·digest 확인이 필요하다. namespace·ServiceAccount·Pod Identity/S3 권한·ECR 저장소·DAG 마운트는 아직 생성하지 않았다.
+- 처음에는 Docker Linux 엔진이 꺼져 빌드하지 못했으나 설치된 Docker Desktop을 백그라운드로 시작해 로컬 이미지 빌드에 성공했다. 빌드 컨텍스트의 .local·캐시·테스트 제외를 명시적으로 보완하고 Git 커밋 없는 빌드를 거부한다. Linux 컨테이너에서의 계산 확인 후 결과를 추가 기록한다. 이미지 push·namespace·ServiceAccount·Pod Identity/S3 권한·ECR 저장소·DAG 마운트는 아직 생성하지 않았다.
 - 상품 기준정보 JSONL 스냅샷의 실제 S3 위치, 실제 Bronze 크기·형식·완전성, 모델 결과 완료 범위, 실제 R6 판정 소비, 정기·부분 재처리·A/B 대조 연결은 후속이다. 현재 실행기는 전체 입력 스냅샷 방식이며 기존 범위별 보류·부분 병합을 자동 호출하지 않는다.
