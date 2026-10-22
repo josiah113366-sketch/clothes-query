@@ -1,5 +1,13 @@
 # Silver 입력·출력 현황
 
+## 결정: 결제 내용 지문 저장
+
+- 거래 Silver는 공통 YAML 입력 검사 후 `pipelines/payment_fingerprint.py`를 호출한다. 시각 변환 전 원본의 `requested_at`, `completed_at` 문자열을 전달한다.
+- 정상 `payment_attempts`에 `payment_content_hash`(SHA-256 소문자 64자리)와 `fingerprint_version`(`payment-content.v1`)을 저장한다. 기존 UTC·KST 시각 컬럼과 금액은 유지한다.
+- 같은 `payment_id`의 같은 버전·같은 지문은 동일 내용 재수신으로 1건만 남기고, 지문이 다르면 기존 내용 충돌 처리에 따라 해당 키 전체를 격리한다. 주문 연결·금액 검사도 계속 적용한다.
+- 공통 함수가 시각을 UTC 소수초 6자리로 통일하므로 같은 순간의 UTC·KST 표현은 같은 지문이다. 6자리 초과 정밀도 등 지문 입력 오류는 `INVALID_VALUE`로 격리하고 같은 키의 정상 후보도 보류한다. 시간대를 추측하거나 정밀도를 조용히 버리지 않는다.
+- Silver 검사 버전은 `transactions.v8`이다. YAML 입력 규칙 버전·지문 버전과 역할이 다르다. Gold B 호출 연결·원천 처리 완료 범위 확인·실제 A/B 대조 잡은 이번 변경에 포함하지 않는다.
+
 ## 결정: 회원 현재 상태 (`members_current`)
 
 | 항목 | 기준 |

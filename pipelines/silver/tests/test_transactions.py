@@ -152,6 +152,44 @@ def summary(result, name):
     return next(row for row in result["dq_results"] if row["source_dataset"] == name)
 
 
+def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_path):
+    raw = payment()
+    original = deepcopy(raw)
+    utc = {**raw, "requested_at": "2026-10-13T15:01:00Z",
+           "completed_at": "2026-10-13T15:02:00Z"}
+    source = tmp_path / "input"
+    source.mkdir()
+    for name, rows in (("orders", [order()]), ("items", []), ("payments", [raw, utc])):
+        (source / f"{name}.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    manifest = run(*(str(source / f"{name}.jsonl") for name in ("orders", "items", "payments")),
+                   str(tmp_path / "output"))
+    saved = [json.loads(line) for line in Path(manifest["outputs"]["payment_attempts"])
+             .read_text(encoding="utf-8").splitlines()]
+    assert len(saved) == 1
+    row = saved[0]
+    assert {key: row[key] for key in payment_fingerprint(raw)} == payment_fingerprint(utc)
+    assert row["amount"] == 1000
+    assert row["completed_at_utc"] == "2026-10-13T15:02:00+00:00"
+    assert row["completed_at_kst"] == "2026-10-14T00:02:00+09:00"
+    assert raw == original
+
+
+def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
+    raw = payment()
+    conflict = build_silver([order()], [], [raw, {**raw, "amount": 1001}])
+    assert conflict["payment_attempts"] == []
+    assert len(conflict["quarantined_records"]) == 2
+    assert {row["error_code"] for row in conflict["quarantined_records"]} == {"CONTENT_CONFLICT"}
+    for field in ("requested_at", "completed_at"):
+        invalid = {**raw, field: raw[field].replace("+09:00", ".1234567+09:00")}
+        result = build_silver([order()], [], [raw, invalid])
+        assert result["payment_attempts"] == []
+        issues = result["quarantined_records"]
+        assert any(row["field"] == field and row["error_code"] == "INVALID_VALUE" for row in issues)
+        assert summary(result, "payments")["status"] == "INCOMPLETE"
+
+
 def test_yaml_contract_validates_uuid_enums_reasons_and_times():
     rules = FormatRules()
     cases = [

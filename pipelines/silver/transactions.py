@@ -9,6 +9,7 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from pipelines.format_rules import DEFAULT_RULES, FormatError, FormatRules
+from pipelines.payment_fingerprint import FingerprintError, payment_fingerprint
 
 from .common import RowError as _RowError
 from .common import integer as _integer
@@ -16,7 +17,7 @@ from .common import run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v5"
+CHECK_VERSION = "transactions.v8"
 
 
 def _version(raw: dict, row: dict) -> tuple:
@@ -63,8 +64,11 @@ def _item(raw: dict) -> dict:
 
 
 def _payment(raw: dict) -> dict:
+    # YAML 검사 후 원본 문자열로 계산한다. datetime 변환 시 정밀도 손실을 숨기지 않는다.
+    fingerprint = payment_fingerprint(raw)
     requested, completed = _time(raw, "requested_at"), _time(raw, "completed_at")
     return {
+        **fingerprint,
         "payment_id": raw["payment_id"], "order_id": raw["order_id"],
         "attempt_no": raw["attempt_no"], "method": raw["method"], "pg": raw["pg"],
         "amount": raw["amount"], "status": raw["status"], "failure_code": raw.get("failure_code"),
@@ -125,6 +129,8 @@ def build_silver(
                 _check_cdc(raw, name)
                 rules.validate(name, raw)
                 normalized[name][index] = normalizers[name](raw)
+            except FingerprintError as exc:
+                reject(name, index, exc.field, "INVALID_VALUE", str(exc))
             except (_RowError, FormatError) as exc:
                 reject(name, index, exc.field, exc.code, str(exc))
                 if isinstance(exc, FormatError):
@@ -172,7 +178,13 @@ def build_silver(
         for _, row in eligible(name):
             key = row[keys[name]]
             previous = seen.setdefault(key, row)
-            if previous != row:
+            # 결제의 전달 정보·시간 표현이 달라도 공통 업무 지문이 같으면 재수신이다.
+            if name == "payments":
+                different = ((previous["fingerprint_version"], previous["payment_content_hash"])
+                             != (row["fingerprint_version"], row["payment_content_hash"]))
+            else:
+                different = previous != row
+            if different:
                 reject_group(name, key, keys[name], "CONTENT_CONFLICT", "동일 키의 업무 내용이 다릅니다")
 
     def unique(name: str) -> list[dict]:
