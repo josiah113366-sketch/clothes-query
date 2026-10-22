@@ -1,4 +1,4 @@
-상태: 완료 · 브랜치: `pipelines/silver-format-rules` · 원격 제출 전
+상태: 완료 · 브랜치: `pipelines/format-rules-silver` · PR 준비
 
 # Silver 회원·클릭 공통 입력 검사 연결
 
@@ -23,5 +23,6 @@
 - 회원·클릭 입력에 공통 validate()를 연결하고 정상 출력의 그레인·경로·시간대와 CDC/중복 복원을 유지했다. 공통 수집기는 FormatError의 첫 오류를 격리하며 rule_id를 보존한다.
 - 실행에 규칙을 한 번 읽고 품질 결과·manifest에 version/sha256/path/consumer를 남긴다. 회원·클릭 CLI에 --rules-path를 추가했다. 기존 회원/클릭 시험 ID를 UUID로 맞췄다.
 - 회원·클릭 집중 검증 9개 통과(1.87초). Silver·공통 검사기·Gold B 샘플 회귀 88개 통과·1개 건너뜀(4.23초). 건너뛴 것은 pyarrow 미설치에 따른 Gold B Parquet 시험이다. 변경 코드·기존 테스트 Ruff 및 diff 공백 검사 통과.
-- 공통 YAML·지문 함수·Gold B·거래 실행 코드·Gold A는 변경하지 않았다. 미등록 실패 코드 수용 정책은 은서의 후속 규약을 기다린다. push·PR 생성·머지는 하지 않았다.
+- 공통 YAML·지문 함수·Gold B·거래 실행 코드·Gold A는 변경하지 않았다. 사용자 결정으로 미등록 실패 코드는 0.2.0의 INVALID_VALUE 격리를 유지하며 수용·품질 경고 확장안은 보류한다. Gold B 샘플의 기대값 정리는 담당자 범위이며 이 PR에 섞지 않는다.
 - Gold A는 별도 브랜치에서 0.2.0 main과 동기화하고, 시험 상품 키를 10자리·클릭 이벤트 키를 UUID로 맞췄다. 두 PR 파일을 임시 복사본에서 함께 검증해 전체 pipelines 106개 통과·1개 건너뜀(14.15초)을 확인했다. Gold A와 Silver 브랜치는 서로 병합하지 않았다.
+- 사용자가 요청한 이름 순서에 따라 pipelines/silver-format-rules를 pipelines/format-rules-silver로 바꾸고 작업 지시서와 대장도 맞췄다. 규칙은 0.2.0 그대로이며 이번 변경이 0.3.0 정책을 포함하지 않는 것을 확인했다.
