@@ -1,5 +1,16 @@
 # Silver 입력·출력 현황
 
+## 결제 대조를 위한 원본 추적 (로컬 초안)
+
+공통 설계·담당자별 PR 확인표는 [공통 계약의 대조 잡 초안](../../docs/contracts/README.md#결제-경로-대조-잡-초안-2026-10-21)에 모은다. 실제 대조 잡과 Kafka Sink 변경은 아직 없다.
+
+- 거래 JSONL 입력에 제안 필드 kafka_topic/kafka_partition/kafka_offset/kafka_timestamp/kafka_timestamp_type이 있으면 검사한 값만 원본 참조에 보존한다. timestamp는 시간대 포함 ISO 문자열, type은 CreateTime/LogAppendTime이다. 실제 Bronze 필드명 합의는 필요하다.
+- Gold A inputs → Silver current.json → outputs.impact_candidates의 source → Bronze 파일·줄·kafka 순서로 찾아간다. 격리 행에는 kafka_reference를 남긴다. 정상 업무 결과의 지표·그레인에 Kafka 컬럼을 넣지 않는다.
+- 거래 manifest의 kafka_observations는 입력별 메타데이터 VALID/INVALID/MISSING 건수와 토픽·파티션별 관측 min/max offset·행 수·고유 offset 수다. 정상·격리 전 입력을 기록하므로 오류 후보도 추적한다.
+- coverage_status=UNVERIFIED는 항상 유지한다. 관측 범위는 원천의 전체 범위·연속성·양쪽 처리 완료를 증명하지 않는다. Kafka 시각을 무조건 브로커 도착 시각으로 간주하지 않는다.
+- 누락·잘못된 추적 필드는 해당 상태와 필드명만 기록하고 업무 품질 판정과 분리한다. 기존 메타데이터 없는 입력은 동작하지만 정확한 Kafka 대조는 확인 불가다. source_ts_ms 또는 파일명으로 Kafka 위치·시각을 채우지 않는다.
+- 검사 버전 transactions.v6. 실제 Gold B 스냅샷·범위 증거·비교 계약이 없으므로 현재 실행은 MATCH/MISMATCH를 판정하지 않는다.
+
 ## 결정: 회원 현재 상태 (`members_current`)
 
 | 항목 | 기준 |
