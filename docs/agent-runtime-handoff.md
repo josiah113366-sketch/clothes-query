@@ -23,7 +23,7 @@ PR #53 detection_runs와 같은 파티션 프로젝션 형식을 격리된 임�
 
 읽기 대상은 gold_b.anomaly_current 및 원본 anomaly, agent.investigation_reports, gold_b.reprocess_events다. 업무 쓰기는 gold_b/reprocess_events/에만 허용한다. 정답표·다른 결과 경로·다른 업무 데이터 쓰기·객체 삭제는 차단한다. REQUESTED/APPROVED 값 제한·상태 전이·중복 승인 방지는 앱 담당자가 구현한다.
 
-Airflow 내부 주소와 토큰 호출 방식은 [대시보드 연결 안내](../infra/platform/dashboard-access/README.md)에 있다. 기존 approval 비밀번호를 새 namespace Secret으로 복제하는 변경은 자동 승인 검토에서 구체적인 승인 부족으로 차단되어 미실행이다. 현재 AWS 접근과 네트워크 응답만 검증했으며 승인 화면의 Airflow 인증·실제 DAG 호출은 아직 연결하지 않았다.
+Airflow 내부 주소와 토큰 호출 방식은 [대시보드 연결 안내](../infra/platform/dashboard-access/README.md)에 있다. 2026-10-22 사용자 명시 승인 후 기존 approval 사용자 자격증명을 dashboard/airflow-api-client Secret으로 복제했다. 실제 대시보드 ServiceAccount Pod에서 토큰 발급 HTTP 201·인증한 DAG 읽기 HTTP 200을 확인했고 임시 Pod는 정리했다. 앱 담당자는 [환경변수 조각](../infra/platform/dashboard-access/airflow-client-env.example.yaml)을 컨테이너에 연결한다. 토큰 발급/갱신 코드는 백엔드 담당자가 작성하고, DAG ID/conf 확정 후 실제 호출을 연결한다. 업무 DAG는 실행하지 않았다. 원본 비밀번호 회전 시 복제 Secret도 갱신해야 한다.
 
 ## Bedrock
 

@@ -8,4 +8,6 @@ Airflow 내부 주소는 http://airflow-api-server.airflow.svc.cluster.local:808
 
 이 준비는 namespace/ServiceAccount·AWS 접근과 인증 경로이며 대시보드 Deployment나 이미지·업무 DAG를 설치하지 않는다. 노드 예산과 배치 설정은 실제 이미지 자원 요청을 받은 뒤 검증한다.
 
-자격증명 상태: airflow-api-client Secret은 아직 만들지 않았다. 기존 approval 비밀번호의 dashboard namespace 복제는 자동 승인 검토에서 구체적인 승인 없이 보관/접근 범위를 넓힌다는 이유로 차단됐다. 사용자가 해당 복제를 명시 승인한 뒤에만 생성한다. namespace/ServiceAccount·AWS 권한·인증 없는 네트워크 도달 검증은 별도로 진행한다.
+자격증명 상태: 2026-10-22 사용자가 구체적인 복제를 승인해 dashboard/airflow-api-client Secret을 생성했다. 기존 approval 사용자만 복제했고 관리자 자격증명·Git 토큰·AWS 키는 공급하지 않았다. 실제 approval-dashboard SA의 임시 Pod에서 POST /auth/token HTTP 201 및 인증한 DAG 읽기 HTTP 200을 확인했다. 토큰·비밀번호는 출력/파일 저장하지 않았고 임시 Pod는 정리했다. 업무 DAG를 실행하지 않았다.
+
+앱 컨테이너에 [환경변수 예제](airflow-client-env.example.yaml)의 env 항목을 반영한다. 예제는 Deployment 전체가 아니라 컨테이너 설정 조각이며 자동 배포하지 않는다. 소스 approval 비밀번호가 회전되면 이 복제 Secret도 운영 담당자가 갱신해야 한다. 내부 Service 호출은 외부 프록시를 우회하도록 앱 네트워크 설정을 확인한다. 실제 시험에서는 프록시를 사용하지 않는 HTTP client로 내부 경로를 확인했다.

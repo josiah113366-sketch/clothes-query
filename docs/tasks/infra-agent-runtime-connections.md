@@ -1,6 +1,6 @@
 # 판정·조사 실행 연결 기반
 
-상태: 인프라 연결 적용·검증 완료, 자격증명 복제 승인 및 담당자 입력 대기
+상태: 인프라·자격증명 연결 적용/검증 완료, 담당자 입력 대기
 
 ## 사용자 범위
 
@@ -27,3 +27,7 @@
 - 검증: Terraform 17 roots·16 mock suites/79 plan runs 통과. 처음 검사에서 plan 시점 미확정 ID 참조가 발견돼 알려진 이름/ARN 참조로 바꾸고 재검증했다. 애플리케이션·업무 SQL·DAG 로직은 수정하지 않았다.
 - 자격증명: 기존 Airflow approval 비밀번호를 dashboard/airflow-api-client Secret으로 복제하는 명령은 자동 승인 검토가 구체적인 복제 승인 없이 보관/접근 범위를 넓힌다는 이유로 거부했다. 실행되지 않았고 우회하지 않았다. Secret 없이 가능한 namespace/SA·권한·네트워크 검증만 완료했다. 사용자 명시 승인 후 이 Secret 공급을 연결한다.
 - 인계: [담당자 연결표](../agent-runtime-handoff.md). 실제 업무 표 생성, 이미지 build/push, 업무 DAG 활성화·5분 SLA, 모델 선택·프로필 활성화, 승인 화면 로직·실제 DAG ID/conf는 담당자 입력 후 연결할 항목이다. 코드 작업은 별도 브랜치에 보존하며 자동 머지/자체 승인은 하지 않는다.
+
+## 승인된 자격증명 공급 후속
+
+2026-10-22 사용자가 기존 approval 비밀번호의 dashboard/airflow-api-client 복제를 명시 승인했다. 해당 사용자 자격증명만 Secret으로 생성했고 값이나 토큰을 출력/파일 저장하지 않았다. 실제 approval-dashboard SA Pod에서 토큰 발급 HTTP 201과 인증한 DAG 읽기 HTTP 200을 확인했다. 업무 DAG trigger·앱 Deployment·추가 IAM 변경은 하지 않았고 임시 Pod를 정리했다. 원본 비밀번호 회전 시 복제본 갱신 필요와 앱 환경변수 조각을 안내에 반영했다. 비밀값 없는 요약은 .cache/dashboard-airflow-auth-summary.json에 보관한다. 앞선 자동 승인 거부 사항은 사용자 명시 승인으로 해소됐다.
