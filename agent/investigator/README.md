@@ -47,7 +47,7 @@
 | `try_model.py` | 진짜 모델 시험대. 가짜 원장(sqlite)에 만든 시나리오 4개(결제·적재·데이터 품질·정상)로 돌려 층 판별·호출 수·거절 수·토큰을 출력 |
 | `Dockerfile` | 이미지 제안. 빌드 위치는 `agent` 폴더 |
 
-환경 변수(비밀값 없음): `ATHENA_WORKGROUP`, `BEDROCK_MODEL_ID`, `AWS_REGION`(기본 ap-northeast-1), `INVESTIGATE_MAX`(기본 3), `INVESTIGATE_LOOKBACK_HOURS`(기본 24). `AWS_BEARER_TOKEN_BEDROCK`은 내 컴퓨터 시험에서만 쓴다.
+환경 변수(비밀값 없음): `ATHENA_WORKGROUP`, `BEDROCK_MODEL_ID`, `AWS_REGION`(기본 ap-northeast-1), `INVESTIGATE_MAX`(기본 3), `INVESTIGATE_LOOKBACK_HOURS`(기본 24), `INVESTIGATE_MARK_EXPIRED`(기본 1). `AWS_BEARER_TOKEN_BEDROCK`은 내 컴퓨터 시험에서만 쓴다.
 
 ### 모델 고르기 전에 확인할 것
 
@@ -59,6 +59,13 @@
 | `toolResult.status`를 지원하는가 | 지원하지 않는 모델은 코드가 자동으로 뺀다 |
 
 모델 후보 비교는 한국어 글 생성 벤치마크가 아니라 **도구 호출 시험**으로 해야 한다: `try_model.py --scenario all --repeat 3`.
+
+### 어떤 이상을 조사하나 (선택 규칙)
+
+- 조사 대상: `gold_b.anomaly_current`에서 **상태가 OPEN이고 최근 24시간 안**인 이상 중 아직 조사하지 않은 것. **오래된 것부터** 한 번에 최대 3건(비용 상한).
+- 조사를 마친 이상(REPORTED·INCOMPLETE·UNKNOWN)은 다시 조사하지 않는다. 오류로 끝난 이상은 2번까지 다시 한다. 조사를 마친 이상도 상태는 OPEN으로 남으므로 **쿼리에서 id로 빼서**(NOT IN) 이미 조사한 이상이 앞을 채워 새 이상이 밀리지 않게 한다.
+- **조사 DAG가 오래 멈췄다가 살아난 경우:** 24시간(조사 기간)을 넘긴 미조사 OPEN 이상에는 실행 기록 `EXPIRED`(이유 포함)를 한 줄 남겨 조용히 사라지지 않게 한다(최근 7일까지). `EXPIRED`는 조사한 것이 아니라서, `INVESTIGATE_LOOKBACK_HOURS`를 늘려 한 번 돌리면 다시 조사할 수 있다.
+- **같은 이상을 두 번 조사하지 않는 보장:** DAG는 `max_active_runs=1`이라 동시에 두 번 돌지 않고, 이미 조사한 이상은 위 규칙으로 빠진다. **한계:** 리포트를 쓴 뒤 실행 기록을 쓰기 전에 Pod가 죽으면 다음 실행이 같은 이상을 한 번 더 조사한다(리포트가 두 개 생길 수 있고 데이터는 상하지 않는다. 드문 경우로 보고 두었다).
 
 ## 실행
 

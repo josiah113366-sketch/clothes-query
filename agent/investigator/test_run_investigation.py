@@ -5,7 +5,7 @@
 import json
 from datetime import datetime
 
-from run_investigation import find_pending, main, run_one
+from run_investigation import find_pending, main, mark_expired, run_one
 
 ok = True
 
@@ -72,7 +72,29 @@ io = FakeIO([anomaly("a-1"), anomaly("a-2"), anomaly("a-3"), anomaly("a-4"), ano
 got = [a["anomaly_id"] for a in find_pending(io.query, NOW, limit=10)]
 check("이미 조사한 이상(a-2)은 빼고, 오류 1번(a-3)은 다시, 오류 3번(a-4)은 포기, 나머지는 포함", got, ["a-1", "a-3", "a-5"])
 check("한 번에 조사할 개수에 상한을 둠", [a["anomaly_id"] for a in find_pending(io.query, NOW, limit=2)], ["a-1", "a-3"])
-check("최근 이상(24시간)만, 상태 OPEN만 읽음 (해소 줄 제외)", ("status = 'OPEN'" in io.sql[0], "TIMESTAMP '2026-10-20 10:00:00'" in io.sql[0]), (True, True))
+q_an = [x for x in io.sql if "FROM gold_b.anomaly_current" in x][0]
+check("최근 이상(24시간)만, 상태 OPEN만 읽음 (해소 줄 제외)", ("status = 'OPEN'" in q_an, "TIMESTAMP '2026-10-20 10:00:00'" in q_an), (True, True))
+check("오래된 이상부터 읽고, 이미 조사한 이상(a-2)과 오류 한도를 넘긴 이상(a-4)은 쿼리에서 빼서 앞을 채우지 않게 함",
+      ("ORDER BY detected_at LIMIT" in q_an, "NOT IN ('a-2', 'a-4')" in q_an), (True, True))
+io2 = FakeIO([anomaly("b-1")], runs=[])
+find_pending(io2.query, NOW, limit=3)
+check("조사 기록이 없으면 NOT IN 조건을 붙이지 않음", "NOT IN" in [x for x in io2.sql if "anomaly_current" in x][0], False)
+io3 = FakeIO([anomaly("c-1", anomaly_id="c-1")], runs=[{"anomaly_id": "x' OR '1'='1", "status": "REPORTED"}])
+find_pending(io3.query, NOW, limit=3)
+check("이상 id에 따옴표가 있으면 쿼리에 넣지 않음(쿼리 주입 방지)", "OR '1'='1" in [x for x in io3.sql if "anomaly_current" in x][0], False)
+io4 = FakeIO([anomaly("e-1")], runs=[{"anomaly_id": "e-1", "status": "EXPIRED"}])
+check("EXPIRED로 표시된 이상은 조사한 것이 아니므로 조사 기간을 늘려 다시 돌리면 조사 대상이 됨", [a["anomaly_id"] for a in find_pending(io4.query, NOW, limit=3, lookback_hours=72)], ["e-1"])
+
+# --- 조사 기간을 넘긴 이상 표시(EXPIRED) ---
+old_io = FakeIO([anomaly("o-1", detected_at="2026-10-19 09:00:00"), anomaly("o-2", detected_at="2026-10-19 10:00:00")], runs=[{"anomaly_id": "o-2", "status": "ERROR"}])
+n = mark_expired(old_io.query, old_io.write, NOW, 24)
+tbl, rows = old_io.written[0]
+check("기간 넘긴 미조사 이상에 EXPIRED 줄을 씀(조사 기록이 이미 있는 o-2는 제외)", (n, tbl, [(r["anomaly_id"], r["status"]) for r in rows]), (1, "investigation_runs", [("o-1", "EXPIRED")]))
+check("EXPIRED 줄에 이유가 남음", "24시간" in rows[0]["error"], True)
+q_old = [x for x in old_io.sql if "anomaly_current" in x][0]
+check("EXPIRED 대상은 조사 기간(24시간) 밖 ~ 7일 안의 OPEN 이상", ("detected_at < TIMESTAMP '2026-10-20 10:00:00'" in q_old, "detected_at >= TIMESTAMP '2026-10-13 10:00:00'" in q_old), (True, True))
+none_io = FakeIO([], runs=[])
+check("표시할 이상이 없으면 아무것도 쓰지 않음", (mark_expired(none_io.query, none_io.write, NOW, 24), none_io.written), (0, []))
 
 # --- 정상 조사 ---
 io = FakeIO([anomaly("a-1")])
