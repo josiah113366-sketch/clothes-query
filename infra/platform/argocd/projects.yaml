@@ -1,0 +1,35 @@
+# Install only: no Application, sync policy, hook, or deletion finalizer.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  description: Default project disabled; choose an explicitly scoped project
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - group: '*'
+      kind: '*'
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: was
+  namespace: argocd
+spec:
+  description: WAS application resources only; infrastructure remains separately managed
+  sourceRepos:
+    - https://github.com/josiah113366-sketch/clothes-query.git
+  destinations:
+    - namespace: api
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: apps, kind: Deployment}
+    - {group: '', kind: Service}
+    - {group: '', kind: ConfigMap}
+    - {group: networking.k8s.io, kind: Ingress}
+  orphanedResources:
+    warn: false
