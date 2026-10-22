@@ -7,10 +7,17 @@ from pathlib import Path
 import yaml
 
 
-def pod_template(name, placement):
-    pool = "clothes-query-dev-compute" + ("-spark" if placement == "dedicated" else "")
+def validate_names(namespace="spark", name_prefix="spark", node_pool=None):
+    for value, limit in [(namespace, 63), (name_prefix, 45), (node_pool, 63)]:
+        if value is not None and (len(value) > limit or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", value)):
+            raise ValueError("Use a DNS label within the namespace/prefix/node-pool length limit")
+
+
+def pod_template(name, placement, *, name_prefix="spark", node_pool=None):
+    validate_names(name_prefix=name_prefix, node_pool=node_pool)
+    pool = node_pool or "clothes-query-dev-compute" + ("-spark" if placement == "dedicated" else "")
     spec = {
-        "serviceAccountName": "spark-" + name,
+        "serviceAccountName": name_prefix + "-" + name,
         "automountServiceAccountToken": name == "driver",
         "nodeSelector": {"karpenter.sh/nodepool": pool},
         "securityContext": {"runAsNonRoot": True, "seccompProfile": {"type": "RuntimeDefault"}},
@@ -21,17 +28,18 @@ def pod_template(name, placement):
     if placement == "dedicated":
         spec["tolerations"] = [{"key": "clothes-query/dedicated", "operator": "Equal", "value": "spark", "effect": "NoSchedule"}]
     if name == "driver":
-        spec["volumes"] = [{"name": "infra", "configMap": {"name": "spark-runtime"}}]
+        spec["volumes"] = [{"name": "infra", "configMap": {"name": name_prefix + "-runtime"}}]
         spec["containers"][0]["volumeMounts"] = [{"name": "infra", "mountPath": "/opt/spark/infra", "readOnly": True}]
-    return {"apiVersion": "v1", "kind": "Pod", "metadata": {"labels": {"app.kubernetes.io/part-of": "spark-runtime"}}, "spec": spec}
+    return {"apiVersion": "v1", "kind": "Pod", "metadata": {"labels": {"app.kubernetes.io/part-of": name_prefix + "-runtime"}}, "spec": spec}
 
 
-def properties(placement):
+def properties(placement, *, namespace="spark", name_prefix="spark"):
+    validate_names(namespace, name_prefix)
     # Small development profile; Python/Hadoop/S3 dependencies belong to the image owner.
     settings = {
-        "spark.kubernetes.namespace": "spark",
-        "spark.kubernetes.authenticate.driver.serviceAccountName": "spark-driver",
-        "spark.kubernetes.authenticate.executor.serviceAccountName": "spark-executor",
+        "spark.kubernetes.namespace": namespace,
+        "spark.kubernetes.authenticate.driver.serviceAccountName": name_prefix + "-driver",
+        "spark.kubernetes.authenticate.executor.serviceAccountName": name_prefix + "-executor",
         "spark.kubernetes.driver.podTemplateFile": "/opt/spark/infra/driver-pod-template.yaml",
         "spark.kubernetes.executor.podTemplateFile": "/opt/spark/infra/executor-pod-template.yaml",
         "spark.kubernetes.driver.podTemplateContainerName": "spark-main",
@@ -62,17 +70,18 @@ def properties(placement):
     return "\n".join(f"{k} {v}" for k, v in settings.items()) + "\n"
 
 
-def resources(placement="dedicated"):
+def resources(placement="dedicated", *, namespace="spark", name_prefix="spark", node_pool=None):
+    validate_names(namespace, name_prefix, node_pool)
     if placement not in {"dedicated", "shared-memory"}:
         raise ValueError("Unknown placement")
-    objects = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "spark"}}]
+    objects = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}]
     def obj(kind, name, **extra):
         return {"apiVersion": "rbac.authorization.k8s.io/v1" if kind in {"Role", "RoleBinding"} else "v1",
-                "kind": kind, "metadata": {"name": name, "namespace": "spark"}, **extra}
+                "kind": kind, "metadata": {"name": name, "namespace": namespace}, **extra}
     for name in ["submitter", "driver", "executor"]:
-        objects.append(obj("ServiceAccount", "spark-" + name, automountServiceAccountToken=name != "executor"))
+        objects.append(obj("ServiceAccount", name_prefix + "-" + name, automountServiceAccountToken=name != "executor"))
     for name in ["submitter", "driver"]:
-        objects.append(obj("Role", "spark-" + name, rules=[
+        objects.append(obj("Role", name_prefix + "-" + name, rules=[
             {"apiGroups": [""], "resources": ["pods", "services", "configmaps"], "verbs": ["create", "get", "list", "watch", "patch", "update", "delete"]},
             {"apiGroups": [""], "resources": ["pods/log", "events"], "verbs": ["get", "list", "watch"]},
         ]))
@@ -82,40 +91,42 @@ def resources(placement="dedicated"):
                 "apiGroups": ["networking.k8s.io"], "resources": ["networkpolicies"],
                 "verbs": ["create", "get", "patch", "delete"],
             })
-        objects.append(obj("RoleBinding", "spark-" + name,
-            subjects=[{"kind": "ServiceAccount", "name": "spark-" + name, "namespace": "spark"}],
-            roleRef={"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "spark-" + name}))
-    objects.append(obj("Role", "airflow-spark-launcher", rules=[
+        objects.append(obj("RoleBinding", name_prefix + "-" + name,
+            subjects=[{"kind": "ServiceAccount", "name": name_prefix + "-" + name, "namespace": namespace}],
+            roleRef={"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name_prefix + "-" + name}))
+    launcher = "airflow-" + name_prefix + "-launcher"
+    objects.append(obj("Role", launcher, rules=[
         {"apiGroups": [""], "resources": ["pods"], "verbs": ["create", "get", "list", "watch", "patch", "delete"]},
         {"apiGroups": [""], "resources": ["pods/log", "events"], "verbs": ["get", "list", "watch"]},
         {"apiGroups": ["batch"], "resources": ["jobs"], "verbs": ["create", "get", "list", "watch", "patch", "delete"]},
     ]))
-    objects.append(obj("RoleBinding", "airflow-spark-launcher",
+    objects.append(obj("RoleBinding", launcher,
         subjects=[{"kind": "ServiceAccount", "name": "airflow-scheduler", "namespace": "airflow"}],
-        roleRef={"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "airflow-spark-launcher"}))
-    objects.append(obj("ResourceQuota", "spark-budget", spec={"hard": {
+        roleRef={"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": launcher}))
+    objects.append(obj("ResourceQuota", name_prefix + "-budget", spec={"hard": {
         "requests.cpu": "3", "requests.memory": "6Gi", "limits.cpu": "4", "limits.memory": "6Gi", "pods": "4",
     }}))
-    objects.append(obj("ConfigMap", "spark-runtime", data={
-        "spark.properties": properties(placement),
-        **{name + "-pod-template.yaml": yaml.safe_dump(pod_template(name, placement), sort_keys=False) for name in ["driver", "executor"]},
+    objects.append(obj("ConfigMap", name_prefix + "-runtime", data={
+        "spark.properties": properties(placement, namespace=namespace, name_prefix=name_prefix),
+        **{name + "-pod-template.yaml": yaml.safe_dump(pod_template(name, placement, name_prefix=name_prefix, node_pool=node_pool), sort_keys=False) for name in ["driver", "executor"]},
     }))
     return objects
 
 
-def submission_job(image, app_file, name, placement, application_args=()):
+def submission_job(image, app_file, name, placement, application_args=(), *, namespace="spark", name_prefix="spark", node_pool=None):
+    validate_names(namespace, name_prefix, node_pool)
     if not re.fullmatch(r"[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}", image):
         raise ValueError("Supply an immutable application image with sha256 digest")
     if not re.fullmatch(r"local:///[-a-zA-Z0-9_./]+\.(py|jar)", app_file) or ".." in app_file:
         raise ValueError("Application must be a local:/// image path ending in .py or .jar")
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,38}[a-z0-9]", name):
         raise ValueError("Use a DNS-safe run name of 2 to 40 characters")
-    pool = "clothes-query-dev-compute" + ("-spark" if placement == "dedicated" else "")
+    pool = node_pool or "clothes-query-dev-compute" + ("-spark" if placement == "dedicated" else "")
     spec = {
-        "restartPolicy": "Never", "serviceAccountName": "spark-submitter",
+        "restartPolicy": "Never", "serviceAccountName": name_prefix + "-submitter",
         "nodeSelector": {"karpenter.sh/nodepool": pool},
         "securityContext": {"runAsNonRoot": True, "seccompProfile": {"type": "RuntimeDefault"}},
-        "volumes": [{"name": "infra", "configMap": {"name": "spark-runtime"}}],
+        "volumes": [{"name": "infra", "configMap": {"name": name_prefix + "-runtime"}}],
         "containers": [{"name": "submit", "image": image,
             "env": [{"name": "SPARK_DRIVER_MEMORY", "value": "512m"}],
             "command": ["/opt/spark/bin/spark-submit"],
@@ -130,13 +141,16 @@ def submission_job(image, app_file, name, placement, application_args=()):
     }
     if placement == "dedicated":
         spec["tolerations"] = [{"key": "clothes-query/dedicated", "operator": "Equal", "value": "spark", "effect": "NoSchedule"}]
-    return {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "namespace": "spark"},
+    return {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "namespace": namespace},
             "spec": {"backoffLimit": 0, "ttlSecondsAfterFinished": 600, "template": {"spec": spec}}}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--placement", choices=["dedicated", "shared-memory"], default="dedicated")
+    parser.add_argument("--namespace", default="spark")
+    parser.add_argument("--name-prefix", default="spark")
+    parser.add_argument("--node-pool")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--include-job", action="store_true")
     parser.add_argument("--image")
@@ -144,11 +158,12 @@ def main():
     parser.add_argument("--run-name", default="spark-trial")
     parser.add_argument("--application-arg", action="append", default=[])
     args = parser.parse_args()
-    objects = resources(args.placement)
+    options = dict(namespace=args.namespace, name_prefix=args.name_prefix, node_pool=args.node_pool)
+    objects = resources(args.placement, **options)
     if args.include_job:
         if not args.image or not args.application_file:
             parser.error("--include-job requires --image and --application-file")
-        objects.append(submission_job(args.image, args.application_file, args.run_name, args.placement, args.application_arg))
+        objects.append(submission_job(args.image, args.application_file, args.run_name, args.placement, args.application_arg, **options))
     elif args.image or args.application_file or args.application_arg:
         parser.error("Use --include-job explicitly to render a workload")
     args.output.parent.mkdir(parents=True, exist_ok=True)

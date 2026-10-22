@@ -2,6 +2,8 @@
 
 사용자 선택은 Spark **4.2.0**이다. 기본 후보는 Docker Official Image의 `spark:4.2.0-scala2.13-java21-python3-ubuntu`(amd64)다. Spark 소스 POM의 Hadoop 3.5.0에 맞춰 S3A를 준비하고, Kafka SQL 커넥터는 Spark 4.2.0/Scala 2.13, PostgreSQL JDBC는 42.7.14로 고정한다. 업무 코드·인증 정보·실제 데이터 경로는 포함하지 않는다.
 
+빌드한 기본 이미지에서 `python3 --version`으로 확인한 Python은 **3.10.12**다. 후속 EKS 합성 계산과 Executor 1→2→1 동적 할당도 통과했다. 실제 업무 패키지 호환성·저장소 접속·업무 데이터 성능까지 검증한 것은 아니다.
+
 ## 현재 검증 수준
 
 2026-10-22 사용자 승인에 따라 짧은 합성 시험을 진행했다. Spark·Maven 공식 이미지 digest를 확인해 Dockerfile에 고정했고 기본 이미지 빌드 및 네트워크를 끈 로컬 Spark 계산·S3A/AWS 자격증명 provider/PostgreSQL/Kafka 클래스 로딩에 성공했다. 앞선 HTTP 401은 registry 인증 scope의 경로 구분자 오류였으며 수정했다. 실제 S3/DB/Kafka 접속은 시험하지 않았다. 클라우드 시험 결과와 정리는 상위 작업 기록에 별도로 남긴다.

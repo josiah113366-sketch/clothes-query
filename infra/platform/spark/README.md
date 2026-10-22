@@ -5,10 +5,11 @@
 ## 2026-10-22 짧은 합성 시험 결과
 
 - 로컬 기본 이미지 빌드, Spark 4.2.0 합성 계산, S3A/AWS provider/PostgreSQL/Kafka 클래스 로딩 통과. 실제 업무 저장소에는 접속하거나 데이터를 쓰지 않았다.
-- 도쿄에서 실행마다 별도 임시 namespace·ECR·t3a.large 한 대분 NodePool을 생성했다. 기존 NodeClass를 재사용했으며 Terraform state나 기존 노드풀·업무 workload는 변경하지 않았다. 시험 2회 모두 노드 기동·이미지 pull·제출기 실행까지 확인했다.
-- 클라우드 제출은 Spark 4.2의 NetworkPolicy 생성에 필요한 submitter 권한 누락으로 실패했다. 두 번째 시험에서 403 원인을 확보했고, runtime.py에 spark namespace 한정 NetworkPolicy create/get/patch/delete 권한과 회귀 검사를 추가했다. **수정 후 클라우드 재시험은 하지 않았다.** Driver/Executor 계산·동적 할당·업무 처리량/메모리는 아직 실측 완료가 아니다.
-- 비용을 줄이기 위해 두 시험 모두 즉시 namespace와 노드풀을 삭제했고, 임시 EC2 2대의 terminated와 ECR 삭제를 확인했다. 기존 노드는 2대 그대로다. 10분 WhenEmpty 자동 축소를 기다려 검증한 것은 아니다.
-- 로컬 검사 12개와 기본 YAML 렌더 통과. 공유 Spark enabled=false 유지. 노드만 생겼다고 실행 검증 완료로 보지 않는다.
+- 도쿄에서 실행마다 별도 임시 namespace·ECR·t3a.large 한 대분 NodePool을 생성했다. 기존 NodeClass를 재사용했으며 Terraform state나 기존 노드풀·업무 workload는 변경하지 않았다.
+- 최초 2회는 Spark 4.2 NetworkPolicy 생성 권한 누락으로 제출이 실패했다. submitter Role에 namespace 한정 create/get/patch/delete를 추가한 뒤, 사용자 요청으로 후속 시험을 수행했다. 실제 API 권한 검사와 **합성 계산·Driver 실행·Executor 1→2→1개 증감**이 통과했다.
+- 성공한 합성 시험의 약 13초 간격 표본에서 제출기·Driver·Executor 합산 최대 CPU는 약 1.40 vCPU, 메모리는 약 1.64GiB였다. 짧은 합성 계산의 관측치이며 실제 최대값 또는 업무 처리에 필요한 자원을 보장하지 않는다. 업무 데이터 처리와 실제 저장소 접근은 아직 검증하지 않았다.
+- 시험마다 즉시 namespace와 노드풀을 삭제했다. 후속 시험도 임시 EC2 terminated·ECR 삭제·기존 노드 2대 유지·로컬 시험 컨테이너 종료를 확인했다. 10분 WhenEmpty 자동 축소를 기다려 검증한 것은 아니다.
+- 현재 로컬 검사 14개와 기본/이름 변경 YAML 렌더 통과. 공유 Spark enabled=false 유지.
 
 ## 현재 확인과 두 후보
 
@@ -66,8 +67,10 @@ RDS는 JDBC/TLS·읽기 계정·접속 Secret·동시 DB 연결 상한, Kafka는
 
 `runtime.py`는 YAML 파일을 만드는 도구이며 AWS CLI/kubectl을 호출하지 않는다. 기본 출력 12개 객체에는 namespace `spark`, 계정 3개, namespace RBAC, ResourceQuota, 런타임 ConfigMap이 있다. **Pod/Job/NodePool을 기본 출력하지 않는다.**
 
+`--namespace`, `--name-prefix`, `--node-pool`로 대상 이름을 지정할 수 있다. ServiceAccount·RoleBinding·ConfigMap·Pod template·제출 Job이 같은 입력을 사용하며 기본값은 유지한다. 이것은 `pipelines` 공유 여부나 계정 이름을 확정한 것이 아니다. Silver·Gold A의 [연결 명세와 적용 전 확인](handoff/README.md)을 참고한다.
+
 - `spark-submitter`: 이미지 안의 spark-submit으로 Driver를 제출한다.
-- Spark 4.2 NetworkPolicyFeatureStep이 Executor ingress 정책을 생성하므로 submitter에 해당 namespace의 NetworkPolicy create/get/patch/delete 권한이 필요하다. 클라우드 403 확인 후 코드에 추가했으며 아직 클라우드 재검증 전이다.
+- Spark 4.2 NetworkPolicyFeatureStep이 Executor ingress 정책을 생성하므로 submitter에 해당 namespace의 NetworkPolicy create/get/patch/delete 권한이 필요하다. 클라우드 403 확인 후 추가했고 후속 합성 실행까지 검증했다.
 - `spark-driver`: Executor Pod·Service·ConfigMap을 관리한다.
 - `spark-executor`: Kubernetes 관리 권한과 API token 자동 마운트가 없다.
 - `airflow-scheduler`: spark namespace에서 제출 Pod/Job 실행·관찰·정리 가능. 실제 DAG는 포함하지 않는다.

@@ -7,6 +7,39 @@ import yaml
 
 
 class RuntimeSafetyTests(unittest.TestCase):
+    def test_custom_namespace_prefix_and_pool_stay_consistent(self):
+        options = dict(namespace='example-jobs', name_prefix='example-work', node_pool='example-spark-pool')
+        objects = runtime.resources(**options)
+        self.assertEqual(objects[0]['metadata']['name'], options['namespace'])
+        self.assertTrue(all(x['metadata'].get('namespace', options['namespace']) == options['namespace'] for x in objects))
+        cm = next(x for x in objects if x['kind'] == 'ConfigMap')
+        self.assertEqual(cm['metadata']['name'], 'example-work-runtime')
+        conf = dict(line.split(maxsplit=1) for line in cm['data']['spark.properties'].splitlines())
+        self.assertEqual(conf['spark.kubernetes.namespace'], options['namespace'])
+        for role in ['driver', 'executor']:
+            self.assertEqual(conf[f'spark.kubernetes.authenticate.{role}.serviceAccountName'], 'example-work-' + role)
+            spec = yaml.safe_load(cm['data'][role + '-pod-template.yaml'])['spec']
+            self.assertEqual(spec['nodeSelector']['karpenter.sh/nodepool'], options['node_pool'])
+            self.assertEqual(spec['serviceAccountName'], 'example-work-' + role)
+        for binding in [x for x in objects if x['kind'] == 'RoleBinding']:
+            subject = binding['subjects'][0]
+            if subject['name'] == 'airflow-scheduler':
+                self.assertEqual(subject['namespace'], 'airflow')
+            else:
+                self.assertEqual(subject['namespace'], options['namespace'])
+                self.assertTrue(subject['name'].startswith('example-work-'))
+        job = runtime.submission_job('example.invalid/spark@sha256:' + 'a'*64, 'local:///opt/jobs/main.py', 'custom-trial', 'dedicated', **options)
+        spec = job['spec']['template']['spec']
+        self.assertEqual(job['metadata']['namespace'], options['namespace'])
+        self.assertEqual(spec['serviceAccountName'], 'example-work-submitter')
+        self.assertEqual(spec['volumes'][0]['configMap']['name'], cm['metadata']['name'])
+        self.assertEqual(spec['nodeSelector']['karpenter.sh/nodepool'], options['node_pool'])
+
+    def test_invalid_connection_names_fail_before_render(self):
+        for options in [dict(namespace='../other'), dict(name_prefix='x'*46), dict(node_pool='UPPER'), dict(namespace='')]:
+            with self.assertRaises(ValueError):
+                runtime.resources(**options)
+
     def test_default_contains_no_workload_or_billable_capacity(self):
         objects = runtime.resources()
         self.assertFalse({"Job", "Pod", "NodePool", "Application", "Deployment"} & {x["kind"] for x in objects})

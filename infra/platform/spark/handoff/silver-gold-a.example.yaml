@@ -1,0 +1,48 @@
+# Handoff contract only. Not loaded by runtime.py or the business application.
+# null = awaiting team confirmation; no permissions or workloads are created.
+confirmed_runtime:
+  submission: spark-submit
+  spark_version: 4.2.0
+  base_image_python_version: 3.10.12
+  node_instance_type: t3a.large
+  node_pool_capacity: {cpu: 2, memory_gib: 8}
+  driver_instances: 1
+  executor_instances: {initial: 1, minimum: 1, maximum: 2}
+
+pending:
+  namespace: null
+  namespace_shared_with_gold_b: null
+  service_account_prefix: null
+  python_version_requirement: null
+  business_image_digest: null
+  ecr_repository: null
+  code_and_rules_delivery: null
+  dag_repository_path: null
+  dag_delivery_method: null
+  inputs:
+    orders: {uri: null, format: null}
+    order_items: {uri: null, format: null}
+    payments: {uri: null, format: null}
+  input_date_partition_rule: null
+  outputs:
+    silver_uri: null
+    gold_a_uri: null
+    run_records_uri: null
+    temporary_uri: null
+  write_mode_and_rerun_rule: null
+  delete_prefixes: null
+  glue_access_required: null
+  glue_databases_and_operations: null
+  silver_entry_file: null
+  silver_arguments: null
+  gold_a_entry_file: null
+  gold_a_arguments: null
+  silver_completion_condition: null
+  test_date_range: null
+  test_data_size_estimate: null
+  expected_result: null
+
+colleague_proposal:
+  first_run: manual
+  max_active_workflows: 1
+  order: [silver, gold_a]

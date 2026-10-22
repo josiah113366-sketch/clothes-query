@@ -35,3 +35,4 @@ jobs:
           python -m unittest discover -s infra/platform/spark -p 'test_*.py' -v
           python infra/platform/spark/runtime.py --output .cache/spark-dedicated.yaml
           python infra/platform/spark/runtime.py --placement shared-memory --output .cache/spark-shared.yaml
+          python infra/platform/spark/runtime.py --namespace example-jobs --name-prefix example-work --node-pool example-spark-pool --output .cache/spark-custom.yaml
