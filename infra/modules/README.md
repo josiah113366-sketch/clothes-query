@@ -10,6 +10,8 @@
 - [ecr](ecr/README.md): WEB/WAS용 ECR 두 개, immutable tag·scan on push
 - [apps](apps/README.md): Namespace·Pod Identity·ConfigMap 및 선택적 WEB/WAS·HTTPS ALB Ingress
 - [workload-access](workload-access/README.md): 명시된 namespace/ServiceAccount·S3 prefix/action별 역할 및 Pod Identity association
+- [gold-b-access](gold-b-access/README.md): 판정/조사 역할·Athena workgroup·분리된 S3 조회 결과, 정답표 차단
+- [ecs-simulator](ecs-simulator/README.md): 시뮬레이터 ECR·ECS 클러스터·서비스·IAM·SG
 - [team-access](team-access/README.md): 동료 EKS 신원을 애플리케이션 namespace 배포 권한에 연결
 
 입출력은 각 모듈의 variables.tf/outputs.tf 및 README를 참고한다. terraform-docs가 로컬에 없어 표를 수동 작성했다.

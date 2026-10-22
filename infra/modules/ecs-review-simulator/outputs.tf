@@ -19,6 +19,11 @@ output "secret_name" {
   value = aws_secretsmanager_secret.bedrock_api_key.name
 }
 
+output "orders_db_secret_name" {
+  description = "RDS 접속 주소 secret 이름 (값은 deploy/secret.py --orders-db)"
+  value       = aws_secretsmanager_secret.orders_database_url.name
+}
+
 output "schedule_name" {
   value = aws_scheduler_schedule.daily.name
 }

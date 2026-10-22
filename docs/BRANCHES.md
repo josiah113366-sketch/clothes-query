@@ -91,6 +91,8 @@ gitGraph
 | `sim/controller` | `docs/tasks/sim-controller.md` | 머지됨 | |
 | `sim/clickstream` | `docs/tasks/sim-clickstream.md` | 머지됨 | |
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
+| `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 머지됨 | 2026-10-22 |
+| `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -98,20 +100,30 @@ gitGraph
 | `docs/branch-rules` | - | 머지됨 (PR #5) | 2026-10-16 |
 | `docs/api-design` | - (설계 문서 `docs/design/api.md`) | 진행 중 | |
 | `docs/data-contracts` | [docs-data-contracts.md](tasks/docs-data-contracts.md) | 검토 대기 | |
-| `docs/agent-anomaly-design` | `design/agent/anomaly-answer-key.md` (PR #28에 포함) | 검토 대기 | |
-| `docs/agent-branches` | - | 검토 대기 | |
+| `docs/agent-anomaly-design` | [anomaly-answer-key.md](design/agent/anomaly-answer-key.md) (설계 문서) | 머지됨 (PR #28) | 2026-10-21 |
+| `docs/agent-branches` | - | 머지됨 (PR #43) | 2026-10-21 |
+| `docs/agent-ledger` | - | 진행 중 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | 실제 적용 완료·검토 대기 | |
+| `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
+| `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
+| `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
+| `infra/agent-development-access` | [infra-agent-development-access.md](tasks/infra-agent-development-access.md) | 실제 적용·PR #49 검토 대기 | |
+| `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
+| `infra/gold-b-access-prep` | [infra-gold-b-access-prep.md](tasks/infra-gold-b-access-prep.md) | 조회 기반 적용·실제 Pod 접근 검증 완료 | |
+| `infra/agent-data-write` | [infra-agent-data-write.md](tasks/infra-agent-data-write.md) | 실제 적용·PR #50 검토 대기 | |
 | `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | 머지됨 (PR #11) | 2026-10-16 |
 | `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | 머지됨 (infra/ready에 통합) | 2026-10-16 |
 | `infra/deploy-result` | [infra-deploy-result.md](tasks/infra-deploy-result.md) | 머지됨 | 2026-10-16 |
 | `infra/pipeline-smoke` | [infra-pipeline-smoke.md](tasks/infra-pipeline-smoke.md) | 검토 대기 | |
 | `infra/generator-was-access` | [infra-generator-was-access.md](tasks/infra-generator-was-access.md) | 실제 연결 완료·검토 대기 | |
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
+| `infra/review-order` | [infra-review-order.md](tasks/infra-review-order.md) (리뷰 시뮬레이터 RDS 주문 읽기) | 검토 대기 | |
 | `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
+| `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
+| `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
 
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -122,10 +134,14 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `agent/detection-draft` | [agent-detection-draft.md](tasks/agent-detection-draft.md) | 머지됨 (PR #14) | 2026-10-21 |
-| `agent/tools-draft` | `agent-tools-draft.md` (PR #30에 포함, 머지되면 링크 가능) | 검토 대기 | |
-| `agent/detect-skeleton` | `agent-detect-skeleton.md` (PR #29에 포함) | 검토 대기 | |
+| `agent/tools-draft` | [agent-tools-draft.md](tasks/agent-tools-draft.md) | 머지됨 (PR #30) | 2026-10-21 |
+| `agent/detect-skeleton` | [agent-detect-skeleton.md](tasks/agent-detect-skeleton.md) | 머지됨 (PR #29) | 2026-10-21 |
+| `agent/detect-athena` | [agent-detect-athena.md](tasks/agent-detect-athena.md) | 머지됨 (PR #46) | 2026-10-21 |
+| `agent/skeleton` | [agent-skeleton.md](tasks/agent-skeleton.md) | 머지됨 (PR #42) | 2026-10-21 |
+| `agent/review-fixes` | [agent-review-fixes.md](tasks/agent-review-fixes.md) | 머지됨 (PR #48) | 2026-10-21 |
+| `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
 | `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
-| `agent/skeleton` | `agent-skeleton.md` (`agent/tools-draft` 위에 쌓음, #30 머지 뒤 PR 대상을 `main`으로) | 검토 대기 | |
+| `agent/ddl` | `agent-ddl.md` (이 대장 PR 다음에 PR) | 진행 중 | |
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -140,3 +156,12 @@ gitGraph
 |---|---|---|---|
 | `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
 | `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 검토 대기 | |
+
+
+| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 검토 대기 | |
+| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 통합 검증 완료·원격 반영 대기 (#35) | |
+
+### gold-b
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 진행 중 | |

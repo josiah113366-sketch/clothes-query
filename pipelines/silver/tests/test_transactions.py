@@ -190,6 +190,50 @@ def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
         assert summary(result, "payments")["status"] == "INCOMPLETE"
 
 
+def test_kafka_trace_observations_and_conflict_references(tmp_path):
+    from pipelines.silver.common import kafka_reference, load_jsonl
+
+    trace = {"kafka_topic": "payments", "kafka_partition": 0, "kafka_offset": 10,
+             "kafka_timestamp": "2026-10-13T15:02:01+00:00",
+             "kafka_timestamp_type": "CreateTime"}
+    bad = kafka_reference({**trace, "kafka_timestamp": "2026-10-21T10:00:00",
+                           "kafka_timestamp_type": "unknown", "text": "must not copy"})
+    assert bad["status"] == "INVALID"
+    assert bad["errors"] == ["kafka_timestamp", "kafka_timestamp_type"]
+    assert "text" not in bad and "timestamp" not in bad
+    source = tmp_path / "input"
+    source.mkdir()
+    paths = [source / (name + ".jsonl") for name in ("orders", "items", "payments")]
+    rows = [payment(**trace), payment(**trace),
+            payment(**{**trace, "kafka_offset": 12}, pg="PG_B"),
+            payment("other", kafka_offset=True), payment("untraced")]
+    paths[0].write_text(json.dumps(order()) + "\n", encoding="utf-8")
+    paths[1].write_text("", encoding="utf-8")
+    paths[2].write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    result = run(*(str(path) for path in paths), str(tmp_path / "output"))
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    obs = manifest["kafka_observations"]["payments"]
+    assert obs["coverage_status"] == "UNVERIFIED"
+    assert obs["row_counts"] == {"VALID": 3, "INVALID": 1, "MISSING": 1}
+    assert obs["partitions"] == [{"topic": "payments", "partition": 0,
+                                  "min_offset": 10, "max_offset": 12,
+                                  "row_count": 3, "unique_offset_count": 2}]
+    candidates = [json.loads(line) for line in Path(result["outputs"]["impact_candidates"])
+                  .read_text(encoding="utf-8").splitlines()]
+    assert [r["source"]["kafka"]["offset"] for r in candidates
+            if r["source_dataset"] == "payments" and r["source"]["kafka"]["status"] == "VALID"] == [10, 10, 12]
+    errors = [json.loads(line) for line in Path(result["outputs"]["quarantined_records"])
+              .read_text(encoding="utf-8").splitlines()]
+    conflicts = [r for r in errors if r["record_key"] == payment()["payment_id"]]
+    assert {r["kafka_reference"]["offset"] for r in conflicts} == {10, 12}
+    assert all(r["source_file"] == str(paths[2].resolve()) for r in conflicts)
+    # 추적 정보 차이는 업무 중복·내용 충돌 판정에 섞지 않는다.
+    loaded, _ = load_jsonl(str(paths[2]), allow_cdc=True)
+    identical = build_silver([order()], [], [loaded[0], {**loaded[1], "_input_source": loaded[2]["_input_source"]}])
+    assert len(identical["payment_attempts"]) == 1
+    assert not identical["quarantined_records"]
+
+
 def test_yaml_contract_validates_uuid_enums_reasons_and_times():
     rules = FormatRules()
     cases = [
@@ -464,6 +508,8 @@ def test_local_files_reexecution_and_failed_publish_preserve_previous_result(tmp
     second = run(*args)
     assert first["output_counts"] == second["output_counts"]
     for name in first["outputs"]:
+        if name == "order_amount_checks":
+            continue  # 실행 ID·검사 시각은 재실행마다 바뀌며 업무 판정값은 별도 검증한다.
         assert Path(first["outputs"][name]).read_bytes() == Path(second["outputs"][name]).read_bytes()
     manifest = Path(second["manifest_path"])
     previous = manifest.read_bytes()
@@ -494,3 +540,70 @@ def test_document_input_does_not_silently_interpret_cdc_or_overwrite_source(tmp_
     assert not output.exists()
     with pytest.raises(ValueError, match="겹치지"):
         run(str(source), str(source), str(source), str(tmp_path))
+
+
+def test_r6_output_fixed_evidence_recheck_and_failed_manifest(tmp_path, monkeypatch):
+    from datetime import datetime
+
+    source = tmp_path / "input"
+    source.mkdir()
+    locations = [source / (name + ".jsonl") for name in ("orders", "items", "payments")]
+    item = {"order_item_id": fixture_id("r6-item"), "order_id": order()["order_id"],
+            "article_id": "0001", "quantity": 2, "unit_price": 5900}
+    output = tmp_path / "output"
+
+    def execute(total=12800, complete=True, items=None):
+        values = ([order(total_amount=total)], [item] if items is None else items,
+                  [payment(amount=total)])
+        for path, rows in zip(locations, values, strict=True):
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        return run(*(str(path) for path in locations), str(output), input_complete=complete)
+
+    def check_row(manifest):
+        rows = [json.loads(line) for line in Path(manifest["outputs"]["order_amount_checks"])
+                .read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["run_id"] == manifest["run_id"]
+        assert row["checked_at"] == manifest["checked_at"]
+        assert datetime.fromisoformat(row["checked_at"]).utcoffset().total_seconds() == 0
+        assert row["check_name"] == "order_item_total_match"
+        assert row["check_version"] == "items-sum-v1"
+        assert row["source_manifest"] == manifest["fixed_manifest_path"]
+        assert json.loads(Path(row["source_manifest"]).read_text(encoding="utf-8")) == manifest
+        return row
+
+    first = execute()
+    fixed = Path(first["fixed_manifest_path"])
+    evidence = fixed.read_bytes()
+    first_row = check_row(first)
+    assert (first_row["status"], first_row["amount_difference"]) == ("MISMATCH", -1000)
+    second = execute()
+    second_row = check_row(second)
+    assert second_row["run_id"] != first_row["run_id"]
+    assert second_row["status"] == "MISMATCH"
+    third = execute(11800)
+    assert (check_row(third)["status"], check_row(third)["amount_difference"]) == ("PASS", 0)
+    assert fixed.read_bytes() == evidence  # 최신 참조가 바뀌어도 과거 근거는 그대로다.
+    for manifest, expected in ((execute(complete=False), "UNVERIFIED"),
+                               (execute(items=[]), "PENDING_REFERENCE"),
+                               (execute(items=[{**item, "unit_price": 0}]), "ITEM_ERROR")):
+        row = check_row(manifest)
+        assert row["status"] == expected
+        assert row["item_total_amount"] is None and row["amount_difference"] is None
+
+    current = Path(first["manifest_path"])
+    before = current.read_bytes()
+    runs_before = set(current.parent.joinpath("runs").iterdir())
+    original = Path.write_text
+
+    def fail_fixed(path, *args, **kwargs):
+        if path.name == "manifest.json":
+            raise OSError("fixed manifest write failed")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_fixed)
+    with pytest.raises(OSError, match="fixed manifest"):
+        execute()
+    assert current.read_bytes() == before
+    assert set(current.parent.joinpath("runs").iterdir()) == runs_before
