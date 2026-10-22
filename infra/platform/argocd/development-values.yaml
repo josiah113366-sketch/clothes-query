@@ -1,0 +1,117 @@
+# Existing WAS node, separate namespace. No node or load balancer is created.
+fullnameOverride: argocd
+namespaceOverride: argocd
+createAggregateRoles: false
+createClusterRoles: true
+crds:
+  install: true
+  keep: true
+global:
+  image:
+    repository: quay.io/argoproj/argocd
+    tag: v3.5.6@sha256:8e5cc5bb008df8a09dba439462e58c94c55b7735888d3ebde0c25fc05e4e5335
+  nodeSelector:
+    karpenter.sh/nodepool: clothes-query-dev-api
+  tolerations:
+    - key: clothes-query/dedicated
+      operator: Equal
+      value: api
+      effect: NoSchedule
+  deploymentStrategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+configs:
+  cm:
+    admin.enabled: "true"
+    users.anonymous.enabled: "false"
+    exec.enabled: "false"
+    installationID: clothes-query-dev-argocd
+    resource.respectRBAC: normal
+    timeout.reconciliation: 180s
+  params:
+    server.insecure: "false"
+    controller.status.processors: "2"
+    controller.operation.processors: "1"
+    reposerver.parallelism.limit: "1"
+  rbac:
+    policy.default: role:readonly
+  repositories:
+    clothes-query:
+      name: clothes-query
+      type: git
+      url: https://github.com/josiah113366-sketch/clothes-query.git
+      project: was
+  # Local ServiceAccounts, not AWS keys or a long-lived Kubernetes bearer token.
+  clusterCredentials:
+    in-cluster:
+      server: https://kubernetes.default.svc
+      namespaces: api
+      clusterResources: false
+      config: {}
+controller:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  # Namespaced app permissions are supplied separately, only in api.
+  clusterRoleRules:
+    enabled: true
+    rules:
+      - apiGroups: [""]
+        resources: [namespaces]
+        verbs: [get, list, watch]
+      - apiGroups: [apiextensions.k8s.io]
+        resources: [customresourcedefinitions]
+        verbs: [get, list, watch]
+server:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+  clusterRoleRules:
+    enabled: true
+    rules:
+      - apiGroups: [""]
+        resources: [namespaces]
+        verbs: [get, list, watch]
+repoServer:
+  replicas: 1
+  automountServiceAccountToken: false
+  serviceAccount:
+    automountServiceAccountToken: false
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+  copyutil:
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 64Mi}
+redis:
+  enabled: true
+  existingSecret: argocd-redis
+  automountServiceAccountToken: false
+  image:
+    repository: docker.io/library/redis
+    tag: 8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+  extraArgs: [--maxmemory, 64mb, --maxmemory-policy, allkeys-lru]
+redisSecretInit:
+  enabled: false
+redis-ha:
+  enabled: false
+dex:
+  enabled: false
+applicationSet:
+  # Upstream chart always creates this Deployment; 0 stops its Pods.
+  replicas: 0
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+notifications:
+  enabled: false
