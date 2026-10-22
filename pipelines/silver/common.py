@@ -110,6 +110,54 @@ def collect_unique(rows: list[dict], name: str, key_field: str, normalize,
     return clean, issues, summary
 
 
+def kafka_reference(raw: dict) -> dict:
+    """제안된 추적 필드만 검사한다. 누락을 추정하지 않고 업무 품질과 분리한다."""
+    fields = ("kafka_topic", "kafka_partition", "kafka_offset",
+              "kafka_timestamp", "kafka_timestamp_type")
+    if not any(field in raw for field in fields):
+        return {"status": "MISSING", "errors": []}
+    values, errors = {}, []
+    for field in fields:
+        value = raw.get(field)
+        valid = False
+        if field == "kafka_topic":
+            valid = isinstance(value, str) and bool(value.strip())
+        elif field in {"kafka_partition", "kafka_offset"}:
+            valid = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        elif field == "kafka_timestamp_type":
+            valid = value in ("CreateTime", "LogAppendTime")
+        elif isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+                valid = parsed.tzinfo is not None and parsed.utcoffset() is not None
+            except ValueError:
+                pass
+        if valid:
+            values[field.removeprefix("kafka_")] = value
+        else:
+            errors.append(field)
+    return {"status": "VALID" if not errors else "INVALID", **values, "errors": errors}
+
+
+def kafka_observations(rows: list[dict]) -> dict:
+    """관측 범위이며 연속성·입수 완료·A/B 일치의 증명은 아니다."""
+    counts = {"VALID": 0, "INVALID": 0, "MISSING": 0}
+    partitions = {}
+    for row in rows:
+        ref = row.get("_input_source", {}).get("kafka", {"status": "MISSING"})
+        counts[ref["status"]] += 1
+        if not all(field in ref for field in ("topic", "partition", "offset")):
+            continue
+        offsets = partitions.setdefault((ref["topic"], ref["partition"]), [])
+        offsets.append(ref["offset"])
+    return {"contract": "kafka-trace.draft.v1", "coverage_status": "UNVERIFIED",
+            "row_counts": counts, "partitions": [
+                {"topic": topic, "partition": partition, "min_offset": min(offsets),
+                 "max_offset": max(offsets), "row_count": len(offsets),
+                 "unique_offset_count": len(set(offsets))}
+                for (topic, partition), offsets in sorted(partitions.items())]}
+
+
 def load_jsonl(location: str, allow_cdc: bool = False) -> tuple[list[dict], list[str]]:
     """지정한 파일/폴더를 읽고 원본 파일 위치와 줄 번호를 보존한다."""
     root = Path(location).resolve()
@@ -136,7 +184,10 @@ def load_jsonl(location: str, allow_cdc: bool = False) -> tuple[list[dict], list
                     "__op" in raw and not allow_cdc
                 ):
                     raise ValueError("CDC 입력은 업무 행으로 변환한 뒤 전달해야 합니다")
-                rows.append({**raw, "_input_source": {"file": str(path), "line": number},
+                source = {"file": str(path), "line": number}
+                if allow_cdc:
+                    source["kafka"] = kafka_reference(raw)
+                rows.append({**raw, "_input_source": source,
                              "_input_error": error})
     return rows, [str(path) for path in files]
 
@@ -187,6 +238,9 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
             **({"checked_at": checked_at, "fixed_manifest_path": str(fixed_manifest)}
                if dataset == "transactions" else {}),
             "input_files": sources,
+            **({"kafka_observations": {name: kafka_observations(rows)
+                                       for name, rows in loaded.items()}}
+               if dataset == "transactions" else {}),
             "input_counts": {name: len(rows) for name, rows in loaded.items()},
             "output_counts": {name: len(rows) for name, rows in result.items()},
             "outputs": paths,

@@ -1,0 +1,4 @@
+# 로그인(OIDC) 설정 비밀값. 저장소 루트 .gitignore 의 같은 항목은 루트 기준 경로라 이 폴더에는 적용되지 않는다.
+.streamlit/secrets.toml
+.venv/
+.local/

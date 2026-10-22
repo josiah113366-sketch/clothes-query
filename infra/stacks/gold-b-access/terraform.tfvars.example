@@ -1,0 +1,3 @@
+# Supply real account/state bucket privately in deployment.local.tfvars.json.
+expected_account_id = "REPLACE_WITH_APPROVED_ACCOUNT_ID"
+state_bucket        = "REPLACE_WITH_EXISTING_STATE_BUCKET"

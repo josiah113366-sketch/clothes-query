@@ -35,6 +35,16 @@ silver/transactions/
 R6는 MISMATCH만 금액 불일치로 본다. UNVERIFIED는 입력 준비 미확인, PENDING_REFERENCE는 주문상품 미도착, ITEM_ERROR는 상품 오류로 검사 보류다. 같은 실행 재조회는 중복 소비하지 않고 후속 실행의 같은 주문 MISMATCH는 기존 이상 지속, 실제 재검사 PASS는 해소 여부 재판정에 사용한다. 주문 자체가 오류로 제외되면 이 출력에 없을 수 있으며 행 부재·검사 대기를 해소로 간주하지 않는다.
 
 실행별 파일은 보존하지만 로컬 실행의 자동 알림·이상 지속/해소 판정은 하지 않는다. 최신 실행만 읽으면 중간 실행을 건너뛸 수 있어 소비 방식은 주현과 합의해야 한다. S3/Parquet/Athena·권한·정기 실행·판정 잡 연결은 이번 구현 범위가 아니다.
+## 결제 대조를 위한 원본 추적 (로컬 초안)
+
+공통 설계·담당자별 PR 확인표는 [공통 계약의 대조 잡 초안](../../docs/contracts/README.md#결제-경로-대조-잡-초안-2026-10-21)에 모은다. 실제 대조 잡과 Kafka Sink 변경은 아직 없다.
+
+- 거래 JSONL 입력에 제안 필드 kafka_topic/kafka_partition/kafka_offset/kafka_timestamp/kafka_timestamp_type이 있으면 검사한 값만 원본 참조에 보존한다. timestamp는 시간대 포함 ISO 문자열, type은 CreateTime/LogAppendTime이다. 실제 Bronze 필드명 합의는 필요하다.
+- Gold A inputs → Silver current.json → outputs.impact_candidates의 source → Bronze 파일·줄·kafka 순서로 찾아간다. 격리 행에는 kafka_reference를 남긴다. 정상 업무 결과의 지표·그레인에 Kafka 컬럼을 넣지 않는다.
+- 거래 manifest의 kafka_observations는 입력별 메타데이터 VALID/INVALID/MISSING 건수와 토픽·파티션별 관측 min/max offset·행 수·고유 offset 수다. 정상·격리 전 입력을 기록하므로 오류 후보도 추적한다.
+- coverage_status=UNVERIFIED는 항상 유지한다. 관측 범위는 원천의 전체 범위·연속성·양쪽 처리 완료를 증명하지 않는다. Kafka 시각을 무조건 브로커 도착 시각으로 간주하지 않는다.
+- 누락·잘못된 추적 필드는 해당 상태와 필드명만 기록하고 업무 품질 판정과 분리한다. 기존 메타데이터 없는 입력은 동작하지만 정확한 Kafka 대조는 확인 불가다. source_ts_ms 또는 파일명으로 Kafka 위치·시각을 채우지 않는다.
+- 검사 버전 transactions.v6. 실제 Gold B 스냅샷·범위 증거·비교 계약이 없으므로 현재 실행은 MATCH/MISMATCH를 판정하지 않는다.
 
 ## 결정: 회원 현재 상태 (`members_current`)
 

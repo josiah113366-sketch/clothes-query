@@ -11,6 +11,7 @@ from guard import GuardError, check_window, validate_sql
 PGS = ("PG_A", "PG_B")
 TOPICS = ("payments", "orders", "order-items", "members-events", "clickstream")   # 실제 배포된 업무 토픽 5개 (heartbeat 토픽, 아직 없는 reviews.raw는 뺀다)
 STALE_SECONDS = 120   # Gold B 문서의 고장 기준: 2분 넘게 안 쌓이면 멈춘 것
+EXPECTED_PARTITIONS = 3   # 업무 토픽마다 파티션 3개 (Kafka 설정 기준). 바뀌면 같이 고친다
 
 
 def _ts(dt: datetime, dialect: str) -> str:
@@ -119,14 +120,19 @@ LIMIT 200""")]
 
 
 def malformed_summary(args, dialect):
-    """토픽·사유별 깨진 메시지 수 (현재 규칙 버전만 센다). 시나리오 3."""
+    """토픽·사유별 깨진 메시지 수 (현재 규칙 버전만 센다). 시나리오 3.
+
+    사유(reason)는 오류 단위 원장(malformed_events)에 있다. 메시지 단위 뷰(malformed_messages)에는 사유가 배열(errors) 안에만 있다.
+    한 메시지에 오류가 여러 개일 수 있어서 사유별 수는 메시지 위치(파티션, offset)가 다른 것만 센다.
+    """
     a, b = check_window(args["window_start"], args["window_end"])
     topic = _pick(args.get("topic"), TOPICS, "topic")
     version = _word(args.get("rule_version"), "rule_version")
     cond = _range("kafka_timestamp", a, b, dialect) + f" AND rule_version = '{version}'" + (f" AND topic = '{topic}'" if topic else "")
-    return [("malformed_summary", f"""SELECT topic, reason, COUNT(*) AS broken_messages,
+    return [("malformed_summary", f"""SELECT topic, reason,
+       COUNT(DISTINCT CAST(kafka_partition AS VARCHAR) || '-' || CAST(kafka_offset AS VARCHAR)) AS broken_messages,
        MIN(kafka_timestamp) AS first_seen
-FROM gold_b.malformed_messages
+FROM gold_b.malformed_events
 WHERE {cond}
 GROUP BY topic, reason
 ORDER BY broken_messages DESC
@@ -169,6 +175,11 @@ LIMIT 1"""),
 FROM gold_b.payment_events
 WHERE {_range("completed_at", a, b, dialect)}
 LIMIT 1"""),
+        ("partitions_seen", f"""SELECT topic, kafka_partition, COUNT(*) AS rows_seen
+FROM gold_b.topic_messages
+WHERE {kt}
+GROUP BY topic, kafka_partition
+LIMIT 200"""),
         ("last_loaded", "SELECT MAX(loaded_at) AS last_loaded_at FROM gold_b.topic_messages LIMIT 1"),
         ("last_collected", "SELECT MAX(collected_at) AS last_collected_at FROM gold_b.bronze_lag_snapshots LIMIT 1"),
     ]
@@ -221,19 +232,27 @@ def _judge_reliability(results, now):
     last_collected = (results["last_collected"] or [{}])[0].get("last_collected_at")
 
     def status(value):
-        if not value:
-            return {"last_seen": None, "status": "UNKNOWN"}
-        seen = datetime.fromisoformat(str(value).replace("T", " "))
+        if not value:     # 표가 비어 있어서 마지막 시각을 알 수 없다: 정상(OK)이 아니라 NO_DATA
+            return {"last_seen": None, "status": "NO_DATA"}
+        seen = datetime.fromisoformat(str(value).replace("T", " ")[:19])
         gap = (now - seen).total_seconds()
         return {"last_seen": str(value), "seconds_ago": int(gap), "status": "STOPPED" if gap > STALE_SECONDS else "OK"}
 
+    seen_parts = {(r["topic"], int(r["kafka_partition"])) for r in results["partitions_seen"]}
+    expected = {(t, p) for t in TOPICS for p in range(EXPECTED_PARTITIONS)}
+    total_rows = sum(int(r["rows_seen"]) for r in results["partitions_seen"])
     return {
         "missing_messages": results["gaps"],
+        "completeness": "NO_DATA" if total_rows == 0 else "PARTIAL",
+        "completeness_note": "누락 검사는 관측된 가장 작은 offset과 가장 큰 offset 사이의 빈 곳만 찾는다. 구간 맨 앞·맨 뒤 메시지나 파티션 전체가 빠진 것은 찾지 못하므로, missing_messages가 비어 있어도 전체가 다 있다는 뜻이 아니다.",
+        "messages_in_window": total_rows,
+        "partitions_without_messages": [{"topic": t, "partition": p} for t, p in sorted(expected - seen_parts)],
+        "partitions_note": "메시지가 적은 시간대에는 파티션이 비어 있는 것이 정상일 수 있다. 다른 지표와 같이 본다.",
         "duplicate_messages": (results["duplicate_messages"] or [{}])[0].get("duplicate_rows", 0),
         "payment_duplicate_rows_info": (results["duplicate_payments"] or [{}])[0].get("duplicate_rows", 0),
         "ledger_writer": status(last_loaded),
         "lag_collector": status(last_collected),
-        "note": "적재 문제는 missing_messages와 duplicate_messages(topic_messages 기준)로만 판단한다. payment_duplicate_rows_info는 참고값이며 같은 payment_id 중복은 정상이다(뷰가 걸러 줌). STOPPED는 데이터 이상이 아니라 관제(적재 잡·수집기) 고장일 수 있어 원인 결론과 섞지 않는다.",
+        "note": "적재 문제는 missing_messages와 duplicate_messages(topic_messages 기준)로만 판단한다. payment_duplicate_rows_info는 참고값이며 같은 payment_id 중복은 정상이다(뷰가 걸러 줌). STOPPED는 데이터 이상이 아니라 관제(적재 잡·수집기) 고장일 수 있어 원인 결론과 섞지 않는다. NO_DATA는 표가 비어 있어 판단할 수 없다는 뜻이며 정상이 아니다.",
     }
 
 

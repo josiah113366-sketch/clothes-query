@@ -1,4 +1,4 @@
-상태: 진행 중 · 브랜치: `pipelines/r6-output`
+상태: 완료 · 브랜치: `pipelines/r6-output`
 
 # R6용 Silver 주문 금액 검사 결과 제공
 
@@ -27,3 +27,4 @@ main 기반 Silver 회귀 테스트, 변경 실행 코드 Ruff, diff 공백 검�
 
 - 최신 origin/main 기반 Silver 테스트 29개 통과(3.03초), common.py/transactions.py Ruff·git diff --check 통과.
 - main 대비 6개 파일이며 Gold A·Kafka 메타데이터·공통 YAML/단가 정책 변경은 없다. 불일치 지속/해소의 실제 알림 판정이 아니라 제공 출력과 고정 근거·저장 실패 보호를 검증했다.
+- 2026-10-22 로컬 main 통합 검증: #35의 Kafka 추적과 R6 고정 실행 기록을 함께 보존해 충돌을 해결했다. Silver 30개 통과(2.55초), Ruff 및 diff 공백 검사 통과. 원격 push·머지는 별도 승인 대기다.

@@ -1,5 +1,7 @@
 # eks module
 
+사용자 요청으로 audit 수집 중단을 취소하고 EKS 관리 로그 5종(api/audit/authenticator/controllerManager/scheduler)을 다시 수집한다. 로그 그룹은 기존 30일 보관을 유지한다. 중단 기간의 감사 로그가 소급 복구되지는 않는다. [복구 기록](../../../docs/tasks/infra-eks-audit-restore.md), [이전 중단 기록](../../../docs/tasks/infra-eks-audit-cost.md).
+
 전용 관리자 역할을 생성하고 `admin_trusted_principal_arns`의 사용자/역할만 assume하도록 준비한다. 선택 `admin_role_arns`는 별도 기존 관리자 역할용이다. `admin_role_arn` 출력은 compute/apps의 Kubernetes 인증에 사용한다. 현재 사용자·현재 PC부터 시작하며 팀원 추가 절차는 [접속 준비](../../EKS_ACCESS.md)를 따른다.
 
 EKS Auto Mode와 cluster/node IAM 및 명시적 관리자 access entry를 관리한다.

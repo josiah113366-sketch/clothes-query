@@ -1,5 +1,10 @@
 # infra
 
+2026-10-21 입력 공유 결정: 공통 배포값은 추적되는 `deployment.auto.tfvars.json`과 `deployment.backend.hcl`로 관리하고 개인 IP·이메일만 로컬 override에 둔다. Terraform은 공유 auto 파일을 자동 로드한다. [파일 구분·실행 방법·보류 스택](DEPLOYMENT_CONFIG.md)을 먼저 따른다. 아래의 비공개 계정 입력 설명은 이전 기록이다.
+2026-10-21 개발 Airflow 배포 완료: [Airflow 실행 기반](platform/airflow/README.md)은 기존 RDS 전용 DB·Simple Auth Manager·별도 업무 Pod 실행 신원과 연결했다. API 권한·S3 task 로그·5분 합성 cron 검증을 통과했고 테스트 DAG는 다시 pause했다. 기존 Kafka/API 노드 2개를 유지하며 새 노드·ALB·PVC·RDS 서버를 추가하지 않았다. 실제 판정/조사/재처리 DAG·업무 이미지·Athena 업무 쿼리·Spark 연결은 후속이다. [검증 기록](../docs/tasks/infra-airflow-runtime.md).
+
+2026-10-21 Gold B 접근: 기존 network/eks/storage 이후 [gold-b-access](stacks/gold-b-access/README.md)에서 판정·조사 역할과 Athena workgroup을 분리해 조회용 자원 8개를 적용했다. 조회 결과는 기존 버킷의 `athena-results/detection/` 및 `athena-results/investigation/`이다. 이름·경로·쿼리당 스캔 상한은 변수다. agent namespace/ServiceAccount를 연결하고 실제 임시 Pod의 접근·정답표 차단 24개 검사를 통과했으며 합성 객체/Pod는 정리했다. 판정 업무 기록 쓰기와 업무 앱은 아직 미연결이다. 기존 미적용 Athena 단일 workgroup 후보와 동시에 배포하지 않는다. [작업 기록](../docs/tasks/infra-gold-b-access-prep.md). 아래 배포 설명은 각 기록일 기준이며 최신 업무 CDC는 [토폴로지](TOPOLOGY.md)와 해당 작업 기록을 따른다.
+
 2026-10-16 최소 배포 완료: 기존 RDS/S3를 보존하고 NAT 1개·EKS 1.36 Auto Mode·private t3a.large 1대·단일 Kafka를 생성했다. 실제 관리자 접속·20GiB 암호화 EBS·TLS 메시지 생산/소비·JMX를 확인했고 network/EKS/compute 후속 plan은 변경 없음이다. [실행 결과·인수인계](../docs/tasks/infra-deploy-result.md).
 
 2026-10-18 사용자 승인으로 실제 RDS → Kafka → S3 JSON6개 전송·CDC 중단 후 이어받기와 Pod Identity의 다른 prefix 접근 거부를 확인했다. 더미 DB/slot·Kafka/Connect·S3 버전8개·임시 IAM/접속 권한을 정리했다. 노드1대·Kafka4 Pod Ready/재시작0을 유지하고 rds/network/ecr/workload-access 후속 plan은 모두 변경 없음이다. RDS 논리 복제 설정과 데이터 없는 Connect ECR 이미지는 후속 연결 기반으로 남았다. [실제 시험·정리 기록](../docs/tasks/infra-pipeline-smoke.md).
@@ -18,6 +23,8 @@ clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별�
 
 ## 스택 순서와 의존 관계
 
+2026-10-21 후속: [Agent 개발 접근 스택](stacks/agent-development-access/README.md)은 기존 EKS 뒤에 독립 state로 추가한다. [판정·조사 이미지 등록/인증/협의 항목](platform/agent-development/README.md)을 따른다. 기존 EKS·관리자·업무 쓰기 권한을 변경하지 않는다.
+
 ```
 bootstrap → network → eks → compute → apps
                           └→ Kafka 운영자 → Kafka (Helm, 측정 배포 완료; Connect 비활성)
@@ -34,6 +41,8 @@ bootstrap → network → eks → compute → apps
 | `ecr` | `stacks/ecr/` | WEB/WAS 및 선택적 Connect 이미지 저장소 | bootstrap | 세 저장소 배포·Connect 이미지 push/EKS pull 확인 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `ecs-review-simulator` | `stacks/ecs-review-simulator/` | 리뷰 시뮬레이터 ECS Fargate 기반: ECR·클러스터·IAM·Secret·꺼진 예약 실행·로그/대시보드 (담당자 apply, [안내](stacks/ecs-review-simulator/README.md)) | network, storage | 코드·validate, 미배포 |
+| `sagemaker-review-score` | `stacks/sagemaker-review-score/` | 리뷰 점수화 SageMaker Processing Job 실행 기반: IAM 역할·SG·스크립트용 SSM 설정·Airflow용 launcher 정책 (실행은 Airflow silver DAG 종료 후, [안내](stacks/sagemaker-review-score/README.md)) | network, storage | 코드·validate·plan(9 create), 미배포 |
+| `ecs-simulator` | [stacks/ecs-simulator/](stacks/ecs-simulator/README.md) | 거래·회원 시뮬레이터 ECS Fargate: ECR·클러스터·IAM·SG·오염용 DB Secret·로그, 이미지 digest가 있으면 태스크 정의(컨테이너 3개)·서비스 1개 (담당자 apply) | network, storage, 업무 API(내부 ALB) | 적용 완료(태스크 1개 Running, 컨테이너 3개) |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
 | `team-access` | [stacks/team-access/](stacks/team-access/README.md) | 동료 WAS 배포·클러스터 운영 조회 | 기존 EKS, 비공개 동료 신원 | 2026-10-19 실제 연결·RBAC16개 통과·후속 plan 변경 없음; 동료 본인 접속 확인 후속 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |

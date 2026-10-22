@@ -4,6 +4,7 @@
 .DESCRIPTION
   low 0.1 (약 100건) / normal 0.5 (약 500건) / high 1.0 (약 1,000건) 또는 -Rate 로 직접 지정 (0 초과 1 이하).
   REVIEW_RATE 만 바꾼 새 리비전을 등록한다. 스케줄이 켜져 있으면 다음 예약 실행부터 적용된다.
+  -Orders rds / fake 는 주문 입력(RDS orders 테이블 / 가짜 주문)만 바꾼다 (2026-10-21). 비율과 따로 바꾼다.
 .EXAMPLE
   .\scripts\switch.ps1 -Show
 .EXAMPLE
@@ -14,6 +15,7 @@
 param(
     [Parameter(Position = 0)] [ValidateSet("low", "normal", "high")] [string] $Preset,
     [double] $Rate = 0,
+    [ValidateSet("rds", "fake")] [string] $Orders,
     [switch] $Show,
     [string] $Region
 )
@@ -21,5 +23,6 @@ param(
 $a = @()
 if ($Preset) { $a += $Preset }
 if ($Rate -gt 0) { $a += @("--rate", $Rate.ToString([System.Globalization.CultureInfo]::InvariantCulture)) }
-if ($Show -or (-not $Preset -and $Rate -le 0)) { $a += "--show" }
+if ($Orders) { $a += @("--orders", $Orders) }
+if ($Show -or (-not $Preset -and $Rate -le 0 -and -not $Orders)) { $a += "--show" }
 Invoke-Deploy -Name "switch" -Arguments $a -Region $Region
