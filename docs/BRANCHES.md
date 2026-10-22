@@ -107,7 +107,7 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `infra/live-code-audit` | [infra-live-code-audit.md](tasks/infra-live-code-audit.md) | 실제 배포·main 대조 및 Grafana lag 읽기 전용 점검 완료 | |
+| `infra/live-code-audit` | [infra-live-code-audit.md](tasks/infra-live-code-audit.md) | 배포·main / DAG 공급 / RDS·Kafka 1~3단계 읽기 전용 점검 완료 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
