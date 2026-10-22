@@ -212,8 +212,17 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
     runs = base / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     snapshot = Path(tempfile.mkdtemp(prefix="run-", dir=runs))
+    fixed_manifest = snapshot / "manifest.json"
     temporary = None
     try:
+        # 업무 시각이 아닌 이번 검사 완료 시각. 기존 업무 출력은 변경하지 않는다.
+        checked_at = datetime.now(UTC).isoformat()
+        if dataset == "transactions":
+            result["order_amount_checks"] = [
+                {**row, "run_id": snapshot.name, "checked_at": checked_at,
+                 "source_manifest": str(fixed_manifest)}
+                for row in result["order_amount_checks"]
+            ]
         paths = {}
         for name, rows in result.items():
             path = snapshot / f"{name}.jsonl"
@@ -226,6 +235,8 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
             **({"format_rules": rule_metadata} if rule_metadata is not None else {}),
             "input_completeness": "DECLARED_COMPLETE" if input_complete else "UNVERIFIED",
             "run_id": snapshot.name,
+            **({"checked_at": checked_at, "fixed_manifest_path": str(fixed_manifest)}
+               if dataset == "transactions" else {}),
             "input_files": sources,
             **({"kafka_observations": {name: kafka_observations(rows)
                                        for name, rows in loaded.items()}}
@@ -235,6 +246,10 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
             "outputs": paths,
             "manifest_path": str(base / "current.json"),
         }
+        if dataset == "transactions":
+            # 고정 실행 기록을 먼저 완성해야 최신 참조를 바꿀 수 있다.
+            fixed_manifest.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True,
+                                                 indent=2), encoding="utf-8")
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=base,
                                          prefix=".current-", delete=False) as handle:
             temporary = Path(handle.name)
@@ -245,6 +260,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
         # 이번 실행의 고정된 파일만 제거한다. 이전 실행 결과는 건드리지 않는다.
         for name in result:
             (snapshot / f"{name}.jsonl").unlink(missing_ok=True)
+        fixed_manifest.unlink(missing_ok=True)
         snapshot.rmdir()
         raise
     finally:
