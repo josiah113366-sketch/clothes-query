@@ -156,10 +156,10 @@ gitGraph
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 기본 구현 main 머지됨 (#26), 후속 통합 대기 | 2026-10-21 |
-| `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 통합 검증 완료·원격 반영 대기 (#55) | |
-| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 통합 검증 완료·원격 반영 대기 (#45) | |
-| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 통합 검증 완료·원격 반영 대기 (#35) | |
+| `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 기본 구현 main 머지됨 (#26), 단가 후속은 Gold A PR 포함 | 2026-10-21 |
+| `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 머지됨 (#55) | 2026-10-22 |
+| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 머지됨 (#45) | 2026-10-22 |
+| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 머지됨 (#35) | 2026-10-22 |
 
 ### gold-b
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -169,4 +169,4 @@ gitGraph
 ### gold-a
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/gold-a` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | #34는 Silver에 머지, main 통합 검증 중 | |
+| `pipelines/gold-a` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | main 동기화 완료·PR 제출 보류 (#34는 Silver에 머지) | |
