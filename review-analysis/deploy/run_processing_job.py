@@ -18,10 +18,25 @@ SSM_NAME = '/clothes-query/dev/sagemaker-review-score/config'
 MODEL_DIR_NAME = '2.4b_score_s2c'   # upload_model.py로 <model_prefix><이름>/ 에 올린 합친 모델 폴더
 DATE_IN_KEY = re.compile(r'year=(\d{4})/month=(\d{2})/day=(\d{2})')
 VERSION_RE = re.compile(r'[A-Za-z0-9._-]+')
-CMD = ('pip install -q "transformers==4.53.3" accelerate pyarrow && '
-       'python /opt/ml/processing/code/score_batch.py --model-dir /opt/ml/processing/model '
-       '--input /opt/ml/processing/input/{name} --output-root /opt/ml/processing/output '
-       '--error-root /opt/ml/processing/errors --model-version {mv}{dflt}')
+# SageMaker 는 ContainerArguments 의 문자열 하나가 256자를 넘으면 거절한다(ValidationException).
+# 그래서 긴 명령을 한 줄로 만들지 않고, bash -c 의 "$@" 로 인자를 나눠 넘긴다: bash -c '<명령>' <$0> <$1> <$2> ...
+RUN = 'pip install -q "transformers==4.53.3" accelerate pyarrow && python /opt/ml/processing/code/score_batch.py "$@"'
+
+
+def container_args(fname, mv, dflt):
+    """bash -c 에 넘길 인자 목록. 첫 원소가 실행할 명령, 둘째는 $0 자리 이름, 나머지가 score_batch.py 의 인자다."""
+    args = [RUN, 'score_batch',
+            '--model-dir', '/opt/ml/processing/model',
+            '--input', f'/opt/ml/processing/input/{fname}',
+            '--output-root', '/opt/ml/processing/output',
+            '--error-root', '/opt/ml/processing/errors',
+            '--model-version', mv]
+    if dflt:
+        args += ['--default-date', dflt]
+    too_long = [x for x in args if len(x) > 256]
+    if too_long:
+        raise SystemExit(f'ContainerArguments 항목이 256자를 넘습니다: {too_long[0][:60]}...')
+    return args
 
 
 def s3_input(name, uri, local):
@@ -49,7 +64,7 @@ def build_request(c, input_key, instance=None, max_seconds=None, name=None, date
     req = dict(
         ProcessingJobName=name, RoleArn=c['role_arn'],
         AppSpecification=dict(ImageUri=c['image_uri'], ContainerEntrypoint=['bash', '-c'],
-                              ContainerArguments=[CMD.format(name=fname, mv=mv, dflt=f' --default-date {dflt}' if dflt else '')]),
+                              ContainerArguments=container_args(fname, mv, dflt)),
         ProcessingResources=dict(ClusterConfig=dict(InstanceCount=1, InstanceType=instance or c['instance_type'],
                                                     VolumeSizeInGB=c['volume_size_gb'])),
         # 비용 안전장치: 이 시간이 지나면 SageMaker가 작업을 중단한다
