@@ -231,10 +231,14 @@ tfplan
 # Simulator
 simulator/.local/
 
-# Private Terraform deployment inputs (shared terraform.tfvars stays tracked)
+# Shared deployment.auto.tfvars.json is tracked; personal overrides stay local.
 infra/**/*.local.tfvars
 infra/**/*.local.tfvars.json
 infra/**/*.backend.hcl
+# Approved backend location only (bucket/region); never credentials.
+!infra/stacks/*/deployment.backend.hcl
+# Superseded candidate is not an active deployment configuration.
+infra/stacks/athena-query-base/deployment.backend.hcl
 infra/**/terraform.tfstate.d/
 infra/**/*.local.yaml
 api/**/*.local.yaml
