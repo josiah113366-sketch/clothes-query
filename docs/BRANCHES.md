@@ -107,8 +107,10 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `infra/data-runtime-share` | [infra-data-runtime-share.md](tasks/infra-data-runtime-share.md) | Airflow·카탈로그·점검·현황 통합 공유, 승인·머지 대기 | |
 | `infra/agent-runtime-connections` | [infra-agent-runtime-connections.md](tasks/infra-agent-runtime-connections.md) | Git DAG·dashboard 권한/인증 적용·검증, 담당자 입력 대기 | |
 | `infra/gold-b-catalog` | [infra-gold-b-catalog.md](tasks/infra-gold-b-catalog.md) | Glue DB·Athena 표 5개 실제 등록/검증 완료 | |
+| `infra/live-code-audit` | [infra-live-code-audit.md](tasks/infra-live-code-audit.md) | 배포·main / DAG 공급 / RDS·Kafka 1~3단계 읽기 전용 점검 완료 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
