@@ -1,5 +1,7 @@
 # compute stack
 
+2026-10-22 미적용 준비: `spark_node_pool.enabled=false`가 공유 auto tfvars와 기본값에 들어 있다. 기존 명령으로 Spark 용량이 자동 추가되지 않는다. [Spark 준비](../../platform/spark/README.md)의 전용/공용 메모리 확대 `.tfvars.example`은 검토용이며 아직 실제 apply 대상으로 승인하지 않았다. node pool 출력은 비활성일 때 null이다.
+
 EKS Auto Mode의 노드 타입, 증설 한도 및 자동 정리 설정을 관리한다.
 
 2026-10-16 사용자 결정: `t3a.large` On-Demand만 허용하고 한도는 6 vCPU/24GiB(세 대분), 통합 대기는 10분이다. 평소 한 대 운영은 배치 목표이며 보장된 최소/고정 수가 아니다. 실제 노드는 Pod requests·배치 제약에 따라 생성하며 동시 provisioning 중 한도를 일시 초과할 수 있다. ECS Fargate 제네레이터는 팀원 담당으로 이 스택에서 생성하지 않는다. [연결 입력](../../../docs/design/infra/team-inputs.md).

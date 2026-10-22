@@ -12,6 +12,10 @@ run "bounded_on_demand_pool" {
   command = plan
   module { source = "../modules/compute" }
   assert {
+    condition     = length(kubernetes_manifest.spark_node_pool) == 0 && output.spark_node_pool_name == null
+    error_message = "Default compute plans must not create Spark capacity."
+  }
+  assert {
     condition     = kubernetes_manifest.node_pool.manifest.spec.limits.cpu == "6" && kubernetes_manifest.node_pool.manifest.spec.limits.memory == "24Gi"
     error_message = "The compact pool must have a nominal three-node budget of 6 vCPU and 24 GiB."
   }
@@ -69,4 +73,47 @@ run "reject_budget_without_replacement_headroom" {
   module { source = "../modules/compute" }
   variables { node_pool_cpu_limit = 2 }
   expect_failures = [var.node_pool_cpu_limit]
+}
+
+run "opt_in_spark_pool_is_isolated_and_demand_driven" {
+  command = plan
+  module { source = "../modules/compute" }
+  variables { spark_node_pool = { enabled = true } }
+  assert {
+    condition     = kubernetes_manifest.spark_node_pool[0].manifest.metadata.name == "test-compute-spark" && kubernetes_manifest.spark_node_pool[0].manifest.spec.template.spec.taints[0].value == "spark"
+    error_message = "Spark must have a separate tainted pool using the approved NodeClass."
+  }
+  assert {
+    condition     = kubernetes_manifest.spark_node_pool[0].manifest.spec.limits.cpu == "4" && kubernetes_manifest.spark_node_pool[0].manifest.spec.limits.memory == "8Gi" && !contains(keys(kubernetes_manifest.spark_node_pool[0].manifest.spec), "replicas")
+    error_message = "Spark must remain demand-driven with explicit capacity budgets."
+  }
+  assert {
+    condition     = kubernetes_manifest.spark_node_pool[0].manifest.spec.disruption.consolidationPolicy == "WhenEmpty" && kubernetes_manifest.node_pool.manifest.spec.limits.cpu == "6"
+    error_message = "Spark consolidation must not evict running jobs or modify common capacity."
+  }
+}
+
+run "reject_spark_budget_smaller_than_one_node" {
+  command = plan
+  module { source = "../modules/compute" }
+  variables { spark_node_pool = { enabled = true, instance_types = ["r6a.large"], memory_limit_gib = 8 } }
+  expect_failures = [var.spark_node_pool]
+}
+
+run "shared_memory_candidate_does_not_create_dedicated_pool" {
+  command = plan
+  module { source = "../modules/compute" }
+  variables {
+    instance_types             = ["r6a.large"]
+    node_pool_cpu_limit        = 4
+    node_pool_memory_limit_gib = 32
+  }
+  assert {
+    condition     = length(kubernetes_manifest.spark_node_pool) == 0 && kubernetes_manifest.node_pool.manifest.spec.limits.memory == "32Gi"
+    error_message = "The shared-memory candidate must not silently add a dedicated pool."
+  }
+  assert {
+    condition     = contains([for r in kubernetes_manifest.node_pool.manifest.spec.template.spec.requirements : jsonencode(r)], jsonencode({ key = "node.kubernetes.io/instance-type", operator = "In", values = ["r6a.large"] }))
+    error_message = "The shared-memory candidate must explicitly select its reviewed type."
+  }
 }
