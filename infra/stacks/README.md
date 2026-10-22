@@ -1,5 +1,7 @@
 # 배포 스택
 
+- [gold-b-catalog](gold-b-catalog/README.md): storage 이후 Glue gold_b DB를 독립 state로 관리한다. 접근 권한·agent DB·데이터 수명주기와 분리한다.
+
 기존 bootstrap은 보존한다. 이번 구현은 dev 환경이며 backend key와 리소스 이름이 dev로 고정되어 있다. 다른 환경에는 새 key/이름 설계를 먼저 검토한다.
 
 - [network](network/README.md)

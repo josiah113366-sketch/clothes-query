@@ -1,5 +1,7 @@
 # Terraform modules
 
+- [gold-b-catalog](gold-b-catalog/README.md): 기존 S3 gold_b/를 가리키는 Glue DB만 관리한다. 테이블 정의는 pipelines 담당 SQL로 등록한다.
+
 각 모듈은 스택에서 호출하며 직접 배포하지 않는다. provider와 backend는 호출 스택에서 설정한다. AWS provider는 기존 bootstrap과 같은 6.68.0 lock을 사용한다.
 
 - [network](network/README.md): 2개 AZ의 public/app/db subnet, AZ별 NAT, S3 Gateway Endpoint
