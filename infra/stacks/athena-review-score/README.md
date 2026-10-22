@@ -11,13 +11,37 @@
 
 ## 전체 흐름
 
-```
-Airflow(silver DAG 종료) → SageMaker Job → S3 staging(Parquet, year=/month=/day=)
-   → Athena MERGE INTO → Iceberg 테이블(S3 table_prefix + Glue 카탈로그) → Gold/대시보드가 Athena 로 읽기
-정기: Airflow → Athena OPTIMIZE(작은 파일 합치기), VACUUM(오래된 스냅샷 삭제)
+```mermaid
+flowchart LR
+  AF["Airflow<br/>silver DAG 종료 신호"]
+  SV[("S3 silver/reviews<br/>KST 작성일 파티션")]
+  subgraph SM["SageMaker Processing Job (g4dn GPU)"]
+    SB["score_batch.py<br/>모델: S3 review-score/model"]
+  end
+  ST[("S3 staging/review-score<br/>year=/month=/day=/<br/>scores_버전_실행시각.parquet")]
+  ER[("S3 silver/review_aspect_scores_error<br/>파싱 실패 시")]
+  AT["Athena 워크그룹<br/>MERGE (중복 제거 후 upsert)"]
+  GL["Glue Data Catalog<br/>DB · Iceberg 테이블 · staging 테이블"]
+  IC[("S3 silver/review_aspect_scores_iceberg<br/>Iceberg 테이블, 파티션 review_date")]
+  GD["Gold / 대시보드<br/>Athena SQL"]
+  MT["정기 유지보수<br/>OPTIMIZE · VACUUM"]
+
+  AF -->|"Job 시작 (launcher 정책)"| SM
+  SV -->|"후기 파일 하나"| SB
+  SB --> ST
+  SB -.->|"파싱 실패"| ER
+  AF -->|"Job 완료 후 날짜마다"| AT
+  ST -->|"staging 테이블"| AT
+  AT <--> GL
+  AT --> IC
+  IC --> GD
+  AF -.->|"주 1회 예정"| MT
+  MT --> IC
 ```
 
-그림: 세션에서 공유한 `iceberg-flow.svg` 참고(저장소 미포함).
+- 파티션 날짜는 실행한 날이 아니라 **후기 작성일(KST)** 이다. 같은 날짜를 다시 실행하면 staging 에 새 파일이 쌓이고, `merge.sql` 이 `(review_id, aspect, model_version, review_date)` 별로 가장 최근 `analyzed_at` 만 남겨 upsert 한다.
+- Bronze 로 시험할 때는 Silver 대신 `review-score/code/test-input/` 에 복사한 Bronze 파일을 입력으로 쓴다(Job 역할이 `silver/reviews/*` 만 읽을 수 있어서).
+- Airflow 연동(`Airflow` 에서 나가는 화살표)은 아직 구현 전이다. 지금은 `run_processing_job.py` 와 Athena 쿼리를 사람이 실행한다.
 
 ## 실행
 
@@ -62,10 +86,10 @@ aws athena get-query-execution --query-execution-id <ID> --region ap-northeast-1
 
 (Git Bash 에서는 SSM 이름 앞에 `MSYS_NO_PATHCONV=1` 이 필요하다.)
 
-## SageMaker 스택과의 연결 (별도 변경)
+## SageMaker 스택과의 연결
 
-`stacks/sagemaker-review-score` 의 `output_prefix` 를 이 스택의 `staging_prefix`(기본 `staging/review-score`)로 바꿔야 Job 이 staging 에 쓴다. 그 스택의 Job 역할 쓰기 권한과 SSM 설정이 같이 바뀐다.
-이 변경은 이 초안에 포함하지 않았다(이미 apply 된 스택이라 별도 plan 확인 후).
+`stacks/sagemaker-review-score` 의 `output_prefix` 는 이 스택의 `staging_prefix`(기본 `staging/review-score`)와 **같은 값**이어야 한다(2026-10-22 반영 완료). 다르면 Job 은 다른 곳에 쓰고 staging 테이블은 빈 채로 남는다.
+Job 이 쓰는 Parquet 의 열(`review_id, aspect, score, model_version, analyzed_at, review_date`)과 staging 테이블의 열도 같아야 한다.
 
 ## 열린 질문 (결정 필요)
 
