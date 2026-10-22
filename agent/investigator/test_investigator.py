@@ -154,5 +154,30 @@ check("같은 응답 제출을 계속 반복하면 되돌림 한도가 0이어�
 conv, calls = script([use(1, "submit_report", **REPORT)], [use(2, "payment_summary", **W)], [use(3, "submit_report", **REPORT)])
 r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("조회 없이 먼저 낸 제출은 부르지 않은 도구를 근거로 댔으니 거절 (다음 응답에서 조회 뒤 통과)", [t["status"] for t in r["trace"]], ["rejected", "ok"])
+# --- 확인하지 않은 것을 "없다/정상"이라고 단정하는 문장 (결론·사실 문장 검사) ---
+from report import check_report, unsupported_denials
+
+check("단정 검사: 중복 확인 도구 없이 '오염이 없다'고 쓰면 걸림", [x[2] for x in unsupported_denials("PG_A 장애입니다. 원본 데이터에 오염이 없습니다.", {"payment_summary"})], ["데이터 오염·중복"])
+check("단정 검사: 도구를 부른 뒤에는 통과", unsupported_denials("원본 데이터에 오염이 없습니다.", {"duplicate_success_orders"}), [])
+check("단정 검사: 형식 오류는 malformed_summary나 malformed_fields 중 하나면 통과", (len(unsupported_denials("형식 오류도 없습니다.", set())), len(unsupported_denials("형식 오류도 없습니다.", {"malformed_fields"}))), (1, 0))
+check("단정 검사: 원장이 정상이라는 말은 ledger_reliability가 필요", (len(unsupported_denials("원장 적재는 정상입니다.", {"payment_summary"})), len(unsupported_denials("원장 적재는 정상입니다.", {"ledger_reliability"}))), (1, 0))
+check("단정 검사: '있다'는 문장(중복 3건이 있음)은 걸리지 않음", unsupported_denials("성공 결제가 중복된 주문이 3개 있습니다.", set()), [])
+check("단정 검사: 낱말이 없는 문장(PG 원인 실패 0건)은 걸리지 않음", unsupported_denials("PG_B의 PG 원인 실패는 0건입니다.", set()), [])
+problems = check_report(dict(REPORT, conclusion="PG_A 장애입니다. 데이터 오염은 없습니다."), {"payment_summary"})
+check("리포트 검사: 결론에 근거 없는 '오염 없음'이 있으면 고쳐야 할 점이 나옴", (len(problems), "duplicate_success_orders" in problems[0]), (1, True))
+check("리포트 검사: 추정(ASSUMPTION) 문장의 '없을 것'은 보지 않음",
+      check_report(dict(REPORT, claims=REPORT["claims"] + [{"text": "오염은 없을 것으로 보입니다", "kind": "ASSUMPTION", "evidence": []}]), {"payment_summary"}), [])
+check("리포트 검사: 사실(FACT) 문장의 근거 없는 단정도 걸림",
+      len(check_report(dict(REPORT, claims=[{"text": "형식 오류는 없습니다", "kind": "FACT", "evidence": [{"tool": "payment_summary"}]}]), {"payment_summary"})), 1)
+
+# 루프 한 바퀴: 처음엔 단정 때문에 되돌려지고, 도구를 부른 뒤 다시 내면 받아들여짐
+unsup = dict(REPORT, conclusion="PG_A 장애입니다. 원본 데이터에 오염이 없습니다.")
+fixed = dict(REPORT, conclusion="PG_A 장애입니다. 같은 시간대 성공 결제 중복도 확인했고 없습니다.")
+conv, calls = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **unsup)],
+                     [use(3, "duplicate_success_orders", **W)], [use(4, "submit_report", **fixed)])
+r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
+check("단정 때문에 되돌려지고, 확인 도구를 부른 뒤 다시 내면 받아들여짐", ([t["status"] for t in r["trace"]], "problems" in r), (["ok", "rejected", "ok"], False))
+check("되돌림 이유에 필요한 도구 이름이 들어 있음", "duplicate_success_orders" in str(calls[2]["messages"][-1]), True)
+
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

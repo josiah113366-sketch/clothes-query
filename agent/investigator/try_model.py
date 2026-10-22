@@ -131,7 +131,8 @@ def main(argv=None, env=None, converse=None):
             r = run(name, converse)
             results.append(r)
             print(f"{name} #{i + 1}: 정답 {r['expected']} / 모델 {r['said']} ({'맞음' if r['match'] else '다름'}), {r['seconds']}초, 모델 {r['model_calls']}번, "
-                  f"도구 {r['tool_calls']}번(오류 {r['tool_errors']}), 되돌림 {r['rejected']}번, 사실 {r['facts']} 추정 {r['assumptions']}")
+                  f"도구 {r['tool_calls']}번(오류 {r['tool_errors']}), 되돌림 {r['rejected']}번, 사실 {r['facts']} 추정 {r['assumptions']}"
+                  + (f", 검사를 못 넘긴 점 {r['problems']}개" if r["problems"] else ""))
             if a.show:
                 print(f"    결론: {r['conclusion']}")
                 for c in r["claims"]:
