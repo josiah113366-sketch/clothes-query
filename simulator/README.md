@@ -85,7 +85,7 @@ pytest -m integration
 베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
-sim member live                                   # normal, 실시간, 하루 평균 5,000명 (요일·시간대 곡선)
+sim member live                                   # normal, 실시간, 하루 평균 25,000명 (요일·시간대 곡선)
 sim member live --mode burst --speed 60 --duration 30   # 폭주로 시작, 시뮬레이터 30분
 sim member live --speed 1440 --duration 30        # 시뮬레이터 하루 = 실제 1분으로 30초 실행
 sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만들고 종료
@@ -94,7 +94,7 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`) |
-| `--daily` | `SIM_LIVE_DAILY` | 5000 | `normal`의 하루 평균 가입 수. `medium`·`burst` 속도도 이 값에서 정해진다 |
+| `--daily` | `SIM_LIVE_DAILY` | 25000 | `normal`의 하루 평균 가입 수. `medium`·`burst` 속도도 이 값에서 정해진다 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
 | `--max-signups` | | 없음 | 이 건수만큼 만들면 정상 종료 |
@@ -105,11 +105,11 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 - **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `--daily ÷ 86,400 × rate_factor(모드, 시뮬레이터 시각)`건/초다. `rate_factor`는 `common/curve.py`에 있고, 방문(`behavior`)도 같은 함수를 쓴다.
 
-  | 모드 | `rate_factor` (하루 평균 대비) | `--daily 5000`일 때 |
+  | 모드 | `rate_factor` (하루 평균 대비) | `--daily 25000`일 때 |
   |---|---|---|
-  | `normal` (일상) | 요일 배율 × 시간대 배율 | 하루 평균 5,000명. 월요일 20시는 분당 약 5.6명 |
-  | `medium` (중간) | 일상 피크 시간대 배율(1.8) × 3 = 5.4, 고정 | 시간당 1,125명 |
-  | `burst` (폭주) | 일상 피크 시간대 배율(1.8) × 10 = 18, 고정 | 시간당 3,750명 |
+  | `normal` (일상) | 요일 배율 × 시간대 배율 | 하루 평균 25,000명. 월요일 20시는 분당 약 28명 |
+  | `medium` (중간) | 일상 피크 시간대 배율(1.8) × 3 = 5.4, 고정 | 시간당 5,625명 |
+  | `burst` (폭주) | 일상 피크 시간대 배율(1.8) × 10 = 18, 고정 | 시간당 18,750명 |
 
   **곡선:** 요일 배율은 H&M 요일 비율 × 7(월 0.896 … 토 1.113, 한 주 평균 1), 시간대 배율은 우리가 정한 시간대 비율 ÷ 구간 길이(0~6시 0.20, 6~9시 0.64, 9~12시 1.12, 12~14시 1.32, 14~18시 1.02, 18~24시 1.80)다. 날짜와 시각은 KST 기준이고, 구간 안에서는 일정한 계단 함수다. 간격은 뽑은 시점의 속도로 뽑으므로 구간 경계에서 약간의 오차가 있다. `medium`·`burst`는 시간대·요일과 상관없이 고정이라 밤에 바꿔도 폭주가 된다. 자동 복귀(중간 60분, 폭주 15분)는 아직 없다(컨트롤러 작업).
 - **제어 파일**을 약 1초마다 읽는다. 로컬에서는 이렇게 바꾼다.
@@ -137,14 +137,14 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 ```bash
 docker compose exec -T postgres psql -U sim -d clothes < ../db/schema/004_orders.sql   # 처음 한 번
-sim behavior live                                                  # normal, 실시간, 하루 평균 11만 1천 방문
+sim behavior live                                                  # normal, 실시간, 하루 평균 55만 5천 방문
 sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink jsonl
 ```
 
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`). `member live`와 같은 변수 |
-| `--visits-daily` | `SIM_VISITS_DAILY` | 111000 | `normal`의 하루 평균 방문 수 |
+| `--visits-daily` | `SIM_VISITS_DAILY` | 555000 | `normal`의 하루 평균 방문 수 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초 |
 | `--max-visits` | | 없음 | 이만큼 방문을 만들면 정상 종료 |
@@ -154,7 +154,7 @@ sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink j
 | `--click-sink` | `SIM_CLICK_SINK` | `none` | 클릭 로그 출력: `none`(버림), `jsonl`(파일), `kafka`(토픽 `clickstream`, 아래 "클릭 로그" 절) |
 | `--click-file` | | `.local/clicks.jsonl` | `jsonl`일 때 경로. `.local/`은 커밋하지 않는다 |
 
-- **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 11만 1천 방문이면 주문은 약 5,000건이다.
+- **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 55만 5천 방문이면 주문은 약 25,000건이다. `SHIPPED` 뒤 3~6시간에 `DELIVERED`가 된다.
 - **값을 바꾸는 곳:** 확률, 분포, 지연은 모두 `src/sim/behavior/params.py` 한 곳에 있다. `[가정]` 표시는 팀과 맞추는 임시값이다.
 - **쓰는 방식:** 주문과 그 상품 줄은 한 트랜잭션, 결제 INSERT와 상태 UPDATE는 한 건씩 자동 커밋이다. `orders.updated_at`과 모든 전이 시각은 **예정된 시뮬레이터 시각**이다(실제 UPDATE 시각이 아니다). 결제는 INSERT만 하고 환불도 결제 행을 만들지 않는다.
 - **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink`, `JsonlClickSink`, `KafkaClickSink`)로 나간다. 나중에 쇼핑몰 API로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(UTC, `Z`로 끝남), `session_id`다.
