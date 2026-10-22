@@ -69,19 +69,19 @@
 - [x] `terraform fmt -check -recursive` (스택·모듈)
 - [x] `terraform init -backend=false` 후 `terraform validate`
 - [x] `terraform plan` → 첫 plan 은 6 create, 0 change, 0 destroy (초안 작성 시점)
-- [ ] apply 후 `terraform plan` 이 변경 없음
+- [x] apply 후 `terraform plan` 이 변경 없음 (2026-10-22 sagemaker·athena 두 스택 모두 "No changes" 확인)
 - [ ] apply 후 SSM 파라미터 JSON 에 `workgroup`·`database`·`table_location`·`staging_location` 이 있고, 계정 ID·버킷 이름이 공유 설정 파일(`deployment.*`) 밖의 코드·문서에는 하드코딩돼 있지 않음 (`git grep`)
 - [x] apply 로 만들어진 Iceberg 테이블·staging 테이블을 Athena 가 읽음(`SELECT`) (2026-10-22). 이후 plan 변경 없음 확인은 위 "apply 후 plan 이 변경 없음" 항목에서 계속
 - [x] 샘플 staging 1일치로 `merge.sql` 2회 실행 → 두 번째는 행 수가 늘지 않음(멱등). 같은 날짜 Job 을 재실행해 staging 에 같은 키 193개가 2번씩(파일 2개) 있는 상태에서 `merge.sql` 이 오류 없이 반영, 테이블 193행·후기 100개·중복 0, `analyzed_at` 이 두 번째 실행 시각으로 갱신됨 (2026-10-22 확인)
 - [x] 같은 날짜를 다른 `model_version`(`test-v`)으로 넣었을 때 행이 따로 쌓이고 `read_latest.sql` 이 최신 버전을 고름 (사용자 시험, 2026-10-22; 시험 행은 삭제함)
 - [x] `optimize.sql`·`vacuum.sql` 이 오류 없이 실행되고 `read_latest.sql` 이 기대한 결과를 냄 (사용자 시험, 2026-10-22). 남은 확인: 테이블 속성에 `vacuum_*` 보존 기준이 보이지 않음(Glue 가 저장하지 않았을 수 있음) → 필요하면 `ALTER TABLE ... SET TBLPROPERTIES` 로 지정
 - [ ] 쿼리당 스캔 한도(10GB)와 워크그룹 설정 강제가 적용됨(콘솔 확인)
-- [ ] (모델 번호·점수 로그·미점수 입력 변경 후) Terraform plan: 점수 로그 테이블·staging 로그 테이블 2 create, staging 점수 테이블·runner 정책·SSM 변경, 삭제/교체 없음
-- [ ] `migrate_add_model_version_no.sql` 4문장 실행: 열 추가, 기존 행 `model_version_no = 1.0`, 비어 있는 행 0, 점수 로그 채우기
-- [ ] 빠진 속성 삭제 시험: 한 후기에 가짜 속성 행을 넣고 `merge.sql` 재실행 → 가짜 행 삭제, 다른 후기 행은 그대로(행 수 불변)
-- [ ] `merge_log.sql` 실행 후 `review_score_log` 에 후기당 한 행(속성 0개 후기는 `n_aspects = 0`)
-- [ ] 높은 모델 번호 시험: 같은 후기에 `model_version_no = 2.0` 행을 넣으면 `read_latest.sql` 이 2.0 행만 고름, 시험 행은 삭제
-- [ ] `select_unscored.py` 시험: 전부 점수 있음(0건, Job 없음) / 일부만 점수 있음(로그 행 삭제 후 그 후기만 선택) / 속성 0개 후기가 다시 선택되지 않음 / 모델 번호를 올리면 전부 선택
+- [x] (모델 번호·점수 로그·미점수 입력 변경 후) Terraform plan: 점수 로그 테이블·staging 로그 테이블 2 create, staging 점수 테이블·runner 정책·SSM 변경, 삭제/교체 없음 → apply 후 두 스택 "No changes" (2026-10-22)
+- [x] `migrate_add_model_version_no.sql` 4문장 실행: 열 추가, 기존 행 `model_version_no = 1.0`, 비어 있는 행 0, 점수 로그 채우기 (사용자 시험, 2026-10-22; 로그 100행, 점수 테이블 `model_version_no = 1.0`)
+- [x] 빠진 속성 삭제 시험: 한 후기에 가짜 속성 행을 넣고 `merge.sql` 재실행 → 가짜 행 삭제, 다른 후기 행은 그대로(행 수 불변) (사용자 시험, 2026-10-22)
+- [x] `merge_log.sql` 실행 후 `review_score_log` 에 후기당 한 행(속성 0개 후기는 `n_aspects = 0`) (사용자 시험, 2026-10-22; 로그 100행)
+- [x] 높은 모델 번호 시험: 같은 후기에 `model_version_no = 2.0` 행을 넣으면 `read_latest.sql` 이 2.0 행만 고름, 시험 행은 삭제 (사용자 시험, 2026-10-22; 시험 행 `test-v` 삭제됨)
+- [x] `select_unscored.py` 시험: 전부 점수 있음(0건, Job 없음) / 일부만 점수 있음(로그 행 삭제 후 그 후기만 선택) / 속성 0개 후기가 다시 선택되지 않음 / 모델 번호를 올리면 전부 선택 (사용자 시험, 2026-10-22; 열 순서 주의: ADD COLUMNS 는 열을 맨 뒤에 붙임)
 
 ## README 갱신
 
