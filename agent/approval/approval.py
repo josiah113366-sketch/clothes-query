@@ -21,18 +21,21 @@ STEP_ORDER = ("REQUESTED", "APPROVED", "REJECTED", "STARTED", "LEDGER_REPLACED",
 TERMINAL = ("REJECTED", "VERIFIED")
 FMT = "%Y-%m-%d %H:%M:%S"
 _ID = re.compile(r"^[A-Za-z0-9._:+-]{1,100}$")      # Airflow의 dag_run_id로도 쓰이므로 안전한 글자만
+POLLER = "POLLER"     # dag_by_rule에서 DAG ID 자리에 쓴다: 재처리 DAG가 5분마다 APPROVED 줄을 읽어 스스로 시작하므로 우리는 Airflow를 부르지 않는다
 
 
 @dataclass
 class ApprovalConfig:
     ttl_minutes: int = 60                 # 요청 후 승인, 승인 후 시작까지 허용하는 시간 (제안 값, 팀 이의 기한 중)
     max_attempts: int = 2                 # 재시도 최대 횟수 (은서 님 동의)
-    rule_version: str = "0.1.0"           # 공통 형식 검사 규칙 버전
+    rule_version: str = "0.2.0"           # 공통 형식 검사 규칙 버전 (docs/contracts/format_rules.yaml의 version과 같게)
+    kafka_retention_days: int = 3         # Gold B 재처리는 Kafka 보관 기간(3일) 안의 구간을 우선한다(은서 님 워크플로우)
     dialect: str = "athena"               # 시험에서만 "sqlite"
-    # 규칙 -> (호출할 DAG ID, source). DAG ID가 None이면 아직 정해지지 않은 것. R3는 재처리가 값을 바꾸지 않아 대상이 아니다
+    # 규칙 -> (호출할 DAG ID, source). DAG ID가 POLLER면 호출하지 않고(재처리 DAG가 APPROVED 줄을 5분마다 읽음), None이면 아직 정해지지 않은 것.
+    # R3는 재처리가 값을 바꾸지 않아 대상이 아니다
     dag_by_rule: dict = field(default_factory=lambda: {
         "R6_ORDER_TOTAL_MISMATCH": ("silver_gold_a_reprocess", "SILVER"),     # 현지 님 제안 이름(아직 확정 아님)
-        "R1_PG_FAILURES": (None, "KAFKA"), "R4_MALFORMED": (None, "KAFKA"), "R5_DUPLICATE_SUCCESS": (None, "KAFKA"),   # Gold B 재처리 DAG ID 대기(은서 님)
+        "R1_PG_FAILURES": (POLLER, "KAFKA"), "R4_MALFORMED": (POLLER, "KAFKA"), "R5_DUPLICATE_SUCCESS": (POLLER, "KAFKA"),   # 은서 님 워크플로우: gold_b_reprocess가 5분마다 APPROVED 확인
     })
     # 재처리해도 원본이 안 바뀌어 해결되지 않을 수 있는 규칙(화면에 경고를 띄운다)
     unfixable_by_reprocess: tuple = ("R5_DUPLICATE_SUCCESS", "R6_ORDER_TOTAL_MISMATCH")
@@ -146,7 +149,12 @@ def request_reprocess(anomaly, report_id, actor, now, query, write, cfg=Approval
            "window_start": start.strftime(FMT), "window_end": end.strftime(FMT), "rule_version": cfg.rule_version, "source": source,
            "attempt": attempt, "parent_request_id": parent_request_id, "detail": json.dumps(detail, ensure_ascii=False)}
     write("reprocess_events", [row])
-    return {"request_id": request_id, "state": "REQUESTED", "warning": "UNFIXABLE_BY_REPROCESS" if rule in cfg.unfixable_by_reprocess else None}
+    warnings = []
+    if rule in cfg.unfixable_by_reprocess:
+        warnings.append("UNFIXABLE_BY_REPROCESS")
+    if source == "KAFKA" and start < now - timedelta(days=cfg.kafka_retention_days):
+        warnings.append("OUTSIDE_KAFKA_RETENTION")      # 보관 기간을 넘긴 구간은 Kafka로 다시 만들 수 없을 수 있다
+    return {"request_id": request_id, "state": "REQUESTED", "warning": warnings[0] if warnings else None, "warnings": warnings}
 
 
 def reject(request_id, actor, reason, now, query, write, cfg=ApprovalConfig()):
@@ -187,6 +195,8 @@ def start_run(request_id, now, query, trigger, cfg=ApprovalConfig()):
             "source": base["source"], "anomaly_id": detail.get("anomaly_id"), "report_id": detail.get("report_id"), "attempt": base["attempt"]}
     if "order_ids" in _detail(req):
         conf["order_ids"] = _detail(req)["order_ids"]
+    if detail["dag_id"] == POLLER:      # 재처리 DAG가 APPROVED 줄을 읽어 시작한다. 같은 줄을 두 번 처리하지 않는 것은 그 DAG의 몫(STARTED 줄 확인)
+        return {"request_id": request_id, "state": "APPROVED", "airflow": "POLLER"}
     status = trigger(detail["dag_id"], request_id, conf)
     if status in (200, 201):
         return {"request_id": request_id, "state": "APPROVED", "airflow": "TRIGGERED"}

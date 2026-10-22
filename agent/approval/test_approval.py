@@ -99,7 +99,7 @@ dag_id, run_id, conf = calls[0]
 check("승인: dag_run_id가 request_id, DAG ID는 요청 때 정한 것", (dag_id, run_id), ("gold_b_reprocess", rid1))
 check("승인: 호출 입력(conf)에 요청 id·시간대·규칙 버전·이상 id·리포트 id가 있고, R1에는 주문 id 목록이 없음",
       ({k: conf[k] for k in ("request_id", "window_start", "window_end", "rule_version", "anomaly_id", "report_id")}, "order_ids" in conf),
-      ({"request_id": rid1, "window_start": "2026-10-22 15:00:00", "window_end": "2026-10-22 16:00:00", "rule_version": "0.1.0", "anomaly_id": "a1", "report_id": "rep-1"}, False))
+      ({"request_id": rid1, "window_start": "2026-10-22 15:00:00", "window_end": "2026-10-22 16:00:00", "rule_version": "0.2.0", "anomaly_id": "a1", "report_id": "rep-1"}, False))
 check("승인 줄에 승인자가 남음", json.loads(fetch_rows(query, rid1)[-1]["detail"])["approved_by"], ME)
 
 
@@ -198,6 +198,21 @@ def opener_down(req, timeout=None):
 check("Airflow 호출기: 같은 dag_run_id는 409를 돌려줌", AirflowClient("http://x", "u", "p", opener=opener_409).trigger("d", "r", {}), 409)
 check("Airflow 호출기: 로그인 실패는 401, 연결 실패는 0", (AirflowClient("http://x", "u", "p", opener=opener_login_fail).trigger("d", "r", {}), AirflowClient("http://x", "u", "p", opener=opener_down).trigger("d", "r", {})), (401, 0))
 check("Airflow 호출기: 잘못된 DAG ID·실행 ID는 호출 전에 거절", (code(lambda: client.trigger("d/../x", "r", {})), code(lambda: client.trigger("d", "r;x", {}))), ("BAD_ID", "BAD_ID"))
+
+# --- 은서 님 워크플로우: gold_b_reprocess가 5분마다 APPROVED를 읽음(POLLER) ---
+DEFAULT = ApprovalConfig(dialect="sqlite")
+check("기본 설정: Gold B 규칙(R1·R4·R5)은 POLLER, R6는 Silver DAG, 규칙 버전 0.2.0", ([DEFAULT.dag_by_rule[k][0] for k in ("R1_PG_FAILURES", "R4_MALFORMED", "R5_DUPLICATE_SUCCESS")], DEFAULT.dag_by_rule["R6_ORDER_TOTAL_MISMATCH"][0], DEFAULT.rule_version),
+      (["POLLER"] * 3, "silver_gold_a_reprocess", "0.2.0"))
+polled = []
+rp = request_reprocess(dict(R1, anomaly_id="p1"), "rep-p", ME, T0, query, write, DEFAULT)["request_id"]
+res = approve(rp, ME, T0 + timedelta(minutes=2), query, write, lambda *a: polled.append(a) or 200, DEFAULT)
+check("POLLER: 승인하면 APPROVED 줄만 쓰고 Airflow는 부르지 않음", (steps(rp), res["airflow"], polled), (["REQUESTED", "APPROVED"], "POLLER", []))
+res = approve(rp, ME, T0 + timedelta(minutes=3), query, write, lambda *a: polled.append(a) or 200, DEFAULT)
+check("POLLER: 다시 승인해도 승인 줄이 늘지 않고 호출도 없음", (steps(rp), res["airflow"], polled), (["REQUESTED", "APPROVED"], "POLLER", []))
+old = request_reprocess(dict(R1, anomaly_id="p2", window_start="2026-10-10 10:00:00", window_end="2026-10-10 10:15:00"), "rep-p2", ME, T0, query, write, DEFAULT)
+check("Kafka 보관 기간(3일)을 넘긴 구간은 경고(요청은 받음)", old["warnings"], ["OUTSIDE_KAFKA_RETENTION"])
+check("최근 구간의 R1은 경고 없음", request_reprocess(dict(R1, anomaly_id="p3"), "rep-p3", ME, T0, query, write, DEFAULT)["warnings"], [])
+check("Silver(R6)는 보관 기간 경고가 없고 재처리로 안 풀릴 수 있다는 경고만", request_reprocess(dict(R6, anomaly_id="p6"), "rep-p6", ME, T0, query, write, DEFAULT)["warnings"], ["UNFIXABLE_BY_REPROCESS"])
 
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
