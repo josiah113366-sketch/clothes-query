@@ -6,7 +6,8 @@ import os
 import re
 from datetime import datetime, timezone
 from itertools import islice
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from pyspark.sql import SparkSession
@@ -239,13 +240,21 @@ def build_sales(tables, catalog):
     return {"order_sales_hourly": hourly, "product_sales_daily": daily}
 
 
+def location(uri):
+    parsed = urlsplit(uri)
+    parts = PurePosixPath(parsed.path).parts
+    if (parsed.scheme != "s3" or not parsed.netloc or parsed.query or parsed.fragment
+            or ".." in parts or "\\" in uri):
+        raise ValueError("시간 제한 서명 URL 대신 s3://버킷/경로를 지정하세요")
+    return parsed.netloc, parsed.path.lstrip("/")
+
 def _write_json(uri, value):
     if uri.startswith("s3://"):
         import boto3
 
-        from pipelines.batch import put_json
-
-        put_json(boto3.client("s3"), uri, value)
+        bucket, key = location(uri)
+        boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=dumps(value).encode("utf-8"),
+                                      ContentType="application/json")
     else:
         path = Path(uri)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -269,8 +278,6 @@ def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
         for uri in locations:
             if uri.startswith("s3://"):
                 import boto3
-
-                from pipelines.batch import location
 
                 client = boto3.client("s3")
                 bucket, key = location(uri)
@@ -315,8 +322,6 @@ def verify_inputs(inventory):
         if uri.startswith("s3://"):
             import boto3
 
-            from pipelines.batch import location
-
             bucket, key = location(uri)
             if boto3.client("s3").head_object(Bucket=bucket, Key=key)["ETag"] != item["etag"]:
                 raise ValueError("처리 중 원본 객체가 변경되어 결과를 공개하지 않습니다")
@@ -357,7 +362,7 @@ def configure_storage(spark, output):
 
 def execute(spark, config):
     if isinstance(config, dict) and config.get("job") == "reviews":
-        from pipelines.spark_reviews import execute_reviews
+        from pipelines.gold_a.reviews import execute_reviews
 
         return execute_reviews(spark, config)
     if not isinstance(config, dict) or set(config) - {"job", "run_id", "inputs", "output_root", "input_complete", "max_order_rows"}:
@@ -371,8 +376,6 @@ def execute(spark, config):
     if not isinstance(output, str) or not output.strip() or output.startswith("s3a://"):
         raise ValueError("출력은 s3:// URI 또는 로컬 경로로 지정하세요")
     if output.startswith("s3://"):
-        from pipelines.batch import location
-
         if set(location(output)[1].split("/")) & {"bronze", "ground_truth"}:
             raise ValueError("Bronze·정답표 아래에는 결과를 쓸 수 없습니다")
     else:
@@ -445,8 +448,6 @@ def main():
     args = parser.parse_args()
     if args.config_uri.startswith("s3://"):
         import boto3
-
-        from pipelines.batch import location
 
         bucket, key = location(args.config_uri)
         config = json.loads(boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read())

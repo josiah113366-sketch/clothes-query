@@ -11,7 +11,7 @@
 | review_product_daily | 리뷰 작성 KST 날짜 × article_id | product_code, 리뷰 수·별점 합계·평균·1~2점 건수·비율 |
 | review_aspect_daily | 리뷰 작성 KST 날짜 × article_id × aspect × model_version | 점수별 리뷰 수·점수 합계·평균 |
 
-현재 실행은 Python 배치와 JSONL이다. Spark·Airflow·Parquet/Glue 스키마·실제 AWS 전체 연결까지 완료했다는 뜻은 아니다. 리뷰 모델을 실행하거나 truth 라벨로 판정을 대신 만들지 않는다.
+운영 진입점은 상위 spark_batch.py이며 거래·리뷰는 Spark/Parquet으로 로컬 검증했다. 리뷰 Spark 상품 연결·집계는 이 폴더의 reviews.py에 포함한다. 아래 Python/JSONL 명령은 기존 계산 검증·검색·부분 재처리용이며 운영 DAG 실행 경로와 구분한다. 클릭·퍼널·회원 Spark 전환, Glue 조회·실제 AWS 전체 연결은 아직 완료하지 않았다. 리뷰 모델을 실행하거나 truth 라벨로 판정을 대신 만들지 않는다.
 
 ## 입력과 상품 연결
 

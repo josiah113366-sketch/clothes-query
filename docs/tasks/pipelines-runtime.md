@@ -9,12 +9,14 @@
 - 공통 입력 규약·계산 규칙은 변경하지 않는다. 처음 일반 Python 시제품으로 구현했으나 사용자가 Spark 실행 엔진을 정정하고 PySpark 전환부터 진행하도록 승인했다. Spark 전환은 현재 승인 범위다. Kafka 소비·인프라 apply·이미지 push·운영 실행은 포함하지 않는다.
 - namespace·ServiceAccount·ECR 이미지 digest·노드 배치는 인프라가 공급한다. 기존 agent 신원을 재사용하지 않는다.
 
-## 구현 계획과 파일
+## 구현 파일 · 현재 구조
 
-- pipelines/batch.py: 입력 목록/ETag 고정·크기 제한·다운로드, 기존 회원/상품/거래/클릭/리뷰 Silver와 Gold A 호출, 고정 S3 참조 변환과 결과 공개.
-- pipelines/Dockerfile 및 Dockerfile.dockerignore: Python 실행 이미지와 원문·캐시·자격증명 제외. requirements.txt에 boto3·pyarrow 고정.
-- infra/platform/airflow/dags/silver_gold_a.py: 수동 작업 선택, digest·실행 신원 검사, 별도 Pod, 단일 실행·재시도 0회.
-- pipelines/tests/test_batch.py: 기존 계산 시나리오를 재사용해 실제 어댑터의 경로 변환·품질/R6·저장 실패 경계를 검증. 운영 경계 검증을 한 파일에 모은다.
+- pipelines/spark_batch.py: 공통 Spark 진입점·S3 URI/입력 목록·ETag 확인·Parquet 저장·거래 처리.
+- pipelines/silver/reviews.py: 공통 리뷰 정제와 Spark 리뷰 정제.
+- pipelines/gold_a/reviews.py: 리뷰 규칙·검색·부분 재처리와 Spark 리뷰 상품 연결/집계/실행.
+- pipelines/Dockerfile·Dockerfile.dockerignore·requirements.txt: Spark 업무 이미지·의존성·원문/시험/캐시 제외.
+- infra/platform/airflow/dags/silver_gold_a.py: 수동 Spark cluster 제출·최종 완료 대기·단일 실행.
+- pipelines/tests/test_spark_batch.py·test_spark_reviews.py: 실제 Spark 엔진에서 계산/Parquet/실패 경계 검증.
 - 기존 README와 브랜치 대장에 실행·설정·후속 연결을 기록한다.
 
 ## 완료 확인
@@ -37,7 +39,7 @@
 - DAG는 일반 Python 명령 대신 spark-submit cluster mode·최종 완료 대기·동적 Executor 1~2개·별도 세 ServiceAccount를 사용하도록 바꿨다. 실제 노드 자원·권한·이미지 digest 공급은 인프라와 맞춘다.
 - 실제 S3 SDK·파일시스템 경로 검증은 외부 통신 없는 Docker 내부 네트워크의 Moto 5.1.15에서 수행했다. Spark 4.2.0 S3A magic committer → Silver Parquet → 저장 결과 재조회 → Gold A Parquet → 완료 manifest까지 통과했다. 정상 승인 금액 30,000원, 객체 63개, 성공 후 __magic/_temporary 작업 객체 0개를 확인했다. AWS 실제 접근·IAM·Pod Identity 검증은 아니다.
 - 커미터 로그에서 데이터셋 폴더 안의 __magic_job-*/ 작업 객체와 멀티파트 시작·완료·목록 조회·정리를 확인했다. 임시 S3 권한은 이 동작에 맞춰 인프라와 제한한다. 별도 S3 tmp prefix를 근거 없이 확정하지 않는다.
-- README를 실제 Spark 진입점·명령·설정 키·파티션/물리 스키마·완료 공개·원본 메타데이터로 교체했다. 이전 batch.py는 시제품/검증용으로 보존하며 운영 DAG가 호출하지 않는다.
+- README를 실제 Spark 진입점·명령·설정 키·파티션/물리 스키마·완료 공개·원본 메타데이터로 교체했다. 이전 batch.py는 이 단계에서 시제품으로 보존했으나 아래 사용자 요청 정리 단계에서 제거했다.
 - 거래 단계 완료 범위는 거래 Silver/판매 Gold A다. 리뷰는 아래 후속 절에서 전환했으며 클릭·퍼널·회원 Spark 전환, Glue/Athena 공개 대상 선택, 운영 S3 권한·Pod Identity·DAG 배포·실제 검증 데이터 범위는 아직 완료하지 않았다.
 
 - 확정 환경 재검증: Python 3.10.12 / Spark 4.2.0 이미지 빌드 성공, 실제 Spark 비교 시험 3개 통과(46.088초), Z 시각 파싱·PyArrow 25.0.1 import·pip check 통과. 같은 Python 3.10 이미지로 S3A magic → Silver/Gold A 저장도 재검증해 승인 금액 30,000원·객체 63개·잔여 작업 객체 0개를 확인했고 임시 컨테이너/네트워크를 정리했다. 호스트 회귀 115개 통과·Spark 전용 모듈 1개 별도 실행, Ruff는 Python 3.10 대상으로 검사했다. 로컬 검증 이미지의 CODE_REF는 작업 중임을 표시한 값이며 배포 시 최종 커밋으로 재빌드한다.
@@ -45,12 +47,19 @@
 
 ### 리뷰 Spark 전환
 
-- 인프라 응답 대기와 병행해 기존 리뷰 Silver·Gold A 계산을 Spark 실행기로 연결했다. job=reviews로 같은 진입점·DAG를 사용한다. 코드/시험은 spark_reviews.py와 test_spark_reviews.py에 모았고 별도 DAG·규약 문서를 늘리지 않았다.
+- 인프라 응답 대기와 병행해 기존 리뷰 Silver·Gold A 계산을 Spark 실행기로 연결했다. job=reviews로 같은 진입점·DAG를 사용한다. 처음 spark_reviews.py와 test_spark_reviews.py로 추가했으나 아래 사용자 요청에 따라 실행 코드는 기존 Silver/Gold 리뷰 파일에 통합했다. 별도 DAG·규약 문서는 늘리지 않았다.
 - Executor에서 review_id별 기존 collect_latest/normalize_review를 호출해 오류 키·동시각 충돌·최신 emitted_at을 처리한다. 원본 참조는 파일/줄로 보존하며 KST 범위 선택은 전체 키 검사 후 수행한다. ID당 행 한도로 Executor 메모리의 무한 증가를 막는다.
 - 상품 기준정보 직접 연결과 명시적 매핑, 별점 1~2점 저평점 집계, -2~2 속성 점수 분포·평균을 Spark SQL로 계산한다. JSONL/CSV 모델 입력과 모델 버전 선택을 지원하며 결과 없음은 0점으로 세지 않는다. 분석 완료 여부는 UNVERIFIED다.
 - Silver Parquet을 저장한 뒤 재조회해 Gold A를 계산한다. 리뷰 품질 미완료는 Silver 근거를 공개하되 Gold A를 교체하지 않는다. 정상 빈 파일 입력은 0행 결과로 공개하며 파일 자체가 없는 경우와 구분한다. 평가 정답표 경로는 거부한다.
 - Spark 4.2.0 / Python 3.10.12 local[2]에서 리뷰 시험 3개 통과(82.902초): KST 날짜 경계·최신 버전·동일 내용 중복·충돌·잘못된 별점·기존 Python 수치 비교·모델 중복/충돌/범위 밖 ID·미분석 제외·Parquet 재실행·오류 시 이전 Gold 유지·CSV·상품 매핑·정상 0건을 검증했다.
 - 공통 실행기 변경 후 거래 Spark 시험도 3개 재검증 통과(64.154초). 기존 Python 회귀 115개 통과, Spark 모듈 2개는 host에서 건너뛰고 실제 Linux Spark로 별도 검증한다. 실제 AWS 리뷰/모델 파일·권한 검증은 아직이다. 입력 자동 창 계산·부분 범위 병합·Glue 공개·정기 실행 연결도 후속이다.
+
+### 사용자 요청: 필요한 실행 코드만 유지
+
+- 별도 spark_reviews.py를 제거하고 Spark 정제는 silver/reviews.py, 리뷰 Spark 집계/실행은 gold_a/reviews.py에 통합했다. 공통 정제·모델 규칙은 기존 함수/상수를 공유한다. Spark 의존성은 함수 호출 시 읽어 기존 단위 검사도 실행 가능하게 했다.
+- 사용하지 않는 단일 Python S3 실행기 batch.py와 그 실행기에만 해당하는 test_batch.py를 제거했다. S3 URI 검사와 JSON 저장은 운영 공통 진입점 spark_batch.py로 옮겨 구 실행기 import를 없앴다.
+- 검증: Python 회귀 107개 통과(구 실행기 전용 시험 8개 제거), Spark 전용 모듈 2개는 별도 실행. 통합 후 실제 리뷰 Spark 시험 3개 재통과(64.593초), Ruff Python 3.10 검사 통과. 구 batch.py 의존성 제거 후 S3A 에뮬레이터 검증도 통과해 승인 금액 30,000원·객체 57개·잔여 작업 객체 0개를 확인했고 임시 컨테이너/네트워크를 정리했다.
+- 아직 사용되는 데이터셋별 정제/계산 함수·검색·부분 재처리를 무작정 삭제하지 않는다. 운영 DAG 진입점은 Spark 하나이며 기존 Python 집계는 기준 수치 비교에도 쓰인다. 아래 단일 Python 시제품의 실행 기록은 과거 기록이다.
 
 ### 이전 단일 Python 시제품 검증 기록
 

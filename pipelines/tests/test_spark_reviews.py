@@ -14,11 +14,16 @@ try:
 except ModuleNotFoundError as error:
     raise unittest.SkipTest("Spark 이미지에서 spark-submit으로 별도 실행합니다") from error
 
-from pipelines.gold_a.reviews import aggregate_aspects, aggregate_day
+from pipelines.gold_a.reviews import (
+    aggregate_aspects,
+    aggregate_day,
+    build_aspects,
+    build_product_daily,
+)
 from pipelines.silver.common import collect_latest
+from pipelines.silver.reviews import build_reviews_spark as build_reviews
 from pipelines.silver.reviews import normalize_review
 from pipelines.spark_batch import execute
-from pipelines.spark_reviews import build_aspects, build_product_daily, build_reviews
 
 
 def rows(frame):

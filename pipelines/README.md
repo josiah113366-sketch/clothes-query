@@ -2,7 +2,7 @@
 
 ## 운영 실행 연결 · Spark 거래 배치
 
-최종 실행 엔진은 **Spark**다. 기존 `batch.py`는 단일 Python 시제품·검증용으로 보존하고 운영 DAG에서는 호출하지 않는다. Spark 실행 범위는 거래 Silver·판매 Gold A와 리뷰 Silver·리뷰 Gold A다. 클릭·퍼널·회원 Spark 전환과 실제 운영 배포는 별도다.
+최종 실행 엔진은 **Spark**다. 운영 진입점은 `spark_batch.py` 하나다. 이전 단일 Python S3 실행기 `batch.py`는 제거했다. Spark 실행 범위는 거래 Silver·판매 Gold A와 리뷰 Silver·리뷰 Gold A다. 클릭·퍼널·회원 Spark 전환과 실제 운영 배포는 별도다.
 
 ### 실행 환경·이미지
 
@@ -34,6 +34,13 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
 
 거래는 필요한 변경 이력·주문상품·결제를 함께 준비한다. UTC 수집 날짜 폴더를 KST 일별 매출로 바로 취급하지 않는다. input_complete는 실행자의 준비 확인이며 원천 완전성을 증명하지 않는다. 입력 객체 ETag를 공개 전 다시 확인하지만 이는 특정 버전 직접 읽기·Kafka watermark 검증을 대신하지 않는다. 상품 JSONL 스냅샷의 실제 S3 위치는 아직 확인이 필요하다.
 
+### 코드 구성
+
+- spark_batch.py: 공통 운영 진입점·S3 입력/출력과 거래 Spark 처리
+- silver/reviews.py: 공통 리뷰 정제 규칙과 Spark 리뷰 정제
+- gold_a/reviews.py: 리뷰 지표·점수 규칙과 Spark 상품 연결/집계/실행
+- 별도 spark_reviews.py와 이전 batch.py는 두지 않는다. 기존 데이터셋의 순수 Python 계산은 비교 검증 및 아직 필요한 검색·부분 재처리에 사용하며 운영 DAG는 Spark만 호출한다.
+
 ### 리뷰 실행 요청
 
 같은 진입점과 DAG에서 job=reviews를 사용한다. 운영 리뷰 파일을 명시적으로 지정하며 정답표 입력은 거부한다. KST 날짜 선택은 파일 경로가 아니라 정제된 created_at 시각을 기준으로 수행한다. 필요한 UTC 날짜 파일을 빠짐없이 지정하는 책임은 실행 요청 생성 단계에 있다.
@@ -57,7 +64,7 @@ analysis는 선택이다. 생략하면 review_product_daily만 생성하며 점�
 
 리뷰 product_id는 상품 article_id와 직접 연결한다. 임시 키가 필요한 경우에만 inputs.mapping에 product_id/article_id JSONL을 지정하며, 매핑 중복·상품 누락을 거부한다. 속성은 기존 11개 범주를 사용하고 3분류 감성으로 변환하지 않는다.
 
-리뷰는 Executor에서 review_id별로 기존 collect_latest/normalize_review를 호출해 최신 emitted_at·동시각 충돌·오류 키 보류를 처리한다. 그룹당 최대 10,000행(max_key_rows로 조정)이며 초과하면 실패한다. 상품 연결과 별점·속성 점수 집계는 Spark SQL로 수행한다. 평균·비율은 기존 Python의 HALF_UP 자리수와 맞춘다.
+리뷰는 silver/reviews.py의 build_reviews_spark가 Executor에서 review_id별로 공통 collect_latest/normalize_review를 호출해 최신 emitted_at·동시각 충돌·오류 키 보류를 처리한다. 그룹당 최대 10,000행(max_key_rows로 조정)이며 초과하면 실패한다. 상품 연결과 별점·속성 점수 집계는 Spark SQL로 수행한다. 평균·비율은 기존 Python의 HALF_UP 자리수와 맞춘다.
 
 출력은 silver/runtime/reviews 및 gold_a/runtime/reviews 아래 동일한 runs/completed/current 구조다. Silver: silver_reviews/quarantined_records/dq_results, Gold: review_product_daily 및 선택적 review_aspect_daily다. 리뷰 검사는 reviews.v1이며 거래 공통 YAML을 적용했다고 기록하지 않는다. 각 manifest의 KST 범위를 확인해 사용하며 서로 다른 실행을 단순 합산하지 않는다. 현재 요청 범위 전체 스냅샷 방식이고 날짜·상품 부분 병합이나 자동 입력 창 계산은 아직 연결하지 않았다.
 
