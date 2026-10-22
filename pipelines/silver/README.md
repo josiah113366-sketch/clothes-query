@@ -1,5 +1,60 @@
 # Silver 입력·출력 현황
 
+## 결정: 결제 내용 지문 저장
+
+- 거래 Silver는 공통 YAML 입력 검사 후 `pipelines/payment_fingerprint.py`를 호출한다. 시각 변환 전 원본의 `requested_at`, `completed_at` 문자열을 전달한다.
+- 정상 `payment_attempts`에 `payment_content_hash`(SHA-256 소문자 64자리)와 `fingerprint_version`(`payment-content.v1`)을 저장한다. 기존 UTC·KST 시각 컬럼과 금액은 유지한다.
+- 같은 `payment_id`의 같은 버전·같은 지문은 동일 내용 재수신으로 1건만 남기고, 지문이 다르면 기존 내용 충돌 처리에 따라 해당 키 전체를 격리한다. 주문 연결·금액 검사도 계속 적용한다.
+- 공통 함수가 시각을 UTC 소수초 6자리로 통일하므로 같은 순간의 UTC·KST 표현은 같은 지문이다. 6자리 초과 정밀도 등 지문 입력 오류는 `INVALID_VALUE`로 격리하고 같은 키의 정상 후보도 보류한다. 시간대를 추측하거나 정밀도를 조용히 버리지 않는다.
+- Silver 검사 버전은 `transactions.v8`이다. YAML 입력 규칙 버전·지문 버전과 역할이 다르다. Gold B 호출 연결·원천 처리 완료 범위 확인·실제 A/B 대조 잡은 이번 변경에 포함하지 않는다.
+
+
+## R6용 주문 금액 검사 출력
+
+기존 금액 검사를 다시 만들지 않고 dq_results의 amount_checks를 `order_amount_checks.jsonl`로 펼친다. 로컬 거래 실행 완료 후 current.json의 outputs.order_amount_checks로 읽는다. 실행 1회 × 검사 종류 × 주문당 1행이며 중복 소비 키는 run_id/check_name/order_id다. 기존 dq_results·quarantined_records도 유지한다. R6가 두 파일의 오류 건수를 합산하면 같은 오류가 중복될 수 있다.
+
+| 컬럼 | JSON 값 / 조회 타입 제안 | 의미 |
+|---|---|---|
+| run_id | 문자열 / STRING | 이번 실행 ID |
+| checked_at | 시간대 포함 ISO 문자열 / TIMESTAMP(UTC) | 입력의 금액 검사 계산 완료 후 기록한 실행 단위 시각. 주문/결제 업무 시각이 아님 |
+| order_id | 문자열 / STRING | 검사한 주문 |
+| check_name | 문자열 / STRING | order_item_total_match |
+| check_version | 문자열 / STRING | items-sum-v1. manifest의 파이프라인 검사 버전 transactions.v7과 구분 |
+| status | 문자열 / STRING | PASS/MISMATCH/UNVERIFIED/PENDING_REFERENCE/ITEM_ERROR |
+| order_total_amount | 정수 / BIGINT | 주문 총액 |
+| item_total_amount | 정수 또는 null / BIGINT | 계산한 상품 합계. 검사 불가이면 null |
+| amount_difference | 정수 또는 null / BIGINT | 상품 합계 − 주문 총액. 검사 불가이면 null |
+| source_manifest | 문자열 / STRING | runs/실행-ID/manifest.json의 고정 경로 |
+
+위 타입은 JSON 값과 후속 조회용 명세이며 Athena 테이블 생성 완료를 뜻하지 않는다. checked_at은 같은 실행 내 모든 주문에 같은 값으로 부여한다. build_silver는 순수 검사값만 반환하고 CLI/run 저장 단계에서 실행 메타데이터를 연결한다.
+
+```text
+silver/transactions/
+  current.json                       최신 공개 참조
+  runs/run-.../
+    manifest.json                    변경하지 않는 해당 실행의 고정 기록
+    order_amount_checks.jsonl        R6용 조회 결과
+    dq_results.jsonl                 기존 품질 요약
+    quarantined_records.jsonl        기존 오류 상세
+    ...                              기존 업무 결과
+```
+
+고정 manifest는 입력·출력 참조/실행 ID/checked_at을 포함하고, 모든 결과와 고정 manifest 저장 성공 후 current.json을 교체한다. 실패하면 이전 공개 결과를 유지한다. source_manifest로 과거 결과를 찾고, 고정 manifest 안의 manifest_path는 최신 참조 주소이므로 이를 따라가 과거 실행을 대체하지 않는다. runs 전체를 업무 결과로 합치지 않는다.
+
+R6는 MISMATCH만 금액 불일치로 본다. UNVERIFIED는 입력 준비 미확인, PENDING_REFERENCE는 주문상품 미도착, ITEM_ERROR는 상품 오류로 검사 보류다. 같은 실행 재조회는 중복 소비하지 않고 후속 실행의 같은 주문 MISMATCH는 기존 이상 지속, 실제 재검사 PASS는 해소 여부 재판정에 사용한다. 주문 자체가 오류로 제외되면 이 출력에 없을 수 있으며 행 부재·검사 대기를 해소로 간주하지 않는다.
+
+실행별 파일은 보존하지만 로컬 실행의 자동 알림·이상 지속/해소 판정은 하지 않는다. 최신 실행만 읽으면 중간 실행을 건너뛸 수 있어 소비 방식은 주현과 합의해야 한다. S3/Parquet/Athena·권한·정기 실행·판정 잡 연결은 이번 구현 범위가 아니다.
+## 결제 대조를 위한 원본 추적 (로컬 초안)
+
+공통 설계·담당자별 PR 확인표는 [공통 계약의 대조 잡 초안](../../docs/contracts/README.md#결제-경로-대조-잡-초안-2026-10-21)에 모은다. 실제 대조 잡과 Kafka Sink 변경은 아직 없다.
+
+- 거래 JSONL 입력에 제안 필드 kafka_topic/kafka_partition/kafka_offset/kafka_timestamp/kafka_timestamp_type이 있으면 검사한 값만 원본 참조에 보존한다. timestamp는 시간대 포함 ISO 문자열, type은 CreateTime/LogAppendTime이다. 실제 Bronze 필드명 합의는 필요하다.
+- Gold A inputs → Silver current.json → outputs.impact_candidates의 source → Bronze 파일·줄·kafka 순서로 찾아간다. 격리 행에는 kafka_reference를 남긴다. 정상 업무 결과의 지표·그레인에 Kafka 컬럼을 넣지 않는다.
+- 거래 manifest의 kafka_observations는 입력별 메타데이터 VALID/INVALID/MISSING 건수와 토픽·파티션별 관측 min/max offset·행 수·고유 offset 수다. 정상·격리 전 입력을 기록하므로 오류 후보도 추적한다.
+- coverage_status=UNVERIFIED는 항상 유지한다. 관측 범위는 원천의 전체 범위·연속성·양쪽 처리 완료를 증명하지 않는다. Kafka 시각을 무조건 브로커 도착 시각으로 간주하지 않는다.
+- 누락·잘못된 추적 필드는 해당 상태와 필드명만 기록하고 업무 품질 판정과 분리한다. 기존 메타데이터 없는 입력은 동작하지만 정확한 Kafka 대조는 확인 불가다. source_ts_ms 또는 파일명으로 Kafka 위치·시각을 채우지 않는다.
+- 추적 기능은 transactions.v6에서 추가됐고 현재 통합 검사 버전은 transactions.v8이다. 실제 Gold B 스냅샷·범위 증거·비교 계약이 없으므로 현재 실행은 MATCH/MISMATCH를 판정하지 않는다.
+
 ## 결정: 회원 현재 상태 (`members_current`)
 
 | 항목 | 기준 |

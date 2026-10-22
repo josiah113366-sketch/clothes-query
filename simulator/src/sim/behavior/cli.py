@@ -5,10 +5,17 @@ from typing import Annotated
 import typer
 
 from sim.behavior import params
+from sim.behavior.api_sink import (
+    ApiCatalogSource,
+    ApiClickSink,
+    ApiMemberSource,
+    ApiOrderSink,
+)
 from sim.behavior.kafka_sink import ClickSinkError, KafkaClickSink
-from sim.behavior.pool import DbCatalogSource, DbMemberSource
+from sim.behavior.pool import CatalogSource, DbCatalogSource, DbMemberSource, MemberSource
 from sim.behavior.runner import BehaviorError, BehaviorRunner, stop_on_signals
-from sim.behavior.sink import ClickSink, DbOrderSink, JsonlClickSink, NullClickSink
+from sim.behavior.sink import ClickSink, DbOrderSink, JsonlClickSink, NullClickSink, OrderSink
+from sim.common.api import BACKENDS, load_api_client, load_backend
 from sim.common.clock import SimClock
 from sim.common.config import ConfigError, load_config
 from sim.common.control import DEFAULT_CONTROL_FILE, MODES, FileControlSource
@@ -17,7 +24,7 @@ from sim.common.kafka import CLICK_TOPIC, load_kafka_settings
 
 app = typer.Typer(help="쇼핑 행동: 방문, 주문, 결제, 상태 전이", no_args_is_help=True)
 
-CLICK_SINKS = ("none", "jsonl", "kafka")
+CLICK_SINKS = ("none", "jsonl", "kafka", "api")
 ALLOW_REMOTE_ENV = "SIM_ALLOW_REMOTE_DB"
 
 
@@ -58,6 +65,10 @@ def live(
     click_file: Annotated[Path, typer.Option(help="--click-sink jsonl일 때 파일 경로")] = Path(
         params.DEFAULT_CLICK_FILE
     ),
+    backend: Annotated[
+        str | None,
+        typer.Option(help=f"쓰고 읽는 곳 ({' | '.join(BACKENDS)}). 기본: SIM_BACKEND, 없으면 db"),
+    ] = None,
 ) -> None:
     """방문 → 조회 → 장바구니 → 주문 → 결제 → 상태 전이를 만들어 주문 테이블에 쓴다."""
     if mode not in MODES:
@@ -65,8 +76,11 @@ def live(
     if click_sink not in CLICK_SINKS:
         raise _fail(f"--click-sink는 {', '.join(CLICK_SINKS)} 중 하나여야 합니다.")
     try:
-        config = load_config()
-        check_db_target(config.database_url, os.environ.get(ALLOW_REMOTE_ENV) == "1")
+        backend = load_backend(backend=backend)
+        config = load_config(require_database=backend == "db")
+        if backend == "db":
+            check_db_target(config.database_url, os.environ.get(ALLOW_REMOTE_ENV) == "1")
+        client = load_api_client() if backend == "api" or click_sink == "api" else None
     except (ConfigError, DatabaseTargetError) as error:
         raise _fail(str(error)) from None
     seed = config.seed if seed is None else seed
@@ -75,23 +89,39 @@ def live(
 
     kafka_clicks = _kafka_click_sink() if click_sink == "kafka" else None
     clicks: ClickSink
+    api_clicks = None
     if kafka_clicks is not None:
         clicks, click_label = kafka_clicks, f"kafka (topic {CLICK_TOPIC})"
+    elif click_sink == "api":
+        assert client is not None
+        api_clicks = ApiClickSink(client, warn=lambda m: typer.echo(f"경고: {m}", err=True))
+        clicks, click_label = api_clicks, f"api ({client.host})"
     elif click_sink == "jsonl":
         clicks, click_label = JsonlClickSink(click_file), f"jsonl ({click_file})"
     else:
         clicks, click_label = NullClickSink(), "none"
-    typer.echo(f"대상 DB: {describe_target(config.database_url)}")
+    orders: OrderSink
+    members: MemberSource
+    catalog: CatalogSource
+    if backend == "api":
+        assert client is not None
+        orders = ApiOrderSink(client)
+        members, catalog = ApiMemberSource(client), ApiCatalogSource(client)
+        typer.echo(f"대상 API: {client.host}")
+    else:
+        orders = DbOrderSink(config.database_url)
+        members = DbMemberSource(config.database_url)
+        catalog = DbCatalogSource(config.database_url)
+        typer.echo(f"대상 DB: {describe_target(config.database_url)}")
     typer.echo(
         f"모드: {mode}  배속: {speed:g}  하루 방문: {visits_daily:,.0f}  시드: {seed}  "
         f"run_salt: {run_salt}  클릭 Sink: {click_label}  제어 파일: {control_file}"
     )
-    orders = DbOrderSink(config.database_url)
     runner = BehaviorRunner(
         orders,
         clicks,
-        DbMemberSource(config.database_url),
-        DbCatalogSource(config.database_url),
+        members,
+        catalog,
         clock,
         FileControlSource(control_file, warn=lambda m: typer.echo(f"경고: {m}", err=True)),
         seed=seed,
@@ -116,6 +146,9 @@ def live(
     if kafka_clicks is not None:
         stats = kafka_clicks.stats
         typer.echo(f"클릭 발행: 성공 {stats.sent:,}건, 실패 {stats.failed:,}건")
+    if api_clicks is not None:
+        sent = api_clicks.stats
+        typer.echo(f"클릭 전송(API): 성공 {sent.sent:,}건, 실패 {sent.failed:,}건")
 
 
 def _kafka_click_sink() -> KafkaClickSink:

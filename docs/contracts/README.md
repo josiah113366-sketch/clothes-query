@@ -114,6 +114,50 @@ YAML의 `source_rules`는 현재 DDL을 충실히 옮긴 기준이다. `proposed
 
 ## 6. 주문・주문상품 처리 계약
 
+### 결제 내용 지문 규약 — payment-content.v1
+
+**상태: 사용자 승인으로 공통 함수와 Silver 호출·저장까지 로컬 구현. Gold B 호출·적재·정리 뷰 연결은 후속 작업.** 입력 규칙과 별도 규약이며 format_rules.yaml에 지문 설정을 추가하지 않는다.
+
+| 항목 | v1 기준 |
+|---|---|
+| 내용 필드 순서 | order_id, attempt_no, method, pg, amount, status, failure_code, requested_at, completed_at |
+| 식별·제외 정보 | payment_id는 비교 키로 별도 유지. Kafka 위치·시각, CDC 정보, loaded_at 등 전달 정보는 지문 제외 |
+| 정수 | attempt_no/amount는 1 이상 Python 정수. bool·문자열·실수 변환 없음 |
+| 문자열 | 비어 있지 않은 문자열, trim/대소문자/유니코드 정규화 없음. 허용값 정책은 공통 입력 검사에서 적용 |
+| NULL | SUCCESS의 failure_code는 명시적 None과 필드 생략을 JSON null로 통일한다(기존 YAML 검사와 일치). FAILED의 누락/None/빈 문자열/공백은 오류. 나머지 8개 필드는 필수이며 임의 보충 없음 |
+| 시각 입력 | 시간대 포함 ISO 문자열: YYYY-MM-DDTHH:MM:SS[.1~6자리](Z 또는 ±HH:MM). datetime 객체·시간대 없는 값·7자리 이상 소수초는 거부 |
+| 시각 정규화 | UTC, 소수초 6자리, Z 고정. 반올림·절삭 없음 |
+| 직렬화 | 고정 순서 JSON 배열, ensure_ascii=False, 공백 없는 separators, UTF-8, NaN 금지 |
+| 알고리즘·반환 | SHA-256 소문자 64자리 payment_content_hash, fingerprint_version=payment-content.v1 |
+
+공통 구현은 [pipelines/payment_fingerprint.py](../../pipelines/payment_fingerprint.py)다. 공개 함수 payment_fingerprint(payment)는 위 두 필드의 dict를 반환한다. canonical_payment_content(payment)는 명세 확인용 UTF-8 바이트를 반환하며 내용을 로그·원장에 통째로 쓰지 않는다. 원본 dict는 수정하지 않는다. FingerprintError는 실패한 field만 전달한다.
+
+```python
+from pipelines.payment_fingerprint import payment_fingerprint
+
+# 호출 경로가 업무 입력 검사를 통과시킨 원천 행을 전달한다.
+# 시각 문자열은 datetime/Spark TIMESTAMP 등으로 바꾸기 전 값이어야 한다.
+# 이후 이 두 필드를 각 경로의 결과/원장에 보존하는 연결은 후속이다.
+fingerprint = payment_fingerprint(validated_payment)
+```
+
+양쪽 호출 순서는 원천 JSON 파싱 → 공통 업무 입력 검사 → 원천 시각 문자열 그대로 지문 계산 → Silver UTC/KST 출력 또는 Gold B TIMESTAMP 변환·저장이다. 업무 입력 검사기가 시각을 내부적으로 파싱하더라도 원천 문자열은 보존해야 한다. 기존 입력 검사는 7자리 이상 소수초를 허용할 수 있으므로 지문 함수가 정밀도를 확인하기 전에 datetime/Spark 변환을 하면 안 된다. Silver의 requested_at_utc/completed_at_utc를 재매핑하는 방식은 원천 정밀도 손실을 감출 수 있어 이 규약에서는 사용하지 않는다. 함수는 필드 별칭을 자동 추측하지 않는다. 기존 KST 출력·집계는 유지한다.
+
+입력 정책과 지문 규칙은 분리한다. 이 함수가 미등록 실패 코드 문자열의 지문을 만들 수 있어도 그 코드를 정상 입력으로 수용한다는 뜻은 아니다. FormatRules의 허용 목록·조건 검사는 먼저 적용해야 한다. method/pg의 enum, UUID 형식, 완료>=요청 등 정책을 지문 모듈에 중복 정의하지 않는다. 공통 YAML/DDL은 이번 작업에서 변경하지 않는다.
+
+지문은 동일 payment_id의 내용 비교에 사용한다. 같은 버전의 다른 해시는 충돌 근거이며, 같은 해시만으로 원본 범위 완료/누락 없음을 증명하지 않는다. fingerprint_version이 다르면 지문 불일치를 곧바로 내용 충돌로 확정하지 않고 비교 불가로 두거나 같은 버전으로 원본에서 재계산한다. 필드/정규화/직렬화/알고리즘 변경은 지문 버전을 올리고 이전 기록의 전환 절차를 합의한다. 입력 허용값만 바뀌면 지문 버전을 반드시 바꿀 필요는 없다.
+
+공통 코드의 고정 벡터:
+
+```text
+["o-1",1,"CARD","PG_A",20000,"SUCCESS",null,"2026-10-21T06:00:00.000000Z","2026-10-21T06:00:02.123000Z"]
+SHA-256: efad032726ae5d4a0ab003e0e99175c4a372076e9d5e26a5c5d7a2b0235979fa
+```
+
+Gold B 원장은 두 컬럼 보존 정의를 반영했지만 실제 호출/원장 적재/뷰 동작 완료를 뜻하지 않는다. Silver는 입력 검사 후 원본 시각 문자열로 지문을 계산하고, 같은 payment_id의 지문·버전으로 중복·충돌을 비교하며 정상 결과에 두 컬럼을 저장한다. 지문 입력 오류는 INVALID_VALUE로 격리한다. 현재 비교 범위는 이번 실행에 제공한 입력이며, 과거 실행의 모든 동일 ID와 자동 비교하지 않는다. 기존 동일 ID 후보·지문 버전 혼재·원본 재계산·해시만으로 변경 필드를 알 수 없는 경우의 원본 추적은 후속 연결에서 검토한다.
+
+### 주문·주문상품 기준
+
 | 대상 | 처리 기준 | 상태・근거 |
 |---|---|---|
 | 주문 상태 | 허용 상태와 `status_reason` 조건은 YAML의 원천 규칙 참조 | 결정: DDL |
@@ -165,9 +209,88 @@ YAML은 CDC 봉투를 해석하고 원천 타입을 정규화한 뒤의 업무 �
 
 재처리와 상시 적재・파일 합치기가 같은 출력 범위를 동시에 쓰지 않게 하는 방법, 오류 원본의 S3 보존, 여러 폴더 중 일부 실패 시 상태, 에이전트의 Gold A・Silver 조회 권한은 별도 실행 설계에서 확인한다.
 
-### 오류 영향 범위와 갱신 보류
+### 결제 경로 대조 잡 초안 (2026-10-21)
 
-**상태: 제안・구현 전.** 오류가 있는 관련 작업 전체를 중단하는 현재 Gold A 처리를, 영향 범위를 확인할 수 있을 때 범위별로 갱신하는 방향이다. 단일 행 형식 검사 YAML에는 넣지 않는다.
+**상태: 제안.** 아래는 Silver/Gold B 담당자 공동 검토용이다. 승인된 로컬 구현은 거래 Silver의 선택적 Kafka 원본 참조 보존뿐이다. 실제 A/B 대조 잡·Gold B 어댑터·Airflow 실행·알림은 아직 연결하지 않았다.
+
+#### 목적과 구조
+
+업무 장애 조사와 처리 누락 검증을 구분한다. PG 장애 시 매출 비교는 completed_at/ordered_at과 업무 키를 사용한다. 아래 잡은 같은 결제 원본을 두 경로가 빠짐없이 같은 기준으로 처리했는지 확인한다. Gold A와 Gold B 전체 집계 숫자를 같게 만드는 작업이 아니다.
+
+```mermaid
+flowchart LR
+  K[Kafka] --> B[Bronze 원본과 Kafka 메타데이터]
+  K --> GB[Gold B 원장 및 중복 제거 뷰]
+  B --> S[Silver 정상 결제·오류·실행 기록]
+  S --> A[Gold A 집계·입력 참조]
+  S --> R[별도 대조 잡]
+  GB --> R
+  A --> R
+  R --> O[대조 결과·차이 근거]
+  O -. 합의 후 연결 .-> AG[탐지·조사 에이전트]
+```
+
+대조 잡이 Gold B를 조회하는 것이며 Gold A의 집계 입력을 Gold B로 바꾸지 않는다. AI가 원본 일치 여부를 판정하지 않고 키·값·처리 범위를 결정적인 코드로 비교한다.
+
+#### 비교할 내용
+
+| 단계 | 비교 대상 | 기준·예외 |
+|---|---|---|
+| 입력 준비 | 두 경로의 원천 토픽·파티션별 범위, 원천/소비 규칙 버전, 읽은 실행 묶음 | 같은 완료 범위를 고정한 뒤 비교. 최대 시각 또는 offset 최솟값/최댓값만 같다고 준비 완료로 보지 않음 |
+| 포함 여부 | Silver payment_attempts ↔ Gold B 중복 제거 뷰의 payment_id 집합 | 원장은 재수신을 포함할 수 있어 원장 행 수를 직접 비교하지 않음 |
+| 업무 값 | 같은 payment_id의 order_id·attempt_no·status·amount·pg·method·failure_code·requested_at·completed_at | 시각은 같은 순간으로 정규화하고 금액은 정수로 비교. UNKNOWN 원인 분류는 원본 failure_code를 대체하지 않음 |
+| 제외 이유 | 정상 출력에서 빠진 키 ↔ 각 경로의 오류·격리·충돌·연결 대기 기록 | 정상 99건+격리 1건을 정상 100건과 같다고 판정하지 않음. 제외 근거까지 보고 정책 차이/업무 차이 구분 |
+| Gold A 자체 검증 | 사용한 Silver 성공 결제 → 시간별 고유 성공 order_id 수·amount 합계 ↔ Gold A paid_order_count·approved_amount | completed_at KST 구간. order_count는 ordered_at 기준이므로 성공 결제 수와 비교하지 않음. PARTIAL 보류 범위는 비교 불가로 표시 |
+
+Gold B 뷰가 최신 결과만 담고 있어 과거 원천 범위로 고정할 수 없다면, 먼저 범위 고정 스냅샷/추적 참조가 필요하다. 업무 시각만 필터링해 같은 원본을 읽었다고 간주하지 않는다. 비교 컬럼이 없으면 임의로 NULL/0으로 채우지 않는다.
+
+#### 실행과 결과 제안
+
+- Gold A 공개 완료를 실행 신호로 삼는 안이다. 상시 의무 실행 주기와 재시도 횟수는 은서·인프라 담당자와 합의한다. 대조 때문에 Gold B 조기 탐지를 기다리게 하지 않는다.
+- 두 경로 중 한쪽이 해당 원천 범위까지 아직 읽지 않았다는 근거가 있으면 WAITING_INPUT, 범위/컬럼/규칙 호환 여부를 확인할 수 없으면 NOT_COMPARABLE이다. 불일치로 단정하지 않는다.
+- 공통 범위와 규칙을 확인한 뒤 차이가 있으면 MISMATCH, 모든 비교가 통과하면 MATCH다. 범위 없음/양쪽 빈 결과만으로 MATCH를 만들지 않는다.
+- 결과 기록 제안: comparison_run_id, 비교 계약 버전, 양쪽 실행 ID/manifest/규칙 버전, 토픽별 범위 증거, 대상 KST 구간, 상태, missing/extra/conflicting 키 건수, 차이 원본 참조, 보류 이유, 실행 시각. 원문·회원 속성은 복사하지 않는다.
+- 대조 오류를 곧바로 원천 수정·자동 재처리로 연결하지 않는다. 입수 대기/규칙 차이/계산 오류를 조사하고 기존 승인 절차로 처리한다.
+
+#### Bronze → Silver 원본 추적 입력 초안
+
+| Bronze JSON 행 필드 제안 | 타입·의미 |
+|---|---|
+| kafka_topic | 비어 있지 않은 문자열 |
+| kafka_partition | 0 이상 정수 |
+| kafka_offset | 0 이상 정수. 파티션 내부 위치 |
+| kafka_timestamp | 시간대 포함 ISO 시각. source_ts_ms나 completed_at과 다름 |
+| kafka_timestamp_type | CreateTime 또는 LogAppendTime. 무조건 브로커 도착 시각으로 해석하지 않음 |
+
+성철과 실제 필드명·시간 표현을 합의해야 한다. Sink 설정은 이번 변경에서 수정하지 않는다. 거래 Silver는 위 필드가 있을 때 검사된 값만 `_input_source.kafka`로 보존하며 정상/오류 후보는 impact_candidates의 source로, 격리 행은 kafka_reference로 연결한다. 원문 필드를 원본 참조에 통째로 복사하지 않는다.
+
+거래 current.json의 kafka_observations에 입력 데이터셋별 VALID/INVALID/MISSING 건수와 토픽·파티션별 min_offset/max_offset/row_count/unique_offset_count를 남긴다. coverage_status는 항상 UNVERIFIED이며 관측만으로 연속성·처리 완료·대조 일치를 보장하지 않는다. 파일명 시작 offset+줄 번호로 위치를 추정하지 않는다. 메타데이터 누락/오류는 업무 행을 격리하는 새 규칙이 아니고 추적 제한으로 기록한다. 대조 잡은 이 경우 실제 근거 없이 MATCH를 만들 수 없다.
+
+#### 담당자별 PR 확인표
+
+체크는 담당자가 확인할 항목이며 현재 동의·구현 완료를 뜻하지 않는다. 확인일 기준 #20/#26은 main 머지, #34는 pipelines/silver로 머지된 상태다. #34의 main 반영은 별도 확인이 필요하다.
+
+| 대상 | 담당·관련 PR | 무엇을 확인할지 |
+|---|---|---|
+| ☐ 원본 보존 | 성철: [#32 CDC/Sink](https://github.com/josiah113366-sketch/clothes-query/pull/32), connectors/bronze-s3-sink.yaml | Kafka 행별 위치·시각 보존 방식, timestamp 유형, 실제 샘플. 경로 날짜 설정만으로 각 행 정보가 보존되는 것은 아님 |
+| ☐ 공통 기준 | 현지·은서: [#20 계약](https://github.com/josiah113366-sketch/clothes-query/pull/20) | 비교 필드·오류 제외·미등록 코드 정책과 적용 버전. 문서 머지가 모든 제안 수용은 아님 |
+| ☐ Silver 추적 | 현지: [#26 Silver](https://github.com/josiah113366-sketch/clothes-query/pull/26) 및 이번 후속 로컬 변경 | current.json → impact_candidates/격리 → Bronze 파일·줄·Kafka 참조 연결. 후속 변경은 기존 #26에 포함됐다고 보지 않음 |
+| ☐ Gold B 입력 | 은서: pipelines/gold-b, 확인일 현재 해당 head의 PR 없음 | 실제 중복 제거 뷰 이름·보존 컬럼·격리 조회·과거 범위 고정·실행 기록. PR이 생기면 이 표에 링크 추가 |
+| ☐ Gold A 기준 | 현지: [#34 Gold A](https://github.com/josiah113366-sketch/clothes-query/pull/34) | inputs의 Silver 실행 참조, KST 계산·PARTIAL/held_scopes 처리. Gold A 결과와 같은 Silver 묶음으로 기대값 계산 |
+| ☐ 탐지 결과 연결 | 주현: [#28 이상 이력](https://github.com/josiah113366-sketch/clothes-query/pull/28), [#29 판정 잡](https://github.com/josiah113366-sketch/clothes-query/pull/29) | 대조 상태를 어떻게 기록·알림할지. WAITING/NOT_COMPARABLE을 업무 장애로 오탐하지 않기 |
+| ☐ 조사 조회 | 주현: [#30 조사 도구](https://github.com/josiah113366-sketch/clothes-query/pull/30) | 실행·차이·오류 참조 조회와 접근 권한. 도구가 이미 연결됐다고 가정하지 않음 |
+| ☐ 운영 연결 | 인프라 담당, 관련 PR은 연결 계획 승인 후 지정 | Gold A 완료 후 실행 신호·실행 잠금·재시도·결과 저장·권한·복구 절차 |
+
+#### 구현 순서와 현재 경계
+
+1. 이번 로컬 구현: 선택적 Kafka 메타데이터 검증·원본 참조 보존·관측 범위 기록. 기존 파일·줄 및 메타데이터 없는 입력 호환 유지.
+2. 성철/은서 합의 후: 실제 Bronze 필드 연결과 Gold B 조회 어댑터·완료 범위 증거 구현.
+3. 별도 작은 대조 잡: 공통 범위 고정 → 결제 키/값/오류 비교 → Gold A 자체 계산 검증 → 상태·차이 저장. 실행 파일은 계약 확정 후 별도 브리핑한다.
+4. 실제 같은 입력 범위로 검증 후: DAG·판정/조사 도구 연결. 누락/충돌/입수 대기/정상 0건 사례를 확인한다.
+
+### 오류 영향 범위와 갱신 보류 (기존 설계)
+
+**상태: 경로 간 계약은 제안, 로컬 Gold A 구현은 PR #34에서 검토 중.** Gold A의 명시적 scope-aware 실행은 영향 범위를 추적할 수 있는 결제 오류에 대해 범위별 갱신 보류를 지원한다. 주문·주문상품 오류 또는 추적 불가능한 오류는 관련 거래·퍼널 묶음 전체를 보류한다. 기본 엄격 실행은 품질 오류 시 갱신을 중단한다. 단일 행 형식 검사 YAML에는 넣지 않는다.
 
 | 항목 | 처리 규칙 제안 |
 |---|---|
