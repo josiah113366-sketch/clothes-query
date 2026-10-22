@@ -41,6 +41,8 @@ Airflow 3개 Deployment에는 공용 노드 hostname `i-0f22eae851d5a3035` 고�
 
 ## 다음 순서
 
+2단계 후속 점검 완료: Airflow scheduler의 실제 CLI에서 DAG 목록과 import error를 조회했다. Git bundle의 설치 확인용 DAG 2개가 인식되고 모두 paused였으며 import error는 0건이었다. DAG processor의 tracking_repo HEAD가 main 783fa84와 일치했고 신규 DAG 기본 일시정지도 true였다. 현재 공급 절차를 infra/platform/airflow/DAG_DELIVERY.md에 정리했다. 업무 DAG를 실행하거나 Git/Helm 공급 설정을 변경하지 않았다. 다음은 3단계 RDS slot/WAL·Kafka PVC 여유 점검이다.
+
 1. 운영 중인 미머지 코드의 의존성과 최신 main 차이를 정리해 개별 검토한다. 자동 머지하지 않는다.
 2. 팀원에게 DAG 공급 경로·main 반영·60초 갱신과 실제 DAG 인식 확인 절차를 전달한다. Silver·Gold A의 업무 DAG 위치는 담당자 입력 후 확정한다.
 3. 데이터 흐름 종합 점검은 RDS slot/WAL·Kafka PVC 여유·실제 전달 범위를 추가 확인한다. 이번에 확인한 것은 connector 상태·lag/offset·S3 객체 갱신이며 전체 end-to-end 또는 장애 복구 검증은 아니다.

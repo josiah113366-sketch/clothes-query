@@ -1,5 +1,7 @@
 # Airflow 개발 실행 기반
 
+**현재 배포의 DAG 공급은 GitDagBundle이다.** [현재 공급·확인 절차](DAG_DELIVERY.md)를 우선한다. 아래 ConfigMap 마운트 설명과 main의 development-values.yaml은 초기 설치 방식이며, 현재 배포 설정과 차이가 있어 그대로 재배포하면 안 된다. Git 공급 적용 코드는 infra/agent-runtime-connections 브랜치에서 별도 검토한다.
+
 기존 EKS의 `airflow` namespace에 공식 Helm 1.22.0 / Airflow 3.3.2 Python 3.12 이미지를 사용한다. 기존 RDS 안의 전용 `airflow_meta` DB·계정을 사용하며 개발 인증은 Simple Auth Manager다. 실제 배포·검증 상태는 [작업 기록](../../../docs/tasks/infra-airflow-runtime.md)에 남긴다. 업무용 재처리·판정 DAG는 각 담당자가 구현한다.
 
 ## 구성과 의존성
