@@ -45,14 +45,14 @@ def make_example(root):
     variants = [{"article_id": article, "product_code": 100, "colour_group_code": 1,
                  "graphical_appearance_no": 1, "price": price, "prod_name": "test product",
                  "colour_group_name": "black", "graphical_appearance_name": "solid"}
-                for article, price in (("0001", 10000), ("0002", 5900))]
+                for article, price in (("0000000001", 10000), ("0000000002", 5900))]
     write(source / "designs.jsonl", [design])
     write(source / "variants.jsonl", variants)
     silver_products(str(source / "designs.jsonl"), str(source / "variants.jsonl"), str(silver))
     orders, items, payments = [], [], []
-    specifications = [("00000000-4000-8000-0000-00000000000e", "00000000-4000-8000-0000-000000000020", "0001", 2, 10000, "2026-10-18T23:50:00+09:00", "2026-10-19T00:10:00+09:00", "SUCCESS"),
-                      ("00000000-4000-8000-0000-00000000000f", "00000000-4000-8000-0000-000000000022", "0001", 1, 10000, "2026-10-18T11:00:00+09:00", "2026-10-18T11:01:00+09:00", "SUCCESS"),
-                      ("00000000-4000-8000-0000-000000000010", "00000000-4000-8000-0000-000000000023", "0002", 1, 5900, "2026-10-18T12:00:00+09:00", "2026-10-18T12:01:00+09:00", "FAILED")]
+    specifications = [("00000000-4000-8000-0000-00000000000e", "00000000-4000-8000-0000-000000000020", "0000000001", 2, 10000, "2026-10-18T23:50:00+09:00", "2026-10-19T00:10:00+09:00", "SUCCESS"),
+                      ("00000000-4000-8000-0000-00000000000f", "00000000-4000-8000-0000-000000000022", "0000000001", 1, 10000, "2026-10-18T11:00:00+09:00", "2026-10-18T11:01:00+09:00", "SUCCESS"),
+                      ("00000000-4000-8000-0000-000000000010", "00000000-4000-8000-0000-000000000023", "0000000002", 1, 5900, "2026-10-18T12:00:00+09:00", "2026-10-18T12:01:00+09:00", "FAILED")]
     for order_id, session, article, quantity, price, ordered, completed, status in specifications:
         orders.append({"order_id": order_id, "member_id": "00000000-4000-8000-0000-000000000007", "session_id": session,
                        "status": "PAID" if status == "SUCCESS" else "PAYMENT_FAILED", "status_reason": None,
@@ -67,29 +67,29 @@ def make_example(root):
         write(source / (name + ".jsonl"), rows)
     silver_transactions(str(source / "orders.jsonl"), str(source / "items.jsonl"), str(source / "payments.jsonl"), str(silver))
     clicks = []
-    for session, article, kind, at in (("00000000-4000-8000-0000-000000000020", "0001", "view", "2026-10-18T10:00:00+09:00"),
-                                     ("00000000-4000-8000-0000-000000000020", "0001", "view", "2026-10-18T10:01:00+09:00"),
-                                     ("00000000-4000-8000-0000-000000000020", "0001", "cart_add", "2026-10-18T10:02:00+09:00"),
-                                     ("00000000-4000-8000-0000-000000000021", "0001", "view", "2026-10-18T10:00:00+09:00"),
-                                     ("00000000-4000-8000-0000-000000000022", "0001", "view", "2026-10-18T10:30:00+09:00"),
-                                     ("00000000-4000-8000-0000-000000000023", "0002", "view", "2026-10-18T11:00:00+09:00"),
-                                     ("00000000-4000-8000-0000-000000000023", "0002", "cart_add", "2026-10-18T11:02:00+09:00")):
-        clicks.append({"event_id": "E" + str(len(clicks)), "event_type": kind, "member_id": "00000000-4000-8000-0000-000000000007",
+    for session, article, kind, at in (("00000000-4000-8000-0000-000000000020", "0000000001", "view", "2026-10-18T10:00:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000020", "0000000001", "view", "2026-10-18T10:01:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000020", "0000000001", "cart_add", "2026-10-18T10:02:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000021", "0000000001", "view", "2026-10-18T10:00:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000022", "0000000001", "view", "2026-10-18T10:30:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000023", "0000000002", "view", "2026-10-18T11:00:00+09:00"),
+                                     ("00000000-4000-8000-0000-000000000023", "0000000002", "cart_add", "2026-10-18T11:02:00+09:00")):
+        clicks.append({"event_id": str(uuid5(NAMESPACE_URL, "click:" + str(len(clicks)))), "event_type": kind, "member_id": "00000000-4000-8000-0000-000000000007",
                        "article_id": article, "session_id": session, "event_time": at})
     write(source / "clicks.jsonl", clicks)
     silver_clicks(str(source / "clicks.jsonl"), str(silver))
     reviews = []
     for review_id, product, rating, created in (("R1", "alias-0001", 2, "2026-10-19T01:00:00Z"),
                                                ("R2", "alias-0001", 5, "2026-10-19T02:00:00Z"),
-                                               ("R3", "0002", 4, "2026-10-18T01:00:00Z"),
-                                               ("R4", "0002", 1, "2026-10-19T03:00:00Z")):
+                                               ("R3", "0000000002", 4, "2026-10-18T01:00:00Z"),
+                                               ("R4", "0000000002", 1, "2026-10-19T03:00:00Z")):
         reviews.append({"schema_version": "review.v2", "event_type": "review_created", "review_id": review_id,
                         "event_id": "E" + review_id, "product_id": product, "rating": rating,
                         "created_at": created, "emitted_at": "2026-10-19T04:00:00Z", "text": "synthetic test review"})
     write_reviews(source, reviews)
     silver_reviews(str(source), str(silver), START, END)
     mapping = source / "mapping.jsonl"
-    write(mapping, [{"product_id": "alias-0001", "article_id": "0001"}])
+    write(mapping, [{"product_id": "alias-0001", "article_id": "0000000001"}])
     analysis = [{"review_id": rid, "aspect": aspect, "score": score, "model_version": "demo.v1"}
                 for rid, aspect, score in (("R1", "품질·내구성", -2), ("R1", "배송", 2),
                                                ("R2", "품질·내구성", 1), ("R3", "사이즈·핏", 2),
@@ -136,7 +136,7 @@ def test_scoped_hold_preserves_bad_product_updates_good_and_recovers(tmp_path):
     assert manifest["status"] == "PARTIAL"
     rows = read_outputs(manifest)["product_sales_daily.jsonl"]
     assert next(row for row in rows if row["sales_date_kst"] == "2026-10-19")["item_sales_amount"] == 20000
-    assert next(row for row in rows if row["article_id"] == "0002")["item_sales_amount"] == 5900
+    assert next(row for row in rows if row["article_id"] == "0000000002")["item_sales_amount"] == 5900
     hours = [scope["key"].get("hour_start_kst") for scope in manifest["held_scopes"]]
     assert "2026-10-19T00:00:00+09:00" in hours and "2026-10-19T01:00:00+09:00" in hours
     repeated = gold_transactions(silver, gold, silver, scope_aware=True)
@@ -159,10 +159,10 @@ def test_scoped_funnel_holds_first_view_day_and_restores_paid(tmp_path):
     assert manifest["status"] == "PARTIAL"
     scopes = manifest["held_scopes"]
     assert any(scope["table"] == "funnel_daily" and scope["key"] == {
-        "funnel_date_kst": "2026-10-18", "article_id": "0001"} for scope in scopes)
+        "funnel_date_kst": "2026-10-18", "article_id": "0000000001"} for scope in scopes)
     daily = read_outputs(manifest)["funnel_daily.jsonl"]
-    assert next(row for row in daily if row["article_id"] == "0001")["paid_sessions"] == 2
-    assert next(row for row in daily if row["article_id"] == "0002")["paid_sessions"] == 1
+    assert next(row for row in daily if row["article_id"] == "0000000001")["paid_sessions"] == 2
+    assert next(row for row in daily if row["article_id"] == "0000000002")["paid_sessions"] == 1
     prepare_scoped_trade(example, conflict=False)
     recovered = gold_funnels(silver, silver, silver, gold, scope_aware=True)
     assert recovered["status"] == "PASS" and not recovered["held_scopes"]
@@ -183,8 +183,8 @@ def test_scoped_changed_order_key_also_finds_previously_published_order(tmp_path
                                  str(example["silver"]), scope_aware=True)
     assert manifest["status"] == "PARTIAL"
     scopes = [row for row in manifest["held_scopes"] if row["table"] == "product_sales_daily"]
-    assert any(row["key"] == {"sales_date_kst": "2026-10-19", "article_id": "0001"} for row in scopes)
-    assert any(row["key"] == {"sales_date_kst": "2026-10-18", "article_id": "0002"} for row in scopes)
+    assert any(row["key"] == {"sales_date_kst": "2026-10-19", "article_id": "0000000001"} for row in scopes)
+    assert any(row["key"] == {"sales_date_kst": "2026-10-18", "article_id": "0000000002"} for row in scopes)
 
 
 def test_scoped_no_baseline_is_missing_not_zero_and_requires_complete_input(tmp_path):
@@ -295,7 +295,7 @@ def test_all_six_datasets_and_late_payment(tmp_path):
     assert [(row["sales_date_kst"], row["sold_quantity"], row["product_code"]) for row in product] == [
         ("2026-10-18", 1, 100), ("2026-10-19", 2, 100)]
     funnel = output["funnels"]["funnel_daily.jsonl"]
-    first = next(row for row in funnel if row["article_id"] == "0001")
+    first = next(row for row in funnel if row["article_id"] == "0000000001")
     assert (first["view_sessions"], first["cart_sessions"], first["order_sessions"], first["paid_sessions"]) == (3, 1, 2, 2)
     assert first["view_to_paid_rate"] == 0.666667
     assert first["cart_order_sessions"] == 1
@@ -305,12 +305,12 @@ def test_all_six_datasets_and_late_payment(tmp_path):
     direct = next(row for row in detail if row["session_id"] == "00000000-4000-8000-0000-000000000022")
     assert direct["has_paid"] and not direct["has_cart"]
     reviews = output["reviews"]["year=2026/month=10/day=19/part-00000.jsonl"]
-    first_review = next(row for row in reviews if row["article_id"] == "0001")
-    assert first_review == {"review_date_kst": "2026-10-19", "article_id": "0001", "product_code": 100,
+    first_review = next(row for row in reviews if row["article_id"] == "0000000001")
+    assert first_review == {"review_date_kst": "2026-10-19", "article_id": "0000000001", "product_code": 100,
                             "review_count": 2, "rating_sum": 7, "average_rating": 3.5,
                             "low_rating_count": 1, "low_rating_rate": 0.5}
     quality = next(row for row in output["aspects"]["review_aspect_daily.jsonl"]
-                   if row["article_id"] == "0001" and row["aspect"] == "품질·내구성")
+                   if row["article_id"] == "0000000001" and row["aspect"] == "품질·내구성")
     assert (quality["scored_review_count"], quality["score_neg2_count"], quality["score_pos1_count"]) == (2, 1, 1)
     assert quality["score_sum"] == -1 and quality["average_score"] == -0.5
     assert "negative_rate" not in quality
@@ -322,21 +322,21 @@ def test_partial_review_replace_preserves_other_product_and_deletes_zero(tmp_pat
     changed = [dict(row, rating=4) if row["review_id"] == "R1" else dict(row, rating=5) for row in rows if row["review_id"] != "R2"]
     write_reviews(example["source"], changed)
     silver_reviews(str(example["source"]), str(example["silver"]), START, END)
-    scope = replacement("2026-10-19", "2026-10-19", ["0001"])
+    scope = replacement("2026-10-19", "2026-10-19", ["0000000001"])
     pointer_path = Path(example["manifests"]["reviews"]["manifest_path"])
     for _ in range(2):
         run_aggregate(str(example["silver"]), str(example["gold"]), START, END,
                       str(example["silver"]), str(example["mapping"]), scope)
         result = read_outputs(pointer(pointer_path))["year=2026/month=10/day=19/part-00000.jsonl"]
-        assert next(row for row in result if row["article_id"] == "0001")["average_rating"] == 4
-        assert next(row for row in result if row["article_id"] == "0002")["average_rating"] == 1
+        assert next(row for row in result if row["article_id"] == "0000000001")["average_rating"] == 4
+        assert next(row for row in result if row["article_id"] == "0000000002")["average_rating"] == 1
     changed = [row for row in changed if row["review_id"] != "R1"]
     write_reviews(example["source"], changed)
     silver_reviews(str(example["source"]), str(example["silver"]), START, END)
     run_aggregate(str(example["silver"]), str(example["gold"]), START, END,
                   str(example["silver"]), str(example["mapping"]), scope)
     result = read_outputs(pointer(pointer_path))["year=2026/month=10/day=19/part-00000.jsonl"]
-    assert len(result) == 1 and result[0]["article_id"] == "0002"
+    assert len(result) == 1 and result[0]["article_id"] == "0000000002"
     assert pointer(pointer_path)["previous_result"]["outputs"]
 
 
@@ -344,7 +344,7 @@ def test_mapping_analysis_conflict_and_score_adapter(tmp_path):
     example = make_example(tmp_path)
     with pytest.raises(ValueError, match="상품 연결"):
         connect_reviews(example["reviews"], example["variants"])
-    connected = connect_reviews(example["reviews"], example["variants"], [{"product_id": "alias-0001", "article_id": "0001"}])
+    connected = connect_reviews(example["reviews"], example["variants"], [{"product_id": "alias-0001", "article_id": "0000000001"}])
     connected = [{**row, "review_date_kst": row["created_at"][:10]} for row in connected]
     with pytest.raises(ValueError, match="충돌"):
         aggregate_aspects(connected, example["analysis"] + [dict(example["analysis"][0], score=2)], "demo.v1")
@@ -359,7 +359,7 @@ def test_mapping_analysis_conflict_and_score_adapter(tmp_path):
 
 def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
     example = make_example(tmp_path)
-    scope = replacement("2026-10-18", "2026-10-19", ["0001"])
+    scope = replacement("2026-10-18", "2026-10-19", ["0000000001"])
     orders = read_rows(str(example["source"] / "orders.jsonl"))
     items = read_rows(str(example["source"] / "items.jsonl"))
     payments = read_rows(str(example["source"] / "payments.jsonl"))
@@ -377,7 +377,7 @@ def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
     trade = gold_transactions(str(example["silver"]), str(example["gold"]), str(example["silver"]), scope)
     funnels = gold_funnels(str(example["silver"]), str(example["silver"]), str(example["silver"]), str(example["gold"]), scope)
     output = read_outputs(trade)
-    assert all(row["article_id"] == "0001" for row in output["product_sales_daily.jsonl"])
+    assert all(row["article_id"] == "0000000001" for row in output["product_sales_daily.jsonl"])
     assert next(row for row in output["product_sales_daily.jsonl"] if row["sales_date_kst"] == "2026-10-19")["sold_quantity"] == 3
     # 전체 주문 시간 지표는 상품 필터와 관계없이 해당 날짜 전체를 다시 계산한다.
     assert sum(row["approved_amount"] for row in output["order_sales_hourly.jsonl"]) == 45900
@@ -388,7 +388,7 @@ def test_partial_funnels_and_transactions_keep_other_product(tmp_path):
     # 조회만 한 방문은 0/0 비율을 0이 아니라 NULL로 표현한다.
     check = [{"status": "PASS", "quarantined_count": 0}]
     clicks = {"dq_results": check, "click_events": [{"event_id": "E-only", "event_type": "view",
-              "session_id": "only", "article_id": "0001", "event_time_kst": "2026-10-18T10:00:00+09:00"}]}
+              "session_id": "only", "article_id": "0000000001", "event_time_kst": "2026-10-18T10:00:00+09:00"}]}
     trade = {"dq_results": check, "orders_current": [], "silver_order_items": [], "payment_attempts": []}
     row = build_funnels(clicks, trade, example["variants"])["funnel_daily"][0]
     assert row["cart_to_order_rate"] is None and row["order_to_paid_rate"] is None
@@ -400,14 +400,14 @@ def test_aspect_partial_replace_preserves_other_product(tmp_path):
     write(example["source"] / "analysis.jsonl", modified)
     result = run_aspects(str(example["silver"]), str(example["gold"]), START, END, str(example["silver"]),
                          str(example["source"] / "analysis.jsonl"), "demo.v1", str(example["mapping"]),
-                         replacement("2026-10-19", "2026-10-19", ["0001"]))
+                         replacement("2026-10-19", "2026-10-19", ["0000000001"]))
     rows = read_outputs(result)["review_aspect_daily.jsonl"]
-    assert next(row for row in rows if row["article_id"] == "0001" and row["aspect"] == "품질·내구성")["average_score"] == 1.5
-    assert next(row for row in rows if row["article_id"] == "0002" and row["review_date_kst"] == "2026-10-19")["average_score"] == -1
+    assert next(row for row in rows if row["article_id"] == "0000000001" and row["aspect"] == "품질·내구성")["average_score"] == 1.5
+    assert next(row for row in rows if row["article_id"] == "0000000002" and row["review_date_kst"] == "2026-10-19")["average_score"] == -1
 
 
 def test_five_scores_are_preserved_and_sentiment_is_not_inferred():
-    reviews = [{"review_id": str(score), "review_date_kst": "2026-10-19", "article_id": "0001", "product_code": 100}
+    reviews = [{"review_id": str(score), "review_date_kst": "2026-10-19", "article_id": "0000000001", "product_code": 100}
                for score in range(-2, 3)]
     predictions = [{"review_id": str(score), "aspect": "품질·내구성", "score": score, "model_version": "v1"}
                    for score in range(-2, 3)]
@@ -432,8 +432,8 @@ def test_legacy_aspect_output_blocks_partial_until_full_rebuild(tmp_path):
     arguments = (str(example["silver"]), str(example["gold"]), START, END, str(example["silver"]),
                  str(example["source"] / "analysis.jsonl"), "demo.v1", str(example["mapping"]))
     with pytest.raises(ValueError, match="전체 재집계"):
-        run_aspects(*arguments, replacement("2026-10-19", "2026-10-19", ["0001"]))
+        run_aspects(*arguments, replacement("2026-10-19", "2026-10-19", ["0000000001"]))
     assert path.read_bytes() == previous
     rebuilt = run_aspects(*arguments)
     assert rebuilt["inputs"]["aspect_schema"] == "score.v1"
-    assert run_aspects(*arguments, replacement("2026-10-19", "2026-10-19", ["0001"]))["status"] == "PASS"
+    assert run_aspects(*arguments, replacement("2026-10-19", "2026-10-19", ["0000000001"]))["status"] == "PASS"

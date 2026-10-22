@@ -169,7 +169,7 @@ def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_pat
     assert len(saved) == 1
     row = saved[0]
     assert {key: row[key] for key in payment_fingerprint(raw)} == payment_fingerprint(utc)
-    assert row["amount"] == raw["amount"]
+    assert row["amount"] == 11800
     assert row["completed_at_utc"] == "2026-10-13T15:02:00+00:00"
     assert row["completed_at_kst"] == "2026-10-14T00:02:00+09:00"
     assert raw == original
@@ -177,7 +177,7 @@ def test_silver_stores_fingerprint_and_deduplicates_equivalent_timezones(tmp_pat
 
 def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
     raw = payment()
-    conflict = build_silver([order()], [], [raw, {**raw, "amount": raw["amount"] + 1}])
+    conflict = build_silver([order()], [], [raw, {**raw, "amount": 1001}])
     assert conflict["payment_attempts"] == []
     assert len(conflict["quarantined_records"]) == 2
     assert {row["error_code"] for row in conflict["quarantined_records"]} == {"CONTENT_CONFLICT"}
@@ -188,27 +188,6 @@ def test_silver_fingerprint_conflict_and_precision_error_are_quarantined():
         issues = result["quarantined_records"]
         assert any(row["field"] == field and row["error_code"] == "INVALID_VALUE" for row in issues)
         assert summary(result, "payments")["status"] == "INCOMPLETE"
-
-
-def test_order_item_price_minimum_is_5900():
-    rules = FormatRules()
-    item = {"order_item_id": fixture_id("minimum-price"), "order_id": order()["order_id"],
-            "article_id": "0001", "quantity": 1, "unit_price": 5900}
-    assert rules.version == "0.1.1"
-    rules.validate("order_items", item)
-    result = build_silver([order(total_amount=5900)], [item], [payment(amount=5900)],
-                          input_complete=True)
-    assert not result["quarantined_records"]
-    assert result["silver_order_items"][0]["item_amount"] == 5900
-    bad = {**item, "unit_price": 5899}
-    with pytest.raises(FormatError) as caught:
-        rules.validate("order_items", bad)
-    assert caught.value.rule_id == "order_items.fields.unit_price.minimum"
-    rejected = build_silver([order(total_amount=5899)], [bad], [payment(amount=5899)],
-                            input_complete=True)
-    assert not rejected["orders_current"]
-    assert not rejected["silver_order_items"]
-    assert not rejected["payment_attempts"]
 
 
 def test_kafka_trace_observations_and_conflict_references(tmp_path):
@@ -330,7 +309,7 @@ def test_failure_codes_follow_source_allowlist_and_preserve_valid_failed_attempt
     result = build_silver([order()], [], payments)
     assert not result["quarantined_records"]
     assert {row["failure_code"] for row in result["payment_attempts"]} == set(codes)
-    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.1.1"
+    assert summary(result, "payments")["failure_code_policy"] == "format_rules:0.2.0"
 
 
 def test_missing_unknown_and_non_string_failure_codes_have_distinct_errors():

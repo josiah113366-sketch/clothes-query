@@ -1,6 +1,6 @@
 """거래 업무 행을 정상 결과·격리 기록·품질 요약으로 나눈다.
 
-펼쳐진 CDC JSONL과 공통 YAML 검사를 지원한다. 거래 S3 직접 연결은 별도다.
+펼쳐진 CDC JSONL과 업무 행을 지원한다. S3 직접 연결·공통 YAML 실행 연결은 별도다.
 """
 from __future__ import annotations
 

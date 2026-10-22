@@ -1,13 +1,14 @@
-# 원천 규칙은 승인된 Silver 검사기에 연결한다. 경로 간 제안은 별도다.
-# source_rules는 거래 DDL과 승인된 업무 기준의 정규화된 행 규칙이다.
-# unit_price 하한 5,900원은 2026-10-21 사용자 승인 기준이며 DDL의 > 0보다 엄격하다.
+# 원천 규칙은 승인된 Silver·Gold B 검사기에 연결한다. 경로 간 제안은 별도다.
+# source_rules는 각 원천 정의(DB DDL, 시뮬레이터 이벤트)를 옮긴 정규화된 업무 행 규칙이다.
+# 데이터셋에 source가 없으면 맨 위 source(db/schema/004_orders.sql)를 따른다.
+# 원천보다 좁힌 업무 기준은 그 줄에 주석으로 적는다 (order_items.unit_price).
 # proposed_changes는 합의 후 반영할 안이며 실행 규칙으로 자동 합치지 않는다.
-version: "0.1.1"
+version: "0.2.0"
 status: proposed
 source_rules_status: decided
 runtime_connected:
   silver: true
-  gold_b: false
+  gold_b: true
 input_stage: normalized_business_row
 source:
   path: db/schema/004_orders.sql
@@ -15,7 +16,8 @@ source:
 
 # 자체 초안 형식: fields와 checks를 해석할 검사기는 별도 구현한다.
 # required는 필드 존재 여부, nullable은 값의 null 허용 여부다.
-# timestamp는 시간대가 있는 시각, integer는 bool을 제외한 정수다.
+# timestamp는 시간대가 있는 시각, integer는 bool을 제외한 정수, boolean은 참/거짓 값이다.
+# pattern은 문자열 전체가 맞아야 하는 정규식, forbidden_fields는 들어오면 안 되는 필드다(필드 이름으로 INVALID_VALUE).
 # FK, UNIQUE, 여러 메시지의 중복/충돌 검사는 README의 처리 계약을 따른다.
 source_rules:
   orders:
@@ -58,6 +60,7 @@ source_rules:
       order_id: {type: uuid, required: true, nullable: false}
       article_id: {type: string, required: true, nullable: false}
       quantity: {type: integer, required: true, nullable: false, minimum: 1}
+      # DB 정의는 0보다 큰 값이다. 상품 시드 가격 규칙(5,900원 이상)에 맞춘 업무 기준으로 좁혔다 (0.2.0).
       unit_price: {type: integer, required: true, nullable: false, minimum: 5900}
     checks: []
 
@@ -102,6 +105,103 @@ source_rules:
         when: {field: status, equals: SUCCESS}
         rule: is_null
         field: failure_code
+
+  members:
+    # 회원 CDC(members-events). Debezium column.include.list가 내보내는 10개 컬럼 (connectors/cdc-source.yaml).
+    source:
+      path: db/schema/001_member.sql
+      revision: "b070995c7c2d4a17d494751492a6a9419ae985f2"
+    fields:
+      member_id: {type: uuid, required: true, nullable: false}
+      gender:
+        type: string
+        required: true
+        nullable: false
+        enum: [F, M]
+      signup_at: {type: timestamp, required: true, nullable: false}
+      signup_channel:
+        type: string
+        required: true
+        nullable: false
+        enum: [web, app]
+      marketing_consent: {type: boolean, required: true, nullable: false}
+      status:
+        type: string
+        required: true
+        nullable: false
+        enum: [ACTIVE, WITHDRAWN]
+      withdrawn_at: {type: timestamp, required: false, nullable: true}
+      created_at: {type: timestamp, required: true, nullable: false}
+      region_sigungu: {type: string, required: true, nullable: false}
+      age_band:
+        type: string
+        required: true
+        nullable: false
+        enum: ["~19", "20s", "30s", "40s", "50s", "60s", "70+"]
+    # 개인정보 컬럼. CDC가 내보내지 않으므로 들어오면 유출이다 (값은 남기지 않고 필드 이름만 알린다).
+    forbidden_fields: [name, email, phone, birth_date, password_hash]
+    checks:
+      - id: members_active_not_withdrawn
+        when: {field: status, equals: ACTIVE}
+        rule: is_null
+        field: withdrawn_at
+      - id: members_withdrawn_has_time
+        when: {field: status, equals: WITHDRAWN}
+        rule: required_non_null
+        field: withdrawn_at
+      - id: members_withdrawn_after_signup
+        when: {field: status, equals: WITHDRAWN}
+        rule: greater_than_or_equal_field
+        field: withdrawn_at
+        other_field: signup_at
+
+  clickstream:
+    # 시뮬레이터 클릭 이벤트(ClickEvent). ID는 uuid4로 만든다.
+    source:
+      path: simulator/src/sim/behavior/model.py
+      revision: "ca1a2da02dfdb4b1415f5e83ef1a9499e7068b66"
+    fields:
+      event_id: {type: uuid, required: true, nullable: false}
+      event_type:
+        type: string
+        required: true
+        nullable: false
+        enum: [view, cart_add]
+      member_id: {type: uuid, required: true, nullable: false}
+      # 상품 시드의 article_id: 숫자로만, 길이가 모두 같고 앞자리 0이 살아 있다 (docs/tasks/sim-product-seed.md). H&M은 10자리.
+      article_id: {type: string, required: true, nullable: false, pattern: "[0-9]{10}"}
+      event_time: {type: timestamp, required: true, nullable: false}
+      session_id: {type: uuid, required: true, nullable: false}
+    checks: []
+
+  reviews:
+    # 리뷰 작성 이벤트(reviews.raw). 리뷰 컬럼은 확정 전이라 Silver가 지금 받는 review.v2 기준을 옮겼다.
+    source:
+      path: pipelines/silver/reviews.py
+      revision: "7e57ae63dbefdeaebd1eb949e27e75f2b2ed39cc"
+    fields:
+      schema_version:
+        type: string
+        required: true
+        nullable: false
+        enum: [review.v2]
+      event_type:
+        type: string
+        required: true
+        nullable: false
+        enum: [review_created]
+      review_id: {type: string, required: true, nullable: false}
+      event_id: {type: string, required: true, nullable: false}
+      product_id: {type: string, required: true, nullable: false}
+      text: {type: string, required: true, nullable: false}
+      rating:
+        type: integer
+        required: true
+        nullable: false
+        enum: [1, 2, 3, 4, 5]
+      created_at: {type: timestamp, required: true, nullable: false}
+      emitted_at: {type: timestamp, required: true, nullable: false}
+    checks: []
 
 # 원천 규칙을 임의로 바꾸지 않고, 합의 대기 중인 변경안을 따로 표시한다.
 proposed_changes:
