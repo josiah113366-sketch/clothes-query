@@ -16,4 +16,5 @@
 - [x] 카탈로그·권한·Git 공급·DAG 안내·현황 문서 통합.
 - [x] Terraform fmt 통과, backend·자격증명 없는 격리 복사본에서 dashboard-access/gold-b-catalog/gold-b-access 및 test root validate 통과, mock plan 7개 통과.
 - [x] Airflow chart schema/render 통과: Deployment 3개·Git bundle·paused 기본값·이전 DAG ConfigMap 미마운트·새 PVC/Ingress/노드 미생성 확인.
+- [x] 공통 문서 추가 위치를 조정한 뒤 세 공유 브랜치를 합치는 임시 tree 검사 통과. 원본 브랜치 커밋 불변·민감 파일 제외·diff 검사 확인.
 - [ ] 초안 PR 공유, 팀원 검토·승인·머지.

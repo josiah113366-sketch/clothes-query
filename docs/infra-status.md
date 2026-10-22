@@ -32,7 +32,7 @@ main 밖의 원본 작업 여섯 브랜치는 아래에 보존했다. 사용자 
 3. Spark는 노드 비활성·업무 미실행 상태로 공유하고 명세가 모두 올 때까지 배포를 기다린다.
 4. 각 PR의 검토 직전에 앞서 머지된 PR과 이후 main 변경을 반영하고 필요한 검사를 수행한다. 검토·승인·머지는 팀원이 수행한다.
 
-처음 여섯 원본을 각각 main `0312bad`와 검사했을 때 텍스트 충돌은 없었다. 이후 승인된 묶음 내부 통합에서 공통 대장·README 동시 추가 충돌이 나 양쪽 내용을 보존했다. 서로 다른 공유 PR 사이의 공통 대장·README·workflow 변경은 앞 PR 머지 후 다시 확인한다.
+처음 여섯 원본을 각각 main `0312bad`와 검사했을 때 텍스트 충돌은 없었다. 이후 묶음 내부의 공통 대장·README 동시 추가 충돌은 양쪽 내용을 보존해 해결했다. 묶음 사이에는 공통 문서 추가 위치를 분산했고 세 공유 브랜치를 함께 합치는 임시 tree 검사도 통과했다. 실제 main 병합은 아니며 이후 main 변경이 생기면 다시 확인한다.
 
 기준 main의 Airflow values는 이전 ConfigMap DAG 공급 설정이므로 실제 GitDagBundle과 차이가 있다. 이 묶음에는 현재 Git 공급 설정을 포함했으며 main에 머지되기 전 이전 values로 무심코 upgrade하지 않는다. monitoring/argocd 디렉터리가 main에 없다고 기존 별도 Helm release가 자동 삭제되는 것은 아니다.
 
@@ -71,5 +71,5 @@ Spark 최초 용량은 전용 t3a.large 한 대분(2 CPU·8GiB), Driver 1개·Ex
 
 - 여섯 브랜치의 main 대비 추가 파일과 비밀값 패턴을 검사했고 `.cache`·local tfvars·state/plan 포함을 거부하는 검사를 통과했다. 패턴 검사는 모든 비밀 부재의 보증은 아니므로 초안 검토에서 파일을 함께 확인한다.
 - 여섯 원본 `git diff --check` 통과. 이후 새 공유 브랜치에서 통합했으며 원본 브랜치와 main은 보존했다.
-- Spark Python 회귀 검사 20개 통과. 기존 클라우드 시험·Terraform/Helm 검증 이력은 각 작업 기록을 참조한다. 이번에는 전체 클라우드 시험을 반복하지 않았다.
+- 통합 후 모니터링·Argo CD·Airflow Helm 렌더/경계 검사, 데이터 권한/카탈로그 mock plan 7개, Spark compute mock plan 7개, Spark Python 회귀 20개 및 3가지 설정 렌더를 통과했다. Terraform은 backend·자격증명 없는 격리 validate/mock plan이며 실제 인프라 plan/apply를 수행한 결과가 아니다.
 - AWS 변경·이미지 push·새 노드·테스트 데이터 생성 없음. 공유 대상은 원본 여섯 개가 아니라 새 통합 브랜치 세 개와 초안 PR 세 개다. PR 승인·머지는 팀원이 수행한다.
