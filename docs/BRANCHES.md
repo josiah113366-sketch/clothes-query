@@ -99,8 +99,9 @@ gitGraph
 | `docs/branch-rules` | - | 머지됨 (PR #5) | 2026-10-16 |
 | `docs/api-design` | - (설계 문서 `docs/design/api.md`) | 진행 중 | |
 | `docs/data-contracts` | [docs-data-contracts.md](tasks/docs-data-contracts.md) | 검토 대기 | |
-| `docs/agent-anomaly-design` | `design/agent/anomaly-answer-key.md` (PR #28에 포함) | 검토 대기 | |
-| `docs/agent-branches` | - | 검토 대기 | |
+| `docs/agent-anomaly-design` | [anomaly-answer-key.md](design/agent/anomaly-answer-key.md) (설계 문서) | 머지됨 (PR #28) | 2026-10-21 |
+| `docs/agent-branches` | - | 머지됨 (PR #43) | 2026-10-21 |
+| `docs/agent-ledger` | - | 진행 중 | |
 
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -130,10 +131,14 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `agent/detection-draft` | [agent-detection-draft.md](tasks/agent-detection-draft.md) | 머지됨 (PR #14) | 2026-10-21 |
-| `agent/tools-draft` | `agent-tools-draft.md` (PR #30에 포함, 머지되면 링크 가능) | 검토 대기 | |
-| `agent/detect-skeleton` | `agent-detect-skeleton.md` (PR #29에 포함) | 검토 대기 | |
+| `agent/tools-draft` | [agent-tools-draft.md](tasks/agent-tools-draft.md) | 머지됨 (PR #30) | 2026-10-21 |
+| `agent/detect-skeleton` | [agent-detect-skeleton.md](tasks/agent-detect-skeleton.md) | 머지됨 (PR #29) | 2026-10-21 |
+| `agent/detect-athena` | [agent-detect-athena.md](tasks/agent-detect-athena.md) | 머지됨 (PR #46) | 2026-10-21 |
+| `agent/skeleton` | [agent-skeleton.md](tasks/agent-skeleton.md) | 머지됨 (PR #42) | 2026-10-21 |
+| `agent/review-fixes` | [agent-review-fixes.md](tasks/agent-review-fixes.md) | 머지됨 (PR #48) | 2026-10-21 |
+| `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
 | `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
-| `agent/skeleton` | `agent-skeleton.md` (`agent/tools-draft` 위에 쌓음, #30 머지 뒤 PR 대상을 `main`으로) | 검토 대기 | |
+| `agent/ddl` | `agent-ddl.md` (이 대장 PR 다음에 PR) | 진행 중 | |
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
