@@ -159,7 +159,7 @@ gitGraph
 
 
 | `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 검토 대기 | |
-| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 통합 검증 완료·원격 반영 대기 (#35) | |
+| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 머지됨 (#35) | 2026-10-22 |
 
 ### gold-b
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
