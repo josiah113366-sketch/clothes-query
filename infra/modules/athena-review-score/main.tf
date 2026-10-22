@@ -10,8 +10,9 @@
 #   - 스크립트용 설정 묶음(SSM 파라미터 JSON 1개)
 #
 # 만들지 않는 것
-#   - Iceberg 테이블, staging 외부 테이블: Terraform 의 aws_glue_catalog_table 은 Iceberg 파티션 사양을 정할 수 없어서
-#     Athena DDL(stacks/athena-review-score/sql/*.sql)로 만든다. 실행은 사람이 한 번 하거나 Airflow 초기화 태스크가 한다.
+#   - (정정 2026-10-22) 테이블은 이 모듈이 만든다: aws_glue_catalog_table 의 open_table_format_input 이 Iceberg 스키마·파티션 사양을 지원한다
+#     (AWS provider 6.x 스키마로 확인). 그래서 Iceberg 테이블과 staging 외부 테이블도 Terraform 으로 만들고.
+#     단, 실제 apply 로 검증하기 전이라 "Terraform 이 만든 Iceberg 테이블을 Athena 가 정상으로 읽고 MERGE 하는지"는 첫 apply 에서 확인해야 한다.
 #   - 버킷·S3 수명주기: 버킷은 storage 스택 소유다. 수명주기 규칙은 버킷당 한 리소스만 둘 수 있어 이 스택에서 건드리면 충돌한다.
 #   - MERGE/OPTIMIZE/VACUUM 실행: Airflow 태스크 몫이다(sql/ 의 템플릿 사용).
 #   - SageMaker Job 쪽 변경(출력 prefix 를 staging 으로): stacks/sagemaker-review-score 의 별도 변경이다.
@@ -44,6 +45,164 @@ locals {
 resource "aws_glue_catalog_database" "this" {
   name        = var.database_name
   description = "review aspect scores (Iceberg table + staging external table)"
+}
+
+# ------------------------------------------------------------------ Iceberg 테이블 (최종 결과)
+# Glue API 로 Iceberg 테이블을 만든다. 데이터·메타데이터는 table_location(S3) 아래에 Iceberg 가 관리한다.
+# 스키마 필드 id 는 Iceberg 가 열을 식별하는 번호다(이름을 바꿔도 같은 열로 취급). 한 번 정하면 바꾸지 않는다.
+# 파티션: review_date(후기 작성일, KST) 그대로(identity). 실행한 날이 아니다.
+resource "aws_glue_catalog_table" "scores" {
+  name          = var.table_name
+  database_name = aws_glue_catalog_database.this.name
+  description   = "review aspect scores (Iceberg). partitioned by review_date (KST)"
+
+  open_table_format_input {
+    iceberg_input {
+      metadata_operation = "CREATE"
+      version            = "2"
+
+      iceberg_table_input {
+        location = "s3://${var.bucket_name}/${var.table_prefix}/"
+
+        # Athena 의 VACUUM 이 쓰는 보존 기준(7일 넘은 스냅샷 삭제, 최소 5개 유지) + 파일 형식
+        properties = {
+          "write.format.default"            = "parquet"
+          "write.parquet.compression-codec" = "snappy"
+          "vacuum_max_snapshot_age_seconds" = "604800"
+          "vacuum_min_snapshots_to_keep"    = "5"
+        }
+
+        # 필드 type 은 JSON 문자열이어야 해서 jsonencode("string") 처럼 쓴다(provider 요구).
+        schema {
+          type      = "struct"
+          schema_id = 0
+
+          fields {
+            id       = 1
+            name     = "review_id"
+            required = false
+            type     = jsonencode("string")
+          }
+          fields {
+            id       = 2
+            name     = "aspect"
+            required = false
+            type     = jsonencode("string")
+          }
+          fields {
+            id       = 3
+            name     = "score"
+            required = false
+            type     = jsonencode("int")
+          }
+          fields {
+            id       = 4
+            name     = "model_version"
+            required = false
+            type     = jsonencode("string")
+          }
+          fields {
+            id       = 5
+            name     = "analyzed_at"
+            required = false
+            type     = jsonencode("timestamp")
+          }
+          fields {
+            id       = 6
+            name     = "review_date"
+            required = false
+            type     = jsonencode("date")
+          }
+        }
+
+        partition_spec {
+          spec_id = 0
+          fields {
+            field_id  = 1000
+            name      = "review_date"
+            source_id = 6
+            transform = "identity"
+          }
+        }
+      }
+    }
+  }
+
+  # 테이블이 만들어진 뒤 스키마 변경은 Athena `ALTER TABLE` 로 한다(Iceberg 스키마 진화). Terraform 이 그 변경을 되돌리거나 테이블을 다시 만들지 않게 한다.
+  # Glue 가 만든 뒤 채우는 값(metadata_location 등)이 매번 diff 로 보이는 것도 막는다.
+  lifecycle {
+    ignore_changes = [open_table_format_input, parameters]
+  }
+}
+
+# ------------------------------------------------------------------ staging 외부 테이블 (MERGE 의 입력)
+# SageMaker Job 이 <staging>/year=/month=/day=/scores_<model_version>.parquet 로 쓴 파일을 읽는 일반(Hive) 외부 테이블.
+# 파티션 프로젝션: 파티션을 등록하지 않아도 경로 규칙(year=YYYY/month=MM/day=DD)만 맞으면 Athena 가 알아서 찾는다.
+resource "aws_glue_catalog_table" "staging" {
+  name          = var.staging_table_name
+  database_name = aws_glue_catalog_database.this.name
+  description   = "staging Parquet from the SageMaker scoring job (input of MERGE)"
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    EXTERNAL                    = "TRUE"
+    "classification"            = "parquet"
+    "projection.enabled"        = "true"
+    "projection.year.type"      = "integer"
+    "projection.year.range"     = "2026,2035"
+    "projection.year.digits"    = "4"
+    "projection.month.type"     = "integer"
+    "projection.month.range"    = "1,12"
+    "projection.month.digits"   = "2"
+    "projection.day.type"       = "integer"
+    "projection.day.range"      = "1,31"
+    "projection.day.digits"     = "2"
+    "storage.location.template" = "s3://${var.bucket_name}/${var.staging_prefix}/year=$${year}/month=$${month}/day=$${day}/"
+  }
+
+  partition_keys {
+    name = "year"
+    type = "string"
+  }
+  partition_keys {
+    name = "month"
+    type = "string"
+  }
+  partition_keys {
+    name = "day"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${var.bucket_name}/${var.staging_prefix}/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+    }
+
+    columns {
+      name = "review_id"
+      type = "string"
+    }
+    columns {
+      name = "aspect"
+      type = "string"
+    }
+    columns {
+      name = "score"
+      type = "int"
+    }
+    columns {
+      name = "model_version"
+      type = "string"
+    }
+    columns {
+      name = "analyzed_at"
+      type = "timestamp"
+    }
+  }
 }
 
 # ------------------------------------------------------------------ Athena 워크그룹

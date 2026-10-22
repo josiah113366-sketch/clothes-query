@@ -51,13 +51,13 @@ variable "database_name" {
 }
 
 variable "table_name" {
-  description = "Iceberg 테이블 이름(sql/create_table.sql 로 생성)."
+  description = "Iceberg 테이블 이름(Terraform 이 생성)."
   type        = string
   default     = "review_aspect_scores"
 }
 
 variable "staging_table_name" {
-  description = "staging Parquet 을 읽는 Hive 외부 테이블 이름(sql/create_staging_table.sql 로 생성)."
+  description = "staging Parquet 을 읽는 Hive 외부 테이블 이름(Terraform 이 생성)."
   type        = string
   default     = "staging_review_aspect_scores"
 }
