@@ -85,7 +85,7 @@ pytest -m integration
 베이스라인 뒤에 신규 가입을 계속 만들어 `members`에 **한 건씩(건당 트랜잭션 하나)** 넣는다. 로컬 DB 전용이다 (호스트가 `localhost`/`127.0.0.1`이 아니면 실행을 거부한다). **베이스라인(10만 명)을 먼저 적재한 뒤에 켠다.**
 
 ```bash
-sim member live                                   # normal, 실시간, 하루 평균 5,000명 (요일·시간대 곡선)
+sim member live                                   # normal, 실시간, 하루 평균 25,000명 (요일·시간대 곡선)
 sim member live --mode burst --speed 60 --duration 30   # 폭주로 시작, 시뮬레이터 30분
 sim member live --speed 1440 --duration 30        # 시뮬레이터 하루 = 실제 1분으로 30초 실행
 sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만들고 종료
@@ -94,7 +94,7 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`) |
-| `--daily` | `SIM_LIVE_DAILY` | 5000 | `normal`의 하루 평균 가입 수. `medium`·`burst` 속도도 이 값에서 정해진다 |
+| `--daily` | `SIM_LIVE_DAILY` | 25000 | `normal`의 하루 평균 가입 수. `medium`·`burst` 속도도 이 값에서 정해진다 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 (1 = 실시간) |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초. 지나면 정상 종료 |
 | `--max-signups` | | 없음 | 이 건수만큼 만들면 정상 종료 |
@@ -105,11 +105,11 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 - **가입 간격**은 푸아송 과정(지수분포)이다. 속도는 `--daily ÷ 86,400 × rate_factor(모드, 시뮬레이터 시각)`건/초다. `rate_factor`는 `common/curve.py`에 있고, 방문(`behavior`)도 같은 함수를 쓴다.
 
-  | 모드 | `rate_factor` (하루 평균 대비) | `--daily 5000`일 때 |
+  | 모드 | `rate_factor` (하루 평균 대비) | `--daily 25000`일 때 |
   |---|---|---|
-  | `normal` (일상) | 요일 배율 × 시간대 배율 | 하루 평균 5,000명. 월요일 20시는 분당 약 5.6명 |
-  | `medium` (중간) | 일상 피크 시간대 배율(1.8) × 3 = 5.4, 고정 | 시간당 1,125명 |
-  | `burst` (폭주) | 일상 피크 시간대 배율(1.8) × 10 = 18, 고정 | 시간당 3,750명 |
+  | `normal` (일상) | 요일 배율 × 시간대 배율 | 하루 평균 25,000명. 월요일 20시는 분당 약 28명 |
+  | `medium` (중간) | 일상 피크 시간대 배율(1.8) × 3 = 5.4, 고정 | 시간당 5,625명 |
+  | `burst` (폭주) | 일상 피크 시간대 배율(1.8) × 10 = 18, 고정 | 시간당 18,750명 |
 
   **곡선:** 요일 배율은 H&M 요일 비율 × 7(월 0.896 … 토 1.113, 한 주 평균 1), 시간대 배율은 우리가 정한 시간대 비율 ÷ 구간 길이(0~6시 0.20, 6~9시 0.64, 9~12시 1.12, 12~14시 1.32, 14~18시 1.02, 18~24시 1.80)다. 날짜와 시각은 KST 기준이고, 구간 안에서는 일정한 계단 함수다. 간격은 뽑은 시점의 속도로 뽑으므로 구간 경계에서 약간의 오차가 있다. `medium`·`burst`는 시간대·요일과 상관없이 고정이라 밤에 바꿔도 폭주가 된다. 자동 복귀(중간 60분, 폭주 15분)는 아직 없다(컨트롤러 작업).
 - **제어 파일**을 약 1초마다 읽는다. 로컬에서는 이렇게 바꾼다.
@@ -137,14 +137,14 @@ sim member live --daily 86400 --max-signups 20    # 초당 약 1건, 20건 만�
 
 ```bash
 docker compose exec -T postgres psql -U sim -d clothes < ../db/schema/004_orders.sql   # 처음 한 번
-sim behavior live                                                  # normal, 실시간, 하루 평균 11만 1천 방문
+sim behavior live                                                  # normal, 실시간, 하루 평균 55만 5천 방문
 sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink jsonl
 ```
 
 | 옵션 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|---|
 | `--mode` | `SIM_LIVE_MODE` | `normal` | 시작 모드 (`normal` \| `medium` \| `burst`). `member live`와 같은 변수 |
-| `--visits-daily` | `SIM_VISITS_DAILY` | 111000 | `normal`의 하루 평균 방문 수 |
+| `--visits-daily` | `SIM_VISITS_DAILY` | 555000 | `normal`의 하루 평균 방문 수 |
 | `--speed` | `SIM_LIVE_SPEED` | 1 | 시간 배속 |
 | `--duration` | | 계속 | **실제 시간** 기준 실행 초 |
 | `--max-visits` | | 없음 | 이만큼 방문을 만들면 정상 종료 |
@@ -154,7 +154,7 @@ sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink j
 | `--click-sink` | `SIM_CLICK_SINK` | `none` | 클릭 로그 출력: `none`(버림), `jsonl`(파일), `kafka`(토픽 `clickstream`, 아래 "클릭 로그" 절) |
 | `--click-file` | | `.local/clicks.jsonl` | `jsonl`일 때 경로. `.local/`은 커밋하지 않는다 |
 
-- **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 11만 1천 방문이면 주문은 약 5,000건이다.
+- **흐름:** 방문이 푸아송으로 도착한다(속도 `--visits-daily ÷ 86,400 × rate_factor(모드, 시각)`, `member live`와 같은 곡선·모드 규칙). 방문마다 회원을 고르고 `session_id`를 붙여 조회(평균 약 5번) → 담기(15%) → 주문(담은 방문의 28%, 담기 없이 바로 주문 0.3%)으로 이어진다. 주문은 결제를 시도하고(실패하면 최대 3번까지 재시도) `PLACED → PAID → SHIPPED → DELIVERED`, 또는 취소·결제 실패·반품으로 바뀐다. 하루 55만 5천 방문이면 주문은 약 25,000건이다. `SHIPPED` 뒤 3~6시간에 `DELIVERED`가 된다.
 - **값을 바꾸는 곳:** 확률, 분포, 지연은 모두 `src/sim/behavior/params.py` 한 곳에 있다. `[가정]` 표시는 팀과 맞추는 임시값이다.
 - **쓰는 방식:** 주문과 그 상품 줄은 한 트랜잭션, 결제 INSERT와 상태 UPDATE는 한 건씩 자동 커밋이다. `orders.updated_at`과 모든 전이 시각은 **예정된 시뮬레이터 시각**이다(실제 UPDATE 시각이 아니다). 결제는 INSERT만 하고 환불도 결제 행을 만들지 않는다.
 - **Sink 두 개:** 주문은 `OrderSink`(지금은 `DbOrderSink`, DB 직접 쓰기), 클릭은 `ClickSink`(`NullClickSink`, `JsonlClickSink`, `KafkaClickSink`)로 나간다. 나중에 쇼핑몰 API로 바꿀 때 같은 인터페이스(`behavior/sink.py`)를 구현해 `cli.py`에서 끼우면 된다. 클릭 로그 한 줄은 `event_id`, `event_type`(`view`/`cart_add`), `member_id`, `article_id`, `event_time`(UTC, `Z`로 끝남), `session_id`다.
@@ -276,6 +276,97 @@ sim clickstream reset --yes                 # 토픽 지우기 (로컬만)
 - **ECS에서 EKS 안 Kafka로 가는 경로는 아직 없다.** Kafka가 EKS 내부 전용이라 Fargate에서 닿지 않는다. 경로(내부 NLB, 클라이언트 인증서 공급, 네트워크 규칙)는 인프라와 `sim/ecs-image`에서 정한다.
 - **시각:** 클릭 `event_time`은 UTC(`Z`로 끝남)로 나간다(`jsonl`도 같다). "Bronze는 UTC, Silver에서 KST로 한 번만 바꾼다" 규칙과 Debezium 시각 표기에 맞췄다(`sim/cdc-orders`, 이전에는 `+09:00`).
 - **알려진 한계:** 재시작하면 메모리 큐에 예약돼 있던 클릭은 발행되지 않는다(주문과 같은 한계).
+
+## 업무 API로 쓰기 (`--backend api`)
+
+`sim member live`와 `sim behavior live`는 RDS에 직접 쓰는 대신 **업무 API(`api/`)**로 쓰고 읽을 수 있다. 이 경우 시뮬레이터에 DB 계정이 필요 없다(`DATABASE_URL` 불필요). 기본은 지금처럼 `--backend db`다.
+
+```bash
+export SIM_BACKEND=api                 # 또는 --backend api
+export SIM_API_URL=http://localhost:8000
+sim member live --speed 60
+sim behavior live --click-sink api --speed 60 --visits-daily 20000 --duration 120   # 실제 2분: 주문 약 80건
+```
+
+`--max-visits`로 짧게 끊으면 주문·결제가 거의 실행되지 않는다. 배속 60이면 방문 300이 몇 초 만에 차서, 조회 뒤에 예약된 주문·결제가 실행되기 전에 끝나기 때문이다(종료 요약의 `남은 큐`).
+
+| 무엇 | `--backend api`일 때 |
+|---|---|
+| 가입 | `POST /v1/members`. 시작 위치는 `GET /v1/members/signup-count`. 전화번호 중복(`PHONE_TAKEN`)이면 지금처럼 번호를 다시 뽑는다 |
+| 주문·결제·상태 | `POST /v1/orders`, `POST /v1/orders/{id}/payments`, `PATCH /v1/orders/{id}`. ID·시각·결제 결과는 시뮬레이터가 정해 보낸다 |
+| 회원 목록 | 시작 때 `GET /v1/members/active` 전체, 그다음 **5초마다** `GET /v1/members/changes` 변경분만 (지금의 60초마다 전체 다시 읽기 대신) |
+| 상품 목록 | 시작 때 `GET /v1/catalog` 한 번 |
+| 클릭 | `--click-sink api`: **1초 또는 500건**마다 `POST /v1/events/clicks`로 묶어 보낸다. API가 `clickstream`에 발행한다. 실패한 묶음은 버리고 센다(경고 1회). 종료 요약에 `클릭 전송(API)` 줄 |
+| API가 닿지 않음·5xx·503 | 그 항목부터 1, 2, 4, … 최대 30초 간격으로 다시 시도한다. ID가 고정이라 다시 보내도 중복이 생기지 않는다(같은 내용이면 API가 200) |
+| 회원 비활성(409 `MEMBER_NOT_ACTIVE`) | 그 주문을 버리고 회원을 목록에서 뺀다. 종료 요약의 `주문` 줄에 거절 수 |
+| 그 밖의 4xx(검증 실패, `ID_CONFLICT`) | 멈춘다(시뮬레이터 버그다). 오류 코드만 출력한다 |
+
+- 출력에는 API 호스트만 나오고 요청 본문(가입 PII)은 나오지 않는다.
+- 컨트롤러의 데이터 오염 주입은 지금처럼 DB에 직접 쓴다(API를 거치지 않는다).
+- **EKS의 API에 붙이기**: Windows PowerShell에서 `kubectl port-forward --address 0.0.0.0 -n api svc/api 8000:80`을 켜고, WSL에서는 Windows 호스트 주소로 접속한다(`SIM_API_URL=http://$(ip route show default | awk '{print $3}'):8000`). WSL을 mirrored 네트워킹으로 쓰면 `http://localhost:8000`도 된다. 이렇게 돌린 주문은 **실제 RDS에 남는 실제 시뮬레이션 데이터**다.
+
+## ECS에서 실행 (`sim/ecs-image`)
+
+ECS Fargate 태스크 1개에 같은 이미지 컨테이너 3개(`controller`, `member`, `behavior`)가 돌고, 공유 볼륨 `/control`의 `control.json`으로 소통한다. 시뮬레이터는 내부 ALB를 거쳐 업무 API로만 쓰고 읽는다(`--speed 1`, 실제 시각). 예외로 컨트롤러의 데이터 오염만 RDS에 직접 쓴다(오염 전용 계정 `clothes_sim_admin`). 인프라는 `infra/stacks/ecs-simulator`(README에 apply 순서).
+
+**이미지** (`Dockerfile`): 베이스 digest 고정, 비root(10001), RDS CA 묶음 `/etc/ssl/rds/ap-northeast-1-bundle.pem`(sha256 고정), `/control`은 비root가 쓸 수 있게 `VOLUME`으로 둔다. `.dockerignore`로 `.env`·`.local`(PII 시드)·`.venv`를 빌드 컨텍스트에서 뺀다.
+
+순서 (Windows PowerShell, 레포 루트. kubectl 쓰는 단계는 관리자 kubeconfig):
+
+1. **ECS 기반 apply**: `infra/stacks/ecs-simulator` README 1단계(이미지 없이). 출력 `ecr_repository_url`, `security_group_id`, `secret_name`을 적어 둔다.
+2. **오염 계정**:
+   ```powershell
+   $pw = aws secretsmanager get-random-password --password-length 32 --exclude-punctuation --query RandomPassword --output text --region ap-northeast-1
+   $pw | Set-Clipboard
+   ```
+   DBeaver(마스터, `postgres` DB)에서 `simulator/deploy/sql/sim-admin-account.sql`의 `BEGIN;`~`COMMIT;`을 실행한다(`'여기에_붙여넣기'` 안쪽에 붙여 넣기). 이어서 접속 문자열을 Secret에 넣는다.
+   ```powershell
+   $rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text --region ap-northeast-1
+   $tmp = "E:\sim-db-" + [guid]::NewGuid() + ".txt"
+   [IO.File]::WriteAllText($tmp, "postgresql://clothes_sim_admin:${pw}@${rdsHost}:5432/postgres?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ap-northeast-1-bundle.pem")
+   aws secretsmanager put-secret-value --secret-id clothes-query-dev-ecs-simulator/sim-admin-database-url --secret-string "file://$tmp" --region ap-northeast-1
+   Remove-Item $tmp; Remove-Variable pw, rdsHost, tmp
+   ```
+3. **RDS 허용**: `infra/stacks/rds`의 비공개 입력 `database_clients`에 `"ecs-simulator": "<security_group_id>"`를 넣고 rds plan(인바운드 규칙 1개 추가뿐) → apply.
+4. **이미지 push**:
+   ```powershell
+   $acct = aws sts get-caller-identity --query Account --output text
+   $repo = "$acct.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/simulator"
+   $tag = "sim-" + (git rev-parse --short HEAD)
+   aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin "$acct.dkr.ecr.ap-northeast-1.amazonaws.com"
+   docker build --platform linux/amd64 -t "${repo}:$tag" simulator
+   docker push "${repo}:$tag"
+   $digest = aws ecr describe-images --repository-name clothes-query-dev/simulator --image-ids imageTag=$tag --query "imageDetails[0].imageDigest" --output text --region ap-northeast-1
+   docker logout "$acct.dkr.ecr.ap-northeast-1.amazonaws.com"
+   $digest
+   ```
+5. **태스크 띄우기**: ECS 스택 비공개 입력에 `image_digest`(위 `$digest`)와 `api_url`(`http://` + `kubectl get ingress api -n api`의 주소)을 넣고 plan(태스크 정의·서비스 2개 추가) → apply.
+6. **API ALB 좁히기**: `api/deploy/chart/runtime.local.yaml`의 `inboundCIDRs`를 app subnet 두 대역(network 비공개 입력의 `subnets`)으로 바꾸고 `helm upgrade --install api …`(`api/README.md` 6단계).
+
+확인:
+
+```powershell
+$c = "clothes-query-dev-ecs-simulator"
+aws ecs describe-services --cluster $c --services $c --query "services[0].{run:runningCount,want:desiredCount,events:events[0:3].message}" --region ap-northeast-1
+aws logs tail "/ecs/$c" --since 10m --region ap-northeast-1     # 세 컨테이너의 [진행] 줄, 오류 없음
+```
+
+- 컨테이너 3개 RUNNING, 재시작 없음. `behavior` 진행 줄에 방문·주문·클릭, `member`에 가입
+- 15분 안에 S3 `bronze/clickstream/`, `bronze/orders/` 등에 새 파일
+
+**컨트롤러 화면** (ECS Exec 포트 포워딩, PC에 [Session Manager 플러그인](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) 필요):
+
+```powershell
+$c = "clothes-query-dev-ecs-simulator"
+$task = aws ecs list-tasks --cluster $c --service-name $c --query "taskArns[0]" --output text --region ap-northeast-1
+$rid = aws ecs describe-tasks --cluster $c --tasks $task --query "tasks[0].containers[?name=='controller'].runtimeId | [0]" --output text --region ap-northeast-1
+aws ssm start-session --target "ecs:${c}_$($task.Split('/')[-1])_$rid" --document-name AWS-StartPortForwardingSession --parameters "portNumber=8080,localPortNumber=8080" --region ap-northeast-1
+```
+
+켜 둔 채로 브라우저 `http://localhost:8080`. 다른 창에서 `sim controller …` 명령도 같은 주소로 된다(`SIM_CONTROLLER_URL` 기본값).
+
+- 멈추기: ECS 스택 `desired_count = 0`으로 apply. 다시 띄우면 메모리에 있던 예약(결제·배송 전이)은 사라진다(알려진 한계).
+- 새 이미지: 4단계 → `image_digest`만 바꿔 apply. 서비스는 옛 태스크를 먼저 내리고 새 태스크를 띄운다(두 개가 겹치지 않음).
 
 ## 로컬 CDC
 

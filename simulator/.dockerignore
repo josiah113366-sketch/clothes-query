@@ -1,0 +1,9 @@
+# 빌드 컨텍스트에서 비밀값·PII·가상환경을 뺀다(Dockerfile 은 pyproject.toml, src, data 만 복사한다)
+.env
+.local
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+tests
+connect

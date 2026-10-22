@@ -3,14 +3,16 @@ from typing import Annotated
 
 import typer
 
+from sim.common.api import BACKENDS, load_api_client, load_backend
 from sim.common.clock import SimClock
 from sim.common.config import ConfigError, load_config
 from sim.common.control import DEFAULT_CONTROL_FILE, MODES, FileControlSource
 from sim.common.db import SafeDatabaseError, connect, describe_target, target_host
 from sim.common.regions import RegionFileError, load_regions
 from sim.member import params
+from sim.member.api_store import ApiStore
 from sim.member.baseline import TableNotEmptyError, run_baseline, write_summary
-from sim.member.live import DbStore, LiveError, LiveRunner, stop_on_signals
+from sim.member.live import DbStore, LiveError, LiveRunner, MemberStore, stop_on_signals
 from sim.member.verify import run_verify
 
 app = typer.Typer(help="회원 생성과 적재", no_args_is_help=True)
@@ -121,25 +123,35 @@ def live(
         Path, typer.Option(envvar="SIM_CONTROL_FILE", help="제어 신호 파일 (로컬 개발용)")
     ] = Path(DEFAULT_CONTROL_FILE),
     seed: Annotated[int | None, typer.Option(help="기본 시드 (기본: SIM_SEED, 없으면 42)")] = None,
+    backend: Annotated[
+        str | None,
+        typer.Option(help=f"쓰는 곳 ({' | '.join(BACKENDS)}). 기본: SIM_BACKEND, 없으면 db"),
+    ] = None,
 ) -> None:
-    """신규 가입을 만들어 member에 한 건씩 넣는다 (로컬 DB 전용, 베이스라인 뒤에 켠다)."""
+    """신규 가입을 만들어 한 건씩 넣는다. db: 로컬 DB 직접(로컬 전용), api: 업무 API(SIM_API_URL)."""
     if mode not in MODES:
         raise _fail(f"--mode는 {', '.join(MODES)} 중 하나여야 합니다.")
     try:
-        config = load_config()
+        backend = load_backend(backend=backend)
+        config = load_config(require_database=backend == "db")
         regions = load_regions(config.region_file)
+        client = load_api_client() if backend == "api" else None
     except (ConfigError, RegionFileError) as error:
         raise _fail(str(error)) from None
     seed = config.seed if seed is None else seed
-    if target_host(config.database_url) not in LOCAL_HOSTS:
-        raise _fail("로컬 DB(localhost, 127.0.0.1)가 아니면 실행하지 않습니다.")
-
-    typer.echo(f"대상 DB: {describe_target(config.database_url)} (로컬 전용)")
+    store: MemberStore
+    if client is not None:
+        store = ApiStore(client)
+        typer.echo(f"대상 API: {client.host}")
+    else:
+        if target_host(config.database_url) not in LOCAL_HOSTS:
+            raise _fail("로컬 DB(localhost, 127.0.0.1)가 아니면 실행하지 않습니다.")
+        store = DbStore(config.database_url)
+        typer.echo(f"대상 DB: {describe_target(config.database_url)} (로컬 전용)")
     typer.echo(
         f"모드: {mode}  배속: {speed:g}  평상시 하루 가입: {daily:,.0f}명  "
         f"제어 파일: {control_file}"
     )
-    store = DbStore(config.database_url)
     runner = LiveRunner(
         store,
         regions,

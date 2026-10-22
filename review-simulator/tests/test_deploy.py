@@ -21,6 +21,7 @@ import aws_common
 import check_access
 import onoff
 import run_incident
+import run_rds
 import secret
 import status
 import switch
@@ -48,6 +49,7 @@ def aws(monkeypatch):
         s3 = sess.client("s3")
         s3.create_bucket(Bucket=BUCKET, CreateBucketConfiguration={"LocationConstraint": REGION})
         secret_arn = sess.client("secretsmanager").create_secret(Name="rsim/bedrock")["ARN"]
+        orders_db_arn = sess.client("secretsmanager").create_secret(Name="rsim/orders-db")["ARN"]
         logs = sess.client("logs")
         logs.create_log_group(logGroupName="/ecs/rsim")
         logs.create_log_group(logGroupName="/aws/events/rsim")
@@ -65,6 +67,7 @@ def aws(monkeypatch):
             "execution_role_arn": role,
             "task_role_arn": role,
             "secret_arn": secret_arn,
+            "orders_db_secret_arn": orders_db_arn,
             "subnets": ["subnet-1"],
             "security_groups": ["sg-1"],
             "app_log_group": "/ecs/rsim",
@@ -109,6 +112,37 @@ def test_first_revision_has_defaults_and_secret(aws):
     assert c["secrets"] == [{"name": "AWS_BEARER_TOKEN_BEDROCK", "valueFrom": cfg["secret_arn"]}]
     assert c["entryPoint"] == ["/bin/sh", "/app/deploy/entrypoint.sh"]
     assert "AWS_BEARER_TOKEN_BEDROCK" not in env  # 키 값은 환경변수 평문으로 안 들어간다
+    assert env["ORDERS_SOURCE"] == "fake"  # 처음에는 가짜 주문 (RDS 접속 secret 은 안 넣는다)
+
+
+def test_switch_orders_to_rds_needs_secret_then_injects_it(aws, capsys):
+    sess, cfg = aws
+    _register(sess, cfg)
+    # 접속 주소 secret 이 비어 있으면 rds 로 못 바꾼다 (빈 secret 을 넣으면 태스크가 시작부터 실패하므로)
+    with pytest.raises(SystemExit):
+        switch.main(["--orders", "rds"])
+    # localhost 주소(로컬 port-forward)는 ECS 에서 못 쓰므로 거절
+    with pytest.raises(SystemExit):
+        secret.check_db_url("postgresql://ro:pw@localhost:5432/clothes")
+    sess.client("secretsmanager").put_secret_value(
+        SecretId=cfg["orders_db_secret_arn"], SecretString="postgresql://ro:pw@db.internal:5432/x"
+    )
+    switch.main(["--orders", "rds"])
+    td = aws_common.latest_task_definition(sess.client("ecs"), "rsim")
+    assert aws_common.env_of(td)["ORDERS_SOURCE"] == "rds"
+    assert aws_common.env_of(td)["REVIEW_RATE"] == "0.1"  # 비율은 그대로
+    assert {"name": "ORDERS_DATABASE_URL", "valueFrom": cfg["orders_db_secret_arn"]} in td[
+        "containerDefinitions"
+    ][0]["secrets"]
+    assert "ORDERS_DATABASE_URL" not in aws_common.env_of(td)  # 값은 평문 환경변수로 안 들어간다
+    # 다시 fake 로 돌리면 secret 주입도 빠진다
+    switch.main(["--orders", "fake"])
+    td = aws_common.latest_task_definition(sess.client("ecs"), "rsim")
+    assert [x["name"] for x in td["containerDefinitions"][0]["secrets"]] == [
+        "AWS_BEARER_TOKEN_BEDROCK"
+    ]
+    with pytest.raises(SystemExit):
+        switch.main(["high", "--orders", "rds"])  # 비율과 같이 바꾸지 않는다
 
 
 def test_switch_keeps_image_and_changes_rate(aws, capsys):
@@ -311,5 +345,48 @@ def test_entrypoint_runs_same_rsim_commands(tmp_path):
         "run --source orders --sink lake --llm bedrock --date 2026-10-17",
     ]
     log.unlink()
+    # ORDERS_SOURCE=rds 면 가짜 주문 없이 RDS 주문으로 바로 리뷰
+    subprocess.run(
+        ["sh", str(script)], env={**env, "ORDERS_SOURCE": "rds"}, check=True, capture_output=True
+    )
+    assert log.read_text(encoding="utf-8").splitlines() == [
+        "run --source rds --sink lake --llm bedrock --date 2026-10-17"
+    ]
+    log.unlink()
     subprocess.run(["sh", str(script), "inject", "--file", "s3://b/k.csv"], env=env, check=True)
     assert log.read_text(encoding="utf-8").strip() == "inject --file s3://b/k.csv"
+
+
+def test_run_rds_checks_secret_switches_and_runs_bedrock(aws, monkeypatch, capsys):
+    """run_rds.py: secret 이 비어 있으면 멈추고, 있으면 주문 입력을 rds 로 맞춘 뒤 Bedrock 으로 한 번 실행한다."""
+    sess, cfg = aws
+    _register(sess, cfg)
+    with pytest.raises(SystemExit):
+        run_rds.main(["--yes", "--date", "2026-10-20"])
+    sess.client("secretsmanager").put_secret_value(
+        SecretId=cfg["orders_db_secret_arn"],
+        SecretString="postgresql://ro:pw@db.internal:5432/postgres",
+    )
+    calls = {}
+
+    def fake_run_task(ecs, cfg_, *, env=None, command=None, started_by=""):
+        calls.update(env=env, started_by=started_by)
+        return "arn:aws:ecs:x:1:task/rsim/abc"
+
+    monkeypatch.setattr(run_rds, "run_task", fake_run_task)
+    # 확인에 n 을 누르면 실행하지 않는다 (rds 전환은 남는다)
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    run_rds.main(["--date", "2026-10-20"])
+    assert not calls
+    td = aws_common.latest_task_definition(sess.client("ecs"), "rsim")
+    assert aws_common.env_of(td)["ORDERS_SOURCE"] == "rds"
+    rev = td["revision"]
+    run_rds.main(["--yes", "--date", "2026-10-20"])
+    assert calls["env"] == {
+        "RUN_DATE": "2026-10-20",
+        "LLM": "bedrock",
+    }  # 가짜 문장이 아니라 실제 생성
+    # 이미 rds 면 새 리비전을 또 만들지 않는다
+    assert aws_common.latest_task_definition(sess.client("ecs"), "rsim")["revision"] == rev
+    with pytest.raises(SystemExit):
+        run_rds.main(["--yes", "--date", "20261020"])
