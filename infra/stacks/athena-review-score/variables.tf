@@ -38,6 +38,30 @@ variable "table_prefix" {
   default     = "silver/review_aspect_scores_iceberg"
 }
 
+variable "staging_log_prefix" {
+  description = "후기별 점수 로그 staging prefix. sagemaker-review-score 스택의 score_log_prefix 와 같아야 한다."
+  type        = string
+  default     = "staging/review-score-log"
+}
+
+variable "log_table_prefix" {
+  description = "점수 로그 Iceberg 테이블 위치."
+  type        = string
+  default     = "silver/review_score_log_iceberg"
+}
+
+variable "log_table_name" {
+  description = "후기별 점수 로그 Iceberg 테이블 이름(Terraform 이 생성)."
+  type        = string
+  default     = "review_score_log"
+}
+
+variable "staging_log_table_name" {
+  description = "점수 로그 staging 외부 테이블 이름(Terraform 이 생성)."
+  type        = string
+  default     = "staging_review_score_log"
+}
+
 variable "results_prefix" {
   description = "Athena 쿼리 결과 prefix."
   type        = string

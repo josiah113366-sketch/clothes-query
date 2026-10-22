@@ -29,6 +29,9 @@ locals {
   code_arn         = "${var.bucket_arn}/${var.work_prefix}/code/*"
   output_arn       = "${var.bucket_arn}/${var.output_prefix}/*"
   error_arn        = "${var.bucket_arn}/${var.error_prefix}/*"
+  # 미점수 후기 입력(select_unscored.py 가 쓰고 Job 이 읽는다)과 후기별 점수 로그(Job 이 쓰는 staging)
+  unscored_input_arn = "${var.bucket_arn}/${var.unscored_input_prefix}/*"
+  score_log_arn      = "${var.bucket_arn}/${var.score_log_prefix}/*"
 
   # SageMaker 가 입력 prefix 를 내려받을 때 ListBucket 이 필요하다. 리소스 제한이 안 되어 prefix 조건으로 좁힌다.
   list_prefixes = [
@@ -36,6 +39,7 @@ locals {
     "${var.work_prefix}/model/*",
     "${var.work_prefix}/code/*",
     "${var.output_prefix}/*",
+    "${var.unscored_input_prefix}/*",
   ]
 
   # 스크립트가 쓰는 컨테이너 이미지(AWS 공개 DLC). 리전·계정은 변수에서 조립한다.
@@ -76,6 +80,7 @@ data "aws_iam_policy_document" "processing_s3" {
     actions = ["s3:GetObject"]
     resources = [
       local.review_input_arn,
+      local.unscored_input_arn,
       local.model_arn,
       local.code_arn,
     ]
@@ -83,7 +88,7 @@ data "aws_iam_policy_document" "processing_s3" {
   statement {
     sid       = "WriteScores"
     actions   = ["s3:PutObject"]
-    resources = [local.output_arn, local.error_arn]
+    resources = [local.output_arn, local.score_log_arn, local.error_arn]
   }
   statement {
     sid       = "ListOnlyUsedPrefixes"
@@ -236,6 +241,18 @@ data "aws_iam_policy_document" "launcher" {
     actions   = ["ssm:GetParameter"]
     resources = [aws_ssm_parameter.config.arn]
   }
+  # select_unscored.py(Job 시작 전 단계)를 실행하는 쪽의 S3 권한: Silver 후기 입력 읽기, 미점수 후기 입력 쓰기.
+  # 이미 점수가 매겨진 후기를 찾는 Athena 쿼리 권한은 athena-review-score 스택의 runner 정책을 함께 붙여서 받는다.
+  statement {
+    sid       = "SelectUnscoredReadInput"
+    actions   = ["s3:GetObject"]
+    resources = [local.review_input_arn]
+  }
+  statement {
+    sid       = "SelectUnscoredWriteInput"
+    actions   = ["s3:PutObject"]
+    resources = [local.unscored_input_arn]
+  }
 }
 
 resource "aws_iam_policy" "launcher" {
@@ -266,7 +283,10 @@ resource "aws_ssm_parameter" "config" {
     model_version       = var.model_version
     model_prefix        = "s3://${var.bucket_name}/${var.work_prefix}/model/"
     code_prefix         = "s3://${var.bucket_name}/${var.work_prefix}/code/"
+    model_version_no    = var.model_version_no
     output_prefix       = "s3://${var.bucket_name}/${var.output_prefix}/"
+    log_prefix          = "s3://${var.bucket_name}/${var.score_log_prefix}/"
+    unscored_prefix     = var.unscored_input_prefix
     error_prefix        = "s3://${var.bucket_name}/${var.error_prefix}/"
     network = local.vpc_enabled ? {
       subnets         = var.subnet_ids

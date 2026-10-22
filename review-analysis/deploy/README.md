@@ -6,5 +6,9 @@
 4. S3 입력으로 테스트: `python deploy/score_batch.py --model-dir ... --input s3://<버킷>/input/reviews_100.csv --output s3://<버킷>/output/out_100.csv`
 5. 팀 S3 `review-score/model/2.4b_score_s2c/`·`review-score/code/`로 업로드 후, 수동 실행: `python deploy/run_processing_job.py --input-key <후기 파일 S3 키> --dry-run` 로 요청 확인 → `--wait` 로 실행. 결과는 `staging/review-score/year=/month=/day=/scores_<model_version>_<실행시각>.parquet`(Iceberg MERGE 입력, 실행마다 새 파일)(날짜는 실행일이 아니라 **후기 작성일(KST)** 이고, 후기 행의 `review_date_kst` 등에서 읽어 날짜별로 나눠 쓴다. 날짜 없는 후기는 `--date` 또는 입력 키의 year=/month=/day= 를 쓴다). 하루 1회 실행은 Airflow silver DAG 종료 후 Airflow가 같은 방식으로 한다(다음 단계).
 
-출력 형식: 출력 경로가 `.parquet` 이면 Parquet(팀 Silver 형식, 열 `review_id,aspect,score,model_version,analyzed_at,review_date`, `pyarrow` 필요), 그 외 확장자는 CSV(같은 열). 속성별 한 행, 3분류 열 없음. 요약 파일은 Parquet 이면 `_summary_<이름>.json`, CSV 면 `<출력>.summary.json`. `--model-version` 으로 버전 값을 주고(기본 `MODEL_VERSION` 환경변수 또는 `unknown`), `--error-dir` 를 주면 파싱 실패 후기를 `errors_<model_version>.jsonl` 로 쓴다.
+출력 형식: 출력 경로가 `.parquet` 이면 Parquet(팀 Silver 형식, 열 `review_id,aspect,score,model_version,model_version_no,analyzed_at,review_date`, `pyarrow` 필요), 그 외 확장자는 CSV(같은 열). 속성별 한 행, 3분류 열 없음. 요약 파일은 Parquet 이면 `_summary_<이름>.json`, CSV 면 `<출력>.summary.json`. `--model-version` 으로 버전 값을 주고(기본 `MODEL_VERSION` 환경변수 또는 `unknown`), `--error-dir` 를 주면 파싱 실패 후기를 `errors_<model_version>.jsonl` 로 쓴다.
 입력 형식: CSV(`review_id,text`) 또는 JSONL. 후기를 Kafka → S3/RDS에서 읽는 경우는 S3에 위 형식 파일로 떨어지게 하거나, 읽기 부분만 `read_reviews`에 추가한다.
+
+모델 번호(`model_version_no`, "x.y" 형식): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`. 번호는 Terraform(sagemaker 스택의 `model_version_no`)과 SSM 설정에서 오고, `score_batch.py` 는 `--model-version-no` 로 받는다.
+
+미점수 후기만 점수화하기: `python deploy/select_unscored.py --input-key <Silver 후기 파일 S3 키>`(개수만 보려면 `--dry-run`) 또는 `python deploy/run_processing_job.py --input-key <키> --select-unscored --wait`. 점수 로그(`review_score_log`)에 현재 모델 번호로 이미 기록된 후기를 빼고 남은 것만 입력으로 쓰며, 남은 후기가 0건이면 Job 을 만들지 않는다. Job 이 끝난 뒤 `merge.sql` → `merge_log.sql` 을 실행해야 다음 실행에서 "이미 점수 있음"으로 인식된다.

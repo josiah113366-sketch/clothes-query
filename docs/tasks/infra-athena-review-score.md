@@ -19,6 +19,9 @@
 
 - 2026-10-22 결정: 점수 결과는 Parquet 이고, 날짜 파티션은 **후기 작성일(KST)** 이다(실행한 날이 아님). `model_version` 은 경로가 아니라 열이다.
 - 2026-10-22 결정: 결과 관리 방식은 **D(Iceberg + MERGE)** 로 진행한다(A 덮어쓰기와 비교 후). 작업은 작업 지시서와 Terraform 초안부터 한다.
+- 2026-10-22 결정: 다시 점수화했을 때 새 결과에서 **빠진 속성은 삭제**한다(`merge.sql` 의 tombstone 처리).
+- 2026-10-22 결정: Gold 는 후기마다 **`model_version_no` 가 가장 큰 결과**를 읽는다. 모델 번호 `model_version_no`("x.y", decimal(4,1)): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`.
+- 2026-10-22 결정: 매일 입력은 **아직 점수가 없는 후기만**이다(`select_unscored.py`). 이를 위해 후기별 점수 로그 테이블 `review_score_log`(속성이 0개인 후기도 한 행)를 둔다. 모델 번호를 올리면 전부 다시 점수화된다.
 - 방식 A(날짜+모델버전별 파일 덮어쓰기)로 이미 만든 `sagemaker-review-score` 스택은 그대로 둔다. 전환(출력 prefix 를 staging 으로 변경)은 별도 변경이다.
 - 하루 후기 수와 늦게 오는 후기 빈도는 아직 모른다. 이 값이 확정되면 D 가 과한지 다시 판단한다(한 번에 처리 가능한 양: 현재 실측으로 Job 당 약 2,200건, 최대 실행시간 3600초).
 
@@ -32,14 +35,14 @@
 ## 만드는 것
 
 ### 1. 모듈 `infra/modules/athena-review-score/`
-- Glue 데이터베이스, Iceberg 테이블(스키마·`review_date` 파티션)과 staging 외부 테이블, Athena 워크그룹(엔진 v3, 결과 위치, 쿼리당 스캔 10GB 한도, 설정 강제)
+- Glue 데이터베이스, Iceberg 테이블 2개(점수 `review_aspect_scores`, 점수 로그 `review_score_log`, 스키마·`review_date` 파티션)와 staging 외부 테이블 2개, Athena 워크그룹(엔진 v3, 결과 위치, 쿼리당 스캔 10GB 한도, 설정 강제)
 - Airflow 가 붙일 IAM 정책 `athena_runner`: 해당 워크그룹의 Athena 쿼리, 해당 DB·테이블의 Glue 읽기/`CreateTable`·`UpdateTable`, S3 staging 읽기·테이블 prefix 읽기/쓰기/삭제·결과 prefix 읽기/쓰기
 - 스크립트용 SSM 설정 파라미터(워크그룹, DB, 테이블, S3 위치)
 
 ### 2. 스택 `infra/stacks/athena-review-score/`
 - backend key `clothes-query/dev/athena-review-score/terraform.tfstate`, 계정 ID·state 버킷은 추적되는 `deployment.auto.tfvars.json`·`deployment.backend.hcl`(공통 배포 설정 규칙, `infra/DEPLOYMENT_CONFIG.md`), 개인 값은 `deployment.local.tfvars.json`(Git 제외)
 - 이름 접두사 `clothes-query-dev-athena-review-score`, 태그 `Component=athena-review-score`, storage 스택을 remote state 로 읽음
-- README 와 `sql/` 템플릿: `merge.sql`, `optimize.sql`, `vacuum.sql`, `read_latest.sql`
+- README 와 `sql/` 템플릿: `merge.sql`(upsert + 빠진 속성 삭제), `merge_log.sql`, `migrate_add_model_version_no.sql`(한 번만), `optimize.sql`, `vacuum.sql`, `read_latest.sql`(후기마다 `model_version_no` 최대)
 - `infra/README.md` 스택 표 한 줄
 
 ## 만들지 않는 것
@@ -68,11 +71,17 @@
 - [x] `terraform plan` → 첫 plan 은 6 create, 0 change, 0 destroy (초안 작성 시점)
 - [ ] apply 후 `terraform plan` 이 변경 없음
 - [ ] apply 후 SSM 파라미터 JSON 에 `workgroup`·`database`·`table_location`·`staging_location` 이 있고, 계정 ID·버킷 이름이 공유 설정 파일(`deployment.*`) 밖의 코드·문서에는 하드코딩돼 있지 않음 (`git grep`)
-- [ ] apply 로 만들어진 Iceberg 테이블·staging 테이블을 Athena 가 읽음(`SELECT`), 이후 plan 에 변경 없음(`ignore_changes` 동작 확인)
-- [ ] 샘플 staging 1일치로 `merge.sql` 2회 실행 → 두 번째는 행 수가 늘지 않음(멱등), `score` 변경 시 갱신됨
-- [ ] 같은 날짜를 다른 `model_version` 으로 반영 → 행이 따로 쌓임
-- [ ] `optimize.sql`·`vacuum.sql` 이 오류 없이 실행되고 `read_latest.sql` 이 기대한 결과를 냄
+- [x] apply 로 만들어진 Iceberg 테이블·staging 테이블을 Athena 가 읽음(`SELECT`) (2026-10-22). 이후 plan 변경 없음 확인은 위 "apply 후 plan 이 변경 없음" 항목에서 계속
+- [x] 샘플 staging 1일치로 `merge.sql` 2회 실행 → 두 번째는 행 수가 늘지 않음(멱등). 같은 날짜 Job 을 재실행해 staging 에 같은 키 193개가 2번씩(파일 2개) 있는 상태에서 `merge.sql` 이 오류 없이 반영, 테이블 193행·후기 100개·중복 0, `analyzed_at` 이 두 번째 실행 시각으로 갱신됨 (2026-10-22 확인)
+- [x] 같은 날짜를 다른 `model_version`(`test-v`)으로 넣었을 때 행이 따로 쌓이고 `read_latest.sql` 이 최신 버전을 고름 (사용자 시험, 2026-10-22; 시험 행은 삭제함)
+- [x] `optimize.sql`·`vacuum.sql` 이 오류 없이 실행되고 `read_latest.sql` 이 기대한 결과를 냄 (사용자 시험, 2026-10-22). 남은 확인: 테이블 속성에 `vacuum_*` 보존 기준이 보이지 않음(Glue 가 저장하지 않았을 수 있음) → 필요하면 `ALTER TABLE ... SET TBLPROPERTIES` 로 지정
 - [ ] 쿼리당 스캔 한도(10GB)와 워크그룹 설정 강제가 적용됨(콘솔 확인)
+- [ ] (모델 번호·점수 로그·미점수 입력 변경 후) Terraform plan: 점수 로그 테이블·staging 로그 테이블 2 create, staging 점수 테이블·runner 정책·SSM 변경, 삭제/교체 없음
+- [ ] `migrate_add_model_version_no.sql` 4문장 실행: 열 추가, 기존 행 `model_version_no = 1.0`, 비어 있는 행 0, 점수 로그 채우기
+- [ ] 빠진 속성 삭제 시험: 한 후기에 가짜 속성 행을 넣고 `merge.sql` 재실행 → 가짜 행 삭제, 다른 후기 행은 그대로(행 수 불변)
+- [ ] `merge_log.sql` 실행 후 `review_score_log` 에 후기당 한 행(속성 0개 후기는 `n_aspects = 0`)
+- [ ] 높은 모델 번호 시험: 같은 후기에 `model_version_no = 2.0` 행을 넣으면 `read_latest.sql` 이 2.0 행만 고름, 시험 행은 삭제
+- [ ] `select_unscored.py` 시험: 전부 점수 있음(0건, Job 없음) / 일부만 점수 있음(로그 행 삭제 후 그 후기만 선택) / 속성 0개 후기가 다시 선택되지 않음 / 모델 번호를 올리면 전부 선택
 
 ## README 갱신
 
@@ -88,4 +97,5 @@
 - **입력과 출력:** 입력 `staging/review-score/year=/month=/day=/scores_<model_version>_<실행시각>.parquet`(열에 `review_date` 포함, 실행마다 새 파일)(SageMaker Job 출력). 출력 Iceberg 테이블 `<database>.review_aspect_scores`(파티션 `review_date`).
   연동 값은 SSM `/clothes-query/dev/athena-review-score/config` 와 `runner_policy_arn` output.
 - **확인한 결과:** fmt·validate 통과, 첫 plan 6 create / 0 change / 0 destroy. Athena 에서의 테이블 읽기·SQL 실행은 아직 하지 않았다.
+- **추가된 결정(2026-10-22):** 빠진 속성 삭제, Gold 는 `model_version_no` 최대 결과 읽기(모델 번호 `model_version_no`("x.y", decimal(4,1)): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`.), 매일 미점수 후기만 입력(점수 로그 `review_score_log` + `select_unscored.py`).
 - **알려진 한계·남은 일:** SQL 실제 검증, SageMaker 출력 prefix 변경, Airflow 태스크, staging·결과 정리 정책(수명주기), 사라진 속성 처리, Gold 의 버전 선택 규칙, 타임스탬프 타입 확인.

@@ -62,6 +62,24 @@ variable "model_version" {
   default     = "2.4b_score_s2c"
 }
 
+variable "model_version_no" {
+  description = "모델 번호 \"x.y\" 형식 문자열(model_version 이름과 1:1). 평가 모델/로직 변경은 메이저(0.0→1.0), 작은 수정은 마이너(0.0→0.1), 마이너는 0~9(x.9 다음은 메이저). Gold 는 가장 큰 번호를 읽는다. 현재 2.4b_score_s2c = 1.0."
+  type        = string
+  default     = "1.0"
+}
+
+variable "score_log_prefix" {
+  description = "후기별 점수 로그 staging prefix(쓰기 전용). athena-review-score 스택의 staging_log_prefix 와 같아야 한다."
+  type        = string
+  default     = "staging/review-score-log"
+}
+
+variable "unscored_input_prefix" {
+  description = "select_unscored.py 가 미점수 후기를 쓰는 입력 prefix(Job 읽기 전용)."
+  type        = string
+  default     = "staging/review-score-input"
+}
+
 variable "instance_type" {
   description = "Processing Job 인스턴스 타입(SSM 설정의 기본값). 실측: ml.g4dn.xlarge 1,000건 약 27분."
   type        = string

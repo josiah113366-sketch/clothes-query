@@ -10,8 +10,10 @@
 | `bucket_name`, `bucket_arn` | storage 스택 output (민감 값) |
 | `staging_prefix` | SageMaker Job 이 점수 Parquet 을 임시로 쓰는 곳(기본 `staging/review-score`) |
 | `table_prefix` | Iceberg 테이블 위치(기본 `silver/review_aspect_scores_iceberg`) |
+| `staging_log_prefix`, `log_table_prefix` | 후기별 점수 로그 staging prefix(기본 `staging/review-score-log`)와 로그 Iceberg 테이블 위치(기본 `silver/review_score_log_iceberg`) |
 | `results_prefix` | Athena 쿼리 결과 위치(기본 `athena-results/review-score`) |
-| `database_name`, `table_name`, `staging_table_name` | Glue DB·테이블 이름 |
+| `database_name`, `table_name`, `staging_table_name` | Glue DB·점수 테이블 이름 |
+| `log_table_name`, `staging_log_table_name` | 후기별 점수 로그 테이블(Iceberg)과 그 staging 외부 테이블 이름 |
 | `bytes_scanned_cutoff` | 쿼리당 스캔 한도(기본 10GB, 최소 10MB) |
 | `config_parameter_name` | 스크립트가 읽는 SSM 파라미터 이름 |
 

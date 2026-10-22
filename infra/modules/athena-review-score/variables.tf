@@ -50,6 +50,21 @@ variable "table_prefix" {
   default     = "silver/review_aspect_scores_iceberg"
 }
 
+variable "staging_log_prefix" {
+  description = <<-EOT
+    후기별 점수 로그를 Job 이 임시로 쓰는 prefix(<이 값>/year=/month=/day=/scorelog_<버전>_<실행시각>.parquet).
+    sagemaker-review-score 스택의 score_log_prefix 와 같아야 한다. merge_log.sql 의 입력이다.
+  EOT
+  type        = string
+  default     = "staging/review-score-log"
+}
+
+variable "log_table_prefix" {
+  description = "점수 로그 Iceberg 테이블 위치(S3 prefix). 점수 테이블 위치와 겹치지 않게 별도 prefix 를 쓴다."
+  type        = string
+  default     = "silver/review_score_log_iceberg"
+}
+
 variable "results_prefix" {
   description = "Athena 쿼리 결과 파일이 쌓이는 prefix(워크그룹 설정). 쿼리마다 작은 파일이 생기므로 수명주기로 지우는 것을 권장(열린 질문)."
   type        = string
@@ -68,6 +83,18 @@ variable "table_name" {
   description = "Iceberg 테이블 이름. Terraform(Glue 테이블 리소스)이 만든다."
   type        = string
   default     = "review_aspect_scores"
+}
+
+variable "log_table_name" {
+  description = "후기별 점수 로그 Iceberg 테이블 이름. 점수가 하나도 안 나온 후기도 한 행 남아 select_unscored 가 같은 후기를 다시 고르지 않게 한다."
+  type        = string
+  default     = "review_score_log"
+}
+
+variable "staging_log_table_name" {
+  description = "점수 로그 staging Parquet 을 읽는 Hive 외부 테이블 이름."
+  type        = string
+  default     = "staging_review_score_log"
 }
 
 variable "staging_table_name" {

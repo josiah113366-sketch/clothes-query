@@ -25,6 +25,11 @@ module "athena_review_score" {
   table_prefix   = var.table_prefix
   results_prefix = var.results_prefix
 
+  staging_log_prefix     = var.staging_log_prefix
+  log_table_prefix       = var.log_table_prefix
+  log_table_name         = var.log_table_name
+  staging_log_table_name = var.staging_log_table_name
+
   database_name        = var.database_name
   table_name           = var.table_name
   staging_table_name   = var.staging_table_name

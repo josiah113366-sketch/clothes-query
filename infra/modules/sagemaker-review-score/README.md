@@ -15,6 +15,8 @@
 | `model_version` | 출력 열·파일명의 모델 버전(기본 `2.4b_score_s2c`), SSM 설정에 담김 |
 | `dlc_registry_account_id`, `dlc_repository`, `dlc_image_tag` | AWS 공개 PyTorch DLC 이미지 (개인 계정에서 실측한 것과 동일) |
 | `instance_type`, `volume_size_gb`, `max_runtime_seconds`, `job_name_prefix` | 스크립트가 SSM 설정에서 읽는 실행 기본값 |
+| `model_version_no` | 모델 번호 "x.y"(기본 `1.0`). 평가 모델/로직 변경은 메이저(0.0→1.0), 작은 수정은 마이너(0.0→0.1), 마이너 0~9(x.9 다음은 메이저). model_version 이름과 1:1 |
+| `score_log_prefix`, `unscored_input_prefix` | 후기별 점수 로그 staging(기본 `staging/review-score-log`, 쓰기)와 미점수 입력(기본 `staging/review-score-input`, 읽기) |
 | `config_parameter_name` | 스크립트가 읽는 SSM 파라미터 이름 |
 
 출력: `role_arn`, `role_name`, `security_group_id`, `config_parameter_name`, `image_uri`, `launcher_policy_arn`.

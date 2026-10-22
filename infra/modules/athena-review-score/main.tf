@@ -27,12 +27,17 @@ locals {
   staging_arn = "${var.bucket_arn}/${var.staging_prefix}/*"
   table_arn   = "${var.bucket_arn}/${var.table_prefix}/*"
   results_arn = "${var.bucket_arn}/${var.results_prefix}/*"
+  # 후기별 점수 로그(review_score_log): staging 읽기, Iceberg 테이블 위치 읽기/쓰기/삭제
+  staging_log_arn = "${var.bucket_arn}/${var.staging_log_prefix}/*"
+  log_table_arn   = "${var.bucket_arn}/${var.log_table_prefix}/*"
 
   # s3:ListBucket 은 리소스 제한이 안 되어 prefix 조건으로 좁힌다.
   list_prefixes = [
     "${var.staging_prefix}/*",
     "${var.table_prefix}/*",
     "${var.results_prefix}/*",
+    "${var.staging_log_prefix}/*",
+    "${var.log_table_prefix}/*",
   ]
 
   catalog_arn  = "arn:${local.partition}:glue:${var.region}:${local.account_id}:catalog"
@@ -112,6 +117,14 @@ resource "aws_glue_catalog_table" "scores" {
             name     = "review_date"
             required = false
             type     = jsonencode("date")
+          }
+          # 모델 번호 "x.y" = decimal(4,1) (2026-10-22 추가). 이미 만들어진 테이블에는 ignore_changes 때문에 이 정의가 적용되지 않는다 →
+          # stacks/athena-review-score/sql/migrate_add_model_version_no.sql 로 ALTER TABLE ADD COLUMNS 를 한 번 실행한다.
+          fields {
+            id       = 7
+            name     = "model_version_no"
+            required = false
+            type     = jsonencode("decimal(4, 1)")
           }
         }
 
@@ -199,6 +212,10 @@ resource "aws_glue_catalog_table" "staging" {
       type = "string"
     }
     columns {
+      name = "model_version_no"
+      type = "decimal(4,1)"
+    }
+    columns {
       name = "analyzed_at"
       type = "timestamp"
     }
@@ -206,6 +223,161 @@ resource "aws_glue_catalog_table" "staging" {
     columns {
       name = "review_date"
       type = "date"
+    }
+  }
+}
+
+# ------------------------------------------------------------------ 후기별 점수 로그 Iceberg 테이블
+# 점수를 매긴 후기마다 한 행: 속성이 하나도 안 나온 후기(n_aspects = 0)도 기록된다.
+# 점수 테이블만 보면 "속성 0개 후기"는 점수 행이 없어서 매일 다시 점수화 대상으로 잡히기 때문에 이 로그로 "점수를 매겼는가"를 판단한다.
+# 파싱에 실패한 후기는 일부러 기록하지 않는다(다음 실행에서 다시 시도되고, 실패는 오류 파일에 남는다).
+resource "aws_glue_catalog_table" "score_log" {
+  name          = var.log_table_name
+  database_name = aws_glue_catalog_database.this.name
+
+  open_table_format_input {
+    iceberg_input {
+      metadata_operation = "CREATE"
+      version            = "2"
+
+      iceberg_table_input {
+        location = "s3://${var.bucket_name}/${var.log_table_prefix}/"
+
+        properties = {
+          "write.format.default"            = "parquet"
+          "write.parquet.compression-codec" = "snappy"
+          "vacuum_max_snapshot_age_seconds" = "604800"
+          "vacuum_min_snapshots_to_keep"    = "5"
+        }
+
+        schema {
+          type      = "struct"
+          schema_id = 0
+
+          fields {
+            id       = 1
+            name     = "review_id"
+            required = false
+            type     = jsonencode("string")
+          }
+          fields {
+            id       = 2
+            name     = "model_version"
+            required = false
+            type     = jsonencode("string")
+          }
+          fields {
+            id       = 3
+            name     = "model_version_no"
+            required = false
+            type     = jsonencode("decimal(4, 1)")
+          }
+          fields {
+            id       = 4
+            name     = "analyzed_at"
+            required = false
+            type     = jsonencode("timestamp")
+          }
+          fields {
+            id       = 5
+            name     = "review_date"
+            required = false
+            type     = jsonencode("date")
+          }
+          fields {
+            id       = 6
+            name     = "n_aspects"
+            required = false
+            type     = jsonencode("int")
+          }
+        }
+
+        partition_spec {
+          spec_id = 0
+          fields {
+            field_id  = 1000
+            name      = "review_date"
+            source_id = 5
+            transform = "identity"
+          }
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [open_table_format_input, parameters]
+  }
+}
+
+# ------------------------------------------------------------------ 점수 로그 staging 외부 테이블 (merge_log.sql 의 입력)
+resource "aws_glue_catalog_table" "staging_log" {
+  name          = var.staging_log_table_name
+  database_name = aws_glue_catalog_database.this.name
+  description   = "per-review score log Parquet from the SageMaker scoring job (input of merge_log.sql)"
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    EXTERNAL                    = "TRUE"
+    "classification"            = "parquet"
+    "projection.enabled"        = "true"
+    "projection.year.type"      = "integer"
+    "projection.year.range"     = "2026,2035"
+    "projection.year.digits"    = "4"
+    "projection.month.type"     = "integer"
+    "projection.month.range"    = "1,12"
+    "projection.month.digits"   = "2"
+    "projection.day.type"       = "integer"
+    "projection.day.range"      = "1,31"
+    "projection.day.digits"     = "2"
+    "storage.location.template" = "s3://${var.bucket_name}/${var.staging_log_prefix}/year=$${year}/month=$${month}/day=$${day}/"
+  }
+
+  partition_keys {
+    name = "year"
+    type = "string"
+  }
+  partition_keys {
+    name = "month"
+    type = "string"
+  }
+  partition_keys {
+    name = "day"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${var.bucket_name}/${var.staging_log_prefix}/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+    }
+
+    columns {
+      name = "review_id"
+      type = "string"
+    }
+    columns {
+      name = "model_version"
+      type = "string"
+    }
+    columns {
+      name = "model_version_no"
+      type = "decimal(4,1)"
+    }
+    columns {
+      name = "analyzed_at"
+      type = "timestamp"
+    }
+    columns {
+      name = "review_date"
+      type = "date"
+    }
+    columns {
+      name = "n_aspects"
+      type = "int"
     }
   }
 }
@@ -281,13 +453,13 @@ data "aws_iam_policy_document" "athena_runner" {
   statement {
     sid       = "ReadStaging"
     actions   = ["s3:GetObject"]
-    resources = [local.staging_arn]
+    resources = [local.staging_arn, local.staging_log_arn]
   }
 
   statement {
     sid       = "ReadWriteTable"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = [local.table_arn]
+    resources = [local.table_arn, local.log_table_arn]
   }
 
   statement {
@@ -322,14 +494,18 @@ resource "aws_ssm_parameter" "config" {
   description = "review score Iceberg/Athena config for Airflow tasks (managed by Terraform)"
   type        = "String"
   value = jsonencode({
-    region             = var.region
-    workgroup          = aws_athena_workgroup.this.name
-    database           = aws_glue_catalog_database.this.name
-    table              = var.table_name
-    staging_table      = var.staging_table_name
-    staging_location   = "s3://${var.bucket_name}/${var.staging_prefix}/"
-    table_location     = "s3://${var.bucket_name}/${var.table_prefix}/"
-    results_location   = "s3://${var.bucket_name}/${var.results_prefix}/"
-    runner_policy_name = aws_iam_policy.athena_runner.name
+    region               = var.region
+    workgroup            = aws_athena_workgroup.this.name
+    database             = aws_glue_catalog_database.this.name
+    table                = var.table_name
+    staging_table        = var.staging_table_name
+    log_table            = var.log_table_name
+    staging_log_table    = var.staging_log_table_name
+    staging_log_location = "s3://${var.bucket_name}/${var.staging_log_prefix}/"
+    log_table_location   = "s3://${var.bucket_name}/${var.log_table_prefix}/"
+    staging_location     = "s3://${var.bucket_name}/${var.staging_prefix}/"
+    table_location       = "s3://${var.bucket_name}/${var.table_prefix}/"
+    results_location     = "s3://${var.bucket_name}/${var.results_prefix}/"
+    runner_policy_name   = aws_iam_policy.athena_runner.name
   })
 }

@@ -22,6 +22,8 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - 실행은 EventBridge 스케줄이 아니라 **Airflow silver DAG 종료 신호**로 Airflow 가 시작한다.
 - 결과는 `s3://<버킷>/staging/review-score/year=/month=/day=/scores_<model_version>_<실행시각>.parquet`(2026-10-22 변경: Iceberg MERGE 입력, 실행마다 새 파일), 오류는 `silver/review_aspect_scores_error/year=/month=/day=/` 에 쓴다(2026-10-22 변경, 같은 날짜·버전 재실행은 그 파일만 덮어쓴다).
 - 입력은 Bronze 가 아니라 **Silver 리뷰**(`silver/reviews/`)를 읽는다(2026-10-22 변경).
+- 2026-10-22 결정: 결과 Parquet 에 `model_version_no`("x.y", decimal(4,1)) 열을 더한다. 모델 번호 `model_version_no`("x.y", decimal(4,1)): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`.
+- 2026-10-22 결정: 후기별 점수 로그를 `staging/review-score-log/` 에 쓰고(속성 0개 후기 포함, 파싱 실패 제외), 매일 입력은 점수 로그에 없는 후기만 쓴다(`select_unscored.py`, 입력 prefix `staging/review-score-input/`).
 - 실측(개인 계정, 도쿄, `ml.g4dn.xlarge`, AWS PyTorch DLC): 1,000건 약 27분, 시간당 0.994 USD, 1회 약 0.46 USD.
 
 ## 시작 전 확인 (Claude가 한다)
