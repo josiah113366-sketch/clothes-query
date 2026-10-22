@@ -11,7 +11,7 @@
 
 두 파일을 하나의 공통 계약 작업으로 관리한다. YAML의 필드 목록을 이 문서에 다시 복사하지 않는다. 사용자 승인으로 `source_rules`를 공통 검사기 `pipelines/format_rules.py`와 거래 Silver에 연결했다. Gold B는 아직 연결하지 않았다. 로컬 기본 경로는 이 폴더의 format_rules.yaml이며 CLI --rules-path로 명시할 수 있다. 운영 배포 방식과 Gold B 연결은 공동 검토 대상이다.
 
-YAML 전체 status=proposed는 경로 간 미합의 제안을 포함한다는 뜻이다. 실행하는 원천 규칙만 source_rules_status=decided, version=0.1.0으로 구분한다. runtime_connected는 소비 경로별 상태(silver=true, gold_b=false)를 나타낸다. proposed_changes를 원천 검사에 자동으로 합치지 않는다.
+YAML 전체 status=proposed는 경로 간 미합의 제안을 포함한다는 뜻이다. 실행하는 원천 규칙만 source_rules_status=decided, version=0.2.0으로 구분한다. runtime_connected는 소비 경로별 상태(silver=true, gold_b=false)를 나타낸다. proposed_changes를 원천 검사에 자동으로 합치지 않는다.
 
 현재 범위는 주문・주문상품・결제다. 회원・클릭・리뷰・AI 결과 계약은 이번 YAML에 추측해서 추가하지 않는다. Gold A 지표의 상세 정의는 Gold A 설계에서 관리하고, 여기에는 다른 경로와 맞출 접점만 남긴다.
 
@@ -170,7 +170,7 @@ Gold B 원장은 두 컬럼 보존 정의를 반영했지만 실제 호출/원�
 | 주문 생성 수 | `ordered_at` KST 시간대에 주문당 1회 | Gold A 기준안 |
 | 결제 성공・승인 금액 | 성공 결제의 `completed_at` 기준. 현재 주문 상태가 PAID인 행만 고르지 않음 | Gold A 기준안 |
 
-상품 원가・수량 등 추가 최소값을 추측해 넣지 않는다. 현재 DDL의 주문상품 단가는 0보다 큰 값이며, 5,900원 하한은 별도 합의 없이 공통 검사에 넣지 않는다. 취소・환불 차감과 순매출은 Gold A 지표 설계에서 따로 결정한다.
+주문상품 단가는 0.2.0부터 5,900원 이상으로 검사한다. DDL은 0보다 큰 값만 요구하지만, 상품 시드의 가격 규칙(5,900원 이상, `docs/tasks/sim-product-seed.md`)에 맞춘 업무 기준이며 Silver와 Gold B가 같이 적용한다(Gold B 제안, 2026-10-22). 상품 원가・수량 등 다른 추가 최소값은 추측해 넣지 않는다. 취소・환불 차감과 순매출은 Gold A 지표 설계에서 따로 결정한다.
 
 ## 7. 공통 검사 연결
 

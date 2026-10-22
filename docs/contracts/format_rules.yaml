@@ -1,7 +1,7 @@
 # 원천 규칙은 승인된 Silver 검사기에 연결한다. 경로 간 제안은 별도다.
 # source_rules는 db/schema/004_orders.sql의 정규화된 업무 행 규칙이다.
 # proposed_changes는 합의 후 반영할 안이며 실행 규칙으로 자동 합치지 않는다.
-version: "0.1.0"
+version: "0.2.0"
 status: proposed
 source_rules_status: decided
 runtime_connected:
@@ -57,7 +57,8 @@ source_rules:
       order_id: {type: uuid, required: true, nullable: false}
       article_id: {type: string, required: true, nullable: false}
       quantity: {type: integer, required: true, nullable: false, minimum: 1}
-      unit_price: {type: integer, required: true, nullable: false, minimum: 1}
+      # DB 정의는 0보다 큰 값이다. 상품 시드 가격 규칙(5,900원 이상)에 맞춘 업무 기준으로 좁혔다 (0.2.0).
+      unit_price: {type: integer, required: true, nullable: false, minimum: 5900}
     checks: []
 
   payments:
