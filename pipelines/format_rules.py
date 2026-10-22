@@ -1,4 +1,7 @@
-"""공통 YAML의 source_rules를 검사한다. 소비 경로의 정제/집계에는 의존하지 않는다."""
+"""공통 YAML의 source_rules를 검사한다. 소비 경로의 정제/집계에는 의존하지 않는다.
+
+validate()는 첫 오류 하나를 내고(Silver), errors()는 한 행의 오류를 전부 돌려준다(Gold B). 두 함수의 첫 오류는 같다.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -158,61 +161,87 @@ class FormatRules:
         return {"version": self.version, "sha256": self.digest, "path": str(self.path),
                 "scope": "source_rules", "consumer": self.consumer}
 
-    def validate(self, dataset: str, row: dict) -> None:
+    def _definition(self, dataset: str) -> dict:
         if dataset not in self.datasets:
             raise RuleConfigError("해당 데이터셋의 규칙이 없습니다")
-        fields = self.datasets[dataset]["fields"]
-        for field, spec in fields.items():
-            prefix = dataset + ".fields." + field
-            if field not in row:
-                if spec["required"]:
-                    raise FormatError(field, "MISSING_FIELD", prefix + ".required")
+        return self.datasets[dataset]
+
+    def errors(self, dataset: str, row: dict) -> list[FormatError]:
+        """한 행의 오류를 전부 돌려준다 (Gold B가 오류마다 한 줄씩 남길 때 쓴다).
+
+        순서는 필드마다 첫 오류 하나(필드 정의 순서), 그다음 조건 검사(정의 순서)다.
+        오류가 난 필드를 쓰는 조건 검사는 건너뛴다. 같은 원인의 오류가 겹치거나 읽을 수 없는 값을 비교하지 않게 한다.
+        """
+        definition = self._definition(dataset)
+        fields = definition["fields"]
+        found = [error for field, spec in fields.items()
+                 if (error := _field_error(dataset, field, spec, row)) is not None]
+        broken = {error.field for error in found}
+        for check in definition["checks"]:
+            used = {check["field"], check.get("other_field"), (check.get("when") or {}).get("field")}
+            if broken & used:
                 continue
-            value = row[field]
-            if value is None:
-                if not spec["nullable"]:
-                    raise FormatError(field, "MISSING_FIELD", prefix + ".nullable")
-                continue
-            kind = spec["type"]
-            if kind == "integer":
-                if type(value) is not int:
-                    raise FormatError(field, "TYPE_MISMATCH", prefix + ".type")
-            else:
-                if not isinstance(value, str):
-                    raise FormatError(field, "TYPE_MISMATCH", prefix + ".type")
-                if not value.strip():
-                    raise FormatError(field, "MISSING_FIELD", prefix + ".non_blank")
-                try:
-                    if kind == "uuid":
-                        UUID(value)
-                    elif kind == "timestamp":
-                        _aware_time(value)
-                except ValueError as exc:
-                    raise FormatError(field, "INVALID_VALUE", prefix + ".type") from exc
-            if "enum" in spec and value not in spec["enum"]:
-                raise FormatError(field, "INVALID_VALUE", prefix + ".enum")
-            if "minimum" in spec and value < spec["minimum"]:
-                raise FormatError(field, "INVALID_VALUE", prefix + ".minimum")
-        for check in self.datasets[dataset]["checks"]:
-            condition = check.get("when")
-            if condition:
-                actual = row.get(condition["field"])
-                if "equals" in condition and actual != condition["equals"]:
-                    continue
-                if "not_in" in condition and actual in condition["not_in"]:
-                    continue
-            field, value, operator = check["field"], row.get(check["field"]), check["rule"]
-            if operator == "required_non_null":
-                if value is None:
-                    raise FormatError(field, "MISSING_FIELD", check["id"])
-                continue
-            valid = value is None if operator == "is_null" else value == check.get("value")
-            if operator == "greater_than_or_equal_field":
-                other = row.get(check["other_field"])
-                if value is None or other is None:
-                    raise FormatError(field, "MISSING_FIELD", check["id"])
-                if fields[field]["type"] == "timestamp":
-                    value, other = _aware_time(value), _aware_time(other)
-                valid = value >= other
-            if not valid:
-                raise FormatError(field, "INVALID_VALUE", check["id"])
+            error = _check_error(check, fields, row)
+            if error is not None:
+                found.append(error)
+        return found
+
+    def validate(self, dataset: str, row: dict) -> None:
+        """첫 오류 하나만 낸다 (Silver가 쓰는 동작). errors()의 첫 오류와 같다."""
+        found = self.errors(dataset, row)
+        if found:
+            raise found[0]
+
+
+def _field_error(dataset: str, field: str, spec: dict, row: dict) -> FormatError | None:
+    """필드 하나의 첫 오류. 통과하면 None."""
+    prefix = dataset + ".fields." + field
+    if field not in row:
+        return FormatError(field, "MISSING_FIELD", prefix + ".required") if spec["required"] else None
+    value = row[field]
+    if value is None:
+        return None if spec["nullable"] else FormatError(field, "MISSING_FIELD", prefix + ".nullable")
+    kind = spec["type"]
+    if kind == "integer":
+        if type(value) is not int:
+            return FormatError(field, "TYPE_MISMATCH", prefix + ".type")
+    else:
+        if not isinstance(value, str):
+            return FormatError(field, "TYPE_MISMATCH", prefix + ".type")
+        if not value.strip():
+            return FormatError(field, "MISSING_FIELD", prefix + ".non_blank")
+        try:
+            if kind == "uuid":
+                UUID(value)
+            elif kind == "timestamp":
+                _aware_time(value)
+        except ValueError:
+            return FormatError(field, "INVALID_VALUE", prefix + ".type")
+    if "enum" in spec and value not in spec["enum"]:
+        return FormatError(field, "INVALID_VALUE", prefix + ".enum")
+    if "minimum" in spec and value < spec["minimum"]:
+        return FormatError(field, "INVALID_VALUE", prefix + ".minimum")
+    return None
+
+
+def _check_error(check: dict, fields: dict, row: dict) -> FormatError | None:
+    """조건 검사 하나의 오류. 조건(when)에 해당하지 않거나 통과하면 None."""
+    condition = check.get("when")
+    if condition:
+        actual = row.get(condition["field"])
+        if "equals" in condition and actual != condition["equals"]:
+            return None
+        if "not_in" in condition and actual in condition["not_in"]:
+            return None
+    field, value, operator = check["field"], row.get(check["field"]), check["rule"]
+    if operator == "required_non_null":
+        return FormatError(field, "MISSING_FIELD", check["id"]) if value is None else None
+    valid = value is None if operator == "is_null" else value == check.get("value")
+    if operator == "greater_than_or_equal_field":
+        other = row.get(check["other_field"])
+        if value is None or other is None:
+            return FormatError(field, "MISSING_FIELD", check["id"])
+        if fields[field]["type"] == "timestamp":
+            value, other = _aware_time(value), _aware_time(other)
+        valid = value >= other
+    return None if valid else FormatError(field, "INVALID_VALUE", check["id"])
