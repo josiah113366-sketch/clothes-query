@@ -1,10 +1,10 @@
 # 공통 배포 설정 Git 공유
 
-상태: 완료 (공통 설정 분리·검증, 새 PR 생성 안 함)
+상태: 공통 설정 분리 완료·최신 main 통합 검증 중
 
 ## 사용자 결정과 범위
 
-2026-10-21 사용자는 계정 ID·SG ID·일반 ARN·bucket 이름·운영 설정을 Git으로 관리하고 개인 IP·이메일·인증 비밀만 분리하기로 했다. 이전 계정 ID 비공개 규칙을 이 범위에서 갱신한다. 기존 AWS 배포값을 바꾸지 않고 공통 설정 브랜치를 게시한다. 자동 apply·새 PR·승인·머지는 하지 않는다.
+2026-10-21 사용자는 계정 ID·SG ID·일반 ARN·bucket 이름·운영 설정을 Git으로 관리하고 개인 IP·이메일·인증 비밀만 분리하기로 했다. 이전 계정 ID 비공개 규칙을 이 범위에서 갱신한다. 기존 AWS 배포값을 바꾸지 않고 공통 설정 브랜치를 게시했다. 2026-10-22 사용자가 최신 인프라와의 호환성을 확인한 뒤 PR 생성·머지를 요청했다. 자동 apply나 자체 승인 리뷰는 추가하지 않는다.
 
 ## 구현
 
@@ -29,3 +29,7 @@
 전체 격리 Terraform 검사 root 13개·mock suite 11개/plan 55건을 통과했다. 검사에서 발견한 미사용 network 변수 정리 후 해당 스택 validate도 경고 없이 재확인했다. source가 아직 main에 없는 Gold B/개발 접근/알림 스택은 공유 입력만 포함하며 관련 선행 브랜치를 반영해야 한다. 보류 스택을 배포하지 않았다.
 
 실제 RDS 읽기 전용 plan은 명시적인 로컬 var-file 없이 공유 auto 파일만 자동 로드해 변경 없음이었다. 기존 두 database_clients와 논리 복제 설정도 공유 입력에 유지했다. 이 작업에서 AWS apply·backend 이전·state 변경·이미지 실행은 하지 않았다. 개인정보 백업은 .cache/tfvars-split-before-20261021, 입력 비교 결과는 .cache/tfvars-split-verification.json, RDS 검증은 .cache/rds-shared-input-verification.json에 보관한다. 과거 일회성 로컬 스크립트는 전체 입력을 개인 파일에서 직접 읽을 수 있어 재사용 전 로더를 확인한다.
+
+2026-10-22 머지 검토: #40·#50·#41·#49가 반영된 main을 통합했고 README·브랜치 목록의 추가 내용을 모두 보존했다. 누락된 workload-access backend 위치 파일은 기존 초기화된 backend의 bucket·region·고유 key를 대조한 뒤 보완했다. 공유 backend 위치 파일은 총 12개이며 state key는 변경하지 않았다. 현재 열린 #56 ECS simulator PR은 별도 스택을 추가하며 공유 JSON/backend 파일과 변경 경로가 겹치지 않는다. 브랜치 목록·README는 후속 통합 시 양쪽 추가 내용을 보존한다.
+
+실제 읽기 전용 plan 비교에서 RDS·Gold B·agent 개발 접근·network·compute는 변경 없음이었다. EKS는 기존 main의 audit 비활성화 코드와 실제 활성 상태 사이 enabled_cluster_log_types 차이만 확인했다. 이번 변경은 EKS 소스나 audit 상태를 수정하지 않는다. audit 재활성화 브랜치 반영 없이 EKS를 apply하면 다시 꺼질 수 있으므로 별도 보류 사항으로 유지한다. 검사 결과는 .cache/shared-config-plan-review.json에 보관한다.

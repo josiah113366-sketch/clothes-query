@@ -48,7 +48,7 @@ EKS 개인 파일 예시:
 
 ## 범위와 의존 관계
 
-현재 공유 설정은 network/eks/rds/storage/ecr/compute/workload-access/team-access/gold-b-access/agent-development-access/operations-alerts에 준비했다. apps는 기존 backend 위치만 공유한다. `gold-b-access`, `agent-development-access`, `operations-alerts`의 소스는 각각 선행 브랜치/PR을 함께 반영해야 한다. 설정 파일만으로 미반영 모듈이 생기지는 않는다.
+현재 공유 설정은 network/eks/rds/storage/ecr/compute/workload-access/team-access/gold-b-access/agent-development-access/operations-alerts에 준비했다. apps는 기존 backend 위치만 공유한다. Gold B·조사 쓰기·Airflow·개발 접근 소스는 #40·#50·#41·#49로 main에 반영됐다. `operations-alerts` 소스는 여전히 별도 보류 브랜치에 있고 설정 파일만으로 미반영 모듈이 생기지는 않는다.
 
 `operations-alerts`는 계속 미적용 보류다. `athena-query-base`는 Gold B로 대체된 과거 후보라 이번 전환에서 제외했고 함께 apply하지 않는다. SageMaker·ECS 등 팀원 스택의 이 PC에 없는 배포 입력을 추정해 만들지 않는다. Helm `runtime.local.yaml`은 이번 Terraform 변수 분리 범위에 포함하지 않는다.
 

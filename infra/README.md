@@ -1,6 +1,9 @@
 # infra
 
 2026-10-21 입력 공유 결정: 공통 배포값은 추적되는 `deployment.auto.tfvars.json`과 `deployment.backend.hcl`로 관리하고 개인 IP·이메일만 로컬 override에 둔다. Terraform은 공유 auto 파일을 자동 로드한다. [파일 구분·실행 방법·보류 스택](DEPLOYMENT_CONFIG.md)을 먼저 따른다. 아래의 비공개 계정 입력 설명은 이전 기록이다.
+2026-10-21 개발 Airflow 배포 완료: [Airflow 실행 기반](platform/airflow/README.md)은 기존 RDS 전용 DB·Simple Auth Manager·별도 업무 Pod 실행 신원과 연결했다. API 권한·S3 task 로그·5분 합성 cron 검증을 통과했고 테스트 DAG는 다시 pause했다. 기존 Kafka/API 노드 2개를 유지하며 새 노드·ALB·PVC·RDS 서버를 추가하지 않았다. 실제 판정/조사/재처리 DAG·업무 이미지·Athena 업무 쿼리·Spark 연결은 후속이다. [검증 기록](../docs/tasks/infra-airflow-runtime.md).
+
+2026-10-21 Gold B 접근: 기존 network/eks/storage 이후 [gold-b-access](stacks/gold-b-access/README.md)에서 판정·조사 역할과 Athena workgroup을 분리해 조회용 자원 8개를 적용했다. 조회 결과는 기존 버킷의 `athena-results/detection/` 및 `athena-results/investigation/`이다. 이름·경로·쿼리당 스캔 상한은 변수다. agent namespace/ServiceAccount를 연결하고 실제 임시 Pod의 접근·정답표 차단 24개 검사를 통과했으며 합성 객체/Pod는 정리했다. 판정 업무 기록 쓰기와 업무 앱은 아직 미연결이다. 기존 미적용 Athena 단일 workgroup 후보와 동시에 배포하지 않는다. [작업 기록](../docs/tasks/infra-gold-b-access-prep.md). 아래 배포 설명은 각 기록일 기준이며 최신 업무 CDC는 [토폴로지](TOPOLOGY.md)와 해당 작업 기록을 따른다.
 
 2026-10-16 최소 배포 완료: 기존 RDS/S3를 보존하고 NAT 1개·EKS 1.36 Auto Mode·private t3a.large 1대·단일 Kafka를 생성했다. 실제 관리자 접속·20GiB 암호화 EBS·TLS 메시지 생산/소비·JMX를 확인했고 network/EKS/compute 후속 plan은 변경 없음이다. [실행 결과·인수인계](../docs/tasks/infra-deploy-result.md).
 
@@ -19,6 +22,8 @@ compute는 `t3a.large` On-Demand, 6 vCPU/24GiB(세 대분 한도)다. 실제 한
 clothes-query의 AWS 기반 인프라를 Terraform으로, Kafka runtime을 별도 Helm release로 준비한다. 리전은 `ap-northeast-1`(도쿄).
 
 ## 스택 순서와 의존 관계
+
+2026-10-21 후속: [Agent 개발 접근 스택](stacks/agent-development-access/README.md)은 기존 EKS 뒤에 독립 state로 추가한다. [판정·조사 이미지 등록/인증/협의 항목](platform/agent-development/README.md)을 따른다. 기존 EKS·관리자·업무 쓰기 권한을 변경하지 않는다.
 
 ```
 bootstrap → network → eks → compute → apps
