@@ -70,12 +70,14 @@ def build(scenario):
     if scenario in ("dup", "mixed"):
         for i in range(3):
             con.execute("INSERT INTO gold_b.payment_attempts VALUES (?,?,?,?,?,?,?,?,?)",
-                        (f"dup{i}", f"o{20 + i}", 2, "PG_B", "SUCCESS", None, None, (T0 + timedelta(minutes=20)).strftime(F), (T0 + timedelta(minutes=27)).strftime(F)))
+                        (f"dup{i}", f"o{20 + i}", 2, "PG_B", "SUCCESS", None, None, (T0 + timedelta(minutes=20)).strftime(F),
+                         (T0 + timedelta(minutes=21 if scenario == "mixed" else 27)).strftime(F)))   # mixed는 PG 이상의 시간대(15:08~15:23) 안에 적재돼 도구가 중복을 보게 한다
     return con
 
 
 BASIC = ("pg", "lag", "dup")
 HARD = ("falsealarm", "nodata", "mixed")   # 정답은 이 시험대 만든 사람의 판단이다(팀 합의 값이 아님)
+MUST_MENTION = {"mixed": "중복"}   # 이 시나리오에서는 결론이나 주장이 이 낱말(성공 결제 중복)을 언급해야 한다 (낱말 검사라 대략적이다)
 SCENARIOS = {
     "pg": ("PAYMENT", {"anomaly_id": "a-demo-pg", "rule_id": "R1_PG_FAILURES", "anomaly_type": "PG_FAILURE_SPIKE", "source_table": "payment_attempts",
                        "window_start": "2026-10-21 15:08:00", "window_end": "2026-10-21 15:23:00", "scope_type": "pg", "scope_key": "PG_A",
@@ -112,7 +114,8 @@ def run(scenario, converse):
             "tool_calls": sum(1 for t in trace if t["status"] == "ok"), "tool_errors": sum(1 for t in trace if t["status"] == "error"),
             "rejected": sum(1 for t in trace if t["status"] == "rejected"), "problems": len(report.get("problems", [])),
             "facts": sum(1 for c in report["claims"] if c.get("kind") == "FACT"), "assumptions": sum(1 for c in report["claims"] if c.get("kind") == "ASSUMPTION"),
-            "conclusion": report["conclusion"], "claims": report["claims"]}
+            "conclusion": report["conclusion"], "claims": report["claims"],
+            "mentions": None if scenario not in MUST_MENTION else MUST_MENTION[scenario] in (report["conclusion"] + " ".join(str(c.get("text")) for c in report["claims"]))}
 
 
 def main(argv=None, env=None, converse=None):
@@ -132,7 +135,8 @@ def main(argv=None, env=None, converse=None):
             results.append(r)
             print(f"{name} #{i + 1}: 정답 {r['expected']} / 모델 {r['said']} ({'맞음' if r['match'] else '다름'}), {r['seconds']}초, 모델 {r['model_calls']}번, "
                   f"도구 {r['tool_calls']}번(오류 {r['tool_errors']}), 되돌림 {r['rejected']}번, 사실 {r['facts']} 추정 {r['assumptions']}"
-                  + (f", 검사를 못 넘긴 점 {r['problems']}개" if r["problems"] else ""))
+                  + (f", 검사를 못 넘긴 점 {r['problems']}개" if r["problems"] else "")
+                  + ("" if r["mentions"] is None else f", 중복 결제 언급 {'있음' if r['mentions'] else '없음'}"))
             if a.show:
                 print(f"    결론: {r['conclusion']}")
                 for c in r["claims"]:
