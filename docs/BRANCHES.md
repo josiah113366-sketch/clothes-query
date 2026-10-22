@@ -156,7 +156,7 @@ gitGraph
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/runtime` | [pipelines-runtime.md](tasks/pipelines-runtime.md) | Spark 거래·Parquet·S3A 검증, 실제 배포 대기 | |
+| `pipelines/runtime` | [pipelines-runtime.md](tasks/pipelines-runtime.md) | Spark 거래·리뷰 검증, 실제 배포 대기 | |
 | `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 기본 구현 main 머지됨 (#26), 단가 기준은 #63 반영 | 2026-10-21 |
 | `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 머지됨 (#55) | 2026-10-22 |
 | `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 머지됨 (#45) | 2026-10-22 |

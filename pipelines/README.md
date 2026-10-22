@@ -2,7 +2,7 @@
 
 ## 운영 실행 연결 · Spark 거래 배치
 
-최종 실행 엔진은 **Spark**다. 기존 `batch.py`는 단일 Python 시제품·검증용으로 보존하고 운영 DAG에서는 호출하지 않는다. 현재 Spark 전환 범위는 거래 Silver와 시간별/상품별 판매 Gold A다. 리뷰·퍼널·회원 Spark 전환과 실제 운영 배포가 끝났다고 표시하지 않는다.
+최종 실행 엔진은 **Spark**다. 기존 `batch.py`는 단일 Python 시제품·검증용으로 보존하고 운영 DAG에서는 호출하지 않는다. Spark 실행 범위는 거래 Silver·판매 Gold A와 리뷰 Silver·리뷰 Gold A다. 클릭·퍼널·회원 Spark 전환과 실제 운영 배포는 별도다.
 
 ### 실행 환경·이미지
 
@@ -33,6 +33,33 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
 접두사는 `/`로 끝낸다. Driver는 파일 목록·ETag·크기만 고정하고 Executor가 JSON Lines 본문을 읽는다. 확장자는 .json/.jsonl을 지원한다. 기본 제한은 최대 10,000개 파일, 파일당 64MiB, 주문당 10,000행이다. 주문당 한도는 max_order_rows(1~100,000)로 조정 가능하다. 초과 시 임의로 자르지 않고 실행 실패다.
 
 거래는 필요한 변경 이력·주문상품·결제를 함께 준비한다. UTC 수집 날짜 폴더를 KST 일별 매출로 바로 취급하지 않는다. input_complete는 실행자의 준비 확인이며 원천 완전성을 증명하지 않는다. 입력 객체 ETag를 공개 전 다시 확인하지만 이는 특정 버전 직접 읽기·Kafka watermark 검증을 대신하지 않는다. 상품 JSONL 스냅샷의 실제 S3 위치는 아직 확인이 필요하다.
+
+### 리뷰 실행 요청
+
+같은 진입점과 DAG에서 job=reviews를 사용한다. 운영 리뷰 파일을 명시적으로 지정하며 정답표 입력은 거부한다. KST 날짜 선택은 파일 경로가 아니라 정제된 created_at 시각을 기준으로 수행한다. 필요한 UTC 날짜 파일을 빠짐없이 지정하는 책임은 실행 요청 생성 단계에 있다.
+
+```json
+{
+  "job": "reviews", "run_id": "reviews-20261022-001",
+  "output_root": "s3://<데이터-버킷>/", "input_complete": true,
+  "start_date": "2026-10-19", "end_date": "2026-10-19",
+  "model_version": "<모델-버전>",
+  "inputs": {
+    "reviews": ["s3://<데이터-버킷>/bronze/reviews/<대상-파일>.jsonl"],
+    "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
+    "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"],
+    "analysis": ["s3://<데이터-버킷>/<모델-결과>/scores.csv"]
+  }
+}
+```
+
+analysis는 선택이다. 생략하면 review_product_daily만 생성하며 점수 집계를 임의로 만들지 않는다. 지정하면 model_version 필수, JSONL은 review_id/aspect/model_version/score를 검증하고 CSV는 review_id/aspect/score를 읽어 요청한 모델 버전을 붙인다. 점수는 -2~2 정수이며 중복 내용 충돌·범위 밖 리뷰 ID는 Gold 갱신을 중단한다. 미분석/속성 미언급을 0점으로 채우지 않고 분석 완료 상태는 UNVERIFIED로 기록한다.
+
+리뷰 product_id는 상품 article_id와 직접 연결한다. 임시 키가 필요한 경우에만 inputs.mapping에 product_id/article_id JSONL을 지정하며, 매핑 중복·상품 누락을 거부한다. 속성은 기존 11개 범주를 사용하고 3분류 감성으로 변환하지 않는다.
+
+리뷰는 Executor에서 review_id별로 기존 collect_latest/normalize_review를 호출해 최신 emitted_at·동시각 충돌·오류 키 보류를 처리한다. 그룹당 최대 10,000행(max_key_rows로 조정)이며 초과하면 실패한다. 상품 연결과 별점·속성 점수 집계는 Spark SQL로 수행한다. 평균·비율은 기존 Python의 HALF_UP 자리수와 맞춘다.
+
+출력은 silver/runtime/reviews 및 gold_a/runtime/reviews 아래 동일한 runs/completed/current 구조다. Silver: silver_reviews/quarantined_records/dq_results, Gold: review_product_daily 및 선택적 review_aspect_daily다. 리뷰 검사는 reviews.v1이며 거래 공통 YAML을 적용했다고 기록하지 않는다. 각 manifest의 KST 범위를 확인해 사용하며 서로 다른 실행을 단순 합산하지 않는다. 현재 요청 범위 전체 스냅샷 방식이고 날짜·상품 부분 병합이나 자동 입력 창 계산은 아직 연결하지 않았다.
 
 ### Spark 처리 방식
 
@@ -97,7 +124,7 @@ S3 저장은 Hadoop S3A magic committer를 사용한다. Parquet·커미터 작�
 
 Gold A #67 main 반영, ECR 업로드·digest 고정, namespace·세 실행 신원/RBAC·S3 권한·전용 노드 자원·main DAG 동기화/실행 설정·실제 입력 첫 실행이 필요하다. Glue/Athena 테이블 생성·파티션 등록·공개된 run_id 선택은 아직 연결하지 않았다. current.json 갱신만으로 Athena가 최신 결과를 고르는 것으로 간주하지 않는다. 업무 조회는 공개 실행, R6는 모든 완료 검사 실행을 읽도록 별도 조회 계약이 필요하다.
 
-리뷰·퍼널·회원 Spark 전환, 시간대 부분 재처리 승인 DAG, 실제 A/B 대조 잡·모델 호출은 이번 거래 Spark 검증의 완료 범위가 아니다.
+클릭·퍼널·회원 Spark 전환, 시간대 부분 재처리 승인 DAG, 실제 A/B 대조 잡·모델 호출은 이번 거래 Spark 검증의 완료 범위가 아니다.
 
 ## 공통 결제 지문
 

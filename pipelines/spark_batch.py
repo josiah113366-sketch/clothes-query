@@ -1,4 +1,4 @@
-"""Spark 거래 배치: 분산 키 검사·주문 복원·SQL 판매 집계·Parquet 저장."""
+"""Spark 거래·리뷰 배치 진입점과 입력 고정·Parquet 저장 공통 기능."""
 
 import argparse
 import json
@@ -258,7 +258,7 @@ def _spark_uri(uri):
     return "s3a://" + uri[5:] if uri.startswith("s3://") else uri
 
 
-def resolve_inputs(inputs):
+def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
     """Driver는 파일 메타데이터만 고정한다. 파일 내용은 Executor가 읽는다."""
     resolved, inventory = {}, []
     seen = set()
@@ -280,7 +280,7 @@ def resolve_inputs(inputs):
                            for item in page.get("Contents", [])) if uri.endswith("/") else [
                     {"Key": key, **client.head_object(Bucket=bucket, Key=key)}]
                 for obj in objects:
-                    if not obj["Key"].endswith((".json", ".jsonl")):
+                    if not obj["Key"].endswith(suffixes):
                         continue
                     path = f"s3://{bucket}/{obj['Key']}"
                     files.append(path)
@@ -290,7 +290,7 @@ def resolve_inputs(inputs):
                 path = Path(uri).resolve()
                 paths = sorted(path.rglob("*")) if path.is_dir() else [path]
                 for path in paths:
-                    if path.suffix not in {".json", ".jsonl"} or not path.is_file():
+                    if path.suffix not in suffixes or not path.is_file():
                         continue
                     files.append(str(path))
                     inventory.append({"dataset": name, "uri": str(path), "size": path.stat().st_size,
@@ -344,7 +344,22 @@ def save_tables(tables, base, run_id, checked_at):
             "spark_application_id": tables[next(k for k in tables if not k.startswith('_'))].sparkSession.sparkContext.applicationId}
 
 
+def configure_storage(spark, output):
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
+    spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
+    if output.startswith("s3://"):
+        spark.conf.set("spark.sql.sources.commitProtocolClass", "org.apache.spark.internal.io.cloud.PathOutputCommitProtocol")
+        spark.conf.set("spark.sql.parquet.output.committer.class", "org.apache.spark.internal.io.cloud.BindingParquetOutputCommitter")
+        spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.name", "magic")
+        spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.magic.enabled", "true")
+        spark.sparkContext._jsc.hadoopConfiguration().set("mapreduce.outputcommitter.factory.scheme.s3a", "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory")
+
+
 def execute(spark, config):
+    if isinstance(config, dict) and config.get("job") == "reviews":
+        from pipelines.spark_reviews import execute_reviews
+
+        return execute_reviews(spark, config)
     if not isinstance(config, dict) or set(config) - {"job", "run_id", "inputs", "output_root", "input_complete", "max_order_rows"}:
         raise ValueError("지원하지 않는 Spark 실행 설정 필드입니다")
     if config.get("job") != "trade" or config.get("input_complete") is not True:
@@ -371,14 +386,7 @@ def execute(spark, config):
     run_id = config.get("run_id", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-") + uuid4().hex)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", run_id):
         raise ValueError("run_id는 영문·숫자·하이픈·밑줄 1~100자리입니다")
-    spark.conf.set("spark.sql.session.timeZone", "UTC")
-    spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
-    if config["output_root"].startswith("s3://"):
-        spark.conf.set("spark.sql.sources.commitProtocolClass", "org.apache.spark.internal.io.cloud.PathOutputCommitProtocol")
-        spark.conf.set("spark.sql.parquet.output.committer.class", "org.apache.spark.internal.io.cloud.BindingParquetOutputCommitter")
-        spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.name", "magic")
-        spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.magic.enabled", "true")
-        spark.sparkContext._jsc.hadoopConfiguration().set("mapreduce.outputcommitter.factory.scheme.s3a", "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory")
+    configure_storage(spark, output)
     if type(config.get("max_order_rows", 10000)) is not int or not 1 <= config.get("max_order_rows", 10000) <= 100000:
         raise ValueError("주문당 행 한도는 1~100,000입니다")
     inputs, inventory = resolve_inputs(config["inputs"])
@@ -432,7 +440,7 @@ def execute(spark, config):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Spark Silver 거래 → Gold A 판매 집계")
+    parser = argparse.ArgumentParser(description="Spark Silver → Gold A 거래·리뷰 집계")
     parser.add_argument("--config-uri", required=True)
     args = parser.parse_args()
     if args.config_uri.startswith("s3://"):
@@ -444,7 +452,7 @@ def main():
         config = json.loads(boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read())
     else:
         config = json.loads(Path(args.config_uri).read_text(encoding="utf-8"))
-    spark = SparkSession.builder.appName("silver-gold-a-trade").getOrCreate()
+    spark = SparkSession.builder.appName("silver-gold-a-" + str(config.get("job", "unknown"))).getOrCreate()
     try:
         result = execute(spark, config)
         print(dumps({"run_id": result["run_id"], "status": result["status"], "output_counts": result["output_counts"]}))

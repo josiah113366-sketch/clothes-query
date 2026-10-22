@@ -1,4 +1,4 @@
-상태: 완료 · Spark 거래·Parquet·S3A 로컬 검증 완료, 실제 배포 대기 · 브랜치: `pipelines/runtime`
+상태: 완료 · Spark 거래·리뷰 로컬 검증 완료, 실제 배포 대기 · 브랜치: `pipelines/runtime`
 
 # Silver·Gold A 운영 실행 연결
 
@@ -38,10 +38,19 @@
 - 실제 S3 SDK·파일시스템 경로 검증은 외부 통신 없는 Docker 내부 네트워크의 Moto 5.1.15에서 수행했다. Spark 4.2.0 S3A magic committer → Silver Parquet → 저장 결과 재조회 → Gold A Parquet → 완료 manifest까지 통과했다. 정상 승인 금액 30,000원, 객체 63개, 성공 후 __magic/_temporary 작업 객체 0개를 확인했다. AWS 실제 접근·IAM·Pod Identity 검증은 아니다.
 - 커미터 로그에서 데이터셋 폴더 안의 __magic_job-*/ 작업 객체와 멀티파트 시작·완료·목록 조회·정리를 확인했다. 임시 S3 권한은 이 동작에 맞춰 인프라와 제한한다. 별도 S3 tmp prefix를 근거 없이 확정하지 않는다.
 - README를 실제 Spark 진입점·명령·설정 키·파티션/물리 스키마·완료 공개·원본 메타데이터로 교체했다. 이전 batch.py는 시제품/검증용으로 보존하며 운영 DAG가 호출하지 않는다.
-- 현재 Spark 완료 범위는 거래 Silver/판매 Gold A다. 리뷰·퍼널·회원 Spark 전환, Glue/Athena 공개 대상 선택, 운영 S3 권한·Pod Identity·DAG 배포·실제 검증 데이터 범위는 아직 완료하지 않았다.
+- 거래 단계 완료 범위는 거래 Silver/판매 Gold A다. 리뷰는 아래 후속 절에서 전환했으며 클릭·퍼널·회원 Spark 전환, Glue/Athena 공개 대상 선택, 운영 S3 권한·Pod Identity·DAG 배포·실제 검증 데이터 범위는 아직 완료하지 않았다.
 
 - 확정 환경 재검증: Python 3.10.12 / Spark 4.2.0 이미지 빌드 성공, 실제 Spark 비교 시험 3개 통과(46.088초), Z 시각 파싱·PyArrow 25.0.1 import·pip check 통과. 같은 Python 3.10 이미지로 S3A magic → Silver/Gold A 저장도 재검증해 승인 금액 30,000원·객체 63개·잔여 작업 객체 0개를 확인했고 임시 컨테이너/네트워크를 정리했다. 호스트 회귀 115개 통과·Spark 전용 모듈 1개 별도 실행, Ruff는 Python 3.10 대상으로 검사했다. 로컬 검증 이미지의 CODE_REF는 작업 중임을 표시한 값이며 배포 시 최종 커밋으로 재빌드한다.
 - Airflow가 main의 infra/platform/airflow/dags/를 약 60초마다 동기화한다는 인프라 확인을 반영했다. 신규 DAG paused와 수동 단일 실행을 유지하며 이전 ConfigMap/subPath 별도 마운트 안내를 제거했다. 팀 ECR 주소·digest는 발행 대기다.
+
+### 리뷰 Spark 전환
+
+- 인프라 응답 대기와 병행해 기존 리뷰 Silver·Gold A 계산을 Spark 실행기로 연결했다. job=reviews로 같은 진입점·DAG를 사용한다. 코드/시험은 spark_reviews.py와 test_spark_reviews.py에 모았고 별도 DAG·규약 문서를 늘리지 않았다.
+- Executor에서 review_id별 기존 collect_latest/normalize_review를 호출해 오류 키·동시각 충돌·최신 emitted_at을 처리한다. 원본 참조는 파일/줄로 보존하며 KST 범위 선택은 전체 키 검사 후 수행한다. ID당 행 한도로 Executor 메모리의 무한 증가를 막는다.
+- 상품 기준정보 직접 연결과 명시적 매핑, 별점 1~2점 저평점 집계, -2~2 속성 점수 분포·평균을 Spark SQL로 계산한다. JSONL/CSV 모델 입력과 모델 버전 선택을 지원하며 결과 없음은 0점으로 세지 않는다. 분석 완료 여부는 UNVERIFIED다.
+- Silver Parquet을 저장한 뒤 재조회해 Gold A를 계산한다. 리뷰 품질 미완료는 Silver 근거를 공개하되 Gold A를 교체하지 않는다. 정상 빈 파일 입력은 0행 결과로 공개하며 파일 자체가 없는 경우와 구분한다. 평가 정답표 경로는 거부한다.
+- Spark 4.2.0 / Python 3.10.12 local[2]에서 리뷰 시험 3개 통과(82.902초): KST 날짜 경계·최신 버전·동일 내용 중복·충돌·잘못된 별점·기존 Python 수치 비교·모델 중복/충돌/범위 밖 ID·미분석 제외·Parquet 재실행·오류 시 이전 Gold 유지·CSV·상품 매핑·정상 0건을 검증했다.
+- 공통 실행기 변경 후 거래 Spark 시험도 3개 재검증 통과(64.154초). 기존 Python 회귀 115개 통과, Spark 모듈 2개는 host에서 건너뛰고 실제 Linux Spark로 별도 검증한다. 실제 AWS 리뷰/모델 파일·권한 검증은 아직이다. 입력 자동 창 계산·부분 범위 병합·Glue 공개·정기 실행 연결도 후속이다.
 
 ### 이전 단일 Python 시제품 검증 기록
 

@@ -6,7 +6,7 @@
 
 ## Silver·Gold A 수동 업무 DAG
 
-`silver_gold_a.py`의 `silver_gold_a_batch`는 제출기 Pod에서 spark-submit cluster mode로 거래 Spark 잡을 제출하고 Driver 최종 완료까지 기다린다. 기존 infra probe와 별개다. `AIRFLOW_PIPELINE_RUNTIME` JSON에 이미지 digest·namespace·제출기/Driver/Executor ServiceAccount·노드 배치를 공급한다. 요청은 dag_run.conf.config_uri로 고정 S3 JSON을 지정한다. [Spark 실행 명세](../../../../pipelines/README.md#운영-실행-연결--spark-거래-배치)를 따른다.
+`silver_gold_a.py`의 `silver_gold_a_batch`는 제출기 Pod에서 spark-submit cluster mode로 거래·리뷰 Spark 잡을 제출하고 Driver 최종 완료까지 기다린다. 기존 infra probe와 별개다. `AIRFLOW_PIPELINE_RUNTIME` JSON에 이미지 digest·namespace·제출기/Driver/Executor ServiceAccount·노드 배치를 공급한다. 요청은 dag_run.conf.config_uri로 고정 S3 JSON을 지정한다. [Spark 실행 명세](../../../../pipelines/README.md#운영-실행-연결--spark-거래-배치)를 따른다.
 
 namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR 이미지·실행 설정은 별도 준비가 필요하다. 인프라 확인 기준 main의 이 폴더는 약 60초마다 Airflow로 동기화되며 신규 DAG는 기본 일시정지 상태다. 별도 DAG ConfigMap/subPath 마운트를 추가하지 않는다. 이 파일은 이를 생성하지 않는다. 이미지가 없는 상태에서는 설정 확인 태스크에서 실패하며 Pod를 실행하지 않는다. 최초는 paused·schedule 없음·max_active_runs=1·재시도 0이다.
 
