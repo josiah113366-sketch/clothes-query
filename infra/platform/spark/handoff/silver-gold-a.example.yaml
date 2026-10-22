@@ -1,5 +1,11 @@
 # Handoff contract only. Not loaded by runtime.py or the business application.
 # null = awaiting team confirmation; no permissions or workloads are created.
+confirmed_developer_access:
+  ecr_push_principal_arn: arn:aws:iam::827913617635:user/de-ai-18
+  permissions_applied: false
+  # Developer image push only; Driver/Executor use separate Pod Identity roles.
+  # Replace the principal later by granting/verifying the new identity, then revoking the old grant.
+
 confirmed_runtime:
   submission: spark-submit
   spark_version: 4.2.0

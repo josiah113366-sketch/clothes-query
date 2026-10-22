@@ -24,6 +24,7 @@ Bronze의 orders/, order-items/, payments/는 읽기 전용으로, 제안하신 
 4. S3 커미터, 임시 객체 경로와 필요한 삭제·멀티파트 정리 권한.
 5. 상품 스냅샷 위치, 첫 검증의 고정 입력 객체/manifest, 기대 건수·금액.
 6. Glue 데이터베이스·테이블·뷰 명세와 실행별 공개 방식. current.json만으로 Athena 조회 대상이 바뀌지 않는다는 전제에 동의하며, R6와 조사 에이전트 권한은 따로 연결하겠습니다.
-7. ECR에 push할 개발자 IAM ARN. 이미 공유한 계정과 같다면 같은 계정이라고 알려주시면 됩니다.
+
+ECR push 담당 계정은 전달해 주신 arn:aws:iam::827913617635:user/de-ai-18로 기록했습니다. Spark Driver·Executor의 S3 접근은 별도 ServiceAccount·Pod Identity 역할로 분리합니다. 추후 개발자 권한을 줄이거나 다른 ARN으로 교체할 수 있고, 계정 교체 시 새 계정의 push 확인 후 기존 권한을 회수하겠습니다. 현재는 계정 확정만 반영했으며 ECR push 권한을 추가 적용한 상태는 아닙니다.
 
 Spark S3 입출력 검증과 Glue/Athena 최종 조회 연결은 나눠 진행할 수 있습니다. 지금은 새 노드를 상시로 올리거나 업무를 실행하지 않고 연결 코드부터 준비하고 있습니다.
