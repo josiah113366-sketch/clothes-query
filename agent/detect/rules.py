@@ -19,6 +19,8 @@ class Config:
     r4_min: int = 5                       # R4: 깨진 메시지가 몇 개 이상
     r4_ratio: float = 0.05                # R4: 그 토픽 메시지 중 깨진 비율이 얼마 이상
     r5_min_orders: int = 1                # R5: 성공 결제가 2건 이상인 주문이 몇 개 이상 (평소 0이어야 하는 값이라 1로 둠, 제안)
+    silver_checks_table: str = None       # R6: Silver 주문 총액 검사 결과 표 이름 (예: silver.order_total_checks). None이면 R6을 돌리지 않는다. 표 위치는 Silver·인프라 담당과 확정 전
+    r6_check_name: str = "order_item_total_match"   # R6: 읽을 검사 이름 (Silver 제공안)
     ratio_wait_min: int = 3               # 비율 규칙은 구간이 끝난 지 몇 분 지난 것만 본다 (Gold B 문서)
     format_rule_version: str = "0.1.0"    # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다). Gold B는 공통 형식 규칙 YAML의 version 값을 그대로 쓴다(현재 0.1.0). 최종 이름이 바뀌면 같이 바꾼다. 다르면 R4가 0건으로 나온다
     pgs: tuple = ("PG_A", "PG_B")
@@ -98,3 +100,52 @@ def r5_duplicate_success(cfg, run_id, now, window, dup_orders):
     return [make_row(cfg, run_id, now, "R5_DUPLICATE_SUCCESS", "DUPLICATE_SUCCESS_PAYMENT", "payment_attempts", window,
                      "global", "all", "duplicate_success_orders", len(ids), 0, "FIXED_THRESHOLD", None,
                      {"table": "payment_attempts", "orders": len(ids), "sample_order_ids": ids[:5]})]
+
+
+R6_RULE = "R6_ORDER_TOTAL_MISMATCH"
+R6_MAX_ORDERS = 500        # 근거에 싣는 주문 번호 최대 수 (컨트롤러 오염 건수 상한과 같다)
+
+
+def open_orders(prior_evidence):
+    """이전 R6 이상 줄들의 근거(JSON 문자열, 오래된 것부터)로 지금 "열려 있는" 주문 번호 집합을 만든다.
+    new_orders로 열리고 resolved_orders로 닫힌다. 닫힌 주문이 다시 불일치가 되면 다시 열린다."""
+    opened = set()
+    for text in prior_evidence:
+        try:
+            ev = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        opened |= set(ev.get("new_orders", []))
+        opened -= set(ev.get("resolved_orders", []))
+    return opened
+
+
+def r6_order_total(cfg, run_id, now, silver_run, mismatches, passes, opened):
+    """R6: Silver 주문 총액 검사(최신 실행)에서 새로 불일치가 된 주문이 있으면 이상, 열려 있던 주문이 PASS가 되면 해소 줄.
+
+    silver_run: {"run_id", "checked_at"} (최신 Silver 실행). mismatches/passes: 그 실행의 MISMATCH/PASS 줄(dict).
+    opened: 이전 R6 이상으로 열려 있는 주문 번호 집합.
+    - 새 불일치(opened에 없던 주문) -> 이상 줄 (status OPEN)
+    - 계속 불일치(opened에 이미 있음) -> 지속, 줄을 새로 쓰지 않는다
+    - opened 주문이 PASS -> 해소 줄 (status RESOLVED)
+    - 결과에서 사라졌거나 UNVERIFIED·PENDING_REFERENCE·ITEM_ERROR인 주문은 해소로 보지 않는다 (이 함수에 들어오지 않는다)
+    """
+    when = silver_run["checked_at"]
+    window = (when, when)
+    rows = []
+    new = sorted((r for r in mismatches if r["order_id"] not in opened), key=lambda r: r["order_id"])
+    if new:
+        diffs = [abs(r["amount_difference"] or 0) for r in new]
+        rows.append(make_row(cfg, run_id, now, R6_RULE, "ORDER_TOTAL_MISMATCH", cfg.silver_checks_table, window,
+                             "global", "orders", "order_total_mismatch_orders", len(new), 0, "FIXED_THRESHOLD", None,
+                             {"table": cfg.silver_checks_table, "silver_run_id": silver_run["run_id"], "check_version": new[0].get("check_version"),
+                              "source_manifest": new[0].get("source_manifest"), "new_orders": [r["order_id"] for r in new][:R6_MAX_ORDERS],
+                              "total_abs_difference": sum(diffs), "max_abs_difference": max(diffs)}))
+    resolved = sorted(r["order_id"] for r in passes if r["order_id"] in opened)
+    if resolved:
+        row = make_row(cfg, run_id, now, R6_RULE, "ORDER_TOTAL_MISMATCH", cfg.silver_checks_table, window,
+                       "global", "orders-resolved", "order_total_resolved_orders", len(resolved), 0, "FIXED_THRESHOLD", None,
+                       {"table": cfg.silver_checks_table, "silver_run_id": silver_run["run_id"], "resolved_orders": resolved[:R6_MAX_ORDERS]})
+        row["status"] = "RESOLVED"
+        rows.append(row)
+    return rows

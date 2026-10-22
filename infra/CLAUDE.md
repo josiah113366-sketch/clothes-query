@@ -94,6 +94,7 @@ provider "aws" {
 - 프로바이더/Terraform 버전은 `versions.tf`에 명시하고, `.terraform.lock.hcl`은 커밋한다.
 - `.terraform/`과 `*.tfstate`, `*.tfstate.*`는 커밋하지 않는다.
 - `terraform.tfvars`에는 비밀값을 넣지 않는다. 비밀값은 Secrets Manager / SSM Parameter Store를 쓴다.
+- 사용자 승인으로 실배포 공통 설정은 `deployment.auto.tfvars.json`, backend 위치는 `deployment.backend.hcl`에 추적한다. 계정 ID·SG ID·일반 ARN·버킷 이름은 포함할 수 있다. 개인 IP·이메일은 Git 제외 `deployment.local.tfvars.json`으로 분리하고 비밀번호·키·토큰은 공유 파일에 넣지 않는다. [공유 설정 안내](DEPLOYMENT_CONFIG.md)를 따른다.
 - 콘솔에서 이미 만든 리소스가 있으면 새로 만들지 말고 `terraform import`로 코드에 편입한다.
 
 ## 코드 작성 규칙
