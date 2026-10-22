@@ -305,6 +305,69 @@ sim behavior live --click-sink api --speed 60 --visits-daily 20000 --duration 12
 - 컨트롤러의 데이터 오염 주입은 지금처럼 DB에 직접 쓴다(API를 거치지 않는다).
 - **EKS의 API에 붙이기**: Windows PowerShell에서 `kubectl port-forward --address 0.0.0.0 -n api svc/api 8000:80`을 켜고, WSL에서는 Windows 호스트 주소로 접속한다(`SIM_API_URL=http://$(ip route show default | awk '{print $3}'):8000`). WSL을 mirrored 네트워킹으로 쓰면 `http://localhost:8000`도 된다. 이렇게 돌린 주문은 **실제 RDS에 남는 실제 시뮬레이션 데이터**다.
 
+## ECS에서 실행 (`sim/ecs-image`)
+
+ECS Fargate 태스크 1개에 같은 이미지 컨테이너 3개(`controller`, `member`, `behavior`)가 돌고, 공유 볼륨 `/control`의 `control.json`으로 소통한다. 시뮬레이터는 내부 ALB를 거쳐 업무 API로만 쓰고 읽는다(`--speed 1`, 실제 시각). 예외로 컨트롤러의 데이터 오염만 RDS에 직접 쓴다(오염 전용 계정 `clothes_sim_admin`). 인프라는 `infra/stacks/ecs-simulator`(README에 apply 순서).
+
+**이미지** (`Dockerfile`): 베이스 digest 고정, 비root(10001), RDS CA 묶음 `/etc/ssl/rds/ap-northeast-1-bundle.pem`(sha256 고정), `/control`은 비root가 쓸 수 있게 `VOLUME`으로 둔다. `.dockerignore`로 `.env`·`.local`(PII 시드)·`.venv`를 빌드 컨텍스트에서 뺀다.
+
+순서 (Windows PowerShell, 레포 루트. kubectl 쓰는 단계는 관리자 kubeconfig):
+
+1. **ECS 기반 apply**: `infra/stacks/ecs-simulator` README 1단계(이미지 없이). 출력 `ecr_repository_url`, `security_group_id`, `secret_name`을 적어 둔다.
+2. **오염 계정**:
+   ```powershell
+   $pw = aws secretsmanager get-random-password --password-length 32 --exclude-punctuation --query RandomPassword --output text --region ap-northeast-1
+   $pw | Set-Clipboard
+   ```
+   DBeaver(마스터, `postgres` DB)에서 `simulator/deploy/sql/sim-admin-account.sql`의 `BEGIN;`~`COMMIT;`을 실행한다(`'여기에_붙여넣기'` 안쪽에 붙여 넣기). 이어서 접속 문자열을 Secret에 넣는다.
+   ```powershell
+   $rdsHost = aws rds describe-db-instances --db-instance-identifier clothes-query-dev-rds --query "DBInstances[0].Endpoint.Address" --output text --region ap-northeast-1
+   $tmp = "E:\sim-db-" + [guid]::NewGuid() + ".txt"
+   [IO.File]::WriteAllText($tmp, "postgresql://clothes_sim_admin:${pw}@${rdsHost}:5432/postgres?sslmode=verify-full&sslrootcert=/etc/ssl/rds/ap-northeast-1-bundle.pem")
+   aws secretsmanager put-secret-value --secret-id clothes-query-dev-ecs-simulator/sim-admin-database-url --secret-string "file://$tmp" --region ap-northeast-1
+   Remove-Item $tmp; Remove-Variable pw, rdsHost, tmp
+   ```
+3. **RDS 허용**: `infra/stacks/rds`의 비공개 입력 `database_clients`에 `"ecs-simulator": "<security_group_id>"`를 넣고 rds plan(인바운드 규칙 1개 추가뿐) → apply.
+4. **이미지 push**:
+   ```powershell
+   $acct = aws sts get-caller-identity --query Account --output text
+   $repo = "$acct.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/simulator"
+   $tag = "sim-" + (git rev-parse --short HEAD)
+   aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin "$acct.dkr.ecr.ap-northeast-1.amazonaws.com"
+   docker build --platform linux/amd64 -t "${repo}:$tag" simulator
+   docker push "${repo}:$tag"
+   $digest = aws ecr describe-images --repository-name clothes-query-dev/simulator --image-ids imageTag=$tag --query "imageDetails[0].imageDigest" --output text --region ap-northeast-1
+   docker logout "$acct.dkr.ecr.ap-northeast-1.amazonaws.com"
+   $digest
+   ```
+5. **태스크 띄우기**: ECS 스택 비공개 입력에 `image_digest`(위 `$digest`)와 `api_url`(`http://` + `kubectl get ingress api -n api`의 주소)을 넣고 plan(태스크 정의·서비스 2개 추가) → apply.
+6. **API ALB 좁히기**: `api/deploy/chart/runtime.local.yaml`의 `inboundCIDRs`를 app subnet 두 대역(network 비공개 입력의 `subnets`)으로 바꾸고 `helm upgrade --install api …`(`api/README.md` 6단계).
+
+확인:
+
+```powershell
+$c = "clothes-query-dev-ecs-simulator"
+aws ecs describe-services --cluster $c --services $c --query "services[0].{run:runningCount,want:desiredCount,events:events[0:3].message}" --region ap-northeast-1
+aws logs tail "/ecs/$c" --since 10m --region ap-northeast-1     # 세 컨테이너의 [진행] 줄, 오류 없음
+```
+
+- 컨테이너 3개 RUNNING, 재시작 없음. `behavior` 진행 줄에 방문·주문·클릭, `member`에 가입
+- 15분 안에 S3 `bronze/clickstream/`, `bronze/orders/` 등에 새 파일
+
+**컨트롤러 화면** (ECS Exec 포트 포워딩, PC에 [Session Manager 플러그인](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) 필요):
+
+```powershell
+$c = "clothes-query-dev-ecs-simulator"
+$task = aws ecs list-tasks --cluster $c --service-name $c --query "taskArns[0]" --output text --region ap-northeast-1
+$rid = aws ecs describe-tasks --cluster $c --tasks $task --query "tasks[0].containers[?name=='controller'].runtimeId | [0]" --output text --region ap-northeast-1
+aws ssm start-session --target "ecs:${c}_$($task.Split('/')[-1])_$rid" --document-name AWS-StartPortForwardingSession --parameters "portNumber=8080,localPortNumber=8080" --region ap-northeast-1
+```
+
+켜 둔 채로 브라우저 `http://localhost:8080`. 다른 창에서 `sim controller …` 명령도 같은 주소로 된다(`SIM_CONTROLLER_URL` 기본값).
+
+- 멈추기: ECS 스택 `desired_count = 0`으로 apply. 다시 띄우면 메모리에 있던 예약(결제·배송 전이)은 사라진다(알려진 한계).
+- 새 이미지: 4단계 → `image_digest`만 바꿔 apply. 서비스는 옛 태스크를 먼저 내리고 새 태스크를 띄운다(두 개가 겹치지 않음).
+
 ## 로컬 CDC
 
 로컬 `members` 테이블을 Debezium이 읽어 Kafka 토픽 `members-events`로 흘리고, 그 결과가 설계대로인지(특히 PII가 한 글자도 안 나가는지) `sim cdc verify`로 확인한다. `verify`가 토픽을 직접 읽어 "Bronze에 들어갈 모양"을 검증한다. 커넥터 설정은 `connectors/`에 있다 (`connectors/README.md`).
