@@ -69,6 +69,9 @@ python3 test_bedrock_io.py && python3 test_run_investigation.py && python3 test_
 # 내 컴퓨터에서 진짜 모델 시험 (키는 환경 변수로만. 파일이나 채팅에 적지 않는다)
 # 환경 변수 AWS_BEARER_TOKEN_BEDROCK, BEDROCK_MODEL_ID를 정한 뒤:
 python3 try_model.py --scenario all --repeat 3
+# 시나리오: basic(pg·lag·dup) / hard(falsealarm·nodata·mixed) / all(여섯 개). hard의 정답은 시험대 제작자의 판단이다
+# 모델이 쓴 결론과 주장(사실/추정)을 눈으로 보려면 --show
+python3 try_model.py --scenario hard --repeat 3 --show
 ```
 
 ## 알아야 할 것 (한계)

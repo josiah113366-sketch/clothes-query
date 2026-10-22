@@ -6,7 +6,7 @@ from datetime import datetime
 
 import try_model
 from loop import investigate
-from try_model import SCENARIOS, build, main
+from try_model import BASIC, HARD, SCENARIOS, build, main
 
 ok = True
 
@@ -58,6 +58,34 @@ res = str(m.last)
 check("시험대: 도구가 가짜 장부를 읽어 PG_A의 PG 원인 실패를 모델에 돌려줌", ("PG_A" in res, "'pg_cause_failures': 45" in res), (True, True))
 check("시험대: 모델이 PAYMENT를 말하면 맞음으로 셈", (r["match"], r["expected"], r["tool_calls"]), (True, "PAYMENT", 1))
 check("모델에 넘기는 이상 정보에 정답(expected)이 없음", "expected" in str(SCENARIOS["pg"][1]), False)
-check("사건 3개의 정답 층", {k: v[0] for k, v in SCENARIOS.items()}, {"pg": "PAYMENT", "lag": "INGEST", "dup": "DATA_QUALITY"})
+check("시나리오 6개의 정답 층(기본 3 + 어려운 3)", {k: v[0] for k, v in SCENARIOS.items()},
+      {"pg": "PAYMENT", "lag": "INGEST", "dup": "DATA_QUALITY", "falsealarm": "UNKNOWN", "nodata": "UNKNOWN", "mixed": "PAYMENT"})
+check("기본·어려운 묶음", (BASIC, HARD), (("pg", "lag", "dup"), ("falsealarm", "nodata", "mixed")))
+fa = q(build("falsealarm"), "SELECT SUM(CASE WHEN failure_cause='PG' THEN 1 ELSE 0 END) pgf, SUM(CASE WHEN pg='PG_A' AND failure_cause='CUSTOMER' AND completed_at >= '2026-10-21 15:10:00' AND completed_at < '2026-10-21 15:25:00' THEN 1 ELSE 0 END) cf FROM gold_b.payment_attempts")[0]
+check("오탐 장부: PG 원인 실패 0, 같은 구간 PG_A 고객 원인 실패 45건 이상", (fa["pgf"], fa["cf"] >= 45), (0, True))
+nd = q(build("nodata"), "SELECT COUNT(*) n FROM gold_b.bronze_lag_snapshots")[0]["n"]
+check("자료 없음 장부: 지연 측정 줄이 0개", nd, 0)
+mx = build("mixed")
+check("혼합 장부: PG 장애와 성공 결제 중복이 함께 있음", (q(mx, "SELECT COUNT(*) n FROM gold_b.payment_attempts WHERE failure_cause='PG'")[0]["n"] > 0,
+      len(q(mx, "SELECT order_id FROM gold_b.payment_attempts WHERE status='SUCCESS' GROUP BY order_id HAVING COUNT(*) > 1"))), (True, 3))
+for name in HARD:
+    check(f"어려운 시나리오 {name}: 모델에 넘기는 정보에 정답이 없음", "expected" in str(SCENARIOS[name][1]), False)
+
+# --show 와 묶음 선택이 모델 없이 도는지
+class Quick(Scripted):
+    def __init__(self):
+        super().__init__()
+        self.turns = [[{"toolUse": {"toolUseId": "1", "name": "payment_summary", "input": {"window_start": "2026-10-21T15:10:00", "window_end": "2026-10-21T15:25:00"}}}],
+                      [{"toolUse": {"toolUseId": "2", "name": "submit_report", "input": {"cause_layer": "UNKNOWN", "conclusion": "PG 원인 실패 없음",
+                        "claims": [{"text": "PG 원인 실패 0건", "kind": "FACT", "evidence": [{"tool": "payment_summary"}]}]}}}]]
+
+
+import contextlib
+import io
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    res = main(["--scenario", "falsealarm", "--show"], env={}, converse=Quick())
+out = buf.getvalue()
+check("--show: 정답 UNKNOWN과 같게 맞힘, 결론과 주장(사실)·근거가 출력됨", (res[0]["match"], "결론: PG 원인 실패 없음" in out, "[FACT] PG 원인 실패 0건 (근거 payment_summary)" in out), (True, True, True))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
