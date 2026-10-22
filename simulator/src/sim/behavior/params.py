@@ -5,7 +5,7 @@
 """
 
 # --- 방문 ---
-NORMAL_DAILY_VISITS = 111_000  # [가정] 주문 5,000 ÷ 전환율 4.5%
+NORMAL_DAILY_VISITS = 555_000  # [가정] 주문 25,000 ÷ 전환율 4.5% (2026-10-22 사용자 결정으로 5배)
 VIEW_EXTRA_MEAN = 4.0  # [가정] 조회 수 = clamp(1 + round(expovariate(1/4)), 1, 20), 평균 약 5
 VIEW_COUNT_MIN = 1
 VIEW_COUNT_MAX = 20
@@ -87,7 +87,7 @@ PRE_PAYMENT_CANCEL_SECONDS = (60, 300)
 PAID_CANCEL_RATE = 0.03
 PAID_CANCEL_SECONDS = (600, 3 * 3600)
 SHIP_SECONDS = (2 * 3600, 6 * 3600)
-DELIVER_SECONDS = (16 * 3600, 22 * 3600)
+DELIVER_SECONDS = (3 * 3600, 6 * 3600)  # 2026-10-22 사용자 결정 (처음 값 16~22시간)
 REFUND_RATE = 0.07
 REFUND_SECONDS = (2 * 3600, 36 * 3600)  # 3일 실행에서 보이도록 압축한 값
 CANCEL_REASON = "USER_REQUEST"

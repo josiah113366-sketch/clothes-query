@@ -170,21 +170,21 @@ def test_paid_transitions() -> None:
 
 def test_delivery_and_refund() -> None:
     delivered = _transitions(SHIPPED)
-    assert all(t.status == DELIVERED and 16 <= _hours(t) <= 22 for t in delivered)
+    assert all(t.status == DELIVERED and 3 <= _hours(t) <= 6 for t in delivered)
     refunds = [t for t in _transitions(DELIVERED) if t is not None]
     assert _within(len(refunds), N, params.REFUND_RATE)
     assert all(t.status == REFUNDED and t.status_reason == "RETURN" for t in refunds)
     assert all(2 <= _hours(t) <= 36 for t in refunds)
 
 
-def test_shipping_to_delivery_is_18_to_28_hours_after_payment() -> None:
+def test_shipping_to_delivery_is_5_to_12_hours_after_payment() -> None:
     rng = SimRandom(8)
     for _ in range(20_000):
         t = next_transition(rng, PAID, T0)
         if t.status != SHIPPED:
             continue
         d = next_transition(rng, SHIPPED, t.at)
-        assert timedelta(hours=18) <= d.at - T0 <= timedelta(hours=28)
+        assert timedelta(hours=5) <= d.at - T0 <= timedelta(hours=12)
 
 
 @pytest.mark.parametrize("state", [CANCELLED, PAYMENT_FAILED, REFUNDED])

@@ -9,6 +9,7 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from pipelines.format_rules import DEFAULT_RULES, FormatError, FormatRules
+from pipelines.payment_fingerprint import FingerprintError, payment_fingerprint
 
 from .common import RowError as _RowError
 from .common import integer as _integer
@@ -16,7 +17,8 @@ from .common import run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v5"
+CHECK_VERSION = "transactions.v8"
+AMOUNT_CHECK_VERSION = "items-sum-v1"
 
 
 def _version(raw: dict, row: dict) -> tuple:
@@ -63,8 +65,11 @@ def _item(raw: dict) -> dict:
 
 
 def _payment(raw: dict) -> dict:
+    # YAML 검사 후 원본 문자열로 계산한다. datetime 변환 시 정밀도 손실을 숨기지 않는다.
+    fingerprint = payment_fingerprint(raw)
     requested, completed = _time(raw, "requested_at"), _time(raw, "completed_at")
     return {
+        **fingerprint,
         "payment_id": raw["payment_id"], "order_id": raw["order_id"],
         "attempt_no": raw["attempt_no"], "method": raw["method"], "pg": raw["pg"],
         "amount": raw["amount"], "status": raw["status"], "failure_code": raw.get("failure_code"),
@@ -110,6 +115,8 @@ def build_silver(
             if isinstance(source.get("file"), str) and isinstance(source.get("line"), int):
                 issue["source_file"] = source["file"]
                 issue["source_line"] = source["line"]
+            if "kafka" in source:
+                issue["kafka_reference"] = source["kafka"]
         errors[name].setdefault(index, issue)
 
     # 행 오류만 분리한다. 프로그램 오류까지 잡아서 정상 완료로 숨기지 않는다.
@@ -125,6 +132,8 @@ def build_silver(
                 _check_cdc(raw, name)
                 rules.validate(name, raw)
                 normalized[name][index] = normalizers[name](raw)
+            except FingerprintError as exc:
+                reject(name, index, exc.field, "INVALID_VALUE", str(exc))
             except (_RowError, FormatError) as exc:
                 reject(name, index, exc.field, exc.code, str(exc))
                 if isinstance(exc, FormatError):
@@ -172,7 +181,13 @@ def build_silver(
         for _, row in eligible(name):
             key = row[keys[name]]
             previous = seen.setdefault(key, row)
-            if previous != row:
+            # 결제의 전달 정보·시간 표현이 달라도 공통 업무 지문이 같으면 재수신이다.
+            if name == "payments":
+                different = ((previous["fingerprint_version"], previous["payment_content_hash"])
+                             != (row["fingerprint_version"], row["payment_content_hash"]))
+            else:
+                different = previous != row
+            if different:
                 reject_group(name, key, keys[name], "CONTENT_CONFLICT", "동일 키의 업무 내용이 다릅니다")
 
     def unique(name: str) -> list[dict]:
@@ -312,10 +327,20 @@ def build_silver(
         })
         if name == "orders":
             quality[-1]["amount_checks"] = amount_checks
-            quality[-1]["amount_check_policy"] = "items-sum-v1; requires-declared-complete-input"
+            quality[-1]["amount_check_policy"] = AMOUNT_CHECK_VERSION + "; requires-declared-complete-input"
         elif name == "payments":
             quality[-1]["failure_code_policy"] = "format_rules:" + rules.version
     output["quarantined_records"], output["dq_results"] = quarantine, quality
+    # R6용 조회 출력: 기존 검사값을 펼칠 뿐 금액을 다시 판정하지 않는다.
+    # 실행 ID/검사 완료 시각/고정 참조는 저장 단계에서 연결한다.
+    output["order_amount_checks"] = [
+        {"order_id": check["order_id"], "check_name": "order_item_total_match",
+         "check_version": AMOUNT_CHECK_VERSION, "status": check["status"],
+         "order_total_amount": check["order_total_amount"],
+         "item_total_amount": check.get("item_total_amount"),
+         "amount_difference": check.get("amount_difference")}
+        for check in amount_checks
+    ]
     # 정상 결과에서 사라진 후보도 추적한다. 회원 정보·원문 대신 집계 연결 최소값만 보존.
     candidates = []
     fields = {"orders": ("order_id", "session_id", "ordered_at", "updated_at"),

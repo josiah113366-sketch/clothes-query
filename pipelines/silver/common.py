@@ -8,6 +8,8 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pipelines.format_rules import FormatError
+
 
 class RowError(ValueError):
     def __init__(self, field: str, code: str, message: str):
@@ -82,8 +84,10 @@ def collect_unique(rows: list[dict], name: str, key_field: str, normalize,
             continue
         try:
             normalized[index] = normalize(raw)
-        except RowError as exc:
+        except (RowError, FormatError) as exc:
             reject(index, exc.field, exc.code, str(exc))
+            if isinstance(exc, FormatError):
+                errors[index]["rule_id"] = exc.rule_id
 
     selected = {}
     for key, indices in groups.items():
@@ -108,6 +112,54 @@ def collect_unique(rows: list[dict], name: str, key_field: str, normalize,
         "source_row_numbers": [issue["source_row_number"] for issue in issues],
     }
     return clean, issues, summary
+
+
+def kafka_reference(raw: dict) -> dict:
+    """제안된 추적 필드만 검사한다. 누락을 추정하지 않고 업무 품질과 분리한다."""
+    fields = ("kafka_topic", "kafka_partition", "kafka_offset",
+              "kafka_timestamp", "kafka_timestamp_type")
+    if not any(field in raw for field in fields):
+        return {"status": "MISSING", "errors": []}
+    values, errors = {}, []
+    for field in fields:
+        value = raw.get(field)
+        valid = False
+        if field == "kafka_topic":
+            valid = isinstance(value, str) and bool(value.strip())
+        elif field in {"kafka_partition", "kafka_offset"}:
+            valid = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        elif field == "kafka_timestamp_type":
+            valid = value in ("CreateTime", "LogAppendTime")
+        elif isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+                valid = parsed.tzinfo is not None and parsed.utcoffset() is not None
+            except ValueError:
+                pass
+        if valid:
+            values[field.removeprefix("kafka_")] = value
+        else:
+            errors.append(field)
+    return {"status": "VALID" if not errors else "INVALID", **values, "errors": errors}
+
+
+def kafka_observations(rows: list[dict]) -> dict:
+    """관측 범위이며 연속성·입수 완료·A/B 일치의 증명은 아니다."""
+    counts = {"VALID": 0, "INVALID": 0, "MISSING": 0}
+    partitions = {}
+    for row in rows:
+        ref = row.get("_input_source", {}).get("kafka", {"status": "MISSING"})
+        counts[ref["status"]] += 1
+        if not all(field in ref for field in ("topic", "partition", "offset")):
+            continue
+        offsets = partitions.setdefault((ref["topic"], ref["partition"]), [])
+        offsets.append(ref["offset"])
+    return {"contract": "kafka-trace.draft.v1", "coverage_status": "UNVERIFIED",
+            "row_counts": counts, "partitions": [
+                {"topic": topic, "partition": partition, "min_offset": min(offsets),
+                 "max_offset": max(offsets), "row_count": len(offsets),
+                 "unique_offset_count": len(set(offsets))}
+                for (topic, partition), offsets in sorted(partitions.items())]}
 
 
 def load_jsonl(location: str, allow_cdc: bool = False) -> tuple[list[dict], list[str]]:
@@ -136,7 +188,10 @@ def load_jsonl(location: str, allow_cdc: bool = False) -> tuple[list[dict], list
                     "__op" in raw and not allow_cdc
                 ):
                     raise ValueError("CDC 입력은 업무 행으로 변환한 뒤 전달해야 합니다")
-                rows.append({**raw, "_input_source": {"file": str(path), "line": number},
+                source = {"file": str(path), "line": number}
+                if allow_cdc:
+                    source["kafka"] = kafka_reference(raw)
+                rows.append({**raw, "_input_source": source,
                              "_input_error": error})
     return rows, [str(path) for path in files]
 
@@ -161,8 +216,17 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
     runs = base / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     snapshot = Path(tempfile.mkdtemp(prefix="run-", dir=runs))
+    fixed_manifest = snapshot / "manifest.json"
     temporary = None
     try:
+        # 업무 시각이 아닌 이번 검사 완료 시각. 기존 업무 출력은 변경하지 않는다.
+        checked_at = datetime.now(UTC).isoformat()
+        if dataset == "transactions":
+            result["order_amount_checks"] = [
+                {**row, "run_id": snapshot.name, "checked_at": checked_at,
+                 "source_manifest": str(fixed_manifest)}
+                for row in result["order_amount_checks"]
+            ]
         paths = {}
         for name, rows in result.items():
             path = snapshot / f"{name}.jsonl"
@@ -175,12 +239,21 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
             **({"format_rules": rule_metadata} if rule_metadata is not None else {}),
             "input_completeness": "DECLARED_COMPLETE" if input_complete else "UNVERIFIED",
             "run_id": snapshot.name,
+            **({"checked_at": checked_at, "fixed_manifest_path": str(fixed_manifest)}
+               if dataset == "transactions" else {}),
             "input_files": sources,
+            **({"kafka_observations": {name: kafka_observations(rows)
+                                       for name, rows in loaded.items()}}
+               if dataset == "transactions" else {}),
             "input_counts": {name: len(rows) for name, rows in loaded.items()},
             "output_counts": {name: len(rows) for name, rows in result.items()},
             "outputs": paths,
             "manifest_path": str(base / "current.json"),
         }
+        if dataset == "transactions":
+            # 고정 실행 기록을 먼저 완성해야 최신 참조를 바꿀 수 있다.
+            fixed_manifest.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True,
+                                                 indent=2), encoding="utf-8")
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=base,
                                          prefix=".current-", delete=False) as handle:
             temporary = Path(handle.name)
@@ -191,6 +264,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
         # 이번 실행의 고정된 파일만 제거한다. 이전 실행 결과는 건드리지 않는다.
         for name in result:
             (snapshot / f"{name}.jsonl").unlink(missing_ok=True)
+        fixed_manifest.unlink(missing_ok=True)
         snapshot.rmdir()
         raise
     finally:
@@ -239,8 +313,10 @@ def collect_latest(rows: list[dict], name: str, key_field: str, normalize,
             continue
         try:
             normalized[index] = normalize(raw)
-        except RowError as exc:
+        except (RowError, FormatError) as exc:
             reject(index, exc.field, exc.code, str(exc))
+            if isinstance(exc, FormatError):
+                errors[index]["rule_id"] = exc.rule_id
         else:
             if key is None:
                 reject(index, key_field, "MISSING_FIELD", "고유 식별 키가 없습니다")
