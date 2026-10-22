@@ -13,14 +13,15 @@
 
 ## 실행 (Windows PowerShell, 이 폴더)
 
-비공개 파일 2개(커밋 안 됨): `deployment.backend.hcl`(bucket, region. network 스택 것과 같은 값),
-`deployment.local.tfvars.json` 또는 `deployment.local.tfvars`(`terraform.tfvars.example` 참고).
+`deployment.backend.hcl`(bucket, region. 다른 스택과 같은 값)은 Git으로 관리한다(`infra/DEPLOYMENT_CONFIG.md`).
+비공개 파일(커밋 안 됨)은 `deployment.local.tfvars.json` 또는 `deployment.local.tfvars`(`terraform.tfvars.example` 참고)이다.
+PowerShell은 `-`로 시작하고 `.`이 든 인자를 둘로 쪼개므로 아래처럼 따옴표로 감싼다.
 
 ```powershell
 cd infra/stacks/ecs-simulator
 $env:TF_VAR_expected_account_id = "<계정 ID>"
-terraform init -backend-config=deployment.backend.hcl -lockfile=readonly
-terraform plan -input=false -var-file=deployment.local.tfvars.json -out=ecs-simulator.tfplan
+terraform init "-backend-config=deployment.backend.hcl" "-lockfile=readonly"
+terraform plan -input=false "-var-file=deployment.local.tfvars.json" "-out=ecs-simulator.tfplan"
 terraform apply ecs-simulator.tfplan
 ```
 
