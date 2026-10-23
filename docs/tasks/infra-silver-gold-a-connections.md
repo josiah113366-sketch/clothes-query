@@ -27,6 +27,8 @@
 
 ## 작업 결과
 
+2026-10-23 연결 권한 적용을 시작했다가 사용자가 Kafka 변경 분리를 먼저 요청했다. 요청 전에 이미 진행 중이던 network 저장 계획은 S3 endpoint 정책 1개 update를 완료했고, 적용 후 변경 없음까지 확인했다. 현재 공통 network auto 설정에 실제 허용 작업 8개를 보존했다. spark-access는 init/validate까지만 진행했고 IAM·Pod Identity·namespace·RBAC는 아직 적용하지 않았다. 작업을 전환하며 spark-access auto 설정은 실제와 같이 disabled 상태로 유지했다. 재개 시 network를 다시 변경하기보다 현재 상태를 읽고 spark-access 계획부터 이어간다.
+
 실제 AWS 계획: ECR 저장소 spark-base·silver-gold-a와 de-ai-18 사용자 이미지 push inline 정책, 총 3개 생성. network는 S3 endpoint 정책 1개 update뿐이고 삭제·교체는 없다. 역할 enabled plan은 endpoint 선행 변경 후 다시 확인한다. terraform validate 및 mock 검사는 통과했다.
 
 현재 Airflow 실제 Helm values를 읽어 overlay 병합 호환성을 확인했다. 기존 extraEnv 1개와 Git bundle을 보존하며 새 runtime 참조 하나만 추가한다. 실제 digest는 없으므로 placeholder ConfigMap을 저장하거나 적용하지 않았다.
