@@ -1,4 +1,15 @@
 variable "aws_region" { type = string }
+variable "spark_node_pool" {
+  description = "Optional Spark capacity; omitted/disabled leaves the existing pool unchanged."
+  type = object({
+    enabled           = optional(bool, false)
+    instance_types    = optional(set(string), ["t3a.medium"])
+    cpu_limit         = optional(number, 4)
+    memory_limit_gib  = optional(number, 8)
+    consolidate_after = optional(string, "10m")
+  })
+  default = {}
+}
 variable "expected_account_id" {
   type      = string
   sensitive = true

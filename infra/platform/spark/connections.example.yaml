@@ -1,0 +1,38 @@
+# Configuration contract only: not a Kubernetes manifest or Spark properties file.
+# runtime.py does not load this file. The job/image owner must implement the adapter.
+# null means undecided. Do not enable a source until required values are confirmed.
+sources:
+  s3:
+    enabled: false
+    input_uri: null
+    format: null
+    authentication: pod-identity
+  rds:
+    enabled: false
+    jdbc_url: null # jdbc:postgresql://<host>:5432/<database>; no credentials in URL
+    table_or_query: null
+    sslmode: verify-full
+    ca_bundle_path: null
+    credentials_secret_ref:
+      name: null # Future Secret in spark namespace; not created by this example.
+      username_key: username
+      password_key: password
+    max_parallel_connections: null # Agree on a DB-safe connection budget first.
+  kafka:
+    enabled: false
+    bootstrap_servers: null
+    topics: []
+    security_protocol: null # Match the actual broker listener; never guess PLAINTEXT.
+    credentials_secret_ref:
+      name: null # Auth/trust keys depend on the selected listener and Kafka user.
+    read_mode: null # Bounded batch or streaming; decide with the job owner.
+    starting_offsets: null # Decide replay scope before the first read.
+    max_offsets_per_trigger: null # Optional streaming batch-size budget.
+
+outputs:
+  silver_uri: null
+  gold_uri: null # Do not assume this is gold_b/.
+  checkpoint_uri: null # Use a distinct location per streaming query when needed.
+  write_mode: null # Append/overwrite/merge semantics belong to the job contract.
+
+# No SG rules, Kafka ACLs, DB grants, Secrets, IAM bindings or test data are created.

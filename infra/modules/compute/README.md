@@ -1,5 +1,7 @@
 # compute module
 
+2026-10-22 Spark 준비: `spark_node_pool`은 기본 비활성이며 명시적으로 켤 때만 기존 private NodeClass를 사용하는 별도 tainted NodePool을 만든다. `WhenEmpty`/10분·유형/용량 예산을 독립 관리한다. [미적용 두 후보와 실행 계약](../../platform/spark/README.md)을 따른다. 기존 공용 풀 기본값은 유지한다.
+
 EKS Auto Mode의 사용자 정의 NodeClass와 NodePool을 관리한다. EKS와 별도 state인 [compute 스택](../../stacks/compute/README.md)에서 호출한다.
 
 ## 입력과 출력
