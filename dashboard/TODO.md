@@ -38,8 +38,8 @@
 | B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | | 대기 | |
 | B4 | 파이프라인 상태의 "평소 범위" 기준(`NORMAL_MAX_SEC`, 현재 1,020초)과 경고 규칙 확정 | 실측 지연 분포 | `gold-b` / `agent` | | 대기 | 15분 파일 주기 톱니 |
 | B5 | 형식 오류 화면의 현재 `rule_version` 선택 방식 확정 | 공통 규칙 YAML 버전 운영 방식 | `gold-b` | | 대기 | |
-| B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `review_aspect_scores_latest` 조회를 `_REAL`에 등록 (`get_model_registry`, `get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_runs`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 대기 | 지금은 더미 |
-| B7 | 감성분석 모델 화면의 파싱 실패 건수와 Job 결과를 읽을 곳 확정 (오류 prefix, Airflow 기록), 오프라인 평가 지표와 버전별 패치노트(바뀐 내용) 기록·저장 위치 확정 | Airflow 연동, 평가 결과 정리 | `review-model` / `gold-b` | | 대기 | |
+| B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `review_aspect_scores_latest` 조회를 `_REAL`에 등록 (`get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_runs`, 그리고 `get_model_registry`의 분석 현황 열 `last_analyzed_at`·`analyzed_reviews`·`unscored_reviews`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 대기 | 버전·패치노트는 연결됨(B7). 점수 현황은 더미 |
+| B7 | 감성분석 모델 화면의 파싱 실패 건수와 Job 결과를 읽을 곳 확정 (오류 prefix, Airflow 기록) | Airflow 연동 | `review-model` / `gold-b` | | 대기 | 평가 지표·패치노트는 결정·연결됨(2026-10-23): `review-analysis/releases/*.yaml` → S3 `review-score/model-registry/releases/` → `MODEL_REGISTRY_URI` |
 
 ## 3. 원인 리포트 / 승인
 
@@ -76,8 +76,8 @@
 |---|---|---|---|---|---|---|
 | F1 | 이미지 빌드·ECR 등록, Dockerfile 작성 | 네임스페이스·ECR 저장소 확정 | `infra` | | 대기 | 초안: 프로젝트 파일 `dashboard-deploy-draft/` |
 | F2 | Deployment/Service/Ingress(ALB) 작성 | F1, EKS 담당자와 방식(YAML 또는 Terraform) 합의 | `infra` | | 대기 | EKS는 노드 1대(24GiB 한도), Auto Mode |
-| F3 | Athena/S3 읽기용 Pod Identity 역할 (읽기 전용, `gold_a/`·`gold_b/`만. `ground_truth/` 접근 금지) | A1, B1 | `infra` | | 대기 | |
-| F4 | 환경변수·Secret 주입 (`AUTH_MODE=local`, `LOCAL_ACCOUNTS_FILE`, `DATA_SOURCE`) | E1 | `infra` | | 대기 | |
+| F3 | Athena/S3 읽기용 Pod Identity 역할 (읽기 전용, `gold_a/`·`gold_b/`·`review-score/model-registry/releases/`만. `ground_truth/` 접근 금지) | A1, B1 | `infra` | | 대기 | 모델 패치노트는 `s3:GetObject` 만 필요 |
+| F4 | 환경변수·Secret 주입 (`AUTH_MODE=local`, `LOCAL_ACCOUNTS_FILE`, `DATA_SOURCE`, `MODEL_REGISTRY_URI`) | E1 | `infra` | | 대기 | `MODEL_REGISTRY_URI` 는 `deployment.yaml`에 채워 둠 |
 
 ## 7. 품질·운영
 

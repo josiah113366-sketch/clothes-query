@@ -18,6 +18,7 @@
 """
 
 import functools
+import json
 import logging
 import os
 import zlib
@@ -717,8 +718,10 @@ SCORES = [-2, -1, 0, 1, 2]  # 속성별 점수 값
 def get_model_registry() -> pd.DataFrame:
     """모델 버전 1줄. 컬럼: model_version, model_version_no, gold_read(Gold 가 읽는 버전인지), deployed_at(UTC),
     change_type(최초/메이저/마이너), summary(한 줄 요약), rescore_required(기존 후기 재점수화 대상인지),
-    last_analyzed_at(UTC), analyzed_reviews, unscored_reviews(현재 버전만. 옛 버전은 NaN),
-    eval_set, eval_n, f1, mae, qwk(오프라인 평가 지표. 저장 위치 미정)."""
+    based_on(되돌림 버전이면 원래 버전 이름), notes(배포 뒤 정정·추가 [{date, text}]),
+    last_analyzed_at(UTC), analyzed_reviews, unscored_reviews(현재 버전만. 옛 버전은 NaN. S3 패치노트만 읽을 때는 모두 비어 있다),
+    eval_set, eval_n, f1, mae, qwk(오프라인 평가 지표, 패치노트의 evaluation).
+    실데이터: MODEL_REGISTRY_URI 가 있으면 S3 패치노트(_real_model_registry)를 읽는다."""
     now = pd.Timestamp.now(tz="UTC").tz_localize(None).floor("60min")
     return pd.DataFrame(
         {
@@ -732,6 +735,8 @@ def get_model_registry() -> pd.DataFrame:
             ],
             "rescore_required": [False, True],
             "deployed_at": [now - pd.Timedelta(days=40), now - pd.Timedelta(days=12)],
+            "based_on": [None, None],
+            "notes": [[], [{"date": "2026-10-20", "text": "예시: 평가 세트 이름 표기 정정"}]],
             "last_analyzed_at": [now - pd.Timedelta(days=12), now - pd.Timedelta(hours=7)],
             "analyzed_reviews": [7_940, 3_410],
             "unscored_reviews": [np.nan, 281.0],
@@ -748,7 +753,7 @@ def get_model_registry() -> pd.DataFrame:
 def get_model_changelog() -> pd.DataFrame:
     """버전별 패치노트 항목. 컬럼: model_version, category, item, detail.
     category: 모델 / 학습 데이터 / 프롬프트·후처리 / 속성 목록 / 평가 / 배포.
-    사람이 쓰는 기록이다. 실제로는 어디에 적어 둘지(모델 레지스트리 표, 문서 등)를 정해야 한다.
+    실데이터: review-analysis/releases/<버전>.yaml 의 changes (S3 로 배포된 JSON, _real_model_changelog).
     ※ 아래 내용은 화면 구성을 보기 위한 예시다."""
     rows = [
         ("2.3_score_s2c", "모델", "초판", "속성별 점수(-2~+2)를 직접 내는 점수 모델 첫 배포"),
@@ -791,6 +796,91 @@ def get_model_changelog() -> pd.DataFrame:
         ),
     ]
     return pd.DataFrame(rows, columns=["model_version", "category", "item", "detail"])
+
+
+# ---- 실데이터: 모델 버전·패치노트 (S3 model-registry) ----------------------
+# 패치노트는 review-analysis/releases/<버전>.yaml 로 git 에 쓰고, 모델을 올릴 때(upload_model.py) JSON 으로 바뀌어 S3 에 올라간다.
+#   <MODEL_REGISTRY_URI>index.json        버전 목록 {schema, versions:[{model_version, model_version_no, change_type, released_at, summary, based_on}]}
+#   <MODEL_REGISTRY_URI><버전>.json        버전 하나의 패치노트 (changes, evaluation, rescore_required, notes, based_on ...)
+# 릴리스 묶음(manifest)이 있는 버전만 올라가므로 여기 보이는 버전 = 실제로 배포할 수 있는 버전이다.
+# MODEL_REGISTRY_URI: s3://<버킷>/review-score/model-registry/releases/ (끝에 / 필수). 버킷 이름은 코드에 두지 않고 환경변수로만 받는다.
+#   비어 있으면 등록하지 않아 더미를 쓴다. 읽기 권한(Pod Identity)은 infra 쪽 작업이다(TODO F4).
+# 양식 번호(schema)가 아래 값과 다르면 읽지 않고 더미로 대체한다(release_notes.py 의 SCHEMA 와 맞춘다).
+MODEL_REGISTRY_URI = os.getenv("MODEL_REGISTRY_URI", "")
+_RELEASE_SCHEMA = 1
+
+
+@st.cache_data(ttl=_TTL_A)
+def _read_releases(uri: str) -> list:
+    """S3 에서 index.json 과 버전별 패치노트 JSON 을 읽어 문서 목록을 돌려준다. 실패하면 예외(=> 더미 대체)."""
+    import boto3  # 실데이터를 쓸 때만 필요하다
+
+    if not (uri.startswith("s3://") and uri.endswith("/")):
+        raise ValueError("MODEL_REGISTRY_URI 는 s3://<버킷>/<경로>/ 형식이어야 합니다")
+    bucket, prefix = uri[5:].split("/", 1)
+    s3 = boto3.client("s3")
+
+    def get(key):
+        doc = json.loads(s3.get_object(Bucket=bucket, Key=prefix + key)["Body"].read())
+        if doc.get("schema") != _RELEASE_SCHEMA:
+            raise ValueError(f"{key}: schema {doc.get('schema')} 를 읽을 수 없습니다")
+        return doc
+
+    index = get("index.json")
+    return [get(f"{v['model_version']}.json") for v in index.get("versions", [])]
+
+
+def _kst_date_to_utc(d: str) -> pd.Timestamp:
+    """패치노트의 날짜(KST, YYYY-MM-DD)를 화면 규칙(UTC 저장 -> to_kst 로 표시)에 맞게 UTC 로 바꾼다."""
+    return pd.Timestamp(d) - pd.Timedelta(hours=9)
+
+
+def _real_model_registry() -> pd.DataFrame:
+    docs = _read_releases(MODEL_REGISTRY_URI)
+    if not docs:
+        return pd.DataFrame()
+    top = max(float(d["model_version_no"]) for d in docs)
+    rows = []
+    for d in docs:
+        ev = d.get("evaluation") or {}
+        rows.append(
+            {
+                "model_version": d["model_version"],
+                "model_version_no": float(d["model_version_no"]),
+                # Gold 는 후기마다 번호가 가장 큰 결과를 읽는다. 배포된 가장 큰 번호를 'Gold 가 읽는 버전'으로 본다.
+                "gold_read": float(d["model_version_no"]) == top,
+                "change_type": d["change_type"],
+                "summary": d["summary"],
+                "rescore_required": bool(d["rescore_required"]),
+                "deployed_at": _kst_date_to_utc(d["released_at"]),
+                "based_on": d.get("based_on"),
+                "notes": d.get("notes") or [],
+                # 분석 현황은 점수 테이블(Athena) 연결 후 채운다(TODO B6). 그 전에는 비워 둔다.
+                "last_analyzed_at": pd.NaT,
+                "analyzed_reviews": np.nan,
+                "unscored_reviews": np.nan,
+                "eval_set": ev.get("eval_set"),
+                "eval_n": ev.get("eval_n"),
+                "f1": ev.get("f1"),
+                "mae": ev.get("mae"),
+                "qwk": ev.get("qwk"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _real_model_changelog() -> pd.DataFrame:
+    rows = [
+        (d["model_version"], c["category"], c["item"], c["detail"])
+        for d in _read_releases(MODEL_REGISTRY_URI)
+        for c in d.get("changes") or []
+    ]
+    return pd.DataFrame(rows, columns=["model_version", "category", "item", "detail"])
+
+
+if MODEL_REGISTRY_URI:
+    _REAL["get_model_registry"] = _real_model_registry
+    _REAL["get_model_changelog"] = _real_model_changelog
 
 
 @dataset(_TTL_A)

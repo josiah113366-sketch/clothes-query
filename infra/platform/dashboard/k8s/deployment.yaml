@@ -34,8 +34,12 @@ spec:
             # 고정 계정 3개 로그인. 계정 파일(해시만 들어 있음)은 Secret 으로 마운트한다.
             - {name: AUTH_MODE, value: "local"}
             - {name: LOCAL_ACCOUNTS_FILE, value: /etc/dashboard/accounts.json}
-            # 실데이터 연결 전에는 dummy. Athena 조회를 등록하고 읽기 권한을 붙인 뒤 auto 로 바꾼다.
-            - {name: DATA_SOURCE, value: "dummy"}
+            # auto: 등록된 실데이터 조회를 먼저 쓰고, 없거나 실패하면 더미로 대체한다(화면에 '더미 사용 중' 표시).
+            # 지금 실데이터는 모델 패치노트(S3)뿐이고 나머지 화면은 더미다. 항상 더미로 보려면 dummy.
+            - {name: DATA_SOURCE, value: "auto"}
+            # 모델 버전·패치노트(S3, 팀 데이터 버킷). Pod Identity 에 이 경로 읽기 권한이 있어야 실제로 읽힌다.
+            # 권한이 없거나 읽기에 실패하면 더미로 대체한다.
+            - {name: MODEL_REGISTRY_URI, value: "s3://clothes-query-datalake/review-score/model-registry/releases/"}
           volumeMounts:
             - {name: accounts, mountPath: /etc/dashboard, readOnly: true}
           readinessProbe:

@@ -5,3 +5,5 @@ pandas>=2.0
 numpy>=1.26
 # OIDC 로그인(st.login)에 필요
 Authlib>=1.3
+# S3 읽기(모델 패치노트, MODEL_REGISTRY_URI). 실데이터를 쓸 때만 import 한다
+boto3>=1.34

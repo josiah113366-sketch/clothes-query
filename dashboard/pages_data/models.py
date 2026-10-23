@@ -1,4 +1,5 @@
-"""[데이터 관리] 감성분석 모델. 데이터: athena-review-score 의 점수 테이블·점수 로그 (지금은 더미).
+"""[데이터 관리] 감성분석 모델. 데이터: 버전·패치노트는 S3 model-registry(MODEL_REGISTRY_URI 가 있을 때),
+점수 현황은 athena-review-score 의 점수 테이블·점수 로그 (아직 더미).
 
 탭 4개
   1) 모델 버전·패치노트 버전 목록, Gold 가 읽는 버전, 버전을 누르면 바뀐 내용·평가 지표(이전 버전 대비)
@@ -36,11 +37,13 @@ with t_status:
     cur = reg[reg.model_version == gold_version].iloc[0]
     c1, c2, c3 = st.columns(3)
     c1.metric("Gold가 읽는 버전", gold_version)
-    c2.metric(
-        "마지막 분석(KST)",
-        data.to_kst(pd.Series([cur.last_analyzed_at])).iloc[0].strftime("%m-%d %H:%M"),
+    # 분석 현황은 점수 테이블 연결 전에는 비어 있을 수 있다(S3 패치노트만 실데이터일 때). 그때는 '-'.
+    last = data.to_kst(pd.Series([cur.last_analyzed_at])).iloc[0]
+    c2.metric("마지막 분석(KST)", "-" if pd.isna(last) else last.strftime("%m-%d %H:%M"))
+    c3.metric(
+        "미점수 후기(현재 버전)",
+        "-" if pd.isna(cur.unscored_reviews) else f"{int(cur.unscored_reviews):,}",
     )
-    c3.metric("미점수 후기(현재 버전)", f"{int(cur.unscored_reviews):,}")
 
     st.subheader("버전 목록")
     view = reg.sort_values("model_version_no", ascending=False).reset_index(drop=True)
@@ -51,11 +54,14 @@ with t_status:
             "변경 유형": view.change_type,
             "Gold 읽기": view.gold_read.map({True: "✅", False: ""}),
             "배포일(KST)": data.to_kst(view.deployed_at).dt.strftime("%Y-%m-%d"),
-            "분석한 후기 수": view.analyzed_reviews,
+            "분석한 후기 수": view.analyzed_reviews.map(
+                lambda x: "-" if pd.isna(x) else f"{int(x):,}"
+            ),
             "미점수 후기": view.unscored_reviews.map(
                 lambda x: "-" if pd.isna(x) else f"{int(x):,}"
             ),
             "요약": view.summary,
+            "되돌림 기준": view.based_on.fillna(""),
         }
     )
     # 행을 누르면 아래에 그 버전의 패치노트가 나온다. 아무것도 누르지 않았으면 Gold가 읽는 버전을 보여준다.
@@ -79,6 +85,11 @@ with t_status:
         + (" · Gold 읽기 중" if sel.gold_read else "")
     )
     st.write(sel.summary)
+    if isinstance(sel.based_on, str) and sel.based_on:
+        # 되돌림(roll-forward): 번호를 올리면서 원래 버전의 가중치·코드를 그대로 다시 배포한 버전
+        st.info(
+            f"되돌림 버전입니다. {sel.based_on} 의 모델·실행 코드를 그대로 쓰고 번호만 올렸습니다."
+        )
     if sel.rescore_required:
         st.warning(
             "이 버전을 올리면 기존 후기가 모두 재점수화 대상이 됩니다(점수 로그에 새 번호가 없음)."
@@ -106,10 +117,16 @@ with t_status:
         # MAE 는 낮을수록 좋아서 증가를 빨간색으로 표시한다.
         delta = None if prev is None else f"{sel[key] - prev[key]:+.3f}"
         col.metric(name, f"{sel[key]:.3f}", delta, delta_color="inverse" if inv else "normal")
+    same_set = prev is None or prev.eval_set == sel.eval_set
     st.caption(
-        f"평가 세트: {sel.eval_set} ({int(sel.eval_n)}건). 평가 세트가 다른 버전끼리는 직접 비교하지 않습니다. "
-        "지표와 패치노트를 어디에 기록해 읽을지는 아직 정해지지 않았습니다(TODO)."
+        f"평가 세트: {sel.eval_set} ({int(sel.eval_n)}건)."
+        + ("" if same_set else " 이전 버전과 평가 세트가 달라 차이는 참고만 하세요.")
+        + " 패치노트와 지표의 원본은 review-analysis/releases/ 이고, 모델을 올릴 때 S3 로 배포됩니다."
     )
+    if sel.notes:
+        st.markdown("**배포 뒤 정정·추가**")
+        for n in sel.notes:
+            st.markdown(f"- {n['date']}: {n['text']}")
 
 # ---- 2) 모델별 리뷰 분석 ------------------------------------------------
 with t_aspect:

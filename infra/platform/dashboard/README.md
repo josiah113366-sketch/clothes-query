@@ -6,7 +6,7 @@
 |---|---|
 | `Dockerfile`, `Dockerfile.dockerignore` | 이미지 빌드. 계정 파일(`.local/`)과 비밀값은 이미지에서 제외 |
 | `k8s/namespace.yaml` | namespace `dashboard` (공유 ALB 라벨 포함) |
-| `k8s/deployment.yaml` | 파드 1개, `AUTH_MODE=local`, 계정 Secret 마운트, `DATA_SOURCE=dummy` |
+| `k8s/deployment.yaml` | 파드 1개, `AUTH_MODE=local`, 계정 Secret 마운트, `DATA_SOURCE=auto`(실데이터가 없거나 실패하면 더미), `MODEL_REGISTRY_URI` |
 | `k8s/service.yaml` | ClusterIP 8501 |
 
 ## 배포 순서 (모두 아직 실행하지 않았다)
@@ -29,5 +29,5 @@
 ## 알아둘 것
 - 로그인 실패 잠금은 파드별 메모리라 replicas 는 1로 둔다.
 - HTTP 구간에서는 비밀번호가 암호화되지 않는다. 운영 전 도메인과 HTTPS 로 바꾼다.
-- 실데이터를 읽으려면 Athena 조회 함수 등록, 읽기 전용 Pod Identity ServiceAccount(`gold_a/`·`gold_b/`만, `ground_truth/` 금지), `DATA_SOURCE=auto` 전환이 필요하다. 할 일은 `dashboard/TODO.md` 의 F3, F4.
+- 실데이터를 읽으려면 Athena 조회 함수 등록, 읽기 전용 Pod Identity ServiceAccount(`gold_a/`·`gold_b/`·`review-score/model-registry/releases/`만, `ground_truth/` 금지)가 필요하다(`DATA_SOURCE=auto` 는 이미 설정됨). 모델 패치노트 위치(`MODEL_REGISTRY_URI`)는 `deployment.yaml`에 채워 두었다. 할 일은 `dashboard/TODO.md` 의 F3, F4.
 - 이미지 빌드·ECR 저장소, 위 YAML 의 실제 적용은 하지 않았고 `kubectl apply --dry-run=server` 도 해 보지 않았다.
