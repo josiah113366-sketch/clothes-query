@@ -797,10 +797,11 @@ pipelines/gold_b/
 
 - [x]  `config/gold_b.yaml` (토픽 목록, PG 목록, S3 경로, 체크포인트 경로) → 토픽·주기·시작 위치·묶음 크기만. S3 경로·체크포인트는 환경변수, PG 목록은 공통 규칙표
 - [x]  `jobs/streaming_ingest.py` Spark Structured Streaming, Kafka 6개 토픽, 1분 트리거, 체크포인트 (로컬 Docker Spark 4.1.3으로 확인, 없는 토픽은 패턴 구독으로 건너뜀)
-- [x]  메시지마다 ②에 쌓기, 결제는 형식 통과 시 ①, 깨진 건 ④ (형식 검사 자리, 2단계 뒤 연결)
+- [x]  메시지마다 ②에 쌓기, 결제는 형식 통과 시 ①, 깨진 건 ④ (형식 검사기 `format_check.py` 연결, 2026-10-23)
 - [x]  이벤트 시각 기준 시간 폴더로 쓰기, `loaded_at` 기록
 - [x]  로컬 또는 개발 Kafka로 샘플을 흘려 원장 확인 (로컬 Kafka 3.7, 가짜 판정)
-- [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙)
+- [x]  실행 입구 `python -m pipelines.gold_b.jobs.streaming_ingest` (설정이 틀리면 Spark를 띄우기 전에 멈춤)
+- [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md`, Python 3.11 이상 이미지 필요)
 - [ ]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인
 - [x]  잡을 재시작해도 빠지거나 두 번 쌓이지 않는지 확인 (체크포인트, 로컬 Docker)
 - [ ]  PR 올리고 합치기
