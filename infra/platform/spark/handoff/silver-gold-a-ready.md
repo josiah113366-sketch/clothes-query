@@ -6,7 +6,7 @@ main #82(36835f5)를 반영했다. 팀 입력 두 개는 S3에 존재함을 읽�
 - runtime ConfigMap: pipelines/silver-gold-a-runtime
 - 업무 설정: airflow/airflow-silver-gold-a-runtime, key config → AIRFLOW_PIPELINE_RUNTIME
 - 기존 main GitDagBundle가 infra/platform/airflow/dags를 읽으므로 새 bundle은 추가하지 않는다. silver_gold_a_batch는 수동/paused로 유지한다.
-- 업무 ECR: clothes-query-dev/silver-gold-a, 기본 ECR: clothes-query-dev/spark-base. 두 저장소와 de-ai-18 push 정책은 적용했다. 이미지 발행과 digest 전달은 아직이다. [발행 안내](spark-ecr-publish.md)를 따른다. push 담당 de-ai-18과 Pod 실행 역할은 다르다.
+- 업무 ECR: clothes-query-dev/silver-gold-a, 기본 ECR: clothes-query-dev/spark-base. 두 저장소와 de-ai-18 push 정책은 적용했다. 기본 이미지는 발행·검증 완료했고 업무 이미지 digest는 동료 전달 대기다. [발행 안내](spark-ecr-publish.md)를 따른다. push 담당 de-ai-18과 Pod 실행 역할은 다르다.
 
 ## 이미지 없이 가능한 렌더
 

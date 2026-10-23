@@ -1,6 +1,6 @@
 # Silver·Gold A 첫 거래 실행 연결 준비
 
-상태: 코드·로컬 검증 준비, ECR·18번 push 권한만 실환경 적용 완료
+상태: ECR·18번 push 권한 적용 및 기본 Spark 이미지 발행 완료, 업무 이미지 대기
 
 브랜치: infra/silver-gold-a-connections
 
@@ -40,3 +40,13 @@
 AWS에서 두 저장소의 IMMUTABLE 태그와 scan_on_push 설정을 확인했다. 실제 사용자 정책은 두 저장소 ARN에 대한 push/pull 작업 및 리소스 제한을 지원하지 않는 GetAuthorizationToken만 포함함을 확인했다. 다른 기존 사용자 권한을 축소하거나 사용자의 전체 권한이 이 정책에만 한정된다고 주장하지 않는다. 적용 후 plan은 변경 없음이었다.
 
 이미지 발행·Spark 실행 계정·network endpoint 변경·노드 활성화·업무 실행은 아직 하지 않았다. Git push·PR·승인·머지는 하지 않았다. 다음 단계는 기본 이미지 발행과 digest 전달이며 그 후 동료가 업무 이미지를 빌드·push한다.
+
+### 기본 이미지 발행
+
+이후 사용자가 기본 이미지 발행을 요청했다. 8c7cf9339de77db60452c7d3a5ad67e9777ede66의 커밋된 image Dockerfile/고정 의존성으로 linux/amd64 이미지를 다시 빌드했다. 해당 커밋 해시 태그로 clothes-query-dev/spark-base에 발행했다. digest는 sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f다.
+
+네트워크 없는 로컬 일회성 컨테이너에서 Spark 4.2.0 / Python 3.10.12 / Java 21·주요 패키지 버전, JAR 10개 체크섬, 연결 클래스 로딩, 숫자 1,000개 합성 계산과 메모리 Parquet 왕복을 확인했다. 첫 검증은 일반 python3 실행에서 PySpark 경로를 지정하지 않아 실패했고 점검 스크립트에 공식 이미지의 /opt/spark/python 및 py4j 경로를 지정해 통과했다. 이미지·업무 코드의 변경은 필요하지 않았다.
+
+업로드 후 최초 식별자 비교는 Docker의 manifest ID를 config digest와 비교해 실패했다. 각각 대응하는 manifest/config 식별자로 대조해 원격 이미지와 검증 이미지가 일치함을 확인했다. 잘못된 이미지를 다시 발행하거나 immutable 태그를 덮어쓰지 않았다. 임시 Docker 인증 설정은 로그아웃 후 제거했다.
+
+동료의 SPARK_IMAGE 인자와 업무 빌드·push 명령을 handoff에 정리했다. 업무 이미지 발행·Spark 실행 권한·network 적용·노드 기동·업무 실행·Git push/PR/머지는 하지 않았다.

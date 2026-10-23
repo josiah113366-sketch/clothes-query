@@ -1,0 +1,34 @@
+{
+  "repository": "clothes-query-dev/spark-base",
+  "tag": "8c7cf9339de77db60452c7d3a5ad67e9777ede66",
+  "image": "827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/spark-base@sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f",
+  "digest": "sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f",
+  "config_digest": "sha256:45a75b74ff41f18409b2867be153836016bec0f5b5591d0a4cc580b4f100346c",
+  "platform": "linux/amd64",
+  "compressed_size_bytes": 2143435207,
+  "source_revision": "8c7cf9339de77db60452c7d3a5ad67e9777ede66",
+  "spark": "4.2.0",
+  "python": "3.10.12",
+  "java_major": 21,
+  "scala_binary": "2.13",
+  "hadoop": "3.5.0",
+  "verified": {
+    "python": "3.10.12",
+    "spark": "4.2.0",
+    "java_major": 21,
+    "packages": {
+      "PyYAML": "6.0.3",
+      "boto3": "1.43.71",
+      "pyarrow": "25.0.1",
+      "tzdata": "2026.3"
+    },
+    "jar_checksums": 10,
+    "synthetic_count": 1000,
+    "connectors_loaded": true,
+    "image_id": "sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f",
+    "network": "none",
+    "aws_business_writes": false
+  },
+  "published_config_matches_verified": true,
+  "aws_jobs_started": false
+}
