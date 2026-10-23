@@ -1,0 +1,15 @@
+# pipelines/gold_b/Dockerfile 빌드에 넣는 파일 (저장소 루트에서 빌드). 처음에 다 빼고, 잡이 쓰는 파일만 다시 넣는다.
+# 폴더(!pipelines/)를 통째로 다시 넣으면 그 아래가 모두 들어가서 파일 단위로만 넣는다 (tests/test_image.py가 확인).
+**
+# 공통 모듈: 지문·형식 규칙·시각 파서 (앞으로 생길 공통 모듈도 빠지지 않게 *.py)
+!pipelines/*.py
+# Gold B 코드·설정·패키지 목록
+!pipelines/gold_b/*.py
+!pipelines/gold_b/requirements.txt
+!pipelines/gold_b/config/gold_b.yaml
+!pipelines/gold_b/jobs/*.py
+!pipelines/gold_b/collector/*.py
+# 형식 규칙표 (pipelines/format_rules.py가 저장소 루트 기준 위치로 읽는다)
+!docs/contracts/format_rules.yaml
+# 시험 파일은 다시 뺀다
+**/test_*.py

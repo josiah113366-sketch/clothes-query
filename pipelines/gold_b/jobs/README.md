@@ -29,16 +29,18 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
 - 형식 검사기(`pipelines/gold_b/format_check.py`, 공통 규칙의 `gold_b`)를 끼워 스트리밍을 시작하고 멈출 때까지 기다린다. 재처리 잡과 같은 검사기라 같은 메시지는 같은 원장 줄이 된다.
 - 설정 파일·환경변수·형식 규칙표가 잘못됐으면 Spark를 띄우기 전에 1로 끝난다. 스트리밍 중 실패는 오류로 끝나고, 다시 띄우면 체크포인트에서 이어 읽는다.
 - 로그에는 묶음 번호와 메시지·파일 수만 남긴다 (주소·메시지 내용은 남기지 않음).
-- Spark 연결(`build_query`)은 Docker의 Spark 4.1.3으로 로컬 Kafka를 읽어 확인했다 (같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않음). 형식 검사기를 끼운 Spark 실행은 아직 못 했다 (Gold B 이미지가 아직 없음).
+- Spark 연결(`build_query`)은 Docker의 Spark 4.1.3으로 로컬 Kafka를 읽어 확인했다 (같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않음). 형식 검사기를 끼운 Spark 실행은 아직 못 했다 (Gold B 이미지는 팀 기본 Spark 이미지가 ECR에 올라온 뒤 빌드).
 
 ### 적재 잡 배포에 필요한 것 (재영 님께)
 
 - 늘 켜 두는 Spark 스트리밍 잡 하나. 같은 체크포인트로 두 개를 동시에 띄우지 않는다.
-- 이미지: 팀 기본 Spark 이미지(`infra/platform/spark/image`: Spark 4.2.0, Python 3.10.12, `spark-sql-kafka`·S3A(`hadoop-aws`) 포함)에서 출발한다. Gold B 코드는 Python 3.10에서 돈다 (2026-10-23 맞춤, Python 3.10.12 컨테이너에서 Gold B 시험 통과). 그 위에 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`(설정 `config/gold_b.yaml` 포함), `docs/contracts/format_rules.yaml`, `pipelines/gold_b/requirements.txt` 패키지(3.10은 pyarrow 25.0.1)를 넣는다. Gold B 이미지의 Dockerfile은 따로 만든다.
-- 제출: `spark-submit local:///<이미지 안 저장소 위치>/pipelines/gold_b/jobs/streaming_ingest.py`. `PYTHONPATH`에 저장소 루트를 더한다.
-- 묶음(최대 20,000건)은 Driver로 모아 파이썬으로 처리한다. Executor는 Kafka만 읽는다.
-- 권한: S3 `gold_b/topic_messages/`·`gold_b/payment_events/`·`gold_b/malformed_events/` 쓰기 (같은 이름 덮어쓰기 포함), 체크포인트 위치 읽기·쓰기·지우기. Kafka 6개 토픽 읽기 (consumer group은 Spark 기본 이름 `spark-kafka-source-…`, Kafka에 커밋 안 함).
-- 환경변수는 위 표. Kafka SSL 파일은 Secret으로 붙인다.
+- 이미지: Gold B 이미지 `pipelines/gold_b/Dockerfile` (팀 기본 Spark 이미지 digest에서 출발, 빌드 방법은 [pipelines/gold_b/README.md](../README.md) 「이미지」). Driver와 Executor가 같은 이미지 digest를 쓴다.
+- 제출: `spark-submit local:///opt/gold_b/pipelines/gold_b/jobs/streaming_ingest.py` (인자 없음, 설정은 이미지 안 `config/gold_b.yaml`). `PYTHONPATH=/opt/gold_b`는 이미지에 들어 있다.
+- 늘 켜 둔다. 멈추면 다시 띄운다 (같은 체크포인트로 이어 읽어 빠지거나 두 번 쌓이지 않음). 같은 체크포인트로 두 개를 동시에 띄우지 않는다.
+- 자원(제안): Driver 1개가 묶음(최대 20,000건)을 파이썬으로 처리하므로 1 CPU·2GiB, Executor 1개는 Kafka만 읽어 1 CPU·1GiB.
+- S3 권한: `gold_b/topic_messages/`·`gold_b/payment_events/`·`gold_b/malformed_events/` 읽기·쓰기 (같은 이름 덮어쓰기 포함), 체크포인트 위치 읽기·쓰기·지우기. 체크포인트 위치 제안: `s3a://clothes-query-datalake/gold_b/_checkpoints/streaming_ingest/` (원장 표 위치와 겹치지 않음, 재영 님과 정함).
+- Kafka: Strimzi `KafkaUser`(예: `gold-b-ingest`, TLS)에 6개 토픽 `Read`·`Describe`. 이 잡의 namespace를 Kafka 클라이언트 리스너에 허용한다. Spark는 파티션을 직접 지정해서 읽고 Kafka에 처리 위치를 커밋하지 않아 소비자 그룹 권한은 필요 없을 것으로 본다 (실제 접속 때 확인. 그룹 권한 오류가 나면 고정 그룹 이름을 쓰도록 바꾼다). 사용자 인증서 Secret(CA·인증서·키)을 붙이고 `KAFKA_SSL_*` 환경변수로 경로를 준다.
+- 환경변수는 위 표 (`KAFKA_SECURITY_PROTOCOL=SSL`).
 
 확인: `python -m pytest -q pipelines/gold_b/tests/test_ingest.py` (설정 파일·형식 검사기 시험은 `PyYAML`이 있어야 돈다).
 
