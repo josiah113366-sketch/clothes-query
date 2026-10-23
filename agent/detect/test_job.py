@@ -138,6 +138,10 @@ check("재처리 전에 PG_A 이상이 기록되어 있음", len(anomalies("WHER
 
 event("rq-0", "LEDGER_REPLACED", at(15, 0), at(16, 0))     # 교체는 했는데 데이터는 그대로 (장애가 진짜였던 경우)
 check("교체 끝났는데 아직 재판정 안 한 줄을 찾음", [(x["request_id"], x["window_start"]) for x in pending_replacements(query)], [("rq-0", "2026-10-20 15:00:00")])
+write("reprocess_events", [{"request_id": "rq-silver", "step": "LEDGER_REPLACED", "at": at(16, 15).strftime(F), "actor": "silver_reprocess", "reason": None,
+                            "window_start": at(15, 0).strftime(F), "window_end": at(16, 0).strftime(F), "rule_version": "v1.0", "source": "SILVER",
+                            "attempt": 1, "parent_request_id": None, "detail": None}])
+check("Silver 재처리(source=SILVER) 교체 줄은 Gold B 재판정 대상이 아님", [x["request_id"] for x in pending_replacements(query)], ["rq-0"])
 s = run_once(query, write, CFG, at(16, 20))
 check("재판정 결과: 장애가 진짜라 이상이 그대로 남음 (STILL_OPEN)", [x["result"] for x in s["redetected"]], ["STILL_OPEN"])
 check("REDETECTED, VERIFIED 줄이 남음", [x["step"] for x in query("SELECT step FROM gold_b.reprocess_events WHERE actor = 'detect_job' AND request_id = 'rq-0' ORDER BY step")], ["REDETECTED", "VERIFIED"])
