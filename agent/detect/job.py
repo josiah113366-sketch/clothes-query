@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from rules import R6_RULE, Config, open_orders, r1_pg_failures, r3_bronze_lag, r4_malformed, r5_duplicate_success, r6_order_total
 
 STEP_MIN = 5     # 판정 주기 (제안)
+MAX_REDETECT_PER_RUN = 1   # 한 번 실행에서 재판정하는 교체 구간(시간 폴더) 수. 구간 하나가 Athena 쿼리 약 52개(5분 간격 13번 x 4개)라 여럿을 한 번에 하면 작업 제한 시간(3분)을 넘을 수 있다. 남은 것은 다음 5분 실행이 이어서 한다
 ACTOR = "detect_job"
 
 
@@ -244,6 +245,6 @@ def run_once(query, write, cfg: Config = None, now: datetime = None, tick: datet
     cfg = cfg or Config()
     now = now or datetime.utcnow()
     summary = {"regular": regular_run(query, write, cfg, now, tick), "redetected": []}
-    for item in pending_replacements(query):
+    for item in pending_replacements(query)[:MAX_REDETECT_PER_RUN]:
         summary["redetected"].append(redetect(query, write, cfg, now, item))
     return summary

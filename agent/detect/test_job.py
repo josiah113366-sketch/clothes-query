@@ -307,5 +307,14 @@ yaml = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "format_rule
 if yaml.exists():
     m = re.search(r'^version:\s*"?([0-9][^"\s]*)"?', yaml.read_text(encoding="utf-8"), re.M)
     check("R4 기본 규칙 버전이 공통 형식 규칙 YAML의 version과 같음", (m.group(1) if m else None, Config().format_rule_version), (Config().format_rule_version, Config().format_rule_version))
+# 교체 구간이 여러 개 쌓여 있어도 한 번 실행에서는 하나만 재판정한다(작업 제한 시간 보호). 남은 것은 다음 실행이 이어서 한다
+event("rq-cap", "LEDGER_REPLACED", at(10, 0), at(11, 0))
+event("rq-cap", "LEDGER_REPLACED", at(11, 0), at(12, 0))
+before_cap = len([x for x in pending_replacements(query) if x["request_id"] == "rq-cap"])
+s1 = run_once(query, write, CFG, at(16, 40))
+left1 = len([x for x in pending_replacements(query) if x["request_id"] == "rq-cap"])
+s2 = run_once(query, write, CFG, at(16, 45))
+left2 = len([x for x in pending_replacements(query) if x["request_id"] == "rq-cap"])
+check("교체 구간 2개: 한 번 실행에 하나만 재판정하고 나머지는 다음 실행이 함", (before_cap, left1, left2, len(s1["redetected"]), len(s2["redetected"])), (2, 1, 0, 1, 1))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
