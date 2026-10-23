@@ -22,6 +22,7 @@ from sim.common.config import ConfigError, load_config
 from sim.common.control import DEFAULT_CONTROL_FILE, MODES
 from sim.common.db import DatabaseTargetError, check_db_target
 from sim.common.rng import SimRandom, derive_seed
+from sim.common.stats import stats_path
 from sim.controller.control_writer import FileControlWriter
 from sim.controller.log import DEFAULT_INCIDENT_DIR, FileIncidentLog, IncidentLog, S3IncidentLog
 from sim.controller.model import (
@@ -35,6 +36,7 @@ from sim.controller.model import (
 from sim.controller.pollution import DbPollution
 from sim.controller.server import ControllerServer, ServerConfigError
 from sim.controller.service import ControllerService
+from sim.controller.traffic import TrafficMonitor, http_fetcher
 
 app = typer.Typer(help="모드 전환, 장애 주입, 정답표 기록 (운영자용)", no_args_is_help=True)
 
@@ -107,7 +109,12 @@ def serve(
         burst_minutes=burst_minutes,
     )
     try:
-        server = ControllerServer(service, host, port, token)
+        api_url = os.environ.get("SIM_API_URL", "").strip()
+        traffic = TrafficMonitor(
+            {name: stats_path(control_file, name) for name in ("behavior", "member")},
+            http_fetcher(api_url) if api_url else None,
+        )
+        server = ControllerServer(service, host, port, token, traffic)
     except ServerConfigError as error:
         raise _fail(str(error)) from None
     except OSError as error:

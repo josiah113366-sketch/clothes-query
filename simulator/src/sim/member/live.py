@@ -21,6 +21,7 @@ from sim.common.control import ControlSource, ControlState
 from sim.common.db import SafeDatabaseError, db_error_info, describe_db_error
 from sim.common.regions import RegionTable
 from sim.common.rng import SimRandom, derive_seed
+from sim.common.stats import STATS_SECONDS
 from sim.member import params
 from sim.member.baseline import COLUMNS
 from sim.member.generate import draw_phone, generate_member
@@ -140,6 +141,7 @@ class LiveRunner:
         duration: float | None = None,
         max_signups: int | None = None,
         out: Callable[[str], None] = print,
+        stats: Callable[[dict], None] | None = None,
     ) -> None:
         self.store = store
         self.regions = regions
@@ -151,6 +153,7 @@ class LiveRunner:
         self.duration = duration
         self.max_signups = max_signups
         self.out = out
+        self.stats = stats  # 컨트롤러 화면용 누적 숫자 (StatsFile.write). 없으면 쓰지 않는다
         self.running = True
         self.summary = LiveSummary()
         self.next_index = 0
@@ -177,7 +180,7 @@ class LiveRunner:
 
         self.clock.restart()  # 연결과 초기화에 든 시간은 실행 시간(--duration)에 넣지 않는다
         due: float | None = None  # 다음 가입 시각 (실제 경과 초). None이면 새로 뽑는다
-        last_poll = last_progress = float("-inf")
+        last_poll = last_progress = last_stats = float("-inf")
         progress_count = 0
         while not self._should_stop():
             now_real = self.clock.real_elapsed()
@@ -191,6 +194,9 @@ class LiveRunner:
                 span = now_real - last_progress
                 self._print_progress(self.summary.total - progress_count, span)
                 last_progress, progress_count = now_real, self.summary.total
+            if self.stats is not None and now_real - last_stats >= STATS_SECONDS:
+                last_stats = now_real
+                self.stats(self.stats_data())
 
             if not self.running:
                 due = None
@@ -216,6 +222,15 @@ class LiveRunner:
 
         self.summary.elapsed_seconds = self.clock.real_elapsed()
         return self.summary
+
+    def stats_data(self) -> dict:
+        """컨트롤러 화면용 누적 숫자. PII 없음."""
+        return {
+            "mode": self.mode,
+            "running": self.running,
+            "signups": self.summary.total,
+            "reconnects": self.summary.reconnects,
+        }
 
     def _should_stop(self) -> bool:
         if self._stop:
