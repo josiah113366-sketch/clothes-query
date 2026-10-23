@@ -108,6 +108,7 @@
 - **보완 (2026-10-23): main 병합과 poller**
   - 최신 `main`(#81까지)을 병합했다. 충돌은 `pipelines/gold_b/README.md`, `docs/BRANCHES.md`의 표 줄뿐이었다.
   - 같은 날 #78(수집기)이 머지되어 다시 병합했다. 충돌은 `docs/BRANCHES.md`, `pipelines/gold_b/README.md`, 설계 문서 팀원 확인 표의 줄뿐이었고 양쪽 줄을 모두 남겼다. 머지된 #78의 브랜치 대장 상태, 작업 지시서 상태, 설계 문서 5단계 진행 표시도 정리했다.
+  - #78에 main을 합치며 GitHub에서 충돌을 풀 때 브랜치 대장의 `### gold-a` 구역이 지워지고 gold-b 표 중간에 빈 줄이 생겼다. 빈 줄을 빼고, gold-a 구역은 #81 때 내용 그대로 되살렸다 (상태 칸은 Gold A 담당이 고친다).
   - poller(`read_events`, `next_request`)를 더했다. 규칙은 「정한 기본값」 9번이다. 승인 화면(#66)이 Gold B 요청을 `source = KAFKA`로 쓰고 승인 만료를 60분으로 보는 것에 맞췄다.
   - 승인 화면·판정 잡은 Athena `INSERT INTO`로 `reprocess_events`에 줄을 써서, 파일 이름에 `.parquet`이 없을 수 있다. 원장 저장소의 `files()`가 `.parquet`만 돌려줘서 그대로면 poller가 `APPROVED` 줄을 못 본다. `files(any_name=True)`를 더해 숨김·임시 파일이 아니면 다 읽게 했다 (원장 3개를 교체할 때는 지금처럼 `.parquet`만).
   - `run()`에 `run_number`를 더해 `STARTED`의 `detail.run`에 남긴다. `attempt`는 승인 화면이 정한 요청 단위 번호 그대로다.
