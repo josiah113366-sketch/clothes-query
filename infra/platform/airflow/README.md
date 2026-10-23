@@ -34,7 +34,7 @@ kubectl -n airflow port-forward svc/airflow-api-server 8080:8080
 
 브라우저에서 `http://localhost:8080`을 연다. 비밀번호는 별도 비공개로 전달한다. `operator`는 admin, `observer`는 viewer, `approval`은 user다. Simple Auth는 개발용 고정 역할이라 업무 DAG별 세밀한 allowlist나 운영용 사용자 관리를 대신하지 않는다.
 
-승인 백엔드는 `POST /auth/token`으로 토큰을 받고 `POST /api/v2/dags/{dag_id}/dagRuns`에 고유 `dag_run_id`와 실제 교체 범위 `conf`를 보낸다. EKS 내부 주소는 `http://airflow-api-server.airflow.svc.cluster.local:8080`이다. 이 주소를 외부에 노출하는 ALB는 만들지 않는다. 실제 업무 DAG ID·입력 계약과 승인 백엔드 네트워크 경로는 담당자와 연결해야 한다.
+승인 백엔드는 `POST /auth/token`으로 토큰을 받고 `POST /api/v2/dags/{dag_id}/dagRuns`에 고유 `dag_run_id`와 실제 교체 범위 `conf`를 보낸다. EKS 내부 주소는 `http://airflow-api-server.airflow.svc.cluster.local:8080`이다. 이 주소는 인터넷에 공개하지 않는다. 사람이 화면을 보는 접속은 [ingress](../ingress/README.md)의 허용 IP 제한 ALB를 쓴다. 실제 업무 DAG ID·입력 계약과 승인 백엔드 네트워크 경로는 담당자와 연결해야 한다.
 
 ## 합성 검증과 한계
 

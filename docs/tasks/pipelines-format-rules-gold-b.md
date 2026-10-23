@@ -1,6 +1,8 @@
 # 작업 지시서: pipelines/format-rules-gold-b
 
-> 상태: 진행 중 · 브랜치: `pipelines/format-rules-gold-b` (최신 `main` `013264d` 위. 작업 중 #45·#55가 머지되어 그 위로 옮김) · 다음 작업: Gold B 형식 검사 연결 (`pipelines/gold-b-format-check`)
+> 상태: 완료 (#63, 2026-10-22 머지) · 브랜치: `pipelines/format-rules-gold-b` (최신 `main` `013264d` 위. 작업 중 #45·#55가 머지되어 그 위로 옮김) · 다음 작업: Gold B 형식 검사 연결 (`pipelines/gold-b-format-check`)
+>
+> 머지 뒤 메모 (2026-10-22): PR 본문에 적은 회원·클릭의 Gold B 전용 표시와 리뷰 규칙 제거는 머지에 들어가지 않았다. 회원·클릭 규칙은 #65로 Silver도 쓰게 되어 Silver·Gold B 공동 규칙으로 두고, 전용 표시는 넣지 않는다 (사용자 결정). `reviews` 규칙은 쓰는 경로 없이 남아 있다.
 
 ## 목표
 

@@ -37,7 +37,7 @@ data/incidents.json ┘   (= 정답 라벨)  (문장만 씀)          (재생성
 | `src/rsim/review/examples.py` | 생성 프롬프트 예시 세트(`data/examples/ex-vN.md`) 읽기 |
 | `src/rsim/review/verifier.py` | 검수 프롬프트(`VERIFIER_PROMPT_VERSION`), 명세 비교, 정답 라벨 합치기 |
 | `src/rsim/review/bedrock.py` | Bedrock Converse 호출 (표준 라이브러리, SDK 없음) |
-| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제 후 0~7일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
+| `src/rsim/review/orders.py` | 주문 기반 리뷰: 주문 읽기, 결제(RDS 는 배송완료) 후 0~7일 텀, 날짜별로 고르기, 가짜 주문 만들기 |
 | `src/rsim/review/options.py` | 구매 옵션(사이즈·색상)과 포토 리뷰 여부 |
 | `src/rsim/review/sinks.py`, `run.py` | Kafka / 콘솔 / 파일 전송, 실행 흐름 |
 | `src/rsim/bench/` | 소량 실행으로 비용·검수 결과 확인, 예시 세트 점검표, 검수 모델 정확도 측정 |
@@ -85,7 +85,7 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-## 주문 기반 실행 (결제 후 0~7일 뒤 리뷰 → S3 날짜별 경로)
+## 주문 기반 실행 (결제 후 0~7일 뒤 리뷰 → S3 날짜별 경로, RDS 주문은 배송완료 후 0~7일)
 
 2026-10-14 결정(lemin): 결제 정보를 읽어 결제 후 1~14일 뒤에 리뷰를 달고(2026-10-21 에 0~7일로 바꿈, 결제 당일 포함), **리뷰는 S3 에 날짜(dt)별로 바로 쓴다.**
 RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있으니 조인은 레이크(Athena 등)에서 한다.
@@ -94,10 +94,11 @@ RDS 에는 넣지 않는다. 상품·회원·결제 정보가 모두 S3 에 있�
 - 주문은 `.local/orders.jsonl` 에서 읽는다(`ORDERS_PATH`). 결제 데이터가 생기기 전에는 `rsim orders-fake` 로 만든다.
 - 주문마다 리뷰를 쓸지(`REVIEW_RATE`), 며칠 뒤에 쓸지(`REVIEW_DELAY_MIN_DAYS`~`REVIEW_DELAY_MAX_DAYS`), review_id, 구매 옵션은
   **order_id 로만** 정해진다. RANDOM_SEED 가 바뀌어도 같은 주문이면 같은 값이다.
-- `rsim run --source orders --date D` 는 리뷰 시각이 **D 하루(UTC)** 안에 떨어지는 주문만 만든다. `--date` 를 빼면 어제(UTC)다.
+- `rsim run --source orders --date D` 는 리뷰 시각이 **D 하루(UTC)** 안에 떨어지는 주문만 만든다. `--date` 를 빼면 어제(KST 달력)다(2026-10-23 에 UTC → KST).
 - `--sink lake` 는 `<LAKE_ROOT>/reviews/year=YYYY/month=MM/day=DD/part-00000.jsonl`(리뷰)과 `reviews_truth/year=.../`(정답)에 쓰고,
   **그 날짜 파티션을 통째로 덮어쓴다.** 그래서 "이미 리뷰가 있는 주문"을 조회할 필요 없이, 같은 날짜를 다시 돌려도 주문당 리뷰는 하나다.
-- dt 는 UTC 날짜다(팀 규칙: Bronze 는 UTC, Silver 부터 KST). 하루 배치는 UTC 0시(KST 오전 9시) 이후에 전날을 돌린다.
+- dt 는 데이터 시각의 날짜다(팀 규칙: Bronze 는 UTC, Silver 부터 KST). 다만 주문 시뮬레이터가 KST 벽시계 시각을 UTC 처럼 RDS 에 넣기 때문에
+  RDS 주문에서 만든 리뷰의 날짜 D 는 사실상 KST 날짜 D 다. 그래서 하루 배치는 **KST 0시**에 전날(KST 달력)을 돌린다(2026-10-23 lemin).
 - 생성이 실패해서 버린 리뷰는 그 파티션에서 빠진다. 다시 채우려면 그 날짜를 다시 돌린다(그날 리뷰 문장은 새로 만들어진다).
 - 결제 데이터를 읽을 때는 D-7 ~ D-1 결제만 보면 된다(`orders.due_orders` 설명 참고). `--source rds` 는 이 범위만 RDS 에서 읽는다.
 
@@ -117,7 +118,9 @@ rsim run --source orders --llm fake --sink lake --date 2026-10-09
 
 업무 API 가 RDS 에 저장한 주문을 읽어 리뷰를 단다(2026-10-21 lemin 결정). `.env` 에 `ORDERS_DATABASE_URL` 을 넣는다(읽기 권한만 있으면 됨).
 
-- 대상: 주문 상태 PAID·SHIPPED·DELIVERED 이고 결제(payments) SUCCESS 가 있는 주문. 결제 시각 = 성공 결제의 completed_at.
+- 대상: **배송완료(DELIVERED)** 이고 결제(payments) SUCCESS 가 있는 주문(0.3.2, 2026-10-23 lemin. 0.3.0~0.3.1 은 PAID·SHIPPED·DELIVERED).
+- 리뷰 시각: **배송완료 시각(orders.updated_at) + 0~7일**. 결제 시각(성공 결제의 completed_at)은 리뷰의 purchased_at 으로만 쓴다.
+  `--source orders`(JSONL 가짜 주문)는 배송 정보가 없어 예전처럼 결제 시각 + 0~7일이다.
 - **주문 항목(order_items) 하나에 리뷰 하나.** 작성 여부·텀·review_id 는 order_item_id 로 정한다(같은 항목이면 언제 돌려도 같은 값).
 - 프롬프트: 상품명(prod_name)과 product_info(상품 종류·색상·무늬, product_design·product_variant), 작성자 연령대(members.age_band).
   리뷰 컬럼은 그대로이고 order_id·member_id·product_id 가 RDS 값이라 레이크에서 거래 데이터와 바로 조인된다.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clothes-query-review-simulator"
-version = "0.3.1"
+version = "0.3.2"
 requires-python = ">=3.12"
 # Bedrock 호출은 표준 라이브러리(urllib)로 해서 SDK 가 필요 없다. boto3 는 S3 레이크 저장에만, psycopg 는 RDS 주문 읽기에만 쓴다.
 dependencies = [

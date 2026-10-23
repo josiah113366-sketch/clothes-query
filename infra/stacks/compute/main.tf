@@ -8,6 +8,7 @@ data "terraform_remote_state" "eks" {
 }
 module "compute" {
   source                     = "../../modules/compute"
+  spark_node_pool            = var.spark_node_pool
   name                       = "clothes-query-dev-compute"
   node_role_name             = data.terraform_remote_state.eks.outputs.node_role_name
   app_subnet_ids             = data.terraform_remote_state.network.outputs.app_subnet_ids
