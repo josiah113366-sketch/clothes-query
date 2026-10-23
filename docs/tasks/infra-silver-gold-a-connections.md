@@ -1,6 +1,6 @@
 # Silver·Gold A 첫 거래 실행 연결 준비
 
-상태: ECR·18번 push 권한 적용 및 기본 Spark 이미지 발행 완료, 업무 이미지 대기
+상태: ECR·기본 이미지·S3 endpoint·실행 IAM/Pod Identity·Kubernetes RBAC 적용 완료, 업무 이미지 대기
 
 브랜치: infra/silver-gold-a-connections
 
@@ -51,4 +51,16 @@ AWS에서 두 저장소의 IMMUTABLE 태그와 scan_on_push 설정을 확인했�
 
 업로드 후 최초 식별자 비교는 Docker의 manifest ID를 config digest와 비교해 실패했다. 각각 대응하는 manifest/config 식별자로 대조해 원격 이미지와 검증 이미지가 일치함을 확인했다. 잘못된 이미지를 다시 발행하거나 immutable 태그를 덮어쓰지 않았다. 임시 Docker 인증 설정은 로그아웃 후 제거했다.
 
-동료의 SPARK_IMAGE 인자와 업무 빌드·push 명령을 handoff에 정리했다. 업무 이미지 발행·Spark 실행 권한·network 적용·노드 기동·업무 실행·Git push/PR/머지는 하지 않았다.
+동료의 SPARK_IMAGE 인자와 업무 빌드·push 명령을 handoff에 정리했다. 해당 단계에서는 업무 이미지 발행·Spark 실행 권한·network 적용·노드 기동·업무 실행·Git push/PR/머지를 하지 않았다.
+
+### 연결 권한 적용 완료
+
+사용자가 작업 재개를 요청해 최신 main 083931f 반영과 기존 자원을 다시 확인했다. pipelines namespace와 해당 Pod Identity는 없었고 실제 scheduler 계정은 airflow/airflow-scheduler였다. namespace와 계정 3개, 제한된 Role/RoleBinding, template ConfigMap을 서버 dry-run 후 적용했다. 총 11개 객체이며 Pod·Job·NodePool·ResourceQuota·Secret은 포함하지 않았다. 다른 기존 자원을 인수하거나 덮어쓰지 않았다.
+
+S3 endpoint 선행 적용을 확인한 Terraform plan은 Driver/Executor 역할 2개·정책 2개·Pod Identity association 2개 생성뿐이었다. 삭제·교체·기존 역할 수정은 없었다. 저장 계획을 적용하고 공통 auto 설정에도 승인한 namespace·상품 객체·두 검증 run_id를 보존했다. 적용 후 기본 plan은 변경 없음이었다.
+
+실제 Kubernetes can-i: scheduler의 pipelines Pod 생성, 제출기의 Pod/NetworkPolicy 생성 및 Driver의 Executor Pod 생성 허용을 확인했다. Driver의 Secret 읽기, 제출기의 다른 namespace Pod 생성, Executor의 Pod 생성은 거부됐다.
+
+Driver/Executor 각각 21개, 총 42개 IAM 객체 권한 검사는 예상대로 통과했다. Bronze 읽기만, 거래 결과 읽기/쓰기, 승인된 run의 Parquet 롤백 및 magic 작업 객체 삭제를 허용하고 ground_truth·미승인 실행의 Parquet 삭제·상품 기준정보 쓰기 및 임의 상품 객체 읽기는 거부됐다. 최초 점검 스크립트가 action별 결과의 중첩 ResourceSpecificResults를 펼치지 않아 개수 단언이 실패했고, 결과 파싱을 수정한 뒤 전부 통과했다. 실제 권한 수정은 추가하지 않았다.
+
+실제 association 두 개의 ServiceAccount/role ARN 일치를 확인했다. pipelines의 Pod/Job 0개, Spark NodePool 0개, 기존 노드 3개의 UID 보존을 확인했다. 실제 Pod Identity 자격증명 발급·S3 입출력·업무 결과는 아직 실행하지 않았으므로 보장하지 않는다. 다음 단계는 동료의 업무 이미지 digest → Airflow runtime 설정 연결 → 별도 노드 활성화/수동 실행 승인 순서다. 이번 작업에서는 Git push·PR·승인·머지를 하지 않았다.
