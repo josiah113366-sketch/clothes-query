@@ -1,0 +1,1 @@
+{"schema_version": 1, "incident_id": "INC-SINK", "phase": "start", "type": "SINK_PAUSE", "at": "2026-10-20T16:00:00Z", "params": {"connector": "bronze-s3-sink-v2", "planned_minutes": 35}}
