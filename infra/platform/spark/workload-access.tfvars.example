@@ -1,0 +1,23 @@
+# Review-only IAM bindings to MERGE into the existing map; passing this as a
+# replacement var-file alone would remove existing CDC/Airflow bindings.
+# Confirm business read/write/checkpoint prefixes before producing a real plan.
+# Spark output commit/checkpoint cleanup can also require DeleteObject; confirm
+# the committer and endpoint policy first. This is not a complete job policy.
+bindings = {
+  spark-driver = {
+    namespace       = "spark"
+    service_account = "spark-driver"
+    s3_access = {
+      "bronze/" = ["s3:GetObject"]
+      "silver/" = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+    }
+  }
+  spark-executor = {
+    namespace       = "spark"
+    service_account = "spark-executor"
+    s3_access = {
+      "bronze/" = ["s3:GetObject"]
+      "silver/" = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]
+    }
+  }
+}

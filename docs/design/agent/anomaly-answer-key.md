@@ -78,7 +78,7 @@ Gold B는 사실을 한 줄씩 쌓는 **원장 4개와 정리 뷰 2개**를 만�
 | `sample_size` | BIGINT | 판정에 쓴 건수 | 8 |
 | `episode_start`, `episode_end` | TIMESTAMP, NULL 허용 | 연속된 시간대를 합친 이상 기간. 재처리 범위 후보 | 15:00, 15:20 |
 | `evidence_ref` | STRING(JSON) | 조사가 볼 곳. 깨진 메시지는 `start_offsets`(파티션별 가장 이른 offset)를 포함 | `{"table":"malformed_events","topic":"clickstream","start_offsets":{"2":18342}}` |
-| `status` | STRING | `OPEN` / `INVESTIGATING` / `REPORTED` | `OPEN` |
+| `status` | STRING | `OPEN` / `INVESTIGATING` / `REPORTED` / `RESOLVED`(R6 해소 줄, 재처리 뒤 재판정에서 사라진 이상의 해소 줄) | `OPEN` |
 | `detected_at` | TIMESTAMP | 판정 잡이 기록한 시각 | 15:20:40 |
 
 - 정답(`expected_*`)은 이 표에 넣지 않는다. 탐지는 신호까지만 말하고 원인은 조사가 찾는다.

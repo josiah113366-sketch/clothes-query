@@ -255,9 +255,12 @@ def run_task(
     return resp["tasks"][0]["taskArn"]
 
 
-def yesterday_utc() -> str:
-    """로컬 rsim run --source orders 기본 날짜와 같은 '어제(UTC)'."""
-    return (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+def yesterday_kst() -> str:
+    """로컬 rsim run 기본 날짜와 같은 '어제(KST 달력)'. (2026-10-23 에 UTC → KST)
+
+    주문 시뮬레이터가 KST 벽시계 시각을 UTC 처럼 RDS 에 넣어서, 데이터의 날짜 D = KST 날짜 D 다.
+    """
+    return (datetime.now(UTC) + timedelta(hours=9) - timedelta(days=1)).date().isoformat()
 
 
 def split_s3(uri: str) -> tuple[str, str]:

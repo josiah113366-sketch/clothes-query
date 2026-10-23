@@ -11,7 +11,8 @@
 | `bucket_name`, `bucket_arn` | storage 스택 output (민감 값) |
 | `lake_prefix`, `input_prefix` | 쓰기 `bronze/reviews/*`, 읽기 `sim-input/review-simulator/*` |
 | `cpu`, `memory` | 태스크 크기 (기본 512 / 1024, 스크립트가 태스크 정의 등록 때 사용) |
-| `schedule_expression` | 예약 실행 시각 (UTC, 기본 매일 00:30) |
+| `schedule_expression` | 예약 실행 시각 (`schedule_timezone` 기준, 기본 매일 00:00) |
+| `schedule_timezone` | 예약 실행 시간대 (기본 `Asia/Seoul`, 2026-10-23 lemin: KST 0시 실행) |
 | `alarm_email`, `budget_email`, `budget_limit_usd` | 선택. 비어 있으면 만들지 않음 |
 | `bedrock_price_input`, `bedrock_price_output` | 대시보드 추정 비용 단가 (100만 토큰당 USD) |
 | `config_parameter_name` | 스크립트가 읽는 SSM 파라미터 이름 |

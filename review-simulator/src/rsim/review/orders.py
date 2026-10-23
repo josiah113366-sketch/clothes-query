@@ -1,5 +1,8 @@
 """주문(결제) 기반 리뷰 발생: 주문 읽기 → 리뷰 쓸 주문 고르기 → 0~7일 뒤 리뷰 시각 정하기.
 
+2026-10-23 lemin: RDS 주문은 **배송완료(DELIVERED) 항목에만** 리뷰를 단다. 이때 0~7일은 결제 시각이 아니라
+배송완료 시각(orders.updated_at)부터 센다(받기 전에 쓴 리뷰가 나오지 않게). JSONL 가짜 주문은 예전처럼 결제 시각 기준.
+
 확정한 구상 (2026-10-14, lemin)
 --------------------------------
 결제 정보를 읽어서 결제 후 0~7일 뒤(결제 당일 포함)에 리뷰를 단다(하루 약 1,000건). 2026-10-21 에 1~14일 → 1~7일 → 0~7일(lemin: 당일 리뷰도 있어야 함).
@@ -68,14 +71,21 @@ class Order:
     order_id: str
     member_id: str
     product_id: str
-    paid_at: datetime  # 결제 시각 (시간대 있음)
-    # 아래 3개는 RDS 에서 읽을 때만 값이 있다 (JSONL 주문은 None → 예전과 같은 동작)
+    paid_at: datetime  # 결제 시각 (시간대 있음). 리뷰의 purchased_at 으로 나간다
+    # 아래 4개는 RDS 에서 읽을 때만 값이 있다 (JSONL 주문은 None → 예전과 같은 동작)
     # 주문 항목 ID. 한 주문에 상품이 여러 개면 상품마다 리뷰가 하나씩 달리므로, 리뷰를 구분하는 키로 쓴다
     order_item_id: str | None = None
     # RDS 상품 테이블에서 같이 읽은 상품(상품명·종류·색상·무늬). 있으면 상품 목록(catalog) 대신 이걸 프롬프트에 쓴다
     product: Product | None = None
     # 회원 연령대(리뷰 표기, 예: "20대"). members.age_band 를 바꾼 값. 없으면 명세에서 무작위로 뽑는다
     age_group: str | None = None
+    # 배송완료 시각 (2026-10-23). RDS 주문은 DELIVERED 인 것만 읽으므로 orders.updated_at = 배송완료로 바뀐 시각이다
+    delivered_at: datetime | None = None
+
+    @property
+    def review_base_at(self) -> datetime:
+        """리뷰 텀(0~7일)을 세기 시작하는 시각. 배송완료 시각이 있으면 그것, 없으면(JSONL 가짜 주문) 결제 시각."""
+        return self.delivered_at or self.paid_at
 
     @property
     def key(self) -> str:
@@ -124,11 +134,12 @@ class JsonlOrderSource:
 
 
 # ---------------------------------------------------------------- RDS orders 테이블 (--source rds)
-# 리뷰를 다는 주문 상태. 결제가 끝난 주문만 리뷰를 쓴다.
-#  - PAID·SHIPPED·DELIVERED : 리뷰 대상
-#  - PLACED(결제 전)·PAYMENT_FAILED·CANCELLED·REFUNDED : 제외 (환불 주문 리뷰를 넣고 싶으면 여기에 추가)
+# 리뷰를 다는 주문 상태. 2026-10-23 lemin: 배송완료된 주문만 리뷰를 쓴다 (예전: PAID·SHIPPED·DELIVERED).
+#  - DELIVERED : 리뷰 대상. 이 상태의 updated_at 이 배송완료 시각이다(업무 API 가 상태를 바꿀 때 같이 씀)
+#  - PLACED·PAID·SHIPPED(아직 못 받음)·PAYMENT_FAILED·CANCELLED·REFUNDED : 제외
+#    (배송완료 뒤 환불된 주문은 상태가 REFUNDED 로 바뀌므로 그 뒤 실행부터 빠진다. 이미 쓴 날짜 파티션은 그대로)
 # 주문 상태는 db/schema/004_orders.sql 의 CHECK 값과 같아야 한다.
-RDS_REVIEW_STATUSES = ("PAID", "SHIPPED", "DELIVERED")
+RDS_REVIEW_STATUSES = ("DELIVERED",)
 
 # members.age_band → 리뷰 명세의 연령대 표기 (scenario.AGE_GROUP_WEIGHTS 의 키와 같아야 한다)
 AGE_BAND_TO_GROUP = {
@@ -145,13 +156,15 @@ AGE_BAND_TO_GROUP = {
 # - 결제 시각 = 그 주문의 SUCCESS 결제 중 가장 늦은 completed_at (재시도 끝에 성공한 시각)
 # - 회원 이름·이메일·전화 같은 개인정보 컬럼은 읽지 않는다 (age_band 만)
 # - 탈퇴 회원도 주문 당시 회원이므로 LEFT JOIN 으로 읽는다 (연령대가 없으면 무작위)
-# - 결제 시각 범위 [%(since)s, %(until)s) 만 읽는다. 날짜 D 를 돌릴 때 D-최대일수-1 ~ D 사이만 필요하다
+# - 배송완료 시각 = DELIVERED 주문의 updated_at (2026-10-23, 리뷰 텀의 시작점)
+# - 배송완료 시각 범위 [%(since)s, %(until)s) 만 읽는다. 날짜 D 를 돌릴 때 D-최대일수-1 ~ D 사이만 필요하다
 RDS_ORDERS_SQL = """
 SELECT o.order_id::text      AS order_id,
        o.member_id::text     AS member_id,
        oi.order_item_id::text AS order_item_id,
        oi.article_id         AS article_id,
        p.paid_at             AS paid_at,
+       o.updated_at          AS delivered_at,
        m.age_band            AS age_band,
        v.prod_name           AS prod_name,
        v.colour_group_name   AS colour_group_name,
@@ -169,9 +182,9 @@ JOIN product_variant v ON v.article_id = oi.article_id
 JOIN product_design d ON d.product_code = v.product_code
 LEFT JOIN members m ON m.member_id = o.member_id
 WHERE o.status = ANY(%(statuses)s)
-  AND p.paid_at >= %(since)s
-  AND p.paid_at < %(until)s
-ORDER BY p.paid_at, oi.order_item_id
+  AND o.updated_at >= %(since)s
+  AND o.updated_at < %(until)s
+ORDER BY o.updated_at, oi.order_item_id
 """
 
 
@@ -183,6 +196,16 @@ def _product_quality_bias(article_id: str) -> float:
     return make_rng(derive_seed(ORDER_HASH_SALT, "product-bias", article_id)).gauss(0, 0.5)
 
 
+def _aware(value, what: str) -> datetime:
+    """DB 시각 값 → 시간대 있는 datetime. timestamptz 는 시간대가 붙어 나온다.
+    없으면 잘못 읽은 것이므로 멈춘다(UTC 날짜 경계가 틀어짐)."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        raise SystemExit(f"RDS {what}에 시간대가 없습니다")
+    return value
+
+
 def order_from_row(row: dict) -> Order:
     """RDS_ORDERS_SQL 결과 한 줄 → Order. (DB 없이 테스트할 수 있게 따로 뺐다)
 
@@ -190,12 +213,8 @@ def order_from_row(row: dict) -> Order:
       product_type_name → 상품 종류, colour_group_name → 색상(리뷰 option_color 로도 씀), graphical_appearance_name → 무늬
     category 는 RDS 에 4개 카테고리 값이 없으므로 None (2026-10-16 lemin: 상품 정보만 있으면 됨).
     """
-    paid_at = row["paid_at"]
-    if isinstance(paid_at, str):
-        paid_at = datetime.fromisoformat(paid_at)
-    if paid_at.tzinfo is None:
-        # timestamptz 는 시간대가 붙어 나온다. 없으면 잘못 읽은 것이므로 멈춘다(날짜 경계가 틀어짐)
-        raise SystemExit("RDS 결제 시각(completed_at)에 시간대가 없습니다")
+    paid_at = _aware(row["paid_at"], "결제 시각(completed_at)")
+    delivered_at = _aware(row["delivered_at"], "배송완료 시각(updated_at)")
     article_id = str(row["article_id"])
     info = {
         key: " ".join(str(row[col]).split())[:MAX_INFO_CHARS]
@@ -221,14 +240,15 @@ def order_from_row(row: dict) -> Order:
         order_item_id=str(row["order_item_id"]),
         product=product,
         age_group=AGE_BAND_TO_GROUP.get(row.get("age_band") or ""),
+        delivered_at=delivered_at.replace(microsecond=0),
     )
 
 
 class RdsOrderSource:
-    """RDS orders 테이블에서 결제가 끝난 주문 항목을 읽는다 (rsim run --source rds).
+    """RDS orders 테이블에서 배송완료된 주문 항목을 읽는다 (rsim run --source rds, 2026-10-23 부터 DELIVERED 만).
 
     database_url : ORDERS_DATABASE_URL (postgresql://사용자:비밀번호@호스트:포트/DB). .env·ECS Secret 에만 둔다.
-    since, until : 읽을 결제 시각 범위 [since, until). run.py 가 날짜 D 와 리뷰 텀으로 계산해서 넘긴다.
+    since, until : 읽을 배송완료 시각 범위 [since, until). run.py 가 날짜 D 와 리뷰 텀으로 계산해서 넘긴다.
     connect      : 테스트용. DB 연결을 돌려주는 함수(기본 psycopg.connect)를 바꿔 끼운다.
 
     읽기만 한다(연결을 read_only 로 연다). 오류 메시지에는 행 내용이 들어갈 수 있어서
@@ -277,7 +297,7 @@ class RdsOrderSource:
             ) from None
         orders = [order_from_row(r) for r in rows]
         log.info(
-            "RDS 주문 항목 %d건 읽음 (결제 %s ~ %s, 상태 %s)",
+            "RDS 주문 항목 %d건 읽음 (배송완료 %s ~ %s, 상태 %s)",
             len(orders),
             self.since.isoformat(),
             self.until.isoformat(),
@@ -292,8 +312,9 @@ class ReviewTiming:
     """주문 → 리뷰 발생 규칙. 값은 config.py(환경변수)에서 받는다.
 
     rate     : 주문 중 리뷰를 쓰는 비율 (0~1). 1.0 이면 모든 주문에 리뷰가 달린다.
-    min_days : 결제 후 리뷰까지 최소 일수 (기본 0 = 결제 당일에도 리뷰 가능, 2026-10-21 에 1 → 0)
-    max_days : 결제 후 리뷰까지 최대 일수 (기본 7, 2026-10-21 에 14 → 7)
+    min_days : 기준 시각 후 리뷰까지 최소 일수 (기본 0 = 당일에도 리뷰 가능, 2026-10-21 에 1 → 0)
+    max_days : 기준 시각 후 리뷰까지 최대 일수 (기본 7, 2026-10-21 에 14 → 7)
+    기준 시각 = Order.review_base_at (RDS 주문은 배송완료 시각, JSONL 가짜 주문은 결제 시각)
     """
 
     rate: float = 1.0
@@ -315,7 +336,7 @@ class ReviewTiming:
             return None
         delay_sec = rng.uniform(self.min_days * 86400, self.max_days * 86400)
         # 초 단위로 자른다 (다른 시각 컬럼과 같은 정밀도)
-        return (order.paid_at + timedelta(seconds=delay_sec)).replace(microsecond=0)
+        return (order.review_base_at + timedelta(seconds=delay_sec)).replace(microsecond=0)
 
 
 def due_orders(

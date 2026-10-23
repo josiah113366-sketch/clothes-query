@@ -1,0 +1,9 @@
+# Review-only candidate. Never load together with shared-memory.tfvars.example.
+# Not an auto.tfvars file: no pool/node is created unless deliberately enabled/applied.
+spark_node_pool = {
+  enabled           = true
+  instance_types    = ["t3a.large"]
+  cpu_limit         = 2
+  memory_limit_gib  = 8
+  consolidate_after = "10m"
+}

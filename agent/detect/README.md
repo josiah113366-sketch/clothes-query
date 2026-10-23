@@ -74,9 +74,9 @@ python3 test_job.py     # sqlite 가짜 원장으로 순찰을 직접 돌려 시
 - S3: 판정용 조회 결과 폴더(`athena-results/detection/`) 읽기·쓰기
 - `ground_truth/`는 접근 금지(이미 차단됨)
 
-**표 정의와 쓰기 방식은 Gold B 담당과 확정 전이다 (제안)**
+**쓰기 방식은 아직 진짜 Athena에서 확인 전이다 (제안)**
 - 쓰기는 `INSERT INTO ... VALUES`로 한다(시각을 `TIMESTAMP`로 안전하게 넣기 위해). 5분마다 작은 파일이 생기는 점이 단점이다. S3에 Parquet를 직접 쓰는 방법도 있다.
-- 세 표를 Gold B 원장처럼 **시간 폴더(`dt`, `hour` 파티션)**로 쌓는다고 가정했다. 기준 시각은 `anomaly`는 `detected_at`, `detection_runs`는 `started_at`, `reprocess_events`는 `at`이다. 실제 표 정의가 다르면 `TABLE_SPECS`만 고친다.
+- 표 정의는 `agent/ddl/`에 있다. `anomaly`와 `detection_runs`는 **날짜(`dt`) 폴더**(기준 시각 `detected_at`, `started_at`)로 쌓고, `reprocess_events`는 은서 님 DDL대로 파티션 없이 쓴다. 코드와 DDL이 같은지는 `agent/ddl/test_ddl.py`가 확인한다. 정의가 바뀌면 `TABLE_SPECS`와 DDL을 같이 고친다.
 - `reprocess_events`는 승인 화면(`REQUESTED`, `APPROVED`), 재처리 잡(`STARTED`, `LEDGER_REPLACED`, `FAILED`)과 이 잡(`REDETECTED`, `VERIFIED`)이 함께 쓴다. 이 잡은 자기 줄만 쓴다.
 - **저장 도중 실패해서 다시 돌려도 이중 저장이 없다**(재영 님 리뷰). ① 이상 줄은 같은 순찰 번호·이상 번호로 이미 있으면 다시 쓰지 않는다. ② 순찰 기록은 이미 있으면 다시 쓰지 않는다. ③ 순찰 기록의 이상 개수는 처음 판정한 개수 그대로다. ④ 재판정의 순찰 번호는 요청과 교체 구간으로 정해서(`<구간 시작>-RD-<요청 번호>`) 몇 시간 뒤 재시도해도 같은 번호가 된다. ⑤ 재판정이 옛 이상을 찾을 때 자기 번호의 줄은 제외한다(이전 시도가 쓴 줄을 옛 이상으로 착각하지 않게).
 - 정기 순찰의 번호는 시각으로 만들므로, **Airflow가 논리 시각(`data_interval_end`)을 환경 변수 `JUDGE_TICK`으로 넘기면** 몇 분 뒤 재시도해도 같은 번호가 된다. 안 넘기면 현재 시각을 5분 단위로 내려 쓴다(같은 5분 안의 재시도만 안전).

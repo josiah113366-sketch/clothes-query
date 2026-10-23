@@ -3,3 +3,4 @@ torch
 transformers==4.53.3
 accelerate
 boto3
+pyarrow   # Parquet 출력(.parquet)용

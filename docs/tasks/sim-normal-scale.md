@@ -1,6 +1,6 @@
 # 작업 지시서: sim/normal-scale
 
-> 상태: 진행 중 · 브랜치: `sim/normal-scale` (최신 `main`) · 다음 작업: `sim/console`
+> 상태: 완료 · 브랜치: `sim/normal-scale` (최신 `main`) · 다음 작업: `sim/console`
 
 ## 목표
 
@@ -47,7 +47,7 @@ normal 모드의 양을 5배로 올리고 배송 완료를 앞당긴다. 시간�
 
 - **한 줄 요약:** normal 방문·가입 5배, 배송 3~6시간
 - **무엇을 만들었나:** `simulator/src/sim/behavior/params.py`, `simulator/src/sim/member/params.py`, 테스트 2개(배송 시간 범위, 느린 INSERT 테스트는 하루 5,000명으로 고정), `simulator/README.md`
-- **확인한 결과:** ruff 통과, pytest 412 통과. ECS 재배포 후 방문 속도가 기대치와 맞음(10초당 평균 약 78, 기대 77). **3일 분석 시작점: 2026-10-22 10:18 KST**
+- **확인한 결과:** ruff 통과, pytest 412 통과. ECS 재배포 후 방문 속도가 기대치와 맞음(10초당 평균 약 78, 기대 77). **3일 분석 시작점: 2026-10-22 10:18 KST** → sim/console 재배포로 **11:41 KST**로 바뀜(`sim-console.md` 작업 결과)
 - **알려진 한계·남은 일:**
   - `docs/design/agent/anomaly-answer-key.md`가 "하루 주문 약 5,000건 확정"을 전제로 탐지 시간을 쟀다 → agent 담당에게 알려 다시 재야 한다
   - 재시작하면 예약 큐가 사라져 이미 `SHIPPED`인 주문은 `DELIVERED`로 넘어가지 않는다

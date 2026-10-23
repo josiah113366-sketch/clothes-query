@@ -29,6 +29,9 @@ locals {
   code_arn         = "${var.bucket_arn}/${var.work_prefix}/code/*"
   output_arn       = "${var.bucket_arn}/${var.output_prefix}/*"
   error_arn        = "${var.bucket_arn}/${var.error_prefix}/*"
+  # 미점수 후기 입력(select_unscored.py 가 쓰고 Job 이 읽는다)과 후기별 점수 로그(Job 이 쓰는 staging)
+  unscored_input_arn = "${var.bucket_arn}/${var.unscored_input_prefix}/*"
+  score_log_arn      = "${var.bucket_arn}/${var.score_log_prefix}/*"
 
   # SageMaker 가 입력 prefix 를 내려받을 때 ListBucket 이 필요하다. 리소스 제한이 안 되어 prefix 조건으로 좁힌다.
   list_prefixes = [
@@ -36,6 +39,7 @@ locals {
     "${var.work_prefix}/model/*",
     "${var.work_prefix}/code/*",
     "${var.output_prefix}/*",
+    "${var.unscored_input_prefix}/*",
   ]
 
   # 스크립트가 쓰는 컨테이너 이미지(AWS 공개 DLC). 리전·계정은 변수에서 조립한다.
@@ -66,15 +70,17 @@ resource "aws_iam_role" "processing" {
 }
 
 # S3: 읽기/쓰기를 prefix 단위로 나눈다.
-#   - 리뷰 입력(bronze/reviews/*)  : 읽기만. reviews_truth/, ground_truth/, gold_b/ 는 prefix 가 달라 접근할 수 없다.
+#   - 리뷰 입력(silver/reviews/*)  : 읽기만. Silver 리뷰(KST 작성일 파티션)를 읽는다. Bronze·reviews_truth/·ground_truth/·gold_b/ 는 prefix 가 달라 접근할 수 없다.
+#     (같은 scope 폴더 안의 격리 레코드·품질 결과 파일도 이 prefix 아래라 읽을 수 있다. 읽기 전용이다.)
 #   - 모델·코드(<work>/model, code): 읽기만.
-#   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 덮어쓰기 대신 새 파일(실행별 하위 경로)로 쓰는 것을 스크립트 규칙으로 둔다.
+#   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 결과는 <output_prefix>(= staging)/year=/month=/day=/scores_<model_version>_<실행시각>.parquet 로 쌓인다(파일명이 겹치지 않아 덮어쓰기 없음).
 data "aws_iam_policy_document" "processing_s3" {
   statement {
     sid     = "ReadReviewsModelCode"
     actions = ["s3:GetObject"]
     resources = [
       local.review_input_arn,
+      local.unscored_input_arn,
       local.model_arn,
       local.code_arn,
     ]
@@ -82,7 +88,7 @@ data "aws_iam_policy_document" "processing_s3" {
   statement {
     sid       = "WriteScores"
     actions   = ["s3:PutObject"]
-    resources = [local.output_arn, local.error_arn]
+    resources = [local.output_arn, local.score_log_arn, local.error_arn]
   }
   statement {
     sid       = "ListOnlyUsedPrefixes"
@@ -235,6 +241,18 @@ data "aws_iam_policy_document" "launcher" {
     actions   = ["ssm:GetParameter"]
     resources = [aws_ssm_parameter.config.arn]
   }
+  # select_unscored.py(Job 시작 전 단계)를 실행하는 쪽의 S3 권한: Silver 후기 입력 읽기, 미점수 후기 입력 쓰기.
+  # 이미 점수가 매겨진 후기를 찾는 Athena 쿼리 권한은 athena-review-score 스택의 runner 정책을 함께 붙여서 받는다.
+  statement {
+    sid       = "SelectUnscoredReadInput"
+    actions   = ["s3:GetObject"]
+    resources = [local.review_input_arn]
+  }
+  statement {
+    sid       = "SelectUnscoredWriteInput"
+    actions   = ["s3:PutObject"]
+    resources = [local.unscored_input_arn]
+  }
 }
 
 resource "aws_iam_policy" "launcher" {
@@ -246,7 +264,7 @@ resource "aws_iam_policy" "launcher" {
 # ------------------------------------------------------------------ 스크립트용 설정 묶음
 # run_processing_job.py 가 Terraform 을 몰라도 되게 이 값 하나만 읽는다(ecs-review-simulator 와 같은 방식).
 # 버킷 이름·계정 ID 가 들어 있어 저장소에는 두지 않고 SSM 에만 둔다.
-# 스크립트가 읽어서 쓸 것: role_arn, image_uri, instance_type, volume_size_gb, max_runtime_seconds, job_name_prefix,
+# 스크립트가 읽어서 쓸 것: model_version, role_arn, image_uri, instance_type, volume_size_gb, max_runtime_seconds, job_name_prefix,
 #   s3 경로 4개, network(use_vpc=true 일 때만 값이 있음), tags(Job 의 Tags 에 그대로 넣기, 비용 추적용 Component).
 resource "aws_ssm_parameter" "config" {
   name        = var.config_parameter_name
@@ -262,9 +280,13 @@ resource "aws_ssm_parameter" "config" {
     job_name_prefix     = var.job_name_prefix
     bucket              = var.bucket_name
     review_input_root   = "s3://${var.bucket_name}/${var.review_input_prefix}"
+    model_version       = var.model_version
     model_prefix        = "s3://${var.bucket_name}/${var.work_prefix}/model/"
     code_prefix         = "s3://${var.bucket_name}/${var.work_prefix}/code/"
+    model_version_no    = var.model_version_no
     output_prefix       = "s3://${var.bucket_name}/${var.output_prefix}/"
+    log_prefix          = "s3://${var.bucket_name}/${var.score_log_prefix}/"
+    unscored_prefix     = var.unscored_input_prefix
     error_prefix        = "s3://${var.bucket_name}/${var.error_prefix}/"
     network = local.vpc_enabled ? {
       subnets         = var.subnet_ids
