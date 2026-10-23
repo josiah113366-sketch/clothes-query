@@ -12,7 +12,6 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
 import json
 from pathlib import Path
 from typing import Mapping
@@ -20,6 +19,7 @@ from typing import Mapping
 from pipelines.format_rules import DEFAULT_RULES, FormatRules, RuleConfigError
 from pipelines.gold_b.ledger import Judgement, KafkaMessage
 from pipelines.payment_fingerprint import FingerprintError, payment_fingerprint
+from pipelines.timestamps import parse_iso_datetime
 
 # Kafka 토픽 → 공통 규칙의 데이터셋 이름. 여기 없는 토픽은 형식 검사를 하지 않는다 (reviews.raw: 2026-10-23 결정)
 DATASETS = {"payments": "payments", "orders": "orders", "order-items": "order_items",
@@ -75,9 +75,10 @@ def _parse(value: bytes | str | None) -> dict | None:
 def _payment_row(row: Mapping[str, object]) -> dict:
     """결제 원장 ①의 업무 칼럼 (ledger.PAYMENT_FIELDS). 지문은 시각을 바꾸기 전의 원문으로 만든다."""
     fingerprint = payment_fingerprint(row)    # 시각 형식도 여기서 확인한다 (소수초 6자리까지, 시간대 필수)
+    # 공통 시각 파서: 팀 Spark 이미지의 Python 3.10에서도 Z와 1~6자리 소수초를 읽는다 (지문·형식 규칙과 같은 함수)
     return {"payment_id": row["payment_id"], "order_id": row["order_id"], "attempt_no": row["attempt_no"],
             "pg": row["pg"], "status": row["status"], "failure_code": row.get("failure_code"),
-            "completed_at": datetime.fromisoformat(str(row["completed_at"])), **fingerprint}
+            "completed_at": parse_iso_datetime(str(row["completed_at"])), **fingerprint}
 
 
 class FormatChecker:

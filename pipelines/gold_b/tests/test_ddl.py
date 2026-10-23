@@ -15,6 +15,8 @@ import re
 
 import pytest
 
+from pipelines.timestamps import parse_iso_datetime
+
 HERE = Path(__file__).resolve().parent
 DDL_DIR = HERE.parent / "ddl"
 SAMPLES = HERE / "samples"
@@ -141,7 +143,7 @@ def load_samples() -> list[dict]:
 
 
 def _utc(text: str) -> datetime:
-    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    parsed = parse_iso_datetime(text)   # 공통 시각 파서 (Python 3.10에서도 Z·소수초를 읽음)
     assert parsed.utcoffset() is not None
     return parsed
 
