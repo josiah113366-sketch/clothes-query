@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-collector
 
-> 상태: 진행 중 · 브랜치: `pipelines/gold-b-collector` (`pipelines/gold-b` 위에서 갈라짐) · 다음 작업: 형식 검사 또는 정리 뷰 (팀원 답에 따라)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-collector` (최신 `main` `965fd73` 병합) · main 대상 PR 제출 · 남은 일: 배포(재영 님)와 실제 Connect·S3 확인
 
 ## 목표
 
@@ -16,8 +16,9 @@ S3 Sink 커넥터가 Kafka 메시지를 얼마나 밀려서 처리하는지 1분
 
 ## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
 
-- #36이 머지 전이라 `pipelines/gold-b` 위에서 갈라졌다. push는 #36 머지 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
+- #36이 머지 전이라 `pipelines/gold-b` 위에서 갈라졌다. #36이 병합 커밋으로 들어가서(2026-10-22), 커밋을 옮기지 않고 최신 `main`을 이 브랜치에 병합했다 (2026-10-23, `pipelines/gold_b/README.md`·`docs/BRANCHES.md` 충돌만 정리). PR에는 이 브랜치의 커밋만 보인다.
 - 커밋 메시지에 Claude 공동 작성자 줄을 넣지 않는다.
+- 머지된 #70의 정리(브랜치 대장 "머지됨", 작업 지시서 상태, 설계 문서 진행 표시)를 이 PR에 같이 넣는다.
 
 ## 정한 규칙 (2026-10-21 사용자 승인)
 
@@ -57,6 +58,7 @@ S3 Sink 커넥터가 Kafka 메시지를 얼마나 밀려서 처리하는지 1분
 ## 완료 확인
 
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 45개)
+- [x] 최신 `main` 병합 뒤 `pipelines/gold_b/tests` 50개, `pipelines` 117개 통과
 - [x] 로컬 Kafka에 한 번 실행해 실제 위치·시각을 읽고 시간 폴더에 Parquet 파일이 생기는지
 - [x] 코드·README·`.env.example`에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)
 
@@ -85,8 +87,8 @@ S3 Sink 커넥터가 Kafka 메시지를 얼마나 밀려서 처리하는지 1분
   - 로컬 Kafka 실제 확인 (Docker `apache/kafka:3.7.0`, 포트 39092): 파티션 3개에 메시지 10건씩, 처리 위치를 0번=10, 1번=4, 2번=없음으로 기록한 뒤 수집기를 실행했다. 종료 코드 0, 파일 1개(`dt=2026-10-21/hour=09`). 0번 밀린 개수 0·시간 0.0, 1번 밀린 개수 6·시간 8.7초, 2번 NULL. Connect가 없어 `UNREACHABLE`. 없는 토픽은 건너뛰었고 새로 생기지 않았다. 시험 토픽·그룹·컨테이너를 지우고 Docker Desktop을 다시 껐다.
   - 첫 실행은 이 PC에서 `localhost`가 IPv6(`::1`)로 먼저 붙어 그룹 처리 위치 조회가 `_TRANSPORT`로 실패했다. 시험 Kafka를 `127.0.0.1`로 알려서 확인했고, 같은 문제를 피하는 `KAFKA_ADDRESS_FAMILY=v4` 설정을 추가했다 (이 설정으로 다시 돌려 보지는 않음).
   - `git grep`: 새 파일에 키·계정 ID·엔드포인트·버킷 이름 없음.
+  - **최신 `main` 병합 뒤 다시 확인 (2026-10-23):** #70까지 들어간 `main`을 병합했다. 충돌은 `pipelines/gold_b/README.md`(뷰·수집기 줄)와 `docs/BRANCHES.md`(gold-b 표)뿐이었고 양쪽 줄을 모두 살렸다. `pipelines/gold_b/tests` 50개 통과 (테이블 정의 22 + 수집기 23 + 뷰 5), `pipelines` 117개 통과. 판정·조사 쪽(`agent/detect/job.py`, `agent/tools/ledger_tools.py`)이 읽는 ③의 칸 8개와 값의 뜻(밀림 없음은 0, 모르면 NULL)이 수집기와 같다.
 - **알려진 한계·남은 일:**
   - 실제 Connect(커넥터 RUNNING·PAUSED)와 S3 쓰기, mTLS는 실제로 돌려 보지 않았다. 상태 해석은 단위 시험으로만 확인했다.
-  - 배포(이미지, CronJob 또는 상시 파드, Kafka 사용자·권한, Connect REST 접근 허용, Pod Identity)는 재영 님과 정한다 (`collector/README.md` 마지막 절).
+  - 배포(이미지, CronJob 또는 상시 파드, Kafka 사용자·권한, Connect REST 접근 허용, Pod Identity)는 재영 님과 정한다 (`collector/README.md` 마지막 절). 설계 문서 5단계의 배포·정상 기준선·S3 Sink 멈춤 확인은 배포 뒤에 한다.
   - 1분마다 파일이 하나씩 생겨서 파일 합치기(6단계)가 필요하다.
-  - push는 #36 머지 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.

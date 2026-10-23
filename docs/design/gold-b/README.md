@@ -779,8 +779,8 @@ pipelines/gold_b/
 
 ### 5단계: Bronze 지연 수집기
 
-- [ ]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
-- [ ]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기
+- [x]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
+- [x]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기 (로컬 Kafka로 확인, 실제 S3 쓰기는 배포 때)
 - [ ]  `deploy/gold_b_collector.yaml` (CronJob 또는 상시 파드)
 - [ ]  정상일 때 값이 파일 전환 주기 기준선과 맞는지 확인
 - [ ]  S3 Sink를 잠깐 멈춰서 밀림·멈춤이 잡히는지 확인
