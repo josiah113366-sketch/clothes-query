@@ -41,6 +41,9 @@ def main():
             memory_mi += int(requests["memory"].removesuffix("Mi"))
     assert (cpu_m, memory_mi) == (300, 896)
     configs = {x["metadata"]["name"]: x["data"] for x in objects if x["kind"] == "ConfigMap"}
+    grafana = next(x for x in deployments if x["metadata"]["name"] == "monitoring-grafana")
+    grafana_env = grafana["spec"]["template"]["spec"]["containers"][0]["env"]
+    assert {x["name"]: x.get("value") for x in grafana_env}["GF_PLUGINS_PREINSTALL_AUTO_UPDATE"] == "false"
     prom = yaml.safe_load(configs["monitoring-prometheus"]["prometheus.yml"])
     if args.prometheus_config:
         args.prometheus_config.parent.mkdir(parents=True, exist_ok=True)

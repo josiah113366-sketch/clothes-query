@@ -81,6 +81,8 @@ spec:
             - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
             - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
             - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: "false"}
+            # Bundled data sources are read-only; keep the versions shipped in the image.
+            - {name: GF_PLUGINS_PREINSTALL_AUTO_UPDATE, value: "false"}
             - {name: GF_NEWS_NEWS_FEED_ENABLED, value: "false"}
           ports: [{name: http, containerPort: 3000}]
           readinessProbe: {httpGet: {path: /api/health, port: http}, initialDelaySeconds: 15}

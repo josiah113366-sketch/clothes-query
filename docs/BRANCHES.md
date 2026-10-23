@@ -112,6 +112,7 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 플러그인 자동 갱신 중단, 실환경 복구·조회 검증 완료, 미게시 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/incident-readiness` | [infra-incident-readiness.md](tasks/infra-incident-readiness.md) | 복구 절차·읽기 점검·기존 경보 보강 및 승인된 인프라 이메일 연결, 새 노드 없음 | |
