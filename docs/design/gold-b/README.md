@@ -129,7 +129,7 @@ Gold B는 평소 **Kafka만 읽는다.** Bronze(S3 파일)는 평소 읽지 않�
 | `order-items` | Debezium (CDC) |  | 유입량 | 형식 검사 |
 | `members-events` | Debezium (CDC) |  | 유입량 | 형식 검사 |
 | `clickstream` | 시뮬레이터 직접 (키 = `session_id`) |  | 유입량 | 형식 검사 (주입 대상 후보) |
-| `reviews.raw` | 리뷰 시뮬레이터 (실험용, 운영에서는 비어 있을 수 있음) |  | 유입량 | 형식 검사 |
+| `reviews.raw` | 리뷰 시뮬레이터 (실험용, 운영에서는 비어 있을 수 있음) |  | 유입량 | 형식 검사 안 함 (2026-10-23) |
 
 CDC 토픽 메시지는 봉투가 풀린 평평한 JSON이다. 예 (`payments`):
 
@@ -218,15 +218,15 @@ s3://clothes-query-datalake/gold_b/
 | `kafka_timestamp` | TIMESTAMP | Kafka 기록 시각 (오염 시작 시점) | 15:03:11 |
 | `field` | STRING | 문제가 난 필드 하나 | `session_id` |
 | `reason` | STRING | **그 필드의** 오류 사유 | `MISSING_FIELD` |
-| `raw_sample` | STRING, NULL 허용 | 마스킹한 원문 일부. 같은 메시지의 첫 줄에만 넣고 나머지는 NULL | `{"event_id":"e7c1…","sessionId":"***"…` |
+| `raw_sample` | STRING, NULL 허용 | 마스킹한 원문 일부. 같은 메시지의 첫 줄에만 넣고 나머지는 NULL | `{"payment_id":"***","pg":"PG_X","status":"FAILED",…` |
 | `rule_version` | STRING | 적용한 규칙표 버전 | `v1.0` |
 | `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 15:04:00 |
 
 - **오류 하나당 한 행**이다. 한 메시지에 `session_id` 누락과 `article_id` 타입 오류가 함께 있으면 2행이다.
 - 같은 Kafka 메시지에 대해 `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같은 오류는 한 번만 적재한다.
 - 규칙 버전 이력을 보존한다. 규칙이 바뀌면 새 `rule_version`의 결과를 추가하고 예전 판정도 남긴다.
-- `raw_sample`은 최소화하고, **필드 이름은 남기고 값만 가린다.** 필드 이름이 남아야 에이전트가 이름이 바뀐 건지, 값이 빠진 건지 가릴 수 있다. 리뷰 본문·회원 관련 값은 마스킹하거나 뺀다. 조회 권한은 데이터 부서로 제한한다.
-- 메시지 전체를 해석하지 못한 경우(`PARSE_ERROR`)는 `field`를 `__message__`로 쓴다.
+- `raw_sample`은 최소화한다 (2026-10-23 결정). **필드 이름은 모두 남기고, 개인정보가 아닌 업무 값만 그대로 둔다:** 결제의 `method`·`pg`·`status`·`failure_code`·`attempt_no`·`amount`, 주문의 `status`·`status_reason`·`total_amount`, 주문상품의 `quantity`·`unit_price`, 클릭의 `event_type`, CDC 표시 `__op`·`__source_snapshot`. ID·시각·회원 속성·자유 문자열과 40자가 넘는 값은 `***`로 가리고, 비어 있는 값(null)은 그대로 둔다. 길이는 최대 1000자다. 필드 이름이 남아야 이름이 바뀐 건지 값이 빠진 건지 가릴 수 있고, 업무 값이 남아야 무엇이 틀렸는지(예: 모르는 실패 코드, 성공인데 실패 코드가 있음) 안다. 조회 권한은 데이터 부서로 제한한다.
+- 메시지 전체를 해석하지 못한 경우(`PARSE_ERROR`)는 `field`를 `__message__`로 쓴다. 필드를 알 수 없어서 `raw_sample`은 비운다.
 - 오류마다 줄이 생기므로 `COUNT(*)`로 세면 깨진 메시지 수가 부풀어 보인다. 메시지 수는 아래 `malformed_messages` 뷰로 센다.
 
 ### ⑤ `reprocess_events` - 재처리 단계 하나 = 한 줄 (은서 + 주현 공동)
@@ -476,6 +476,8 @@ GROUP BY 1, 2;
 
 `failure_code` 하나로 분류가 정해지고, 매핑에 없는 값은 모두 `UNKNOWN`이다. 그래서 어떤 구간에서든 실패 건수 = PG 원인 + 고객 원인 + UNKNOWN이 성립한다. 매핑은 뷰 SQL에 있어서 새 코드가 생기면 뷰만 고친다. `UNKNOWN`이 늘면 실패 코드 형식이 바뀌었다는 신호로 본다.
 
+**지금 규칙표(0.2.0)에서는 `UNKNOWN`이 생기지 않는다 (2026-10-23 결정).** 규칙표가 원천 DDL의 실패 코드 5개만 허용해서, 모르는 코드는 형식 오류(`failure_code`, `INVALID_VALUE`)로 ④에 남고 ①에 들어오지 않는다. 판정은 R4(깨진 메시지)로 본다. 모르는 코드를 ①에 넣고 `UNKNOWN`으로 나누는 확장안(규칙표 `proposed_changes`)은 보류다. 합의되면 규칙표 버전을 올리고, `UNKNOWN`이 늘어나는 것을 보는 판정 규칙도 같이 만든다.
+
 | `failure_code` | 분류 |
 | --- | --- |
 | `PG_TIMEOUT`, `PG_ERROR` | PG 원인 (`PG`) |
@@ -488,6 +490,14 @@ GROUP BY 1, 2;
 
 통과한 결제만 ①에 쌓고, 실패한 메시지는 ④에 오류별로 쌓는다. ②에는 통과 여부와 상관없이 모든 메시지를 쌓는다. 메시지 하나가 깨졌는지는 정해진 규칙에 맞는지 확인하는 사실 기록이고, 그게 "이상"인지는 주현 님이 판단한다.
 
+**Gold B 형식 검사기 (`pipelines/gold_b/format_check.py`, 2026-10-23).** 적재 잡과 재처리 잡이 같은 검사기를 쓴다.
+- 토픽마다 공통 규칙표의 규칙을 쓴다: `payments`→`payments`, `orders`→`orders`, `order-items`→`order_items`, `members-events`→`members`, `clickstream`→`clickstream`. 소비 경로는 `gold_b`다.
+- `reviews.raw`는 형식 검사하지 않는다 (2026-10-23 결정). 운영에서 비어 있을 수 있고 판정도 보지 않으며, 리뷰 이상은 내용 이상이라 리뷰 분석이 본다. ②에만 남는다.
+- 값이 없거나, UTF-8·JSON이 아니거나, JSON 객체가 아니면 `PARSE_ERROR` 한 줄이다.
+- 공통 검사기의 `errors()`로 오류를 전부 찾는다 (필드마다 하나). Silver는 같은 규칙으로 첫 오류만 본다.
+- 결제는 오류가 없고 `__op`가 `c`·`r`일 때만 지문을 붙여 ①에 쌓는다. 그 밖의 `__op`(`u` 등)나 `__op`가 없는 결제는 ②에만 남고 오류로 남기지 않는다. 지문을 만들 수 없으면 그 필드의 `INVALID_VALUE`다 (Silver와 같음).
+- 규칙표에 Gold B가 쓰는 규칙이 하나라도 없으면 검사기를 만들 때 실패한다.
+
 - `FAILED`인데 `failure_code`가 없거나 비어 있으면 `MISSING_FIELD`로 ④에 쌓고 ①에는 넣지 않는다.
 
 | 토픽 | 필수 컬럼 | 규칙 예시 |
@@ -496,8 +506,8 @@ GROUP BY 1, 2;
 | `payments` | `payment_id`, `order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `requested_at`, `completed_at` | `pg`는 `PG_A`·`PG_B`만, `attempt_no` ≥ 1, `FAILED`면 `failure_code` 필수, `SUCCESS`면 비어 있어야 함. 지문에 들어가는 필드는 모두 검사한다 (공통 규칙표와 같음) |
 | `orders` | `order_id`, `member_id`, `status`, `ordered_at` | `status`는 7개 값 중 하나 |
 | `order-items` | `order_item_id`, `order_id`, `article_id`, `quantity`, `unit_price` | `quantity` ≥ 1, `unit_price` ≥ 5,900 (공통 계약 초안은 `minimum: 1`이라 현지 님과 맞춤) |
-| `members-events` | `member_id`, `status`, `created_at` | 개인정보 컬럼이 들어 있으면 오류 |
-| `reviews.raw` | 리뷰 컬럼 확정 후 (민혁 님) | `rating`은 1~5 |
+| `members-events` | `member_id`, `status`, `created_at` | 개인정보 컬럼(이름·이메일·전화·생년월일·비밀번호 해시)이 들어 있으면 `INVALID_VALUE` (규칙표의 금지 필드) |
+| `reviews.raw` | - | 형식 검사 안 함 (2026-10-23 결정) |
 
 오류 사유는 `PARSE_ERROR`(파싱 실패), `MISSING_FIELD`(필수 필드 누락), `TYPE_MISMATCH`(타입 불일치), `INVALID_VALUE`(허용되지 않는 값) 네 가지다. 한 메시지에 오류가 여러 개면 ④에 오류마다 한 줄을 쌓고, 사유는 필드별로 따로 기록한다. 형식 검사는 모양만 보므로, 모양은 맞는데 값이 이상한 경우(금액 0원, 미래 시각)는 잡지 못한다.
 
@@ -766,11 +776,11 @@ pipelines/gold_b/
 (현지 님과 공용 모듈 위치·분담 먼저 확정)
 
 - [x]  규칙표에 토픽 규칙 추가: 공통 `docs/contracts/format_rules.yaml`에 회원·클릭·리뷰 추가 (#63). 회원·클릭은 #65로 Silver와 공동 규칙. `reviews.raw`를 검사할지는 형식 검사 때 정함
-- [ ]  CDC 표시 읽기 (`__op = c` 또는 `r`)
+- [x]  CDC 표시 읽기 (`__op = c` 또는 `r`만 ①, 그 밖은 ②에만. 2026-10-23)
 - [x]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, #55)
-- [ ]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록)
-- [ ]  `raw_sample` 마스킹 (필드 이름 유지, 값만 가림)
-- [ ]  `tests/test_format_check.py` 샘플로 검사 결과 확인
+- [x]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록): `format_check.py`
+- [x]  `raw_sample` 마스킹 (필드 이름 유지, 개인정보가 아닌 업무 값만 남김)
+- [x]  `tests/test_format_check.py` 샘플로 검사 결과 확인
 - [ ]  샘플로 원장 ①②④를 S3에 쌓아 보기
 - [ ]  PR 올리고 합치기
 
