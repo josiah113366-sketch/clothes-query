@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-reprocess-by-message
 
-> 상태: 진행 중 · 브랜치: `pipelines/gold-b-reprocess-by-message` (결제 UPDATE 처리 #95 머지 뒤 최신 `main` `4d80c76`에서) · 다음 작업: 계획 확인 (사용자), 주현 님 확인
+> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-reprocess-by-message` (결제 UPDATE 처리 #95 머지 뒤 최신 `main` `4d80c76`에서) · 다음 작업: PR (사용자), 주현 님 확인
 
 ## 목표
 
@@ -90,14 +90,51 @@
 ## 작업 순서
 
 1. 결제 UPDATE PR 머지 뒤 최신 `main`에서 브랜치를 만들고, 머지된 #95의 브랜치 대장·작업 지시서 상태를 정리한다 (2026-10-23)
-2. 이 지시서와 브랜치 대장 줄 (2026-10-23, 계획 확인 대기)
-3. 「개발 계획」 1~3단계
-4. "완료 확인" 실행과 작업 결과 기록
+2. 이 지시서와 브랜치 대장 줄 (2026-10-23, 사용자 확인)
+3. 「개발 계획」 1~3단계 (2026-10-23)
+4. "완료 확인" 실행과 작업 결과 기록 (2026-10-23)
 
 ## 완료 확인
 
-- [ ] `python -m pytest -q pipelines/gold_b/tests` 통과
-- [ ] 위 「확인할 것」 (시험)
-- [ ] `git diff --check`
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (189개, 로컬 Python 3.12)
+- [x] 위 「확인할 것」 (시험, 아래 작업 결과)
+- [x] `git diff --check`
 
 ## 작업 결과 (머지 전에 작성한다)
+
+### 무엇을 만들었나
+
+| 커밋 | 내용 |
+|---|---|
+| `77b0380` | 머지된 #95의 브랜치 대장·작업 지시서 상태와 설계 문서 표시 정리 |
+| `a8fe7a1` | 이 작업 지시서와 브랜치 대장 줄 |
+| `fd4ece1` | 재처리 잡(`jobs/reprocess.py`)을 메시지 단위로 바꿈. `plan_replacement`(대상 메시지의 새 줄, 옛 결과·새 결과가 있는 시간 폴더), `add_new_rows`(가), `tidy_hour`(나), 범위 밖 폴더의 `LEDGER_REPLACED`(detail `outside_window`), `Result.outside`. 앞뒤 여유 읽기는 없애고 10분 여유는 시작 전 확인에만 쓴다. 시험: 기존 재처리 시험을 맞추고, 한계였던 시험을 복구로 뒤집고, 새 시나리오 시험 |
+| (이 커밋) | 설계 문서(결정 표, 재처리 잡의 동작, 재실행 원칙, 결제 최신 상태, 체크리스트, 팀원 확인 표), `jobs/README.md`, 파일 합치기 설명, Gold B README, 이 지시서 |
+
+`LEDGER_REPLACED`의 detail에서 `messages_read`(그 폴더를 읽은 메시지 수)를 `messages`(그 폴더를 고치게 한 대상 메시지 수)로 바꿨고, `STARTED`의 detail에서 `margin_minutes`를 뺐다. 판정 잡과 poller는 이 칸을 읽지 않는다.
+
+### 왜
+
+한 메시지의 결과가 ①은 결제 시각, ②④는 Kafka 시각 폴더로 나뉘는데 재처리가 폴더 단위였다. 그래서 늦게 온 결제 수정을 복구하지 못하고, 앞뒤 여유 시간에 걸친 결제가 더 엄격한 규칙에서 뷰에서 사라지고, 같은 규칙 버전으로 다시 돌리면 정정 전 값이 보였다 (위 「왜 바꾸나」). 메시지 단위로 바꿔 세 문제를 함께 고쳤다.
+
+### 확인한 결과 (2026-10-23)
+
+- `python -m pytest -q pipelines/gold_b/tests`: 189개 통과 (Python 3.12). `git diff --check` 통과.
+- 「확인할 것」과 시험 (`tests/test_payment_states.py`, `tests/test_reprocess.py`):
+  - 다음 날 온 정정 u 복구: `test_late_bad_update_is_recovered_from_its_kafka_hour` (Kafka 07:05, 09:41, 다음 날 09:41. Kafka 시각 폴더만 승인해도 06시 결제 시각 폴더에 ① 줄이 생기고, 옛 규칙의 오류 줄은 이력으로 남음)
+  - 같은 규칙 버전으로 코드만 고친 재처리: `test_same_rule_version_fix_shows_the_corrected_value` (정정된 성공이 보임)
+  - 시간 경계 결제: `test_messages_outside_the_window_are_left_alone` (원장이 재처리 전과 똑같음)
+  - 범위 안 늦은 u: `test_late_update_inside_the_window_needs_no_outside_folder`
+  - 통과했던 늦은 u가 새 규칙에서 오류: `test_stricter_rules_clean_the_old_pass_of_a_late_update` (06시의 옛 ① 줄을 지우고 07시에 ④, `LEDGER_REPLACED`는 06시(범위 밖)·07시)
+  - 같은 요청 두 번: `test_same_request_twice_gives_the_same_ledgers` (범위 밖 폴더까지 같고 폴더마다 파일 하나)
+  - (가) 뒤 멈춤: `test_stop_after_adding_new_results_loses_nothing` (뷰는 새 결과, 다시 돌리면 위치마다 하나)
+  - poller: `test_poller_rules`에 두 경우 (범위 밖 폴더만 끝내고 멈추면 다시 돎, 승인 폴더가 다 끝나면 끝남)
+- 기존 시험에서 바뀐 기대: 중간 실패 시험의 06시 파일 수 2 → 3 ((가)에서 더한 새 줄 파일), 통과했던 늦은 u의 옛 ① 줄은 이제 지움, 한계였던 시험은 복구로.
+- Python 3.10 컨테이너 시험은 다시 돌리지 않았다 (패키지를 다시 받아야 함). 새 코드에 3.10에서 안 되는 문법은 없다.
+
+### 다음 할 일
+
+- 주현 님: 승인 범위 밖 시간대의 `LEDGER_REPLACED`(detail `outside_window`)로 재판정하는 것과 승인 화면 표시 (설계 문서 팀원 확인 표).
+- DAG: 재처리와 파일 합치기를 같은 Airflow pool(슬롯 1개)에 넣어 같은 시간에 돌지 않게 (`jobs/README.md` DAG 명세).
+- Bronze 재처리 브랜치는 이 방식을 그대로 쓴다 (Bronze v2 줄로 만든 메시지를 `plan_replacement`에 넣음).
+- `pipelines/gold-b-image`와 브랜치 대장 gold-b 표 끝에서 충돌한다. 나중에 올리는 PR 전에 먼저 머지된 쪽을 받아 정리한다.
