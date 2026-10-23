@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-ingest
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-ingest` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 2026-10-23 `pipelines/gold-b-format-check` 병합) · PR은 형식 검사·파일 합치기 브랜치가 머지된 뒤 · 다음 작업: 배포와 Python 3.11 이미지 (재영 님), EKS에서 Spark 실행 확인
+> 상태: 완료 · 브랜치: `pipelines/gold-b-ingest` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 2026-10-23 `pipelines/gold-b-format-check` 병합) · PR은 형식 검사·파일 합치기 브랜치가 머지된 뒤 · 다음 작업: Gold B 이미지(팀 기본 Spark 이미지 위)와 배포 (재영 님), EKS에서 Spark 실행 확인
 
 ## 목표
 
@@ -58,6 +58,7 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 - [x] (보완) 실제 형식 검사기로 샘플 묶음을 쓰면 원장 ② 31줄, ① 9줄, ④는 샘플 기대 오류 수와 같은지
 - [x] (보완) 실행 입구가 형식 검사기(규칙 0.2.0)를 끼워 쿼리를 시작하고, 환경변수가 없으면 Spark를 띄우지 않고 1로 끝나는지 (가짜 쿼리)
 - [x] (보완) `python -m pytest -q pipelines/gold_b/tests`, `python -m pytest -q pipelines` 통과 (형식 검사·파일 합치기 병합 뒤 136개, 221개)
+- [x] (보완) Python 3.10 수정이 든 형식 검사 브랜치를 다시 병합한 뒤 `pipelines/gold_b/tests` 139개 통과 (Python 3.12, 그리고 같은 코드로 Python 3.10.12 컨테이너)
 
 ## 작업 결과 (머지 전에 작성한다)
 
@@ -101,5 +102,12 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
   - `python -m pytest -q pipelines/gold_b/tests/test_ingest.py`: 8개 통과. 실제 형식 검사기로 샘플 31건을 쓰면 ② 31줄, ① 9줄, ④는 샘플 기대 오류 수이고 `rule_version`은 모두 0.2.0.
   - `python -m pytest -q pipelines/gold_b/tests`: 108개 통과. `python -m pytest -q pipelines`: 193개 통과 (PC Python 3.12). `git diff --check` 통과.
   - 형식 검사 브랜치(최신 `main` #78 포함)와 파일 합치기 브랜치를 병합한 뒤 `pipelines/gold_b/tests` 136개, `pipelines` 221개 통과 (수집기 23개, 합치기 5개 포함).
-  - 형식 검사기를 끼운 Spark 실행은 하지 않았다. 공용 Spark 이미지(`infra/platform/spark/image`, Spark 4.2.0)는 `spark-sql-kafka`·S3A가 들어 있지만 Python이 3.10이고, 결제 지문 함수는 3.11 기능(`datetime.UTC`)을 쓴다.
-- **다음 할 일:** Python 3.11 이상 실행 이미지(또는 코드를 3.10에 맞출지) 정하기 (현지 님·재영 님), 배포 설정과 EKS 상시 실행 확인 (재영 님), 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인.
+  - 형식 검사기를 끼운 Spark 실행은 하지 않았다. ~~공용 Spark 이미지(`infra/platform/spark/image`, Spark 4.2.0)는 `spark-sql-kafka`·S3A가 들어 있지만 Python이 3.10이고, 결제 지문 함수는 3.11 기능(`datetime.UTC`)을 쓴다.~~ → 2026-10-23 바뀜: #82와 형식 검사 브랜치의 수정으로 Gold B 코드가 Python 3.10에서 돈다 (아래 보완).
+- **다음 할 일:** ~~Python 3.11 이상 실행 이미지(또는 코드를 3.10에 맞출지) 정하기~~ (3.10에 맞춤), Gold B 이미지 Dockerfile, 배포 설정과 EKS 상시 실행 확인 (재영 님), 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인.
+
+### 보완 (2026-10-23): Python 3.10 맞추기와 배포 설명
+
+- **무엇을 했나:** Python 3.10 수정이 든 `pipelines/gold-b-format-check`(최신 `main` #82·#83·#84 포함)를 다시 병합했다. `jobs/README.md`의 「적재 잡 배포에 필요한 것」을 팀 기본 Spark 이미지(Spark 4.2.0, Python 3.10.12) 기준으로 고쳤다: 그 이미지에서 출발해 공통 모듈(`pipelines/*.py`), `pipelines/gold_b/`, 규칙표, Gold B 패키지(3.10은 pyarrow 25.0.1)를 넣는다. 설계 문서 4단계의 배포 항목도 같이 고쳤다.
+- **왜:** #82가 팀 공용 실행 이미지를 Python 3.10.12로 고정했고, 형식 검사 브랜치에서 Gold B 코드를 3.10에 맞췄다. 적재 잡은 Spark 위에서 돌아서 팀 기본 Spark 이미지를 그대로 쓸 수 있다.
+- **확인한 결과:** `pipelines/gold_b/tests` 139개 통과 (Python 3.12). 같은 코드(이 병합과 같은 시험용 병합)로 Python 3.10.12 컨테이너에서도 139개 통과했다 (형식 검사 작업 지시서 「보완: Python 3.10 맞추기」). `pipelines` 전체는 234개 통과, 오류 13개는 #82의 Silver·Gold A Spark 시험(로컬 Spark·`SPARK_TEST_INPUT` 필요)이다. `git diff --check` 통과.
+- **다음 할 일:** Gold B 이미지 Dockerfile (팀 기본 Spark 이미지 FROM), 배포 (재영 님). main의 Kafka 보관 기간이 #86으로 7일이 되어, 재처리 잡의 보관 기준(72시간)과 문서의 "3일"을 맞출지 정해야 한다.
