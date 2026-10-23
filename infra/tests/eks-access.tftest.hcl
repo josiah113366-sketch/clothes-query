@@ -74,3 +74,30 @@ run "reject_user_as_additional_role" {
   variables { admin_role_arns = [format("arn:aws:iam::%s:user/test-user", join("", [for i in range(12) : "0"]))] }
   expect_failures = [var.admin_role_arns]
 }
+
+run "explicit_development_opening_keeps_authentication_and_private_access" {
+  command = plan
+  module { source = "../modules/eks" }
+  variables { allow_public_api_from_anywhere = true }
+  assert {
+    condition = (
+      toset(aws_eks_cluster.this.vpc_config[0].public_access_cidrs) == toset(["0.0.0.0/0"]) &&
+      aws_eks_cluster.this.vpc_config[0].endpoint_public_access &&
+      aws_eks_cluster.this.vpc_config[0].endpoint_private_access &&
+      aws_eks_cluster.this.access_config[0].authentication_mode == "API" &&
+      !aws_eks_cluster.this.access_config[0].bootstrap_cluster_creator_admin_permissions &&
+      toset(var.public_access_cidrs) == toset(["192.0.2.1/32"])
+    )
+    error_message = "Opening must be explicit, preserve IAM/private access and retain restricted CIDRs for restoration."
+  }
+}
+
+run "turn_off_development_opening_restores_restricted_cidrs" {
+  command = plan
+  module { source = "../modules/eks" }
+  variables { allow_public_api_from_anywhere = false }
+  assert {
+    condition     = toset(aws_eks_cluster.this.vpc_config[0].public_access_cidrs) == toset(var.public_access_cidrs)
+    error_message = "Disabling the temporary option must restore the preserved CIDRs."
+  }
+}

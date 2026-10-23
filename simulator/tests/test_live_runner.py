@@ -351,10 +351,22 @@ def test_draw_phone_uses_baseline_format() -> None:
 
 
 def test_slow_insert_does_not_lower_the_arrival_rate(regions) -> None:
-    # 가입 하나에 INSERT가 5ms 걸려도 도착 속도는 설계(하루 5,000명)를 따라야 한다.
+    # 가입 하나에 INSERT가 5ms 걸려도 도착 속도는 정한 값(하루 5,000명)을 따라야 한다.
     # 간격을 INSERT가 끝난 뒤부터 새로 재면 도착 속도가 눈에 띄게 떨어진다.
-    runner, store, clock, _ = make(regions, speed=1440, duration=120)
+    # 하루 수는 고정한다. 배속 1440에서 기본값(25,000)은 초당 약 400건이라 5ms INSERT로는 닿을 수 없다.
+    runner, store, clock, _ = make(regions, speed=1440, duration=120, daily=5000)
     store.on_insert = lambda s, m: clock.sleep(0.005)
     summary = runner.run()
-    expected = _expected_normal(START, START + timedelta(days=2))  # 실제 120초 = 시뮬레이터 2일
+    # 실제 120초 = 시뮬레이터 2일
+    expected = _expected_normal(START, START + timedelta(days=2), daily=5000)
     assert _within_5_sigma(summary.total, expected)
+
+
+def test_stats_are_written_every_two_real_seconds(regions) -> None:
+    written: list[dict] = []
+    runner, *_ = make(regions, duration=10, stats=written.append)
+    runner.run()
+    assert 4 <= len(written) <= 6
+    assert written[-1]["mode"] == "normal" and written[-1]["running"] is True
+    assert written[-1]["signups"] <= runner.summary.total
+    assert set(written[-1]) == {"mode", "running", "signups", "reconnects"}  # PII 없음

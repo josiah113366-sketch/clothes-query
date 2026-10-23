@@ -1,0 +1,3 @@
+[tool.ruff]
+# 저장소의 다른 영역(simulator, review-simulator)과 같은 줄 길이
+line-length = 100

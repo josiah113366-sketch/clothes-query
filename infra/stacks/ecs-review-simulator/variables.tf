@@ -20,9 +20,10 @@ variable "state_region" {
   type    = string
   default = "ap-northeast-1"
 }
+# 매일 00:00 KST (2026-10-23 lemin). 시간대는 모듈 기본값 Asia/Seoul
 variable "schedule_expression" {
   type    = string
-  default = "cron(30 0 * * ? *)"
+  default = "cron(0 0 * * ? *)"
 }
 variable "alarm_email" {
   type      = string

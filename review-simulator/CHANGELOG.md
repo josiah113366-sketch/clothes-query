@@ -10,6 +10,46 @@
 | 변경 | 같은 입력에 결과가 달라지는 변경 (리뷰 분포, 프롬프트, 기본값) |
 | 실행 환경 | 기능은 같고 어디서·어떻게 도는지만 바뀜 |
 
+## 0.3.2 (2026-10-23)
+
+- 변경: `--source rds` 는 **배송완료(DELIVERED) 주문 항목에만** 리뷰를 단다(lemin). 예전에는 PAID·SHIPPED·DELIVERED.
+- 변경: 리뷰 시각의 기준을 결제 시각에서 **배송완료 시각(orders.updated_at)** 으로 바꿈. 리뷰 시각 = 배송완료 + 0~7일.
+  받기 전에 쓴 리뷰가 나오지 않게 하려는 것이다. 리뷰 컬럼 purchased_at 은 그대로 결제 시각이다.
+  RDS 에서 읽는 범위도 배송완료 시각으로 자른다. 같은 날짜를 다시 돌리면 그 날짜에 걸리는 주문 항목이 0.3.1 과 달라진다.
+- 그대로: `--source orders`(JSONL 가짜 주문)와 `random` 은 결과가 바뀌지 않는다(배송 정보가 없어 결제 시각 기준 유지).
+- 실행 환경: 예약 실행을 매일 00:30 UTC(09:30 KST) → **00:00 KST** 로 바꿈(Terraform `schedule_timezone` = Asia/Seoul, 2026-10-23 lemin).
+  주문 시뮬레이터가 KST 벽시계 시각을 UTC 처럼 RDS 에 넣으므로, 날짜를 안 주면 쓰는 '어제'도 KST 달력으로 센다
+  (컨테이너 entrypoint.sh, `rsim run` 기본값, deploy 스크립트의 `yesterday_kst`).
+- 참고: 배송완료 뒤 환불(REFUNDED)된 주문은 그 뒤 실행부터 빠진다. 이미 쓴 날짜 파티션의 리뷰는 남는다.
+
+## 0.3.1 (2026-10-21)
+
+- 변경: 결제 후 리뷰까지 기간을 1~7일에서 **0~7일**로 바꿈(`REVIEW_DELAY_MIN_DAYS` 1 → 0, lemin: 결제 당일 리뷰도 있어야 함).
+  같은 주문이라도 리뷰 시각이 달라지므로 이미 만든 날짜를 다시 돌리면 그 날짜에 걸리는 주문이 바뀐다.
+  하루 배치는 그대로 어제(UTC)를 돌리므로, 결제 당일 리뷰는 다음 날 배치에서 그 날짜 파티션에 들어간다.
+
+## 0.3.0 (2026-10-21)
+
+- 추가: `rsim run --source rds` — 리뷰 시뮬레이터가 **RDS orders 테이블**을 읽는다(lemin 결정).
+  업무 API 가 RDS 에 저장한 주문 중 결제가 끝난 주문(상태 PAID·SHIPPED·DELIVERED, 결제 SUCCESS)의 **주문 항목 하나에 리뷰 하나**를 단다.
+  결제 후 1~7일 규칙과 날짜(UTC) 파티션 덮어쓰기는 `--source orders` 와 같다.
+- 추가: 프롬프트를 RDS 값으로 만든다. 상품명(prod_name), 상품 종류(product_type_name), 색상(colour_group_name), 무늬(graphical_appearance_name)는
+  `product_info` 로(p5.7 형식 그대로, `PROMPT_VERSION` 변경 없음), 회원 연령대(members.age_band)는 `age_group` 으로 들어간다.
+  리뷰의 order_id·member_id·product_id 가 RDS 값(uuid, article_id)이라 레이크에서 거래 데이터와 바로 조인된다. 리뷰 컬럼(review.v2)은 그대로다.
+- 추가: 설정 `ORDERS_DATABASE_URL`(.env 또는 ECS Secret), 의존성 `psycopg[binary]`. 개인정보 컬럼(이름·이메일·전화)은 읽지 않는다.
+- 그대로: `--source orders`(JSONL 가짜 주문)와 `random` 은 결과가 바뀌지 않는다.
+- 실행 환경: ECS 에서도 RDS 주문을 읽을 수 있다. 태스크 환경변수 `ORDERS_SOURCE`(fake 기본 / rds)로 고르고 `deploy/switch.py --orders rds` 로 바꾼다.
+  rds 면 진입점이 가짜 주문 단계를 건너뛰고 `rsim run --source rds` 를 부르며, 접속 주소는 새 Secret(`deploy/secret.py --orders-db`)에서 `ORDERS_DATABASE_URL` 로 들어온다.
+  Terraform(`infra/modules/ecs-review-simulator`): 접속 주소 Secret, 태스크 보안 그룹의 5432 나가는 규칙(VPC 안), 설정 `orders_db_secret_arn`.
+  RDS 쪽 허용(`database_clients`)과 읽기 전용 계정은 `deploy/README.md` "RDS 주문 읽기" 순서대로 따로 한다.
+- 실행 방식은 하루 1번 그대로다. 실시간(계속 쓰기)은 보류(2026-10-21 lemin).
+
+## 0.2.1 (2026-10-21)
+
+- 변경: 결제 후 리뷰까지 기간 기본값을 1~14일에서 **1~7일**로 좁힘(`REVIEW_DELAY_MAX_DAYS` 14 → 7, lemin 결정: 프로젝트 기간에 맞춤).
+  같은 주문이라도 리뷰 날짜가 달라지므로, 이미 만든 날짜를 다시 돌리면 그 날짜에 걸리는 주문이 바뀐다.
+  `.env` 에 `REVIEW_DELAY_MAX_DAYS=14` 를 직접 적어 두었다면 그 값이 우선한다.
+
 ## 0.2.0 (2026-10-18, 브랜치 sim/review-ecs)
 
 로컬과 같은 기능을 AWS ECS Fargate 에서 돌린다. **리뷰를 만드는 방식은 0.1.0 과 같다** (지시서 특례: 기능 변경 없음).

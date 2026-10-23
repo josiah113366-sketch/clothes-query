@@ -3,6 +3,7 @@ output "cluster_name" { value = module.ecs_review_simulator.cluster_name }
 output "task_family" { value = module.ecs_review_simulator.task_family }
 output "security_group_id" { value = module.ecs_review_simulator.security_group_id }
 output "secret_name" { value = module.ecs_review_simulator.secret_name }
+output "orders_db_secret_name" { value = module.ecs_review_simulator.orders_db_secret_name }
 output "schedule_name" { value = module.ecs_review_simulator.schedule_name }
 output "config_parameter_name" { value = module.ecs_review_simulator.config_parameter_name }
 output "dashboard_name" { value = module.ecs_review_simulator.dashboard_name }

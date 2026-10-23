@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-reprocess
 
-> 상태: 진행 중 · 브랜치: `pipelines/gold-b-reprocess` (`pipelines/gold-b` 위에서 갈라짐) · 다음 작업: 형식 검사(2단계) 뒤 실행 진입점과 DAG
+> 상태: 완료 · 브랜치: `pipelines/gold-b-reprocess` (최신 `main` `05d4771` 병합) · main 대상 PR 제출 · 남은 일: 실행 입구(형식 검사기와 함께), DAG(재영 님)
 
 ## 목표
 
@@ -14,7 +14,7 @@
 
 ## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
 
-- #36이 머지 전이라 `pipelines/gold-b` 위에서 갈라졌다. push는 #36 머지 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
+- #36이 머지 전이라 `pipelines/gold-b` 위에서 갈라졌다. #36이 병합 커밋으로 들어가서(2026-10-22), 커밋을 옮기지 않고 최신 `main`을 이 브랜치에 병합했다 (2026-10-23, `pipelines/gold_b/README.md`·`docs/BRANCHES.md` 충돌만 정리). PR에는 이 브랜치의 커밋만 보인다.
 - 커밋 메시지에 Claude 공동 작성자 줄을 넣지 않는다.
 
 ## 정한 기본값 (설계에 없는 세부, 2026-10-21 사용자에게 알리고 진행)
@@ -26,7 +26,9 @@
 5. **바꾸는 줄:** 이번에 다시 읽은 메시지의 줄만 새로 만든 줄로 바꾼다. 다시 읽지 못한 메시지(여유 시간보다 늦게 온 결제, 대상이 아닌 토픽, 그 사이 지워진 메시지)의 옛 줄은 그대로 남긴다. `malformed_events`는 다른 `rule_version` 줄도 남긴다.
 6. **교체 순서:** 폴더마다 새 파일을 먼저 쓰고 옛 파일을 지운다. 중간에 멈추면 잠깐 같은 줄이 두 번 있을 수 있지만(뷰가 거름) 줄이 사라지지는 않는다. 다시 돌리면 정리된다.
 7. **형식 검사 자리:** 메시지 하나를 받아 결제 줄과 오류 목록만 돌려주는 함수를 넣는다. Kafka 위치·`loaded_at`·`rule_version`은 잡이 붙인다. 그 함수의 규칙 버전이 승인된 `rule_version`과 다르면 `FAILED`, 재시도하지 않는다.
-8. **실행 방식:** Spark 없이 파이썬 한 프로세스로 돈다 (한 시간 폴더는 수천 줄). 한 번에 하나씩 돌리기와 재시도 2번은 Airflow DAG가 맡는다.
+8. **실행 방식:** Spark 없이 파이썬 한 프로세스로 돈다 (한 시간 폴더는 수천 줄). Airflow DAG는 5분마다 poller를 부르고 한 번에 하나만 돈다. 다시 돌릴지와 몇 번까지 돌릴지는 poller가 `reprocess_events`를 보고 정한다.
+9. **poller (2026-10-23, 승인 화면 #66과 맞춤):** `APPROVED` 줄의 `source`가 `KAFKA`·`BRONZE`인 요청만 맡는다. 아직 시작하지 않은 요청은 승인 뒤 60분 안일 때만 시작한다. `FAILED`의 `retryable`이 참이거나 중간에 멈췄으면 다시 돌리고, 한 요청은 최대 3번(처음 1번 + 자동 재시도 2번)까지다. 한 번에 승인이 가장 이른 요청 하나만 돌린다. `attempt`는 승인 화면이 정한 요청 단위 번호를 그대로 쓰고, 몇 번째 실행인지는 `STARTED`의 `detail.run`에 쓴다.
+10. **`reprocess_events.source`에 `SILVER` (2026-10-23 팀 결정):** Silver 재처리도 같은 표와 같은 단계 이름을 쓰고 `source = SILVER`로 나눈다. 설계 문서와 DDL 설명을 "재처리 경로"로 넓혔다.
 
 ## 시작 전 확인 (Claude가 한다)
 
@@ -36,7 +38,7 @@
 ## 만드는 것
 
 - `pipelines/gold_b/ledger.py`: 원장 공통 도구. 표별 Parquet 스키마(DDL과 같음), 시간 폴더 경로, 메시지 하나의 원장 줄 만들기, 파일 저장소(로컬 폴더·S3)
-- `pipelines/gold_b/jobs/reprocess.py`: 재처리 잡 (`run()`), Kafka 다시 읽기
+- `pipelines/gold_b/jobs/reprocess.py`: 재처리 잡 (`run()`), Kafka 다시 읽기, poller (`read_events`, `next_request`)
 - `pipelines/gold_b/jobs/README.md`: 동작, 기본값, 부르는 방법
 - `pipelines/gold_b/tests/test_reprocess.py`: 가짜 Kafka와 샘플 메시지로 시험
 - `pipelines/gold_b/requirements.txt`: 수집기 브랜치와 같은 내용
@@ -45,7 +47,8 @@
 ## 만들지 않는 것
 
 - 형식 검사 코드 (2단계), 결제 지문 (`pipelines/payment_fingerprint.py`, 현지 님과)
-- 실행 진입점(명령줄)과 `dags/gold_b_reprocess.py` (형식 검사가 생긴 뒤, 재영 님과)
+- 실행 입구(명령줄): 형식 검사기와 함께 만든다 (`pipelines/gold-b-format-check`)
+- `dags/gold_b_reprocess.py`: 재영 님 (Airflow DAG 공급 경로가 `infra/platform/airflow/dags/`라 인프라 영역)
 - Bronze에서 다시 읽기, Silver 재처리 연결 (8단계)
 - 재처리 검증 시나리오 전체 (9단계)
 
@@ -61,6 +64,7 @@
 ## 완료 확인
 
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 37개)
+- [x] 최신 `main` 병합 뒤 `pipelines/gold_b/tests` 54개, `pipelines` 139개 통과 (poller 시험 포함)
 - [x] 같은 입력으로 두 번 돌려 원장이 같은지 (`loaded_at` 제외), 폴더 밖 줄이 그대로인지
 - [x] 로컬 Kafka에서 시간으로 위치를 찾아 다시 읽고 폴더가 교체되는지
 - [x] 코드·README에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)
@@ -93,10 +97,17 @@
   - 다른 시각 형식(나노초, UTC 표시)의 파일을 UTC 마이크로초로 맞춰 읽는 것과 S3 경로 처리(숨김 파일·하위 폴더 제외, 버킷 이름을 남기지 않음)는 가짜 S3 클라이언트로 한 번 확인했다.
   - `git grep`: 새 파일에 키·계정 ID·엔드포인트·버킷 이름 없음.
 - **알려진 한계·남은 일:**
-  - 형식 검사(2단계)가 생겨야 실제로 돌릴 수 있다. 명령줄 진입점과 `dags/gold_b_reprocess.py`(재시도 2번, 한 번에 하나씩, `retryable`이 `False`면 재시도 없이 멈춤)는 그때 재영 님과 만든다.
+  - 형식 검사기가 생겨야 실제로 돌릴 수 있다. 실행 입구(명령줄)는 형식 검사기와 함께 만들고, `dags/gold_b_reprocess.py`(5분마다 poller, 한 번에 하나)는 재영 님과 만든다.
   - Bronze 재처리(3일 넘은 구간)는 없다. Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정해야 한다.
   - 고친 뒤 이벤트 시각이 다른 폴더로 옮겨 가는 줄(예: 코드 버그로 `completed_at`을 잘못 읽었던 결제)은 옆 폴더도 승인 범위에 넣어야 한다. 넣지 않으면 그 줄이 빠진다.
   - 실제 S3 쓰기·지우기와 mTLS Kafka는 돌려 보지 않았다.
   - 판정 잡의 `TABLE_SPECS`는 `reprocess_events`를 시간 폴더로, `attempt`를 BIGINT로 가정한다. 테이블 정의(폴더 없음, INT)와 맞춰 달라고 주현 님께 전한다.
-  - push는 #36 머지 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
+  - 판정 잡이 `LEDGER_REPLACED`를 읽는 두 곳에 `source IN ('KAFKA', 'BRONZE')` 조건이 필요하다 (주현 님께 요청함, 설계 문서 팀원 확인 표).
 - **보완 (2026-10-21):** 한 메시지에서 같은 필드의 오류는 한 줄만 남긴다 (설계 「중복 제거」: `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같으면 한 번). `ledger.message_rows`에서 하므로 적재 잡도 같다. 시험 1개를 더했다.
+- **보완 (2026-10-23): main 병합과 poller**
+  - 최신 `main`(#81까지)을 병합했다. 충돌은 `pipelines/gold_b/README.md`, `docs/BRANCHES.md`의 표 줄뿐이었다.
+  - poller(`read_events`, `next_request`)를 더했다. 규칙은 「정한 기본값」 9번이다. 승인 화면(#66)이 Gold B 요청을 `source = KAFKA`로 쓰고 승인 만료를 60분으로 보는 것에 맞췄다.
+  - 승인 화면·판정 잡은 Athena `INSERT INTO`로 `reprocess_events`에 줄을 써서, 파일 이름에 `.parquet`이 없을 수 있다. 원장 저장소의 `files()`가 `.parquet`만 돌려줘서 그대로면 poller가 `APPROVED` 줄을 못 본다. `files(any_name=True)`를 더해 숨김·임시 파일이 아니면 다 읽게 했다 (원장 3개를 교체할 때는 지금처럼 `.parquet`만).
+  - `run()`에 `run_number`를 더해 `STARTED`의 `detail.run`에 남긴다. `attempt`는 승인 화면이 정한 요청 단위 번호 그대로다.
+  - 설계 문서: `source`를 "재처리 경로"로 넓히고 `SILVER`를 더했다 (2026-10-23 팀 결정). poller 규칙, Silver 재처리 줄, 복구 판단 기준(줄이 쌓인 것만으로 복구로 보지 않고 `VERIFIED`로 판단)을 적었다. Silver 줄의 세부(실패는 `FAILED`, 범위, manifest 경로)와 Silver 복구 조건은 제안으로 표시했다. DDL의 `source`·`attempt` 설명도 맞췄다 (칸은 그대로).
+  - 시험 12개를 더했다: 승인 순서와 `SILVER` 제외, 처음·승인 만료·거절·끝남·다시 돌려도 소용없는 실패·일시 실패·시작 뒤 만료 없음·중간에 멈춤·최대 3번, 확장자 없는 Athena 파일 읽기, `run` 번호와 끝난 요청을 다시 고르지 않음. `pipelines/gold_b/tests` 54개, `pipelines` 139개 통과.
