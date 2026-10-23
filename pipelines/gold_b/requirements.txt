@@ -1,5 +1,7 @@
 # Gold B 실행 패키지. 시험에는 pytest를 따로 설치한다. Silver의 pipelines/requirements.txt와 따로 둔다.
+# 팀 Spark 이미지는 Python 3.10이라 pyarrow 26.0.0을 설치할 수 없다. pipelines/requirements.txt처럼 3.10은 25.0.1을 쓴다.
 confluent-kafka==2.16.0
-pyarrow==26.0.0
+pyarrow==25.0.1; python_version < '3.11'
+pyarrow==26.0.0; python_version >= '3.11'
 boto3==1.43.116
 PyYAML==6.0.3

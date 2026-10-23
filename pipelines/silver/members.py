@@ -6,12 +6,13 @@ import argparse
 import os
 import re
 import tempfile
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from pipelines.format_rules import DEFAULT_RULES, FormatRules, RuleConfigError
+from pipelines.timestamps import parse_iso_datetime
 
 from .common import RowError, collect_latest, decode_record, publish_bundle
 
@@ -78,7 +79,7 @@ def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
-        result = datetime.fromisoformat(value)
+        result = parse_iso_datetime(value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if result.tzinfo is None or result.utcoffset() is None:
@@ -108,10 +109,10 @@ def _normalize(raw: dict[str, object], rules: FormatRules) -> tuple[str, int, di
         "region_sigungu": raw["region_sigungu"],
         "marketing_consent": raw["marketing_consent"],
         "status": raw["status"],
-        "signup_at_utc": signup.astimezone(UTC).isoformat(),
+        "signup_at_utc": signup.astimezone(timezone.utc).isoformat(),
         "signup_at_kst": signup.astimezone(KST).isoformat(),
-        "created_at_utc": created.astimezone(UTC).isoformat(),
-        "withdrawn_at_utc": None if withdrawn is None else withdrawn.astimezone(UTC).isoformat(),
+        "created_at_utc": created.astimezone(timezone.utc).isoformat(),
+        "withdrawn_at_utc": None if withdrawn is None else withdrawn.astimezone(timezone.utc).isoformat(),
         "source_ts_ms": source_ts,
     }
     return str(raw["member_id"]), source_ts, row

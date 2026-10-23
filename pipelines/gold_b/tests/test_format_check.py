@@ -17,6 +17,7 @@ from pipelines.format_rules import DEFAULT_RULES, FormatRules, RuleConfigError  
 from pipelines.gold_b.format_check import DATASETS, MASK, FormatChecker, mask_sample  # noqa: E402
 from pipelines.gold_b.ledger import PAYMENT_FIELDS, KafkaMessage, message_rows  # noqa: E402
 from pipelines.payment_fingerprint import payment_fingerprint  # noqa: E402
+from pipelines.timestamps import parse_iso_datetime  # noqa: E402
 from test_ddl import _utc, load_samples  # noqa: E402
 
 UTC = timezone.utc
@@ -55,13 +56,26 @@ def test_payment_row_has_fingerprint_and_completed_at(checker):
     payment = checker(message(sample)).payment
     assert set(payment) == set(PAYMENT_FIELDS)
     value = sample["value"]
-    assert payment["completed_at"] == datetime.fromisoformat(value["completed_at"])
+    assert payment["completed_at"] == parse_iso_datetime(value["completed_at"])
     assert payment["completed_at"].utcoffset() is not None   # 시간대가 있어서 message_rows가 UTC로 바꾼다
     assert {k: payment[k] for k in ("payment_content_hash", "fingerprint_version")} == payment_fingerprint(value)
     duplicate = checker(message(SAMPLES["duplicate_of_success_pg_a"])).payment
     assert duplicate["payment_content_hash"] == payment["payment_content_hash"]
     first, second = (checker(message(SAMPLES[n])).payment for n in ("conflict_amount_first", "conflict_amount_second"))
     assert first["payment_content_hash"] != second["payment_content_hash"]   # 금액만 달라도 지문이 다르다
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("2026-10-21T06:01:00Z", datetime(2026, 10, 21, 6, 1, 0, tzinfo=UTC)),
+    ("2026-10-21T06:01:00.5Z", datetime(2026, 10, 21, 6, 1, 0, 500000, tzinfo=UTC)),
+    ("2026-10-21T15:01:00.5+09:00", datetime(2026, 10, 21, 6, 1, 0, 500000, tzinfo=UTC)),
+])
+def test_payment_completed_at_uses_the_shared_parser(checker, text, expected):
+    """결제 시각은 공통 파서로 읽는다. 팀 Spark 이미지의 Python 3.10에서 datetime.fromisoformat이 못 읽는
+    Z·1자리 소수초도 같은 순간이 된다."""
+    sample = SAMPLES["success_pg_a"]
+    payment = checker(message({**sample, "value": {**sample["value"], "completed_at": text}})).payment
+    assert payment is not None and payment["completed_at"] == expected
 
 
 class NoErrorRules:

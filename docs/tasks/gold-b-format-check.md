@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-format-check
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #84까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
 
 ## 목표
 
@@ -56,6 +56,7 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (100개)
 - [x] `python -m pytest -q pipelines` 통과 (185개)
 - [x] 재처리 브랜치(최신 `main` #78 포함)를 다시 병합한 뒤 `pipelines/gold_b/tests` 123개, `pipelines` 208개 통과 (수집기 시험 23개 포함)
+- [x] (보완) Python 3.10 맞추기 뒤 `pipelines/gold_b/tests` 126개 통과 (Python 3.12와 3.10.12 모두), Python 3.10.12에서 결제 시각·지문이 3.12와 같음
 - [x] 샘플 31개가 모두 기대 결과와 같은지 (형식 검사기 + `message_rows`)
 - [x] `raw_sample`에 개인정보 값·ID·시각이 남지 않는지
 - [x] 코드·README에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)
@@ -83,7 +84,16 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
 - **알려진 한계·남은 일:**
   - 적재 잡에는 아직 붙지 않았다 (`pipelines/gold-b-ingest`에서 연결).
   - 실제 Kafka·S3·Athena로는 돌려 보지 않았다. 배포(이미지, Pod 권한, DAG)는 재영 님과 한다 (`jobs/README.md`의 DAG 명세).
-  - 실행 이미지는 Python 3.11 이상이어야 한다 (지문 함수). 재영 님 Spark 이미지는 Python 3.10이라, 재처리 잡은 Spark 없이 Python 3.11+ 이미지로 돌린다.
+  - ~~실행 이미지는 Python 3.11 이상이어야 한다 (지문 함수). 재영 님 Spark 이미지는 Python 3.10이라, 재처리 잡은 Spark 없이 Python 3.11+ 이미지로 돌린다.~~ → 2026-10-23 바뀜: #82로 공통 코드가 Python 3.10에서 돈다. 아래 「보완: Python 3.10 맞추기」
   - 모르는 실패 코드를 ①에 넣는 확장안, `rule_id` 칸은 하지 않았다 (위 결정).
 - **팀원 확인 표 정리 (2026-10-23):** 주현 님 PR이 main에 들어간 것을 확인하고 설계 문서 팀원 확인 표를 고쳤다. #71 판정 설정 `format_rule_version` 0.2.0, #72 판정·조사 쿼리의 시간 폴더 조건, #80 `pending_replacements`의 `source IN ('KAFKA', 'BRONZE')`. 판정 잡의 `reprocess_events` 정의(`TABLE_SPECS`)도 DDL과 같아졌다(폴더 없음, `attempt` int). 남은 것은 `_replaced_filter`(R5 순찰)의 같은 `source` 조건이다. 재처리 브랜치는 이미 올라가 있어서 이 정리는 이 브랜치에 넣었다.
 - **#84 머지 정리 (2026-10-23):** 재처리 브랜치가 #84로 머지되어 브랜치 대장의 재처리 줄을 머지됨으로, 재처리 작업 지시서 상태를 바꾸고, 설계 문서 7단계의 실행 입구·PR 항목을 체크했다 (실행 입구 항목은 이 브랜치에서 만들었는데 체크가 빠져 있었다).
+- **보완 (2026-10-23): Python 3.10 맞추기**
+  - **무엇을 했나:** 최신 `main`(#82 공통 시각 파서, #83, #84)을 병합했다. `format_check.py`가 결제 `completed_at`을 공통 파서 `pipelines.timestamps.parse_iso_datetime`으로 읽는다 (지문·형식 규칙과 같은 함수). `requirements.txt`의 pyarrow는 Python 3.10에서 25.0.1을 받는다 (`pipelines/requirements.txt`와 같은 기준). 시험은 기존 비교 1줄과 `test_ddl._utc`를 공통 파서로 바꾸고, 결제 시각 형식 시험 3개(`Z`, 1자리 소수초, `+09:00`)를 더했다. `jobs/README.md` DAG 명세의 이미지 조건을 Python 3.10 이상으로 고쳤다.
+  - **왜:** #82가 팀 공용 실행 이미지(`pipelines/Dockerfile`)를 Python 3.10.12로 고정하고 공통 코드를 3.10에서 돌게 바꿨다. 3.10의 `datetime.fromisoformat`은 `Z`와 1·2·4·5자리 소수초를 읽지 못해서, 그대로면 적재 잡·재처리가 결제마다 멈춘다. pyarrow 26.0.0은 3.10용이 없어 설치되지 않는다.
+  - **확인한 결과:**
+    - Python 3.12: `pipelines/gold_b/tests` 126개 통과. `pipelines`는 221개 통과, 오류 13개는 #82의 Silver·Gold A Spark 시험이다 (`SPARK_TEST_INPUT`과 로컬 Spark가 있어야 돈다. Gold B와 무관).
+    - Python 3.10.12 (로컬에 있던 `spark:4.1.3` 이미지, 새로 받은 것 없음): 결제 샘플 17개 모두 예전 `fromisoformat`으로는 읽지 못하고, 공통 파서로는 읽으며 시각과 지문이 3.12와 같다. Gold B·공통 모듈 18개 파일 문법 검사 통과.
+    - Python 3.10.12 컨테이너에 PyPI에서 pyarrow 25.0.1(50.1MB)·PyYAML 6.0.3·pytest 9.1.1을 받아 (사용자 허락, 컨테이너 안에만 설치하고 지움) `pipelines/gold_b/tests` 126개 통과. ingest·compact까지 합친 상태(커밋하지 않은 시험용 병합)에서는 Gold B 시험 139개 통과. 처음 돌릴 때 설계 문서를 컨테이너에 넣지 않아 `test_views.py` 5개가 실패했고, 3.12에서도 같게 실패해 Python 버전 문제가 아님을 확인한 뒤 설계 문서를 넣어 다시 돌렸다.
+    - `confluent-kafka` 2.16.0의 3.10 설치는 확인하지 않았다 (시험은 가짜 Kafka를 써서 필요 없음).
+  - **다음 할 일:** `pipelines/gold-b-ingest`에 반영 (배포 설명을 팀 기본 Spark 이미지 기준으로), Gold B Dockerfile (새 브랜치).
