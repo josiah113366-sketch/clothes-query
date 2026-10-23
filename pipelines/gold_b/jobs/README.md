@@ -69,7 +69,7 @@ DAG 파일은 Airflow 공급 경로(`infra/platform/airflow/dags/`)에 둔다.
 - DAG `gold_b_reprocess`: 5분마다(`*/5 * * * *`), `max_active_runs` 1, 밀린 실행을 몰아서 돌리지 않음(`catchup` 끔)
 - 작업 하나: 위 명령을 Pod로 실행한다. 다시 돌린 횟수는 poller가 세므로 Airflow 재시도는 0으로 둔다 (두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감).
 - Pod 권한: S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. Kafka 6개 토픽 읽기 (임시 그룹 `gold-b-reprocess-*`, 커밋 없음)
-- 이미지: Python 3.11 이상 (지문 함수가 3.11 기능을 씀), `pipelines/gold_b/requirements.txt`, 저장소의 `pipelines/`와 `docs/contracts/format_rules.yaml`
+- 이미지: Python 3.10 이상 (팀 기본 Spark 이미지의 3.10.12에서 돈다), `pipelines/gold_b/requirements.txt`, 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`, `docs/contracts/format_rules.yaml`
 
 코드에서 부를 때는 이렇게 한다.
 
