@@ -45,7 +45,7 @@ def strict_schema(schema):
 
 
 def check_business_connectors(connector_schema, values):
-    """connectors/cdc-source.yaml, bronze-s3-sink.yaml: CRD, topic contract, PII allowlist, secrets."""
+    """connectors/cdc-source.yaml, bronze-s3-sink(-v2).yaml: CRD, topic contract, PII allowlist, secrets."""
     pii = {"name", "email", "phone", "birth_date", "password_hash"}
     ddl = (REPO / "db" / "schema" / "004_orders.sql").read_text(encoding="utf-8")
     order_columns = {}
@@ -53,7 +53,7 @@ def check_business_connectors(connector_schema, values):
         order_columns[table] = {m for m in re.findall(r"^\s{4}(\w+)\s+(?:uuid|text|bigint|integer|timestamptz)", body, re.M)}
     assert set(order_columns) == {"orders", "order_items", "payments"}
     docs = {}
-    for name in ("cdc-source", "bronze-s3-sink"):
+    for name in ("cdc-source", "bronze-s3-sink", "bronze-s3-sink-v2"):
         text = (REPO / "connectors" / f"{name}.yaml").read_text(encoding="utf-8")
         assert not re.search(r"AKIA[0-9A-Z]{16}|amazonaws\.com|[0-9]{12}", text), name
         doc = yaml.safe_load(text)
@@ -101,9 +101,21 @@ def check_business_connectors(connector_schema, values):
     assert set(values["connect"]["produceTopics"]) == routed | {heartbeat}
     assert {t["name"] for t in values["topics"]} == BUSINESS_TOPICS | {heartbeat}
     assert set(sink["topics"].split(",")) == BUSINESS_TOPICS == set(values["connect"]["consumeTopics"])
-    assert values["connect"]["consumerGroups"] == ["connect-bronze-s3-sink"]
+    assert values["connect"]["consumerGroups"] == ["connect-bronze-s3-sink", "connect-bronze-s3-sink-v2"]
     assert sink["topics.dir"] == "bronze" and sink["timezone"] == "UTC"
     assert sink["path.format"] == "'year'=YYYY/'month'=MM/'day'=dd"
+    # v2 is the same sink into bronze_v2/ plus the Kafka position and time on every row (Gold B reprocessing).
+    v2 = docs["bronze-s3-sink-v2"]
+    meta = {k: v for k, v in v2.items() if k.startswith("transforms")}
+    assert {k: v for k, v in v2.items() if k not in meta} == {**sink, "topics.dir": "bronze_v2"}
+    assert meta == {
+        "transforms": "kafkaMeta",
+        "transforms.kafkaMeta.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.kafkaMeta.topic.field": "kafka_topic",
+        "transforms.kafkaMeta.partition.field": "kafka_partition",
+        "transforms.kafkaMeta.offset.field": "kafka_offset",
+        "transforms.kafkaMeta.timestamp.field": "__kafka_timestamp",
+    }
     assert not any(k.startswith(("aws.", "s3.credentials")) for k in sink), "S3 credentials come from Pod Identity"
     prepare = (REPO / "connectors" / "cdc-prepare.sql").read_text(encoding="utf-8")
     publication = re.search(r"CREATE PUBLICATION cdc_pub FOR TABLE ([^;]+);", prepare).group(1)
@@ -113,7 +125,8 @@ def check_business_connectors(connector_schema, values):
     assert "members_archive" not in publication and "PASSWORD '" not in prepare
     role_example = (ROOT / "cdc-orders" / "workload-access.tfvars.example").read_text(encoding="utf-8")
     assert f'service_account = "{values["connect"].get("name", "clothes-query-dev-connect")}-connect"' in role_example
-    assert f'"{sink["topics.dir"]}/" =' in role_example, "S3 Sink output and IAM prefix must match"
+    for prefix in (sink["topics.dir"], v2["topics.dir"]):
+        assert re.search(rf'"{prefix}/"\s+=', role_example), f"S3 Sink output and IAM prefix must match: {prefix}"
     network_example = (ROOT / "cdc-orders" / "network.tfvars.example").read_text(encoding="utf-8")
     assert "s3:AbortMultipartUpload" in role_example and "s3:AbortMultipartUpload" in network_example
 

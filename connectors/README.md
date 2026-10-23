@@ -9,6 +9,7 @@ Debezium(Kafka Connect) 커넥터 설정이다. 로컬 구성(`simulator/docker-
 | `member-s3-sink.json` | 토픽 `members-events`를 S3의 `bronze/`에 JSON Lines 파일로 쌓는 S3 Sink 커넥터 (Confluent S3 Sink 12.1.13) |
 | `cdc-source.yaml` | **EKS 업무용.** RDS의 `members`·`orders`·`order_items`·`payments`를 토픽 4개로 보내는 Debezium 커넥터 (Strimzi `KafkaConnector`) |
 | `bronze-s3-sink.yaml` | **EKS 업무용.** 업무 토픽 5개를 `clothes-query-datalake`의 `bronze/`에 쌓는 S3 Sink (Strimzi `KafkaConnector`) |
+| `bronze-s3-sink-v2.yaml` | **EKS 업무용.** 위와 같고 `bronze_v2/`에 쓰며, 줄마다 Kafka 위치·시각을 넣는다. 아래 "Bronze v2" |
 | `cdc-prepare.sql` | **EKS 업무용.** RDS에 CDC 전용 계정 `clothes_cdc`와 publication `cdc_pub`을 만드는 SQL. 사용자가 마스터로 실행한다 |
 
 `member-source.json`의 등록과 상태 확인, 초기화는 `sim cdc setup` / `status` / `reset`으로 한다 (`simulator/README.md`의 "로컬 CDC").
@@ -135,6 +136,24 @@ Debezium(Kafka Connect) 커넥터 설정이다. 로컬 구성(`simulator/docker-
 | `s3.part.size` | 기본(25MB) | 5MB(최소값) | 열린 파티션 15개마다 버퍼를 잡는다. 25MB면 Connect 힙(512MB)이 모자란다 |
 
 같은 점: 회원 10컬럼(`column.include.list`), 관리 컬럼 `__op`·`__source_ts_ms`·`__source_snapshot`, 삭제 이벤트를 보내지 않음(`tombstones.on.delete=false`, `delete.handling.mode=drop`), S3 경로 `bronze/<토픽>/year=YYYY/month=MM/day=DD/<토픽>+<파티션>+<시작offset>.json`(UTC, 레코드 시각 기준), 15분 또는 10,000건마다 파일 끊기.
+
+### Bronze v2 (`bronze-s3-sink-v2.yaml`)
+
+`bronze/`의 줄에는 Kafka 위치(offset)와 Kafka 시각이 없다. 파일 이름에 첫 offset만 있고, 빈 값을 건너뛰거나(`behavior.on.null.values: ignore`) 재시작으로 같은 메시지가 두 파일에 들어갈 수 있어 줄 번호로도 계산할 수 없다. 그래서 Gold B 재처리가 원장의 같은 줄을 찾지 못해 두 번 쌓고, Kafka 시각의 시간 폴더(dt, hour)도 정하지 못한다(Gold B 담당 요청, 2026-10-23).
+
+v2는 `bronze-s3-sink`와 설정이 같고 두 가지만 다르다(`infra/platform/kafka/verify/check.py`가 확인한다).
+
+| 값 | v2 | 이유 |
+|---|---|---|
+| `topics.dir` | `bronze_v2` | 옛 파일과 섞이지 않게 경로를 나눈다. 경로는 `bronze_v2/<토픽>/year=YYYY/month=MM/day=DD/<토픽>+<파티션>+<시작offset>.json` |
+| `transforms` | `InsertField$Value`: `kafka_topic`, `kafka_partition`, `kafka_offset`, `__kafka_timestamp` | 줄마다 Kafka 위치·시각(ms, UTC). 이름은 Gold B 담당이 정했다 |
+
+- 이름이 새것이라 컨슈머 그룹 `connect-bronze-s3-sink-v2`도 새것이다. Sink는 처음 읽는 그룹을 가장 오래된 메시지부터 읽으므로 **Kafka에 남은 메시지를 처음부터 다시 쓴다**(offset을 되감는 작업 없음). 다 따라잡으면 옛 Sink처럼 끝에서 따라간다.
+- Kafka 보관 기간보다 오래돼 이미 지워진 메시지는 v2에 없다. 그런 날짜는 옛 `bronze/`에만 있다.
+- 값이 JSON 객체가 아닌 메시지가 오면 이 변환이 실패해 작업이 멈춘다. 업무 토픽 5개는 모두 객체다.
+- 따라잡는 동안 두 Sink가 함께 돈다. 경로와 그룹이 달라 서로 영향이 없다. 진행은 Kafka UI → Consumers의 `connect-bronze-s3-sink-v2` lag로 본다.
+- 읽는 쪽(Silver, Gold B, Athena 테이블)이 `bronze_v2/`로 옮긴 뒤 옛 Sink를 지운다. Gold B 지연 수집기는 `GOLD_B_SINK_CONNECTOR=bronze-s3-sink-v2`로 바꾼다. 옛 `bronze/` 객체는 지우지 않는다.
+- 적용 순서: `infra/platform/kafka/cdc-orders/README.md`의 "6. Bronze v2".
 
 ### PII를 두 겹으로 막는다
 

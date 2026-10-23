@@ -1,0 +1,45 @@
+# 업무 토픽 5개 → S3 bronze_v2/. bronze-s3-sink 와 같고, 줄마다 Kafka 위치·시각(kafka_topic, kafka_partition,
+# kafka_offset, __kafka_timestamp)을 넣는다. Gold B 재처리가 원장 줄을 위치로 찾고 Kafka 시각으로 시간 폴더를 정한다.
+# 새 이름이라 컨슈머 그룹(connect-bronze-s3-sink-v2)도 새것이고, Kafka에 남은 가장 오래된 메시지부터 다시 쓴다.
+# 선행: workload-access 의 bronze_v2/ 쓰기, Helm values 의 그룹 ACL. 순서는 infra/platform/kafka/cdc-orders/README.md "6. Bronze v2".
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: bronze-s3-sink-v2
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: clothes-query-dev-connect
+spec:
+  class: io.confluent.connect.s3.S3SinkConnector
+  tasksMax: 1
+  config:
+    topics: clickstream,members-events,orders,order-items,payments
+    s3.bucket.name: clothes-query-datalake
+    s3.region: ap-northeast-1
+    topics.dir: bronze_v2
+    storage.class: io.confluent.connect.s3.storage.S3Storage
+    format.class: io.confluent.connect.s3.format.json.JsonFormat
+    # clickstream 키는 JSON이 아닌 session_id 문자열이다. 키는 파일에 쓰지 않으므로 문자열로 읽는다.
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: "false"
+    schema.compatibility: NONE
+    behavior.on.null.values: ignore
+    partitioner.class: io.confluent.connect.storage.partitioner.TimeBasedPartitioner
+    path.format: "'year'=YYYY/'month'=MM/'day'=dd"
+    partition.duration.ms: "86400000"
+    timezone: UTC
+    locale: en-US
+    timestamp.extractor: Record
+    flush.size: "10000"
+    rotate.schedule.interval.ms: "900000"
+    s3.compression.type: none
+    # 열린 파티션(5토픽 x 3 = 15개)마다 이 크기의 버퍼를 잡는다. 기본 25MB면 Connect 힙(512MB)에 너무 크다. 5MB는 최소값.
+    s3.part.size: "5242880"
+    # 줄마다 Kafka 위치·시각. 값이 JSON 객체가 아니면 이 변환이 실패해 작업이 멈춘다(업무 토픽 5개는 모두 객체다).
+    transforms: kafkaMeta
+    transforms.kafkaMeta.type: org.apache.kafka.connect.transforms.InsertField$Value
+    transforms.kafkaMeta.topic.field: kafka_topic
+    transforms.kafkaMeta.partition.field: kafka_partition
+    transforms.kafkaMeta.offset.field: kafka_offset
+    transforms.kafkaMeta.timestamp.field: __kafka_timestamp
