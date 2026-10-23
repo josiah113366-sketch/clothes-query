@@ -30,7 +30,8 @@ LATE_PAYMENT = {   # Kafka에서 다시 읽지 못하는 결제 줄 (예: 여유
     "payment_id": "00000000-4000-8000-0000-0000000000f9", "order_id": "00000000-4000-8000-0000-0000000000e9",
     "attempt_no": 1, "pg": "PG_A", "status": "SUCCESS", "failure_code": None,
     "completed_at": datetime(2026, 10, 21, 6, 59), "payment_content_hash": "late", "fingerprint_version": "test",
-    "kafka_partition": 0, "kafka_offset": 999, "loaded_at": STREAMED_AT}
+    "kafka_partition": 0, "kafka_offset": 999, "loaded_at": STREAMED_AT,
+    "cdc_op": "c", "source_ts_ms": 1792565940000, "rule_version": "test"}
 
 
 # ---------- 가짜 Kafka, 가짜 형식 검사 ----------
@@ -75,6 +76,11 @@ class FakeKafka:
         pass
 
 
+# 오류 줄의 record_key로 쓰는 메시지 키 (format_check.RECORD_KEYS와 같음, 토픽 이름 기준)
+RECORD_KEYS = {"payments": "payment_id", "orders": "order_id", "order-items": "order_item_id",
+               "clickstream": "event_id"}
+
+
 class SampleChecker:
     """샘플의 기대 결과대로 판정한다. accept_pg_c=True면 PG_C를 허용하는 새 규칙처럼 판정한다."""
 
@@ -92,9 +98,13 @@ class SampleChecker:
                 "payment_id": v["payment_id"], "order_id": v["order_id"], "attempt_no": v["attempt_no"],
                 "pg": v["pg"], "status": v["status"], "failure_code": v["failure_code"],
                 "completed_at": _utc(v["completed_at"]), "payment_content_hash": stand_in_fingerprint(v),
-                "fingerprint_version": "test"})
+                "fingerprint_version": "test", "cdc_op": v["__op"], "source_ts_ms": v["__source_ts_ms"]})
+        value = s.get("value") if isinstance(s.get("value"), dict) else {}
+        key_field = RECORD_KEYS.get(s["kafka"]["topic"])
         return Judgement(errors=[{"field": e["field"], "reason": e["reason"],
-                                  "raw_sample": "<masked>" if i == 0 else None}
+                                  "raw_sample": "<masked>" if i == 0 else None,
+                                  "record_key": value.get(key_field) if key_field else None,
+                                  "source_ts_ms": value.get("__source_ts_ms")}
                                  for i, e in enumerate(s["expected"]["malformed"])])
 
 

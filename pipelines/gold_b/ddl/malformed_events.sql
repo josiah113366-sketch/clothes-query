@@ -9,7 +9,9 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gold_b.malformed_events (
   reason          STRING    COMMENT 'PARSE_ERROR, MISSING_FIELD, TYPE_MISMATCH, INVALID_VALUE',
   raw_sample      STRING    COMMENT '마스킹한 원문 일부 (필드 이름 유지, 값만 가림). 메시지의 첫 줄에만, 나머지는 NULL',
   rule_version    STRING    COMMENT '적용한 형식 검사 규칙표 버전',
-  loaded_at       TIMESTAMP COMMENT '원장에 쌓은 시각 (UTC)'
+  loaded_at       TIMESTAMP COMMENT '원장에 쌓은 시각 (UTC). 같은 메시지를 여러 번 검사했을 때 결과의 순서',
+  record_key      STRING    COMMENT '메시지의 키 (결제 payment_id, 주문 order_id, 주문상품 order_item_id, 클릭 event_id). 회원·읽지 못한 메시지는 NULL',
+  source_ts_ms    BIGINT    COMMENT '원본 DB에서 바뀐 시각 (__source_ts_ms, 밀리초). 없거나 0 이상의 정수가 아니면 NULL'
 )
 PARTITIONED BY (dt STRING, hour STRING)
 STORED AS PARQUET

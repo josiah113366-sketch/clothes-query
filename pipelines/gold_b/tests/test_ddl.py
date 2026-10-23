@@ -29,7 +29,7 @@ EXPECTED = {
         ("pg", "STRING"), ("status", "STRING"), ("failure_code", "STRING"),
         ("completed_at", "TIMESTAMP"), ("payment_content_hash", "STRING"),
         ("fingerprint_version", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
-        ("loaded_at", "TIMESTAMP"),
+        ("loaded_at", "TIMESTAMP"), ("cdc_op", "STRING"), ("source_ts_ms", "BIGINT"), ("rule_version", "STRING"),
     ],
     "topic_messages": [
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
@@ -44,6 +44,7 @@ EXPECTED = {
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
         ("kafka_timestamp", "TIMESTAMP"), ("field", "STRING"), ("reason", "STRING"),
         ("raw_sample", "STRING"), ("rule_version", "STRING"), ("loaded_at", "TIMESTAMP"),
+        ("record_key", "STRING"), ("source_ts_ms", "BIGINT"),
     ],
     "reprocess_events": [
         ("request_id", "STRING"), ("step", "STRING"), ("at", "TIMESTAMP"), ("actor", "STRING"),
@@ -190,7 +191,7 @@ def test_payment_samples_follow_view_rules():
     for s in payments:
         expected = s["expected"]
         if expected["payment_events"]:
-            assert s["value"]["__op"] in {"c", "r"}
+            assert s["value"]["__op"] in {"c", "r", "u"}
         if expected.get("payment_attempts"):
             assert expected["failure_cause"] in FAILURE_CAUSES
         if "payment_conflicts" in expected:
@@ -288,8 +289,8 @@ def test_sample_ledgers_round_trip_through_hour_folders(tmp_path):
         for name, _ in parse_ddl(table)["columns"]:
             assert read.schema.field(name).type == schema.field(name).type
 
-    # 기대 건수: 결제 9줄(중복·충돌 두 쌍 포함, 모르는 실패 코드는 형식 오류), 메시지 31줄, 오류 = 샘플 기대 오류 합
-    assert len(rows["payment_events"]) == 9
+    # 기대 건수: 결제 10줄(중복, 내용이 바뀐 두 쌍, 수정 u 포함. 모르는 실패 코드는 형식 오류), 메시지 31줄, 오류 = 샘플 기대 오류 합
+    assert len(rows["payment_events"]) == 10
     assert len(rows["topic_messages"]) == len(samples) == 31
     assert len(rows["malformed_events"]) == sum(len(s["expected"]["malformed"]) for s in samples)
     per_message = Counter((r["topic"], r["kafka_partition"], r["kafka_offset"]) for r in rows["malformed_events"])

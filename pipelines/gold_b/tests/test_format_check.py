@@ -95,17 +95,73 @@ def test_fingerprint_error_becomes_invalid_value():
     assert [(e["field"], e["reason"]) for e in judgement.errors] == [("completed_at", "INVALID_VALUE")]
 
 
-def test_masking_keeps_business_values_only(checker):
+def raw_sample_of(checker, name: str) -> dict:
+    return json.loads(checker(message(SAMPLES[name])).errors[0]["raw_sample"])
+
+
+def test_masking_shows_business_values_ids_and_times(checker):
+    """raw_sample: 업무 값과 결제·주문 ID, 시각은 보이고 회원 정보는 가린다 (2026-10-23 결정)."""
     value = SAMPLES["multiple_errors"]["value"]
-    sample = json.loads(checker(message(SAMPLES["multiple_errors"])).errors[0]["raw_sample"])
+    sample = raw_sample_of(checker, "multiple_errors")
     assert set(sample) == set(value)                        # 필드 이름은 다 남는다
-    for key in ("pg", "status", "method", "amount", "attempt_no", "__op"):
+    for key in ("pg", "status", "method", "amount", "attempt_no", "__op", "__source_ts_ms",
+                "payment_id", "order_id", "requested_at", "completed_at"):
         assert sample[key] == value[key], key
-    for key in ("payment_id", "order_id", "requested_at", "completed_at"):
-        assert sample[key] == MASK, key
-    member = json.loads(checker(message(SAMPLES["member_with_pii_column"])).errors[0]["raw_sample"])
-    assert {member[k] for k in ("email", "member_id", "region_sigungu", "gender", "signup_at")} == {MASK}
+    order, order_value = raw_sample_of(checker, "order_bad_status"), SAMPLES["order_bad_status"]["value"]
+    for key in ("order_id", "ordered_at", "updated_at", "status"):
+        assert order[key] == order_value[key], key
+    assert order["member_id"] == order["session_id"] == MASK
+    click = raw_sample_of(checker, "click_bad_event_type")
+    assert click["event_time"] == SAMPLES["click_bad_event_type"]["value"]["event_time"]
+    assert {click[k] for k in ("event_id", "member_id", "session_id", "article_id")} == {MASK}
+    member = raw_sample_of(checker, "member_with_pii_column")
+    assert {member[k] for k in ("email", "member_id", "region_sigungu", "gender", "signup_at",
+                                "__source_ts_ms")} == {MASK}
     assert member["withdrawn_at"] is None                   # 값이 없다는 것은 보인다
+
+
+def test_payment_update_is_a_payment_event(checker):
+    """결제 u도 ① 줄이 된다. 변경 종류와 원본 변경 시각을 남긴다 (2026-10-23)."""
+    for name, op in (("success_pg_a", "c"), ("duplicate_of_success_pg_a", "r"), ("update_op", "u")):
+        payment = checker(message(SAMPLES[name])).payment
+        assert payment is not None, name
+        assert (payment["cdc_op"], payment["source_ts_ms"]) == (op, SAMPLES[name]["value"]["__source_ts_ms"])
+
+
+@pytest.mark.parametrize("source_ts, reason", [
+    (None, "MISSING_FIELD"), ("1792562460500", "TYPE_MISMATCH"), (True, "TYPE_MISMATCH"), (-1, "INVALID_VALUE"),
+])
+def test_payment_needs_source_ts_ms(checker, source_ts, reason):
+    """결제 CDC 줄은 변경 시각이 0 이상의 정수여야 한다 (Silver 거래 검사와 같은 오류 코드). 오류 줄에도 키가 남는다."""
+    value = {**SAMPLES["update_op"]["value"]}
+    if source_ts is None:
+        del value["__source_ts_ms"]
+    else:
+        value["__source_ts_ms"] = source_ts
+    judgement = checker(raw_message("payments", json.dumps(value).encode("utf-8")))
+    assert judgement.payment is None
+    assert [(e["field"], e["reason"], e["record_key"], e["source_ts_ms"]) for e in judgement.errors] == \
+        [("__source_ts_ms", reason, value["payment_id"], None)]
+
+
+def test_error_rows_keep_record_key_and_source_ts(checker):
+    """오류 줄마다 메시지의 키와 변경 시각을 남긴다. 회원은 키를 남기지 않고, 읽지 못한 메시지는 둘 다 비어 있다."""
+    keys = {"payments": "payment_id", "orders": "order_id", "order-items": "order_item_id", "clickstream": "event_id"}
+    with_source_ts = {"payments", "orders", "order-items"}
+    checked = 0
+    for sample in SAMPLES.values():
+        if not sample["expected"]["malformed"]:
+            continue
+        topic, value = sample["kafka"]["topic"], sample.get("value")
+        value = value if isinstance(value, dict) else {}
+        key = value.get(keys[topic]) if topic in keys else None
+        source_ts = value.get("__source_ts_ms") if topic in with_source_ts else None
+        for error in checker(message(sample)).errors:
+            assert (error["record_key"], error["source_ts_ms"]) == (key, source_ts), sample["name"]
+        checked += 1
+    assert checked >= 10
+    assert checker(message(SAMPLES["member_with_pii_column"])).errors[0]["record_key"] is None
+    assert checker(message(SAMPLES["parse_error"])).errors[0]["record_key"] is None
 
 
 def test_mask_sample_hides_long_values_and_limits_length():

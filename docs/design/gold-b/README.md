@@ -163,24 +163,27 @@ s3://clothes-query-datalake/gold_b/
 
 ### ① `payment_events` - 결제 시도 한 건 = 한 줄
 
-`payments` 토픽에서 형식 검사를 통과하고 `__op`가 `c`(새 결제) 또는 `r`(Debezium 시작 전부터 있던 결제, 예: 백필)인 메시지만. 같은 결제가 스냅샷으로 다시 와도 정리 뷰에서 `payment_id`로 걸러진다. 성공·고객 원인 실패·PG 원인 실패를 **모두** 쌓는다 (성공이 있어야 시도 수를, 고객 원인 실패가 있어야 비교 기준을 셀 수 있다).
+`payments` 토픽에서 형식 검사를 통과하고 `__op`가 `c`(새 결제), `r`(Debezium 시작 전부터 있던 결제, 예: 백필), `u`(결제 수정, 2026-10-23 추가)인 메시지. 결제가 수정되면 변경 전후 이벤트를 모두 남기고 덮어쓰지 않는다. 최신 상태는 정리 뷰가 고른다 (「처리 규칙」의 결제 최신 상태). 같은 결제가 스냅샷으로 다시 와도 정리 뷰가 하나만 보여준다. 성공·고객 원인 실패·PG 원인 실패를 **모두** 쌓는다 (성공이 있어야 시도 수를, 고객 원인 실패가 있어야 비교 기준을 셀 수 있다).
 
 | 컬럼 | 타입 | 가져오는 곳 | 의미 | 예시 |
 | --- | --- | --- | --- | --- |
-| `payment_id` | STRING | `payment_id` | 결제 시도 한 번의 고유 번호. 시도마다 새로 붙음. 중복 제거 기준 | `p-01` |
+| `payment_id` | STRING | `payment_id` | 결제 시도 한 번의 고유 번호. 시도마다 새로 붙음. 같은 결제의 이벤트를 묶는 기준 (`payments` 토픽의 메시지 키) | `p-01` |
 | `order_id` | STRING | `order_id` (필수) | 이 결제가 어느 주문에 대한 것인지. 재시도해도 같은 값. 에이전트가 최근 장애의 재시도·피해를 바로 볼 때 | `o-5` |
 | `attempt_no` | INT | `attempt_no` (필수) | 그 주문에서 몇 번째 시도인지. 1이 첫 시도, 2 이상이 재시도 | `1` |
 | `pg` | STRING | `pg` | 결제를 처리한 결제대행사. `PG_A`, `PG_B` 중 하나 | `PG_A` |
 | `status` | STRING | `status` | 이 시도 한 번의 결과. `SUCCESS`, `FAILED` 중 하나 | `FAILED` |
 | `failure_code` | STRING, NULL 허용 | `failure_code` | 실패했다면 그 이유. 성공이면 NULL | `PG_TIMEOUT` |
 | `completed_at` | TIMESTAMP | `completed_at` | 결제 결과가 확정된 시각 (UTC). 탐지가 구간을 묶을 때 기준 | 15:01:20 |
-| `payment_content_hash` | STRING | 업무 필드 9개로 계산 | 결제 내용 지문. 같은 `payment_id`인데 지문이 다르면 내용 충돌. `amount`·`method`·`requested_at`은 컬럼 없이 여기에만 들어간다 | `9f2c…` |
+| `payment_content_hash` | STRING | 업무 필드 9개로 계산 | 결제 내용 지문 (Silver와 같은 함수). 수정 전후 내용이 다른지 볼 때 쓴다. `amount`·`method`·`requested_at`은 컬럼 없이 여기에만 들어간다 | `9f2c…` |
 | `fingerprint_version` | STRING | 지문 함수 | 지문 규칙 버전. 버전이 같은 줄끼리만 지문을 비교한다 | (현지 님과 정함) |
-| `kafka_partition` | INT | Kafka 위치 | 이 메시지가 `payments` 토픽의 몇 번 파티션에 있었는지 (추적용) | `0` |
-| `kafka_offset` | BIGINT | Kafka 위치 | 그 파티션 안에서 몇 번째 메시지였는지 (추적용) | `17920` |
-| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 그때 탐지가 본 숫자를 재현할 때 씀 | 15:02:00 |
+| `kafka_partition` | INT | Kafka 위치 | 이 메시지가 `payments` 토픽의 몇 번 파티션에 있었는지. 같은 결제는 한 파티션에 들어간다 | `0` |
+| `kafka_offset` | BIGINT | Kafka 위치 | 그 파티션 안에서 몇 번째 메시지였는지. 같은 결제의 이벤트 순서 기준 | `17920` |
+| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 그때 탐지가 본 숫자를 재현할 때 씀. 같은 메시지를 여러 번 검사했을 때 가장 늦은 결과를 고를 때도 씀 | 15:02:00 |
+| `cdc_op` | STRING | `__op` | CDC 변경 종류. `c` 새 결제, `r` 스냅샷, `u` 수정 (2026-10-23 추가) | `u` |
+| `source_ts_ms` | BIGINT | `__source_ts_ms` | 원본 DB에서 바뀐 시각 (밀리초). 순서는 Kafka 위치로 정하고, 이 값은 순서 이상 확인에 쓴다 (2026-10-23 추가) | `1792562460500` |
+| `rule_version` | STRING | 형식 검사기 | 이 줄을 만든 규칙표 버전. 같은 메시지를 여러 규칙 버전으로 검사한 이력을 ④와 함께 추적한다 (2026-10-23 추가) | `0.2.0` |
 
-실패 원인 분류(PG / 고객 / unknown), 중복 제거, 충돌 분리는 원장에 하지 않고 정리 뷰에서 한다.
+실패 원인 분류(PG / 고객 / unknown), 최신 상태 고르기, 보류는 원장에 하지 않고 정리 뷰에서 한다.
 
 지문은 형식 검사를 통과한 결제를 쌓을 때 계산한다. 지문 규칙(필드 순서, 시각·NULL·숫자 정규화, 직렬화, 해시 알고리즘)은 공통 모듈 `pipelines/payment_fingerprint.py`에서 현지 님과 정한다 (**미정**, 2단계).
 
@@ -226,7 +229,9 @@ s3://clothes-query-datalake/gold_b/
 | `reason` | STRING | **그 필드의** 오류 사유 | `MISSING_FIELD` |
 | `raw_sample` | STRING, NULL 허용 | 마스킹한 원문 일부. 같은 메시지의 첫 줄에만 넣고 나머지는 NULL | `{"payment_id":"***","pg":"PG_X","status":"FAILED",…` |
 | `rule_version` | STRING | 적용한 규칙표 버전 | `v1.0` |
-| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 15:04:00 |
+| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각. 같은 메시지를 여러 번 검사했을 때 결과의 순서 | 15:04:00 |
+| `record_key` | STRING, NULL 허용 | 메시지의 키. 결제 `payment_id`, 주문 `order_id`, 주문상품 `order_item_id`, 클릭 `event_id` (Silver 키와 같음). 회원과 읽지 못한 메시지는 NULL. 잘못된 결제 이벤트를 결제와 연결할 때 쓴다 (2026-10-23 추가) | `p-08` |
+| `source_ts_ms` | BIGINT, NULL 허용 | 원본 DB에서 바뀐 시각 (`__source_ts_ms`). 없거나 0 이상의 정수가 아니면 NULL. 잘못된 결제 이벤트도 순서 이상을 확인할 수 있게 남긴다 (2026-10-23 추가) | `1792562639800` |
 
 - **오류 하나당 한 행**이다. 한 메시지에 `session_id` 누락과 `article_id` 타입 오류가 함께 있으면 2행이다.
 - 같은 Kafka 메시지에 대해 `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같은 오류는 한 번만 적재한다.

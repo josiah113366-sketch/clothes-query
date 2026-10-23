@@ -120,9 +120,9 @@
   },
   {
     "name": "update_op",
-    "description": "op u (결제 수정). 계약상 오면 안 되는 메시지. 설계대로 c·r만 payment_events에 넣고 이 메시지는 topic_messages에만 남음",
+    "description": "op u (결제 수정). fail_customer_declined의 실패 코드를 바로잡음 (CARD_DECLINED → INSUFFICIENT_BALANCE). 2026-10-23부터 u도 payment_events에 쌓는다",
     "kafka": {"topic": "payments", "partition": 1, "offset": 205, "timestamp": "2026-10-21T06:08:30Z"},
-    "value": {"payment_id": "00000000-4000-8000-0000-0000000000a3", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 12900, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:02:01Z", "completed_at": "2026-10-21T06:02:03Z", "__op": "u", "__source_ts_ms": 1792562910000, "__source_snapshot": "false"},
-    "expected": {"payment_events": false, "malformed": [], "note": "u는 형식 오류로 남기지 않는다 (2026-10-23, 설계대로 c·r만 payment_events)"}
+    "value": {"payment_id": "00000000-4000-8000-0000-0000000000a3", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 12900, "status": "FAILED", "failure_code": "INSUFFICIENT_BALANCE", "requested_at": "2026-10-21T06:02:01Z", "completed_at": "2026-10-21T06:02:03Z", "__op": "u", "__source_ts_ms": 1792562910000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": [], "note": "같은 결제(0a3)의 c 뒤 u. 같은 파티션에서 offset이 뒤라 이 줄이 최신 상태 (2026-10-23 결정)"}
   }
 ]
