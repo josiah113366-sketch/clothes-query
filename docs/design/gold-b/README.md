@@ -31,7 +31,7 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 | --- | --- |
 | 적재 방식 | 원장 쌓기(1분마다) + 정리 뷰. 워터마크·구간 닫기·하트비트 없음 |
 | 실행 | Gold B 적재 잡은 Spark Structured Streaming(1분 트리거, 체크포인트)으로 상시 실행한다. Bronze 지연 수집기는 별도의 작은 프로그램으로 1분마다 돈다 |
-| 입력 | 평소 Kafka만 읽는다. 재처리는 Kafka 보관 기간(3일) 안이면 Kafka, 넘으면 Bronze |
+| 입력 | 평소 Kafka만 읽는다. 재처리는 Kafka 보관 기간(7일, 2026-10-23 #86으로 3일에서 늘어남) 안이면 Kafka, 넘으면 Bronze |
 | Bronze 적재 | S3 Sink 커넥터 (성철 님 확정). Bronze 지연은 수집기가 Kafka에 직접 물어서 잰다 |
 | 구간 묶기·판정 | 주현 님 탐지 규칙에서 (몇 분 단위로 묶을지, 기준값). 탐지 주기는 **미정** (제안 5분) |
 | 판정 가능 구간 | 건수 규칙은 바로 판정, 비율 규칙은 끝난 지 3분 지난 구간만 |
@@ -63,7 +63,7 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 | Bronze 파일 전환 주기 | 성철 님께 확인 | `rotate.schedule.interval.ms = 900000` (15분), `flush.size = 10000` | 정상 지연 기준선 후보는 15분. 성철 님 확인은 유지 |
 | S3 Sink 커넥터 이름 | 성철 님께 확인 | `bronze-s3-sink` (Strimzi `KafkaConnector`, 네임스페이스 `kafka`). 소비자 그룹은 Connect 기본 규칙상 `connect-bronze-s3-sink`로 예상 | 수집기 단계에서 실제 그룹 이름 확인 |
 | Bronze 대상 토픽 | 6개 | 5개 (`clickstream`, `members-events`, `orders`, `order-items`, `payments`). `reviews.raw`는 없음 | 아래 「입력」 참고 |
-| Bronze의 Kafka 위치 | 성철 님께 확인 | 파일에는 메시지 값만 있다. 파일 이름에 파티션과 시작 offset만 있음 (`<토픽>+<파티션>+<시작offset>.json`) | 3일이 지난 구간을 Bronze로 재처리하는 방법은 7단계 전에 정함 |
+| Bronze의 Kafka 위치 | 성철 님께 확인 | 파일에는 메시지 값만 있다. 파일 이름에 파티션과 시작 offset만 있음 (`<토픽>+<파티션>+<시작offset>.json`) | 보관 기간(7일)이 지난 구간을 Bronze로 재처리하는 방법은 7단계 전에 정함 |
 | 오류 토픽(DLQ) | 성철 님께 확인 | S3 Sink에 `errors.tolerance`·DLQ 설정 없음 | 성철 님 확인 유지 |
 | 리뷰 | `reviews.raw` 토픽 | 운영 흐름은 리뷰 시뮬레이터가 S3 `bronze/reviews/`에 바로 쓴다. `reviews.raw`는 실험용 토픽 | 대상 토픽 목록(설정값)에 넣되, 운영에서 비어 있을 수 있음. 민혁 님 확인 |
 | 형식 규칙 파일 | `common/format_rules.yaml` | `docs/contracts/format_rules.yaml`과 읽는 코드 `pipelines/format_rules.py`가 PR #26으로 머지됨 (주문·주문상품·결제만, Silver가 읽음) | 2단계에서 이 파일을 같이 쓰는 방법을 현지 님과 정함 |
@@ -454,7 +454,7 @@ GROUP BY 1, 2;
 | --- | --- | --- |
 | 오프셋 빈틈 | `topic_messages` (모든 메시지가 있는 표. `payment_events`로 보면 정상인데도 빈틈처럼 보임). Gold B가 읽기 시작한 번호부터 검사 | Gold B가 메시지를 놓친 것. 그 시간대를 재처리해서 채움 |
 | 중복 | `topic_messages`에서 같은 (토픽, 파티션, offset). 같은 `payment_id` 중복은 정상이라 신호가 아님 | Gold B가 같은 위치를 두 번 쌓은 것. 그 시간대를 재처리 |
-| 적재 정지 | `loaded_at`, `collected_at` 최댓값 (2분 넘게 멈추면 고장) | 잡을 다시 켬. Kafka 보관(3일)을 넘게 멈췄으면 그 구간만 Bronze로 재처리 |
+| 적재 정지 | `loaded_at`, `collected_at` 최댓값 (2분 넘게 멈추면 고장) | 잡을 다시 켬. Kafka 보관(7일)을 넘게 멈췄으면 그 구간만 Bronze로 재처리 |
 
 점검에서 문제가 나오면 그 시간대의 탐지 결과는 믿지 않고, Gold B를 먼저 고친 뒤 재판정한다. 이 경우는 원인이 이미 드러나서 에이전트 조사가 필요 없다. 수집기가 멈춘 동안의 Bronze 지연 측정값은 다시 만들 수 없어 "측정 없음"으로 남는다.
 
@@ -585,7 +585,7 @@ GROUP BY 1, 2;
 | 경로 | 입력 | 실행 | 쓰기 방식 |
 | --- | --- | --- | --- |
 | 평소 | Kafka 토픽 | 상시 실행 적재 잡 (Spark Structured Streaming, 1분 트리거) | 원장에 추가 |
-| 재처리 (Kafka 보관 3일 안) | Kafka의 해당 위치부터 다시 읽기 | Airflow로 실행하는 재처리 잡 | 해당 시간 폴더를 지우고 다시 채움 |
+| 재처리 (Kafka 보관 7일 안) | Kafka의 해당 위치부터 다시 읽기 | Airflow로 실행하는 재처리 잡 | 해당 시간 폴더를 지우고 다시 채움 |
 | 재처리 (보관 기간 넘음) | Bronze의 해당 시간 구간 | 위와 같음 | 위와 같음 |
 
 **재처리하는 경우와 안 하는 경우**
@@ -611,8 +611,8 @@ GROUP BY 1, 2;
 - **교체 단위는 1시간 폴더다.** 15:10~15:30을 승인해도 15시대(15:00~15:59) 폴더 전체를 다시 채운다. 1분마다 쌓은 파일에는 늦게 온 데이터가 섞여 있고 하루 1회 합치기도 해서 특정 줄만 골라 바꾸면 복잡하고 위험하기 때문이다. 같은 입력으로 다시 계산하므로 문제없던 구간의 결과는 원래와 같다.
 - **재처리 대상:** `payment_events`, `topic_messages`, `malformed_events`. `bronze_lag_snapshots`는 그 시점에만 잴 수 있는 측정값이라 다시 만들지 않는다. `malformed_events`는 이번 재처리의 `rule_version` 줄만 지우고 다시 만들고, 다른 버전 줄은 그대로 남긴다 (예전 판정 이력 보존).
 - **읽기 범위 여유:** 폴더는 이벤트 시각 기준이라, 원본은 앞뒤로 몇 분 여유 있게 읽고 이벤트 시각으로 걸러서 쓴다. 결제는 결과 시각보다 늦게 Kafka에 들어올 수 있다.
-- **Kafka 보관 기간:** 3일이다. 3일 안에 잡아서 고친 구간은 Kafka를 다시 읽고, 그보다 오래된 구간(늦게 발견, 백필)은 Bronze로 다시 채운다.
-- **Bronze에 필요한 것:** 3일이 지난 구간을 Bronze로 같은 결과로 다시 만들려면 Bronze에 Kafka 위치·시각(`topic`, `partition`, `offset`, `timestamp`)과 깨진 메시지 원본이 있어야 한다. 현재 Bronze 파일에는 메시지 값만 있고(파일 이름에 파티션·시작 offset), S3 Sink에 오류 토픽 설정이 없다. Silver·Gold A를 고칠 때도 이 원본이 필요하다.
+- **Kafka 보관 기간:** 7일이다 (2026-10-23 #86으로 3일에서 늘어남, 업무 토픽 `retention.ms` 604800000). 7일 안에 잡아서 고친 구간은 Kafka를 다시 읽고, 그보다 오래된 구간(늦게 발견, 백필)은 Bronze로 다시 채운다.
+- **Bronze에 필요한 것:** 보관 기간(7일)이 지난 구간을 Bronze로 같은 결과로 다시 만들려면 Bronze에 Kafka 위치·시각(`topic`, `partition`, `offset`, `timestamp`)과 깨진 메시지 원본이 있어야 한다. 현재 Bronze 파일에는 메시지 값만 있고(파일 이름에 파티션·시작 offset), S3 Sink에 오류 토픽 설정이 없다. Silver·Gold A를 고칠 때도 이 원본이 필요하다.
 - **교체 후 재판정:** 재처리 잡은 시간 폴더 교체가 끝날 때마다 `reprocess_events`에 `LEDGER_REPLACED`와 실제 교체 범위를 남기고, 마지막에 전체 교체 범위를 결과로 넘긴다. 재처리 DAG는 판정을 직접 부르지 않고, 주현 님 판정 잡이 정해진 주기(미정, 제안 5분)마다 이 줄을 읽어 재판정한다. 교체가 끝나지 않은 폴더는 `LEDGER_REPLACED`가 없으므로 재판정되지 않는다.
 - **자동 재시도:** 재처리 잡이 일시적으로 실패하면 Airflow가 같은 승인 범위 안에서 2번까지 다시 시도한다. 교체는 처음부터 다시 해도 결과가 같아서 안전하다. 계속 실패하면 `FAILED`로 멈추고 사람이 다시 승인한다. 범위가 바뀌면 새로 승인받는다.
 - **한 번에 하나씩:** 같은 시간 폴더를 두 재처리가 동시에 건드리지 않도록 재처리는 한 번에 하나씩 돌린다. 같은 시간대를 순서대로 두 번 재처리하면 재판정도 두 번 되고, 이상 이력은 회차별로 쌓여 문제없다.
@@ -683,12 +683,13 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 현지 | Silver 재처리 줄 쓰는 법(실패는 `FAILED`, 범위, `detail`)과 `gold_b/reprocess_events/` 쓰기 권한 | 같은 표를 두 경로가 함께 쓰기 | 필요 |
 | 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 완료 (#72) |
 | 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 완료 (#71) |
+| 주현 | 승인 화면 `kafka_retention_days`(지금 3)를 Kafka 보관 7일(#86)에 맞추기 | 3~7일 전 구간에 "보관 기간 밖" 경고가 잘못 붙음 (재처리 잡은 7일 기준) | 필요 |
 | 성철 | Bronze 적재 방식 | 지연 측정 방식 결정 | 완료 (S3 Sink) |
 | 성철 | S3 Sink 커넥터 이름, 소비자 그룹 이름 | 수집기가 처리 위치를 물어볼 대상 | 저장소상 `bronze-s3-sink`. 소비자 그룹 확인 필요 |
 | 성철 | 파일 전환 주기 | 정상일 때의 지연 기준선 | 저장소상 15분. 확인 필요 |
 | 성철 | Kafka Connect REST 주소 | 커넥터 상태 조회 | 필요 |
 | 성철 | 오류 토픽(DLQ) 이름과 S3 저장 여부 | 깨진 원본이 있어야 오래된 구간과 Silver를 고칠 수 있음 | 저장소상 설정 없음. 필요 |
-| 성철 | Bronze에 Kafka 위치·시각 저장 여부, 저장 형식(JSON/Parquet) | 3일 넘은 구간을 Bronze로 재처리할 때 필요 | 저장소상 값만 JSON으로 저장. 필요 |
+| 성철 | Bronze에 Kafka 위치·시각 저장 여부, 저장 형식(JSON/Parquet) | 보관 기간(7일) 넘은 구간을 Bronze로 재처리할 때 필요 | 저장소상 값만 JSON으로 저장. 필요 |
 | 성철 | 결제 데이터 계약, 결과 시각을 정하면 바로 저장 | 중복 제거와 재시도 구분, 늦은 데이터 방지 | 필요 |
 | 성철 | 시나리오별 시연 모드(3배·10배), 평소 변동 | 탐지 기준과 허용 지연 | 필요 |
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
@@ -698,7 +699,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 현지 | Silver 격리 기준 일치 | 같은 메시지를 다르게 판단하지 않기 | 필요 |
 | 현지 | 격리 해제와 Silver 재처리 방식 (upsert / 구간 교체), Silver 처리 범위 기록 | 같은 승인으로 Silver·Gold A를 다시 돌리기 | 필요 |
 | 현지 | `payment_attempts` 이름 겹침, Gold A 데이터셋 이름 | 발표와 문서에서 헷갈리지 않기 | 필요 |
-| 재영 | Kafka 보관 기간, 적재 잡 실행 방식 | 재처리 범위, 실행 환경 | 완료 (3일, Spark Structured Streaming) |
+| 재영 | Kafka 보관 기간, 적재 잡 실행 방식 | 재처리 범위, 실행 환경 | 완료 (3일 → 2026-10-23 #86으로 7일, Spark Structured Streaming) |
 | 재영 | 저장소 폴더 규칙, 브랜치·PR 규칙 | 파일을 어디에 둘지 | Silver와 같이 `pipelines/gold_b/`, `pipelines/gold-b` (사용자 결정) |
 | 재영 | S3 폴더(`gold_b/`), Athena 사용, Glue 데이터베이스 관리 방식(Terraform 여부) | 테이블 이름이 실제로 생기려면 필요 | 필요 |
 | 재영 | DDL·설계에 버킷 이름을 그대로 둘지, 자리표시자로 바꿀지 (`connectors/bronze-s3-sink.yaml`에는 이미 있음) | 공개 레포 규칙 | 필요 |
@@ -758,7 +759,7 @@ pipelines/gold_b/
 
 - [x]  주현 님 질문 답변 (재판정 연결, 이력 표 단계, 재시도 2번, 단계 추가)
 - [x]  Bronze 적재 방식 확인 (S3 Sink)
-- [x]  Kafka 보관 기간 확인 (3일)
+- [x]  Kafka 보관 기간 확인 (3일 → 2026-10-23 #86으로 7일)
 - [x]  적재 잡 실행 방식 확정 (Spark Structured Streaming)
 - [x]  저장소 구조와 브랜치·PR 규칙 (Silver와 같이)
 - [ ]  노션 기획서를 이 문서로 교체
@@ -833,7 +834,7 @@ pipelines/gold_b/
 
 - [x]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
 - [x]  승인 범위를 시간 폴더 단위로 넓히기
-- [ ]  원본 선택: 3일 안은 Kafka(해당 offset부터), 넘으면 Bronze (Kafka는 완료. Bronze는 Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정한 뒤)
+- [ ]  원본 선택: 보관 기간(7일) 안은 Kafka(해당 offset부터), 넘으면 Bronze (Kafka는 완료. Bronze는 Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정한 뒤)
 - [x]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
 - [x]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
 - [x]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록

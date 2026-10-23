@@ -15,8 +15,8 @@ pytest.importorskip("pyarrow")
 
 import pyarrow.parquet as pq  # noqa: E402
 
-from pipelines.gold_b.jobs.reprocess import (ReprocessError, Request, TopicMissing,  # noqa: E402
-                                             hour_folders, main, next_request, read_events, run)
+from pipelines.gold_b.jobs.reprocess import (Options, ReprocessError, Request, TopicMissing,  # noqa: E402
+                                             check_request, hour_folders, main, next_request, read_events, run)
 from pipelines.gold_b.ledger import (EVENT_TIME, TABLE_COLUMNS, Judgement, KafkaMessage,  # noqa: E402
                                      LocalStore, hour_folder, hour_of, message_rows, to_arrow)
 from test_ddl import _utc, load_samples, parse_ddl, stand_in_fingerprint  # noqa: E402
@@ -257,8 +257,8 @@ def test_refuses_before_start(tmp_path, case):
     req, now = request(), NOW
     if case == "unfinished":            # 06시 폴더 끝 07:00 + 10분이 아직 안 됨
         now = datetime(2026, 10, 21, 7, 5, tzinfo=UTC)
-    elif case == "out_of_retention":    # 05:50부터 읽어야 하는데 72시간이 지남
-        now = datetime(2026, 10, 24, 6, 0, tzinfo=UTC)
+    elif case == "out_of_retention":    # 05:50부터 읽어야 하는데 7일이 지남
+        now = datetime(2026, 10, 28, 6, 0, tzinfo=UTC)
     elif case == "rule_version":
         req = request(rule_version="v9")
     else:
@@ -272,6 +272,15 @@ def test_refuses_before_start(tmp_path, case):
     assert json.loads(events(store)[0]["detail"])["retryable"] is False
     assert kafka.reads == 0
     assert ledger_files(tmp_path) == before
+
+
+def test_kafka_retention_is_seven_days():
+    """Kafka 보관 기간은 7일이다 (#86). 3~7일 전 구간도 Kafka에서 다시 읽고, 7일이 넘으면 거부한다."""
+    assert Options().retention == timedelta(days=7)
+    assert check_request(request(), SampleChecker(), Options(), datetime(2026, 10, 27, 6, 0)) == [
+        datetime(2026, 10, 21, 6)]   # 6일 전 (예전 72시간 기준이면 거부)
+    with pytest.raises(ReprocessError):
+        check_request(request(), SampleChecker(), Options(), datetime(2026, 10, 28, 6, 0))
 
 
 class CrashOnceStore(LocalStore):
