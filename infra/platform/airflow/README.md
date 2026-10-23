@@ -8,7 +8,7 @@
 - 내장 PostgreSQL·Redis·PgBouncer·triggerer·StatsD·추가 ALB·PVC는 사용하지 않는다. `workers.celery.persistence`도 꺼서 LocalExecutor scheduler에 기본 PVC가 생기지 않게 한다. 업데이트 전략은 Recreate라 업데이트 중 중단될 수 있다.
 - [prepare_metadata.py](prepare_metadata.py): 일회성 비공개 Pod에서 전용 DB·계정만 생성·검증한다. 역할은 superuser/DB 생성/역할 생성/복제 권한이 없고 연결 한도는 16이다. 기존 업무 테이블을 변경하지 않는다. RDS CA와 `sslmode=verify-full`을 사용한다.
 - metadata connection·Fernet·API secret·JWT·Simple Auth 비밀번호를 각각 기존 Kubernetes Secret 참조로 공급한다. 원본은 Secrets Manager에서 비공개 관리한다. 실제 값·계정·엔드포인트·이미지 digest·버킷은 공개 파일에 쓰지 않는다.
-- task 로그는 기존 S3의 `airflow-logs/`로 보낸다. `workload-access`의 scheduler 역할은 해당 prefix 읽기/쓰기, API 역할은 읽기만 허용한다. 이 두 binding은 기존 비공개 tfvars에도 유지해야 한다. 새 CloudWatch 로그 수집은 추가하지 않는다.
+- task 로그는 기존 S3의 `airflow-logs/`로 보낸다. `workload-access`의 scheduler 역할은 해당 prefix 읽기/쓰기, API 역할은 읽기만 허용한다. 두 binding은 `workload-access/deployment.auto.tfvars.json`에서 공유한다. 일부 binding만 담은 local var-file은 map 전체를 덮어써 다른 역할 삭제를 계획할 수 있으므로 전체 plan을 확인한다. 2026-10-23 실제 누락 복구와 observer 로그 API 검증은 [복구 기록](../../../docs/tasks/infra-airflow-log-access-restore.md)을 참고한다. 새 CloudWatch 로그 수집은 추가하지 않는다.
 - [agent-pod-rbac.yaml](agent-pod-rbac.yaml): scheduler에 `agent` namespace Pod 생성·조회·정리와 로그 읽기만 허용한다. Secrets 읽기나 다른 namespace Pod 생성은 허용하지 않는다. 판정·조사 Pod는 기존 `agent/detection-job`, `agent/investigation-agent` ServiceAccount와 각각의 EKS Pod Identity를 사용한다.
 
 ## 설치 순서
