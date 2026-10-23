@@ -243,3 +243,13 @@
 - 네트워크를 끈 로컬 Airflow 이미지에서 실제 DAG 파싱·Pod 렌더링을 실행했다. Spark 설정을 인프라 생성 함수 출력과 비교하고, 제출기 CPU/메모리·환경 변수 및 toleration/template 연결 일치를 확인했다. 인프라의 executor.instances=1은 동적 할당 initial/min=1 설정을 사용하므로 중복 추가하지 않았다.
 - 변경 DAG Ruff(py310)·git diff --check 통과. 업무 집계 로직은 변경하지 않았고 전체 Spark 집계 재시험은 수행하지 않았다. EKS 실행·이미지 빌드·push·커밋은 하지 않았다.
 - 대기 50분/DAG 1시간, 자동 재시도 0회, 입력 크기 한도는 이번 자원 정렬과 별개의 기존 업무 기본값으로 남는다. 인프라가 확정한 값이라고 간주하지 않는다.
+
+### 발행된 기본 이미지 결합 및 업무 이미지 검증 (2026-10-23)
+
+- PR #82가 2026-10-23 머지됐음을 확인했다. 이후 로컬 자원 정렬·공개 명세 커밋은 아직 원격 반영 전이므로, 업무 소스 커밋 `19027bb219427f04d7f1f8105babd10cc62cb01b`로 후보 이미지를 빌드했다. main 최신 코드로 발행했다고 표시하지 않는다.
+- SPARK_IMAGE는 재영이 발행한 spark-base digest `sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f`로 고정했다. 플랫폼은 linux/amd64, 로컬 태그는 `clothes-query-pipelines:19027bb`다.
+- 코드·규칙·요구 패키지 파일 18개 SHA-256, code_ref, UID 185, Python 3.10.12/Spark 4.2.0/Java 21, 패키지 고정값, 연결 JAR 체크섬·필수 클래스 로딩과 합계 45를 확인했다. 기존 JAR 4개는 재사용하고 spark-hadoop-cloud 4.2.0만 추가했다.
+- 같은 이미지 내부 업무 코드로 읽기 전용 고정 거래 입력을 처리했다. Driver heap 512m, local[2]에서 정상 주문 1건·성공 금액 7,900원·판매 수량 1개가 독립 기대값과 일치했다. Silver/Gold PASS, 금액 검사 PASS 1건, 보류 0건이다. EKS 분산 실행·실제 S3 쓰기·운영 메모리 제한 검증은 아니다.
+- 최초 네트워크 격리 검사에서는 컨테이너 호스트 이름 해석 실패로 Spark가 시작되지 않았다. 검사 환경에 SPARK_LOCAL_IP=127.0.0.1을 지정한 재실행은 통과했다. 운영 코드·이미지 설정을 변경한 것은 아니다.
+- 로컬 이미지 식별자는 `sha256:e82e13dfc0adee1c13784339a52fab29a356f5a63e78002f67274b55c1747dbf`, 크기는 2,143,589,083바이트다. 이 값은 아직 업무 ECR에 발행·확인한 digest가 아니다.
+- 증거는 Git 제외 `pipelines/gold_a/.local/image-19027bb/`의 build.log, preflight.log, trade-normal.log, image-inspect.json, result/normal-validation.json에 보관했다. 원격 코드 push·ECR 업무 이미지 push·EKS 실행은 하지 않았다. 원격 코드 반영과 발행 승인이 후속이다.
