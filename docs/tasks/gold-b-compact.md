@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-compact
 
-> 상태: 진행 중 · 브랜치: `pipelines/gold-b-compact` (`pipelines/gold-b-reprocess` 위에서 갈라짐) · 다음 작업: DAG (재영 님 규칙 확인 후)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-compact` (`pipelines/gold-b-reprocess` 위에서 갈라짐) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 남은 일: DAG (재영 님)
 
 ## 목표
 
@@ -13,7 +13,7 @@
 
 ## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
 
-- 원장 공통 도구(`ledger.py`)를 쓰므로 `pipelines/gold-b-reprocess` 위에서 갈라졌다. push는 #36과 재처리 브랜치가 머지된 뒤, 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
+- 원장 공통 도구(`ledger.py`)를 쓰므로 `pipelines/gold-b-reprocess` 위에서 갈라졌다. 커밋을 옮기지 않고, 최신 `main`을 병합한 재처리 브랜치를 이 브랜치에 병합했다 (2026-10-23). PR은 `pipelines/gold-b-reprocess`가 머지된 뒤에 머지한다.
 - 커밋 메시지에 Claude 공동 작성자 줄을 넣지 않는다.
 
 ## 정한 기본값 (설계에 없는 세부, 2026-10-21 사용자에게 알리고 진행)
@@ -46,6 +46,7 @@
 ## 완료 확인
 
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 40개)
+- [x] 재처리 브랜치 병합 뒤 `pipelines/gold_b/tests` 59개, `pipelines` 144개 통과 (실행 입구 시험 포함)
 - [x] 합친 뒤 폴더의 줄(`loaded_at` 포함)이 합치기 전과 같은지, 같은 위치 두 줄도 남는지
 - [x] 중간에 멈춘 뒤 다시 돌려도 줄이 두 번 들어가지 않는지
 
@@ -66,4 +67,8 @@
   - `dags/gold_b_compact.py`(하루 1회, 재처리 잡과 한 번에 하나씩)는 재영 님 규칙을 확인한 뒤 만든다. 재처리와 동시에 돌면 같은 폴더가 꼬일 수 있어서 DAG에서 꼭 막아야 한다.
   - 지난날 폴더에 늦게 들어온 파일(늦은 결제, 백필)은 그 날을 다시 넘겨야 합쳐진다. DAG가 어제만 볼지 며칠을 볼지 정해야 한다.
   - 실제 S3에서는 돌려 보지 않았다.
-  - push는 #36과 재처리 브랜치가 머지된 뒤 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.
+- **보완 (2026-10-23): 재처리 브랜치 병합과 실행 입구**
+  - 최신 `main`을 병합한 재처리 브랜치(poller 포함)를 병합했다. 충돌은 `ledger.py`(합치기의 메타데이터 쓰기와 재처리의 파일 목록 `any_name`이 같은 곳), `jobs/README.md`, `docs/BRANCHES.md`였고 양쪽을 모두 살렸다. 합치기는 원장 폴더만 다루므로 파일 목록은 지금처럼 `.parquet`만 본다.
+  - 실행 입구 `python -m pipelines.gold_b.jobs.compact`를 더했다. 날짜를 주지 않으면 어제(UTC)를 합치고, 성공하면 0, 실패하면 1이다. S3 오류는 버킷 이름이 들어 있을 수 있어 종류만 로그에 남긴다.
+  - `jobs/README.md`에 DAG 명세를 적었다: 하루 1번 UTC 00:30 이후, 한 번에 하나. 재처리 DAG와 같은 Airflow pool(슬롯 1개)에 넣자는 것은 제안이다.
+  - 시험 2개를 더했다 (어제 기본값, 경로 없음·안 끝난 날 거부). `pipelines/gold_b/tests` 59개, `pipelines` 144개 통과.
