@@ -1,5 +1,5 @@
 # 업무 토픽 5개 → S3 bronze_v2/. bronze-s3-sink 와 같고, 줄마다 Kafka 위치·시각(kafka_topic, kafka_partition,
-# kafka_offset, __kafka_timestamp)을 넣는다. Gold B 재처리가 원장 줄을 위치로 찾고 Kafka 시각으로 시간 폴더를 정한다.
+# kafka_offset, kafka_timestamp, kafka_timestamp_type)을 넣는다. Gold B 재처리가 원장 줄을 위치로 찾고 Kafka 시각으로 시간 폴더를 정한다.
 # 새 이름이라 컨슈머 그룹(connect-bronze-s3-sink-v2)도 새것이고, Kafka에 남은 가장 오래된 메시지부터 다시 쓴다.
 # 선행: workload-access 의 bronze_v2/ 쓰기, Helm values 의 그룹 ACL. 순서는 infra/platform/kafka/cdc-orders/README.md "6. Bronze v2".
 apiVersion: kafka.strimzi.io/v1
@@ -36,10 +36,21 @@ spec:
     s3.compression.type: none
     # 열린 파티션(5토픽 x 3 = 15개)마다 이 크기의 버퍼를 잡는다. 기본 25MB면 Connect 힙(512MB)에 너무 크다. 5MB는 최소값.
     s3.part.size: "5242880"
-    # 줄마다 Kafka 위치·시각. 값이 JSON 객체가 아니면 이 변환이 실패해 작업이 멈춘다(업무 토픽 5개는 모두 객체다).
-    transforms: kafkaMeta
+    # 줄마다 Kafka 위치·시각 (docs/contracts/README.md 8절 "Bronze → Silver 원본 추적 입력"). 값이 JSON 객체가 아니면
+    # 이 변환이 실패해 작업이 멈춘다(업무 토픽 5개는 모두 객체다).
+    # 1) 위치와 레코드 시각(ms) 2) 시각을 시간대 포함 ISO 문자열(UTC, ...Z)로 3) 시각 종류.
+    # 시각 종류는 토픽 설정(message.timestamp.type)이라 토픽의 모든 레코드가 같다. 업무 토픽은 기본값 CreateTime 이다
+    # (verify/check.py 가 values 에 다른 값이 없는지 확인한다). 바꾸면 이 값도 바꾼다.
+    transforms: kafkaMeta,kafkaTime,kafkaTimeType
     transforms.kafkaMeta.type: org.apache.kafka.connect.transforms.InsertField$Value
     transforms.kafkaMeta.topic.field: kafka_topic
     transforms.kafkaMeta.partition.field: kafka_partition
     transforms.kafkaMeta.offset.field: kafka_offset
-    transforms.kafkaMeta.timestamp.field: __kafka_timestamp
+    transforms.kafkaMeta.timestamp.field: kafka_timestamp
+    transforms.kafkaTime.type: org.apache.kafka.connect.transforms.TimestampConverter$Value
+    transforms.kafkaTime.field: kafka_timestamp
+    transforms.kafkaTime.target.type: string
+    transforms.kafkaTime.format: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    transforms.kafkaTimeType.type: org.apache.kafka.connect.transforms.InsertField$Value
+    transforms.kafkaTimeType.static.field: kafka_timestamp_type
+    transforms.kafkaTimeType.static.value: CreateTime

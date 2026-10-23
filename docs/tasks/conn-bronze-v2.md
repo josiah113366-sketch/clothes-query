@@ -10,13 +10,13 @@ Bronze 줄마다 Kafka 위치(토픽·파티션·offset)와 Kafka 시각을 남�
 
 - **한 브랜치에 `connectors/`와 `infra/`를 같이 담는다.** 관련 담당 모두 동의했다(PR 한 영역 규칙의 예외)
 - 기존에 쌓인 것도 다시 만든다: **새 Sink로 Kafka에 남은 메시지를 처음부터** 쓴다. 기존 Sink의 offset을 되감지 않는다(옛 파일과 섞임)
-- 경로 `bronze_v2/<토픽>/`(최상위). 칸 이름은 Gold B 담당안 그대로: `kafka_topic`, `kafka_partition`, `kafka_offset`, `__kafka_timestamp`
+- 경로 `bronze_v2/<토픽>/`(최상위). 필드는 `docs/contracts/README.md` 8절 그대로: `kafka_topic`, `kafka_partition`, `kafka_offset`, `kafka_timestamp`(시간대 포함 ISO), `kafka_timestamp_type`(`CreateTime`). Gold B 담당의 처음 안(`__kafka_timestamp`, ms)은 계약·Silver 코드·Gold B 원장 이름과 맞춰 대체했다
 - 5개 토픽 모두(clickstream 포함). 파일 전환 15분 → 5분은 이번에 하지 않는다
 - 시뮬레이터는 멈추지 않는다
 
 ## 만드는 것
 
-- `connectors/bronze-s3-sink-v2.yaml`: 기존 Sink + `topics.dir: bronze_v2` + `InsertField$Value`
+- `connectors/bronze-s3-sink-v2.yaml`: 기존 Sink + `topics.dir: bronze_v2` + `InsertField$Value`·`TimestampConverter$Value`·고정값 `InsertField$Value`
 - `infra/platform/kafka/cdc-orders-values.yaml`: Connect·Kafka UI의 그룹 ACL `connect-bronze-s3-sink-v2`, lag exporter 정규식
 - `infra/stacks/workload-access/deployment.auto.tfvars.json`, `cdc-orders/workload-access.tfvars.example`: Connect 역할에 `bronze_v2/` 쓰기
 - `infra/platform/kafka/verify/check.py`: v2가 기존 Sink와 경로·변환만 다른지 확인

@@ -108,14 +108,25 @@ def check_business_connectors(connector_schema, values):
     v2 = docs["bronze-s3-sink-v2"]
     meta = {k: v for k, v in v2.items() if k.startswith("transforms")}
     assert {k: v for k, v in v2.items() if k not in meta} == {**sink, "topics.dir": "bronze_v2"}
+    # Field names and types follow docs/contracts/README.md section 8 (Bronze -> Silver source trace).
     assert meta == {
-        "transforms": "kafkaMeta",
+        "transforms": "kafkaMeta,kafkaTime,kafkaTimeType",
         "transforms.kafkaMeta.type": "org.apache.kafka.connect.transforms.InsertField$Value",
         "transforms.kafkaMeta.topic.field": "kafka_topic",
         "transforms.kafkaMeta.partition.field": "kafka_partition",
         "transforms.kafkaMeta.offset.field": "kafka_offset",
-        "transforms.kafkaMeta.timestamp.field": "__kafka_timestamp",
+        "transforms.kafkaMeta.timestamp.field": "kafka_timestamp",
+        "transforms.kafkaTime.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+        "transforms.kafkaTime.field": "kafka_timestamp",
+        "transforms.kafkaTime.target.type": "string",
+        "transforms.kafkaTime.format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "transforms.kafkaTimeType.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.kafkaTimeType.static.field": "kafka_timestamp_type",
+        "transforms.kafkaTimeType.static.value": "CreateTime",
     }
+    # The static CreateTime is only true while no business topic overrides the timestamp type.
+    for topic in values["topics"]:
+        assert "message.timestamp.type" not in str(topic) and "timestampType" not in topic, topic["name"]
     assert not any(k.startswith(("aws.", "s3.credentials")) for k in sink), "S3 credentials come from Pod Identity"
     prepare = (REPO / "connectors" / "cdc-prepare.sql").read_text(encoding="utf-8")
     publication = re.search(r"CREATE PUBLICATION cdc_pub FOR TABLE ([^;]+);", prepare).group(1)

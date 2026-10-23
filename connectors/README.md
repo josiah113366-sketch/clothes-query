@@ -146,7 +146,19 @@ v2는 `bronze-s3-sink`와 설정이 같고 두 가지만 다르다(`infra/platfo
 | 값 | v2 | 이유 |
 |---|---|---|
 | `topics.dir` | `bronze_v2` | 옛 파일과 섞이지 않게 경로를 나눈다. 경로는 `bronze_v2/<토픽>/year=YYYY/month=MM/day=DD/<토픽>+<파티션>+<시작offset>.json` |
-| `transforms` | `InsertField$Value`: `kafka_topic`, `kafka_partition`, `kafka_offset`, `__kafka_timestamp` | 줄마다 Kafka 위치·시각(ms, UTC). 이름은 Gold B 담당이 정했다 |
+| `transforms` | `InsertField$Value` → `TimestampConverter$Value` → `InsertField$Value`(고정값) | 줄마다 Kafka 위치·시각. 필드는 `docs/contracts/README.md` 8절 "Bronze → Silver 원본 추적 입력"을 따른다(아래 표) |
+
+| 필드 | 값 | 예 |
+|---|---|---|
+| `kafka_topic` | 토픽 이름 | `payments` |
+| `kafka_partition` | 파티션 (0 이상 정수) | `0` |
+| `kafka_offset` | 파티션 안의 위치 (0 이상 정수) | `1234` |
+| `kafka_timestamp` | Kafka 레코드 시각, 시간대 포함 ISO 문자열(UTC, ms) | `2026-10-23T05:26:41.070Z` |
+| `kafka_timestamp_type` | 레코드 시각의 종류 | `CreateTime` |
+
+- `kafka_timestamp`는 Kafka 레코드 시각이다. 값 안의 `__source_ts_ms`(DB 커밋 시각)나 `completed_at`(업무 시각)과 다르다. Gold B 원장의 `kafka_timestamp`와 같은 값이다.
+- `kafka_timestamp_type`은 토픽 설정(`message.timestamp.type`)이라 토픽의 모든 레코드가 같다. 업무 토픽은 기본값 `CreateTime`(보낸 쪽이 정한 시각, 브로커 도착 시각이 아님)이라 고정값으로 넣는다. 토픽 설정을 바꾸면 이 값도 바꾼다(`verify/check.py`가 values에 다른 값이 없는지 확인).
+- Gold B 담당의 처음 요청은 `__kafka_timestamp`(ms)였으나, 계약 문서·Silver 코드(`pipelines/silver/common.py`의 `kafka_reference`)·Gold B 원장이 이미 `kafka_timestamp`를 쓰므로 계약 쪽으로 맞췄다(2026-10-23).
 
 - 이름이 새것이라 컨슈머 그룹 `connect-bronze-s3-sink-v2`도 새것이다. Sink는 처음 읽는 그룹을 가장 오래된 메시지부터 읽으므로 **Kafka에 남은 메시지를 처음부터 다시 쓴다**(offset을 되감는 작업 없음). 다 따라잡으면 옛 Sink처럼 끝에서 따라간다.
 - Kafka 보관 기간보다 오래돼 이미 지워진 메시지는 v2에 없다. 그런 날짜는 옛 `bronze/`에만 있다.

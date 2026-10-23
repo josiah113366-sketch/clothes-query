@@ -145,7 +145,7 @@ kubectl get kafkaconnector -n kafka
    kubectl get kafkaconnector -n kafka
    ```
    Kafka UI → Consumers → `connect-bronze-s3-sink-v2`의 lag가 줄어들다 0 근처에 머물면 따라잡은 것이다. 그동안 Connect Pod 재시작이 없는지 본다(Sink 두 개라 버퍼가 두 배다).
-5. **확인**: `bronze_v2/payments/...` 파일 한 줄에 `kafka_topic`, `kafka_partition`, `kafka_offset`, `__kafka_timestamp`가 있고, 파티션별 첫 파일 이름의 offset이 Kafka의 가장 오래된 offset과 같다.
+5. **확인**: `bronze_v2/payments/...` 파일 한 줄에 `kafka_topic`, `kafka_partition`, `kafka_offset`, `kafka_timestamp`(ISO, `...Z`), `kafka_timestamp_type`(`CreateTime`)이 있고, 파티션별 첫 파일 이름의 offset이 Kafka의 가장 오래된 offset과 같다.
 6. **옛 Sink 정리 (읽는 쪽이 옮긴 뒤)**: `kubectl delete kafkaconnector bronze-s3-sink -n kafka`. 옛 `bronze/` 객체와 `bronze/` 권한은 남긴다. values의 옛 그룹 이름은 별도 PR에서 뺀다.
 
 ## Kafka UI
