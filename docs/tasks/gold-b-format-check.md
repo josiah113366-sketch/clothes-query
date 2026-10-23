@@ -97,3 +97,8 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
     - Python 3.10.12 컨테이너에 PyPI에서 pyarrow 25.0.1(50.1MB)·PyYAML 6.0.3·pytest 9.1.1을 받아 (사용자 허락, 컨테이너 안에만 설치하고 지움) `pipelines/gold_b/tests` 126개 통과. ingest·compact까지 합친 상태(커밋하지 않은 시험용 병합)에서는 Gold B 시험 139개 통과. 처음 돌릴 때 설계 문서를 컨테이너에 넣지 않아 `test_views.py` 5개가 실패했고, 3.12에서도 같게 실패해 Python 버전 문제가 아님을 확인한 뒤 설계 문서를 넣어 다시 돌렸다.
     - `confluent-kafka` 2.16.0의 3.10 설치는 확인하지 않았다 (시험은 가짜 Kafka를 써서 필요 없음).
   - **다음 할 일:** `pipelines/gold-b-ingest`에 반영 (배포 설명을 팀 기본 Spark 이미지 기준으로), Gold B Dockerfile (새 브랜치).
+- **보완 (2026-10-23): Kafka 보관 7일**
+  - main의 #86(재영 님)이 업무 토픽 5개의 Kafka 보관 기간을 3일에서 7일로 늘렸다 (실제 환경 적용). 재처리 잡의 보관 기준(`Options.retention`)을 72시간에서 7일로 바꿨다. 3~7일 전 구간도 이제 Kafka에서 다시 읽는다.
+  - 시험: 보관 기간 밖 거부 시험의 시각을 7일 뒤로 옮기고, 6일 전 구간은 받고 7일이 넘으면 거부하는 시험을 더했다. `pipelines/gold_b/tests` 127개 통과 (Python 3.12).
+  - 문서: 설계 문서, `jobs/README.md`, 수집기 README의 Kafka 보관 3일(72시간)을 7일로 고쳤다. 재처리 작업 지시서의 기본값 줄에 바뀐 것을 적었다.
+  - 승인 화면(`agent/approval/approval.py`)의 `kafka_retention_days`는 아직 3이라, 3~7일 전 구간에 "보관 기간 밖" 경고가 붙는다. 주현 님 코드라 고치지 않고 설계 문서 팀원 확인 표에 요청을 적었다.
