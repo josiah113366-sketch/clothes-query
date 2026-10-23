@@ -1,6 +1,10 @@
 # Kafka 7일 보관
 
-상태: 적용 및 복구 검증 완료 · 브랜치: `infra/kafka-retention-week`
+상태: 적용 및 복구 검증 완료 · 독립 브랜치: `infra/kafka-retention-only`
+
+2026-10-23 사용자가 7일 변경만 먼저 머지 가능한 형태로 분리하도록 요청했다. origin/main 083931f에서 기존 Kafka 커밋 60850a7만 가져왔다. docs/BRANCHES.md 충돌은 이 Kafka 브랜치 한 줄만 남겨 해결했으며, 인프라 알림·모니터링·Argo CD·Spark 변경은 포함하지 않는다. 아래 적용 결과는 앞서 실환경에 반영했던 작업 이력이고, 이번 분리 작업에서 클러스터를 재배포하지 않는다.
+
+독립 브랜치에서 Helm lint, standard/single-node/CDC/Sink/pipeline/metrics 렌더, Strimzi 1.3.0 CRD 검사 및 잘못된 입력 35개 거부 검사가 통과했다. main 대비 변경은 Kafka 코드·설정·검사 7개와 작업/브랜치 문서 2개뿐이다. push·PR·머지는 아직 하지 않았다.
 
 사용자가 2026-10-23 보관 기간을 72시간에서 1주일로 늘리도록 요청했다. 디스크는 20GiB로 유지한다. 변경 전 실제 Kafka PVC 사용률은 9%(약 1.75GiB)였으며 이것만으로 향후 7일분 용량을 보장하지 않는다.
 
