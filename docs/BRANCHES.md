@@ -199,6 +199,7 @@ gitGraph
 | `pipelines/gold-b-image` | [gold-b-image.md](tasks/gold-b-image.md) | 머지됨 (#98) | 2026-10-24 |
 | `pipelines/gold-b-reprocess-by-message` | [gold-b-reprocess-by-message.md](tasks/gold-b-reprocess-by-message.md) | 머지됨 (#99) | 2026-10-24 |
 | `pipelines/gold-b-dags` | [gold-b-dags.md](tasks/gold-b-dags.md) | 검토 대기 | |
+| `pipelines/gold-b-bronze-reprocess` | [gold-b-bronze-reprocess.md](tasks/gold-b-bronze-reprocess.md) | 진행 중 | |
 
 ### gold-a
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
