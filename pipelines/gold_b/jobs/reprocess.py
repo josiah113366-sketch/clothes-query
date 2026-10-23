@@ -6,9 +6,10 @@
 
 run() 한 번에 하는 일
   1. 승인 범위를 UTC 1시간 폴더로 넓힌다 (끝은 포함하지 않음).
-  2. 시작 전 확인: 형식 검사 규칙 버전, 안 끝난 폴더, Kafka 보관 기간. 걸리면 FAILED (다시 돌려도 소용없음).
+  2. 시작 전 확인: 형식 검사 규칙 버전, 안 끝난 폴더, Kafka 보관 기간(Bronze 위치가 없을 때만). 걸리면 FAILED (다시 돌려도 소용없음).
   3. reprocess_events에 STARTED를 쓴다.
   4. 그 시간대에 Kafka에 들어온 메시지(대상 메시지)를 한 번에 다시 읽고 검사한다. 앞뒤 여유 시간은 더 읽지 않는다.
+     Kafka 보관 기간(7일)이 지난 시간 폴더는 Bronze v2 파일에서 메시지를 다시 만든다 (폴더마다 시각으로 고름).
      대상 메시지마다 새 줄과, 옛 결과·새 결과가 있는 시간 폴더를 메시지로 정한다 (②④는 Kafka 시각, ①은 결제 시각).
      결제 시각 폴더는 승인 범위 밖일 수 있다 (예: 다음 날 들어온 결제 수정). 범위 밖 폴더는 결과가 바뀌는 결제가 있을 때만 고친다.
   5. (가) 검사 결과(①·④) 새 줄을 모든 폴더에 먼저 더한다. (나) 폴더마다 대상 메시지의 옛 결과를 지우고 파일 하나로 정리한 뒤
@@ -19,7 +20,7 @@ run() 한 번에 하는 일
 next_request()는 poller다. reprocess_events를 읽어 지금 돌릴 승인 요청 하나를 고른다 (source가 KAFKA·BRONZE인 것만,
 승인이 가장 이른 것부터). Airflow DAG가 5분마다 부른다.
 
-Kafka는 읽기만 한다 (임시 그룹으로 assign만 하고 처리 위치를 커밋하지 않음).
+Kafka와 Bronze는 읽기만 한다 (Kafka는 임시 그룹으로 assign만 하고 처리 위치를 커밋하지 않음).
 """
 from __future__ import annotations
 
@@ -38,6 +39,7 @@ from pipelines.timestamps import parse_iso_datetime
 
 ACTOR = "reprocess_job"   # reprocess_events.actor (판정 잡은 detect_job)
 SOURCE_KAFKA = "KAFKA"
+SOURCE_BRONZE = "BRONZE"   # Kafka 보관 기간이 지나 Bronze v2 파일에서 다시 읽은 폴더
 # 다시 만드는 원장. bronze_lag_snapshots는 그 시점에만 잴 수 있는 값이라 건드리지 않는다
 REPLACED_TABLES = ("payment_events", "topic_messages", "malformed_events")
 # (가)에서 먼저 더하는 원장: 검사 결과만. topic_messages는 옛 줄과 같은 폴더라 (나)에서 바로 바꾼다
@@ -84,7 +86,7 @@ class Options:
     topics: tuple[str, ...] = DEFAULT_TOPICS
     payments_topic: str = "payments"               # payment_events 줄의 토픽 (원장에 토픽 칸이 없음)
     margin: timedelta = timedelta(minutes=10)      # 안 끝난 폴더·보관 기간 확인의 여유 (읽는 범위는 넓히지 않음)
-    retention: timedelta = timedelta(days=7)       # Kafka 보관 기간 (업무 토픽 retention.ms 7일, 2026-10-23 #86)
+    retention: timedelta = timedelta(days=7)       # Kafka 보관 기간 (업무 토픽 retention.ms 7일, 2026-10-23 #86). 지난 폴더는 Bronze
 
 
 @dataclass(frozen=True)
@@ -115,8 +117,10 @@ def hour_folders(window_start: datetime, window_end: datetime) -> list[datetime]
     return hours
 
 
-def check_request(request: Request, checker: Checker, options: Options, now: datetime) -> list[datetime]:
-    """교체할 시간 폴더를 돌려준다. 다시 돌려도 소용없는 문제면 ReprocessError(retryable=False)."""
+def check_request(request: Request, checker: Checker, options: Options, now: datetime,
+                  bronze: bool = False) -> list[datetime]:
+    """교체할 시간 폴더를 돌려준다. 다시 돌려도 소용없는 문제면 ReprocessError(retryable=False).
+    bronze가 거짓이면(Bronze 위치 없음) Kafka 보관 기간이 지난 폴더가 있는 요청을 거부한다."""
     if not request.request_id:
         raise ReprocessError("request_id가 비어 있다", retryable=False)
     if checker.rule_version != request.rule_version:
@@ -126,9 +130,14 @@ def check_request(request: Request, checker: Checker, options: Options, now: dat
     if hours[-1] + HOUR + options.margin > now:
         raise ReprocessError("아직 끝나지 않은 시간 폴더가 있다 (폴더 끝 + 여유 시간이 지난 뒤 다시 승인)",
                              retryable=False)
-    if hours[0] - options.margin < now - options.retention:
-        raise ReprocessError("Kafka 보관 기간 밖이라 원본이 없다 (Bronze 재처리는 아직 없음)", retryable=False)
+    if not bronze and from_bronze(hours, options, now):
+        raise ReprocessError("Kafka 보관 기간 밖이라 원본이 없다 (Bronze 위치가 설정되지 않음)", retryable=False)
     return hours
+
+
+def from_bronze(hours: Sequence[datetime], options: Options, now: datetime) -> list[datetime]:
+    """Kafka 보관 기간이 지나 Bronze에서 다시 읽을 시간 폴더: 폴더 시작 - 여유 시간이 지금 - 보관 기간보다 앞."""
+    return [hour for hour in hours if hour - options.margin < utc_naive(now) - options.retention]
 
 
 # ---------- 다시 읽기와 고칠 곳 ----------
@@ -151,6 +160,28 @@ def read_ranges(source: KafkaSource, topics: Sequence[str], read_from: datetime,
     return ranges, missing
 
 
+def read_messages(source: KafkaSource, bronze: BronzeSource | None, topics: Sequence[str], hours: Sequence[datetime],
+                  old: set[datetime]) -> tuple[list[KafkaMessage], dict[datetime, list[str]]]:
+    """대상 메시지(위치마다 하나, 위치 순)와 시간 폴더마다 원본에 없는 토픽.
+    보관 기간이 지난 폴더(old)는 Bronze에서, 나머지 폴더는 Kafka에서 한 번에 읽는다."""
+    found: dict[tuple[str, int, int], KafkaMessage] = {}
+    missing: dict[datetime, list[str]] = {}
+    recent = [hour for hour in hours if hour not in old]
+    if recent:
+        ranges, absent = read_ranges(source, topics, recent[0], recent[-1] + HOUR)
+        for message in source.read(ranges):
+            found.setdefault(message.position, message)
+        missing.update((hour, absent) for hour in recent)
+    if old:
+        if bronze is None:
+            raise ReprocessError("Bronze 위치가 설정되지 않았다", retryable=False)
+        messages, absent = bronze.read(topics, sorted(old))
+        for message in messages:   # 경계에서 Kafka 범위에도 든 메시지(시각이 위치 순서와 다른 것)는 하나만
+            found.setdefault(message.position, message)
+        missing.update((hour, absent) for hour in old)
+    return [found[position] for position in sorted(found)], missing
+
+
 @dataclass
 class Plan:
     """재처리 한 번이 고칠 것: 대상 메시지 위치, 새 줄, 옛 결과·새 결과가 있는 시간 폴더."""
@@ -159,7 +190,7 @@ class Plan:
     new_rows: dict[tuple[str, datetime], list[dict]] = field(default_factory=lambda: defaultdict(list))
     tables: dict[datetime, set[str]] = field(default_factory=lambda: defaultdict(set))   # 시간 폴더 → 고칠 원장
     messages: dict[datetime, int] = field(default_factory=lambda: defaultdict(int))      # 시간 폴더 → 대상 메시지 수
-    missing_topics: list[str] = field(default_factory=list)
+    missing_topics: dict[datetime, list[str]] = field(default_factory=dict)   # 시간 폴더 → 원본(Kafka·Bronze)에 없는 토픽
     paid: dict[datetime, set[tuple[str, int, int]]] = field(default_factory=lambda: defaultdict(set))
     """결제 시각 폴더 → 그 폴더에 ① 줄이 있거나 생길 대상 결제 위치"""
     outside_targets: dict[datetime, set[tuple[str, int, int]]] = field(default_factory=dict)
@@ -176,11 +207,11 @@ def _completed_hour(message: KafkaMessage) -> datetime | None:
 
 
 def plan_replacement(messages: Sequence[KafkaMessage], checker: Checker, rule_version: str, loaded_at: datetime,
-                     payments_topic: str, missing_topics: Sequence[str] = ()) -> Plan:
+                     payments_topic: str, missing_topics: Mapping[datetime, Sequence[str]] | None = None) -> Plan:
     """대상 메시지마다 새 줄을 만들고, 옛 결과와 새 결과가 있는 시간 폴더를 모은다.
     원장을 뒤지지 않고 메시지로 정한다: ②④는 Kafka 시각 폴더, ①은 결제 시각(completed_at) 폴더.
     새 결과가 오류여도 옛 ① 줄은 결제 시각 폴더에서 지운다 (통과했던 결제가 새 규칙에서 오류가 된 경우)."""
-    plan = Plan(missing_topics=list(missing_topics))
+    plan = Plan(missing_topics={hour: list(topics) for hour, topics in (missing_topics or {}).items()})
     for message in messages:
         plan.targets.add(message.position)
         kafka_hour = hour_of(message.timestamp)
@@ -310,8 +341,8 @@ def tidy_hour(store: Store, plan: Plan, hour: datetime, inside: bool, rule_versi
                                       rule_version, payments_topic, stamp)
         detail["written"][table] = written
         detail["kept"][table] = kept
-    if inside and plan.missing_topics:
-        detail["missing_topics"] = plan.missing_topics
+    if inside and plan.missing_topics.get(hour):
+        detail["missing_topics"] = plan.missing_topics[hour]
     if not inside:
         detail["outside_window"] = True
     return detail
@@ -359,9 +390,10 @@ def _utc_now() -> datetime:
 
 def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker,
         options: Options = Options(), now: Callable[[], datetime] = _utc_now,
-        log: Callable[[str], None] = _log, run_number: int = 1) -> Result:
+        log: Callable[[str], None] = _log, run_number: int = 1, bronze: BronzeSource | None = None) -> Result:
     """재처리 한 번. 성공하면 교체한 시간 폴더를 돌려주고, 실패하면 FAILED를 쓴 뒤 예외를 다시 올린다.
-    run_number는 이 요청을 몇 번째로 돌리는지다 (poller가 정함, STARTED의 detail.run)."""
+    run_number는 이 요청을 몇 번째로 돌리는지다 (poller가 정함, STARTED의 detail.run).
+    bronze가 있으면 Kafka 보관 기간이 지난 시간 폴더는 Bronze에서 다시 읽는다 (없으면 그런 요청은 시작 전에 거부)."""
     events = _Events(store, request, now)
     approved = (utc_naive(request.window_start), utc_naive(request.window_end))
 
@@ -376,26 +408,32 @@ def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker
             log(f"재처리 {request.request_id}: FAILED 기록을 쓰지 못함 ({_error_label(write_error)})")
         log(f"재처리 {request.request_id} 실패: {detail['error']}")
 
+    checked_at = utc_naive(now())
     try:
-        hours = check_request(request, checker, options, utc_naive(now()))
+        hours = check_request(request, checker, options, checked_at, bronze=bronze is not None)
     except ReprocessError as exc:
         fail(approved, None, exc, 0)
         raise
 
     window = set(hours)
+    old = set(from_bronze(hours, options, checked_at)) if bronze is not None else set()
+    # 승인 범위 밖 결제 시각 폴더와 STARTED·FAILED의 source. 승인 범위 폴더는 그 폴더를 다시 읽은 곳
+    run_source = SOURCE_BRONZE if old == window else SOURCE_KAFKA
     folders = list(hours)                          # 고칠 시간 폴더 (계획을 세운 뒤 범위 밖 결제 시각 폴더가 더해짐)
     replaced: list[tuple[datetime, datetime]] = []
     outside: list[tuple[datetime, datetime]] = []
     details: list[dict] = []
     current = hours[0]
     try:
-        events.write("STARTED", approved, SOURCE_KAFKA,
-                     {"folders": [f"{h:%Y-%m-%dT%H:00}" for h in hours], "run": run_number})
-        log(f"재처리 {request.request_id} 시작: 시간 폴더 {len(hours)}개")
+        started = {"folders": [f"{h:%Y-%m-%dT%H:00}" for h in hours], "run": run_number}
+        if old:
+            started["bronze_folders"] = [f"{h:%Y-%m-%dT%H:00}" for h in sorted(old)]
+        events.write("STARTED", approved, run_source, started)
+        log(f"재처리 {request.request_id} 시작: 시간 폴더 {len(hours)}개"
+            + (f" (Kafka 보관 기간이 지나 Bronze에서 읽는 폴더 {len(old)}개)" if old else ""))
         loaded_at = utc_naive(now())
-        ranges, missing = read_ranges(source, options.topics, hours[0], hours[-1] + HOUR)
-        plan = plan_replacement(source.read(ranges), checker, request.rule_version, loaded_at,
-                                options.payments_topic, missing)
+        messages, missing = read_messages(source, bronze, options.topics, hours, old)
+        plan = plan_replacement(messages, checker, request.rule_version, loaded_at, options.payments_topic, missing)
         narrow_outside(plan, store, window, options.payments_topic)
         folders = sorted(window | set(plan.tables))
         current = folders[0]
@@ -406,7 +444,8 @@ def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker
             inside = hour in window
             detail = tidy_hour(store, plan, hour, inside, request.rule_version, options.payments_topic, stamp)
             # 폴더 정리가 다 끝난 뒤에 쓴다. 판정 잡은 이 줄을 보고 그 시간대를 재판정한다 (범위 밖 결제 시각 폴더도)
-            events.write("LEDGER_REPLACED", (hour, hour + HOUR), SOURCE_KAFKA, detail)
+            folder_source = SOURCE_BRONZE if hour in old else SOURCE_KAFKA if inside else run_source
+            events.write("LEDGER_REPLACED", (hour, hour + HOUR), folder_source, detail)
             (replaced if inside else outside).append((hour, hour + HOUR))
             details.append(detail)
             log(f"재처리 {request.request_id}: {hour:%Y-%m-%d %H}시 폴더 정리{'' if inside else ' (승인 범위 밖)'} "
@@ -414,7 +453,7 @@ def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker
                 f"남긴 줄 {sum(detail['kept'].values())})")
     except Exception as exc:
         # 남은 폴더 범위를 FAILED에 적는다. 끝난 폴더는 LEDGER_REPLACED가 있어 재판정된다
-        fail((current, folders[-1] + HOUR), SOURCE_KAFKA, exc, len(replaced) + len(outside))
+        fail((current, folders[-1] + HOUR), run_source, exc, len(replaced) + len(outside))
         raise
     return Result(request.request_id, replaced, details, outside)
 
@@ -625,10 +664,77 @@ def _to_message(message) -> KafkaMessage:
                         value=message.value(), key=message.key())
 
 
+# ---------- Bronze 읽기 ----------
+
+BRONZE_TOPICS = ("payments", "orders", "order-items", "members-events", "clickstream")   # connectors/bronze-s3-sink-v2.yaml
+BRONZE_FIELDS = ("kafka_topic", "kafka_partition", "kafka_offset", "kafka_timestamp", "kafka_timestamp_type")
+
+
+class BronzeSource(Protocol):
+    def read(self, topics: Sequence[str], hours: Sequence[datetime]) -> tuple[list[KafkaMessage], list[str]]: ...
+
+
+class BronzeReader:
+    """Bronze v2 파일(connectors/bronze-s3-sink-v2.yaml)에서 Kafka 메시지를 다시 만든다. 읽기만 한다.
+
+    파일은 <토픽>/year=YYYY/month=MM/day=dd/<토픽>+<파티션>+<시작offset>.json 이다 (Kafka 시각의 UTC 날짜 폴더).
+    줄마다 메시지 값(JSON 객체)에 Sink가 Kafka 위치·시각(kafka_* 5칸)을 더했다. 이 칸을 떼어 원래 값으로 되돌린다.
+    Sink가 다시 켜지면 같은 메시지가 두 파일에 들어갈 수 있어서 위치로 하나만 남긴다.
+    빈 값과 JSON 객체가 아닌 값은 Sink가 쓰지 않아 Bronze에 없다 (그 메시지는 대상이 아니라 옛 줄이 그대로 남는다).
+    칸 순서는 원래 메시지와 다를 수 있다 (Kafka Connect가 다시 씀). 검사 결과는 같고 ④ raw_sample의 칸 순서만 다를 수 있다.
+    """
+
+    def __init__(self, store: Store, topics: Sequence[str] = BRONZE_TOPICS):
+        self._store = store
+        self._topics = tuple(topics)
+
+    def read(self, topics: Sequence[str], hours: Sequence[datetime]) -> tuple[list[KafkaMessage], list[str]]:
+        """hours 시간 폴더에 Kafka 시각이 있는 메시지(위치마다 하나, 위치 순)와 Bronze에 없는 토픽.
+        필요한 날짜에 Bronze 토픽 모두 파일이 없으면 원본이 없는 것으로 보고 멈춘다 (다시 돌려도 소용없음)."""
+        wanted = set(hours)
+        stored = [topic for topic in topics if topic in self._topics]
+        found: dict[tuple[str, int, int], KafkaMessage] = {}
+        for day in sorted({hour.date() for hour in wanted}):
+            paths = [(topic, path) for topic in stored
+                     for path in self._store.files(f"{topic}/year={day:%Y}/month={day:%m}/day={day:%d}", any_name=True)
+                     if path.endswith(".json")]
+            if not paths:
+                raise ReprocessError(f"Bronze에 {day:%Y-%m-%d}(UTC) 원본이 없다", retryable=False)
+            for topic, path in paths:
+                for line in self._store.read_bytes(path).splitlines():
+                    if line.strip():
+                        message = _bronze_message(line, topic)
+                        if hour_of(message.timestamp) in wanted:
+                            found.setdefault(message.position, message)
+        return [found[position] for position in sorted(found)], [topic for topic in topics if topic not in stored]
+
+
+def _bronze_message(line: bytes, topic: str) -> KafkaMessage:
+    """Bronze 줄 하나 → Kafka 메시지. 위치·시각 칸이 없거나 틀리면 다시 돌려도 소용없다 (옛 bronze/ 형식 등)."""
+    try:
+        value = json.loads(line)
+        if not isinstance(value, dict):
+            raise ValueError("JSON 객체가 아님")
+        meta = {name: value.pop(name) for name in BRONZE_FIELDS[:4]}
+        value.pop(BRONZE_FIELDS[4], None)
+        partition, offset = meta["kafka_partition"], meta["kafka_offset"]
+        if meta["kafka_topic"] != topic or type(partition) is not int or type(offset) is not int:
+            raise ValueError("위치가 틀림")
+        timestamp = parse_iso_datetime(str(meta["kafka_timestamp"]))
+        if timestamp.tzinfo is None:
+            raise ValueError("시간대 없음")
+    except (ValueError, KeyError):   # 줄 내용을 로그에 남기지 않는다
+        raise ReprocessError(f"Bronze {topic} 줄에 Kafka 위치·시각이 없거나 틀리다 (bronze_v2 형식인지 확인)",
+                             retryable=False) from None
+    return KafkaMessage(topic=topic, partition=partition, offset=offset, timestamp=timestamp,
+                        value=json.dumps(value, ensure_ascii=False).encode("utf-8"))
+
+
 # ---------- 실행 입구 ----------
 
 ENV_LEDGER_ROOT = "GOLD_B_LEDGER_ROOT"    # s3://<버킷>/gold_b 또는 로컬 폴더 (필수)
 ENV_RULES_PATH = "GOLD_B_RULES_PATH"      # 형식 규칙표 경로 (생략하면 저장소의 docs/contracts/format_rules.yaml)
+ENV_BRONZE_ROOT = "GOLD_B_BRONZE_ROOT"    # Bronze v2 위치: s3://<버킷>/bronze_v2 또는 로컬 폴더 (없으면 보관 기간 밖 요청 거부)
 
 
 def kafka_config_from_env(env: Mapping[str, str]) -> dict[str, object]:
@@ -677,15 +783,17 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
         return 0
     from pipelines.gold_b.format_check import FormatChecker   # 규칙표와 지문 함수는 돌릴 때만 읽는다
 
+    bronze_root = (env.get(ENV_BRONZE_ROOT) or "").strip()
     try:
         checker = FormatChecker(rules_path=env.get(ENV_RULES_PATH) or None)
+        bronze = BronzeReader(open_store(bronze_root)) if bronze_root else None
         reader = KafkaReader(kafka_config_from_env(env))
     except Exception as exc:   # 실행 환경 문제라 요청을 실패로 남기지 않는다 (다음 번에 다시 고름)
         log(f"재처리 {request.request_id}: 준비 실패 ({_error_label(exc)})")
         return 1
     try:
         run(request, source=reader, store=store, checker=checker, now=now, log=log,
-            run_number=pending.run_number)
+            run_number=pending.run_number, bronze=bronze)
     except Exception:   # run()이 FAILED를 쓰고 이유를 로그에 남겼다
         return 1
     finally:

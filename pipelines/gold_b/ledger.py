@@ -158,6 +158,7 @@ class Store(Protocol):
 
     def files(self, folder: str, any_name: bool = False) -> list[str]: ...
     def read(self, path: str, table: str) -> list[dict]: ...
+    def read_bytes(self, path: str) -> bytes: ...   # 원장이 아닌 파일 그대로 (예: Bronze JSON)
     def write(self, path: str, table: str, rows: Sequence[Mapping],
               metadata: Mapping[str, str] | None = None) -> None: ...
     def metadata(self, path: str) -> dict[str, str]: ...
@@ -221,6 +222,9 @@ class LocalStore:
     def read(self, path: str, table: str) -> list[dict]:
         return from_arrow(table, pq.read_table(self._root / path))
 
+    def read_bytes(self, path: str) -> bytes:
+        return (self._root / path).read_bytes()
+
     def write(self, path: str, table: str, rows: Sequence[Mapping],
               metadata: Mapping[str, str] | None = None) -> None:
         target = self._root / path
@@ -268,8 +272,10 @@ class S3Store:
         return sorted(found)
 
     def read(self, path: str, table: str) -> list[dict]:
-        body = self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
-        return from_arrow(table, pq.read_table(pa.BufferReader(body)))
+        return from_arrow(table, pq.read_table(pa.BufferReader(self.read_bytes(path))))
+
+    def read_bytes(self, path: str) -> bytes:
+        return self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
 
     def write(self, path: str, table: str, rows: Sequence[Mapping],
               metadata: Mapping[str, str] | None = None) -> None:
