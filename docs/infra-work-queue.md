@@ -12,7 +12,7 @@
 | Kafka 보관 | 7일 설정 적용, #86 머지 | 20GiB 용량과 유입량 감시; 유입량에 무관한 7일 보관 보장은 아님 |
 | Bronze v2 지연 수집기 | Running, 실제 Pod의 커넥터·그룹 모두 v2, 23:26 S3 저장·Athena 조회 재확인 | 장기 신선도 감시, 인증서 갱신 후 복사/재시작, v2 정지→R3 실제 시험은 별도 |
 | Silver·Gold A Spark | Driver 1·Executor 2 종료 코드 0, Silver/Gold A manifest·완료 기록 PASS, 실제 출력 존재 | 로그 보존·완료 Pod 정리·자동 축소로 Spark 노드 0대/EC2 terminated 확인. coverage_status UNVERIFIED 및 추가 업무 사례는 담당자 확인 |
-| Gold B 상시 적재 Spark | #92로 실행 코드·형식 검사기 main 도착 | 최종 실행 이미지·실행 계약·checkpoint·실행 신원·상시 자원 몫 확인 후 배포 |
+| Gold B 상시 적재 Spark | main에 실행 코드·형식 검사기·Dockerfile·실행 명령/자원 제안 도착. 격리 로컬에서 배치와 동시 실행·41,000건 검증 | ECR 최종 digest·적재 전용 권한/인증서·checkpoint 확정·EKS/S3 자원 실측 후 배포 |
 | 판정 | #95 컬럼 5개·뷰 4개 반영, 실제 판정 역할 조회 통과, 배포 후 00:10/00:15 예약 실행 success | Gold B 상시 적재 데이터·업무 규칙 검증 |
 | 조사 | JP Haiku 호출 성공 이력, 실제 이미지/역할의 모듈 로딩·Athena·대기 조회 통과, 대기 0건 | 검증 사건과 기대 결과를 받은 뒤 DAG→모델→리포트 저장 검증 |
 | 승인 화면 | approval-dashboard·전용 workgroup·기존 Secret 연결, REAL backend 조회·패치노트 S3 읽기·Airflow 인증 통과 | gold_b_reprocess/silver_gold_a_reprocess가 Airflow에서 404. 업무 DAG 등록·계약 필요 |
@@ -27,7 +27,7 @@
 3. **완료 — 인프라: Gold B 조회 뷰 배포.** 기존 세 뷰 배포 후 #95의 원장 컬럼 5개와 payment_states 포함 네 뷰까지 반영했다. 실제 detection-job SA 조회와 뒤이은 00:10 판정 예약 실행 성공을 확인했다. 더미 업무 행은 만들지 않았다.
 4. **완료 — 인프라: 승인 연결.** 실제 Deployment를 approval-dashboard·승인 전용 workgroup·AWS_REGION/DEFAULT_REGION·기존 airflow-api-client Secret의 username/password로 연결했다. 모델 registry GetObject/제한 목록 조회만 추가했고 권한 경계 7개를 검증했다. 후보/요청 실제 조회 및 Airflow 인증 성공, 이미지·계정 파일 불변을 확인했다. 사람 계정·화면 로직은 앱 담당이다.
 5. **첫 실행·자동 축소 확인 — Silver·Gold A 담당 + 인프라.** 실행 trade-v2-eks-20261023-b0185ff의 Driver/Executor exit=0과 Silver·Gold A S3 manifest·완료 기록 PASS를 확인했다. coverage_status는 UNVERIFIED이므로 업무 범위·금액 등 추가 사례 검증은 담당자가 확인한다. 전체 Pod 로그를 S3에 보존하고 완료 Pod만 정리했다. 20:20:10 KST에 Spark 노드 0대/EC2 terminated를 확인했다. 수동 노드 삭제 없이 전용 풀을 유지했다.
-6. **명세 대기 — Gold B 담당 + 인프라: 상시 적재 연결.** 사용자 확인 결과 최종 이미지 digest·실행 명령·checkpoint·Driver/Executor 자원 설정은 아직 미수신이다. 임의로 정해 배포하지 않는다. collector는 이미 별도 일반 Python Pod이며 이 상시 Spark와 다르다.
+6. **후속 연결 대기 — Gold B 담당 + 인프라: 상시 적재 연결.** main 문서에 실행 명령·자원 제안·checkpoint 제안 경로가 추가된 것을 확인했다. 최종 ECR digest와 적재 전용 ServiceAccount/Pod Identity·Kafka 사용자/인증서는 아직 없다. [한 노드 공유 시험](operations/spark-shared-capacity-check.md)은 작은 입력의 격리 로컬 결과이며 EKS/S3 실측과 checkpoint 계약 확정이 남았다. collector는 이미 별도 일반 Python Pod이며 이 상시 Spark와 다르다.
 7. **연결 일부 완료 — 판정·조사 담당 + 인프라: 실제 업무 검증.** 판정은 최신 뷰 반영 뒤에도 예약 실행 성공, 조사는 실제 역할/이미지의 모듈 로딩·Athena·대기 조회 통과와 기존 JP Haiku Converse 성공 이력이 있다. 대기 사건은 0건으로 조사 DAG의 업무 입력→모델→리포트 저장은 검증 사건을 받아야 한다. 원래 paused 상태는 유지했다.
 8. **재처리 담당 + 인프라: 승인 → Airflow → 재처리 → 완료 → 재판정.** 재처리 DAG ID·입력·완료 이벤트와 권한을 실제 코드에 맞춰 대조한다. Silver 공개/R6는 #87의 완료 목록·completed_at·Glue 공개 계약 확정/구현이 남아 있다.
 
