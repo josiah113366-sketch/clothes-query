@@ -21,7 +21,7 @@ class TradeAccessTests(unittest.TestCase):
         plan = access_plan(self.contract)
         self.assertEqual(plan['read_prefixes'], ['bronze/orders/', 'bronze/order-items/', 'bronze/payments/'])
         self.assertEqual(plan['read_write_prefixes'], ['silver/runtime/trade/', 'gold_a/runtime/trade/'])
-        self.assertEqual(set(plan['missing_binding_inputs']), {'namespace', 'service_account_prefix', 'config_request_prefix_uri'})
+        self.assertEqual(set(plan['missing_binding_inputs']), {'namespace'})
         self.assertFalse(plan['delete_permissions'])
         self.assertFalse(plan['applied'])
         with self.assertRaisesRegex(ValueError, 'Missing binding inputs'):

@@ -7,6 +7,13 @@ import yaml
 
 
 class RuntimeSafetyTests(unittest.TestCase):
+    def test_existing_namespace_does_not_replace_shared_quota(self):
+        objects = runtime.resources(namespace='pipelines', name_prefix='silver-gold-a', existing_namespace=True)
+        self.assertFalse(any(x['kind'] in {'Namespace', 'ResourceQuota', 'Job', 'Pod'} for x in objects))
+        self.assertEqual({x['metadata']['name'] for x in objects if x['kind'] == 'ServiceAccount'},
+                         {'silver-gold-a-submitter', 'silver-gold-a-driver', 'silver-gold-a-executor'})
+        self.assertTrue(all(x['metadata']['namespace'] == 'pipelines' for x in objects))
+
     def test_custom_namespace_prefix_and_pool_stay_consistent(self):
         options = dict(namespace='example-jobs', name_prefix='example-work', node_pool='example-spark-pool')
         objects = runtime.resources(**options)

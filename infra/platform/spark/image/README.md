@@ -1,4 +1,8 @@
-# Spark 기본 이미지 — 빌드 전 준비
+# Spark 기본 이미지와 업무 패키지 준비
+
+2026-10-23 후속: 전달받은 PyYAML 6.0.3 / boto3 1.43.71 / PyArrow 25.0.1 / tzdata 2026.3 및 실제 해결한 전이 의존성을 requirements-pipelines.txt에 고정했다. Python 3.10.12에서 설치·pip check·실제 import·메모리 Parquet 왕복·KST 시간대와 로컬 Spark 합성 계산/커넥터 클래스 로딩을 통과했다. 설치 결과는 python-dependencies.lock.json에 기록한다. 이 검사는 업무 커밋 908c252 코드 검증이나 실제 AWS 쓰기 성공을 뜻하지 않는다.
+
+로컬 빌드 태그는 clothes-query-spark-base:4.2.0-pipelines다. 영구 ECR 후보는 clothes-query-dev/spark-base와 clothes-query-dev/silver-gold-a이며 저장소 생성·push 전에는 원격 digest를 전달하지 않는다. 아래 2.07GB는 이전 jar-only 이미지의 크기 기록이다.
 
 사용자 선택은 Spark **4.2.0**이다. 기본 후보는 Docker Official Image의 `spark:4.2.0-scala2.13-java21-python3-ubuntu`(amd64)다. Spark 소스 POM의 Hadoop 3.5.0에 맞춰 S3A를 준비하고, Kafka SQL 커넥터는 Spark 4.2.0/Scala 2.13, PostgreSQL JDBC는 42.7.14로 고정한다. 업무 코드·인증 정보·실제 데이터 경로는 포함하지 않는다.
 

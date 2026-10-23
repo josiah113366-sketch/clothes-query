@@ -1,0 +1,8 @@
+# Merge with existing network actions; do not remove other workloads' requirements.
+# Transport permission only. Spark IAM limits DeleteObject to __magic_job-* objects.
+additional_s3_endpoint_actions = [
+  "s3:AbortMultipartUpload",
+  "s3:ListMultipartUploadParts",
+  "s3:DeleteObject"
+]
+# ListBucketMultipartUploads is intentionally pending the owner's committer config.
