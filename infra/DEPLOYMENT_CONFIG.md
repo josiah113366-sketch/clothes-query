@@ -50,6 +50,8 @@ EKS 개인 파일 예시:
 
 ## 범위와 의존 관계
 
+2026-10-23 후속 정리: `infra/applied-state-sync`는 실제 적용된 후속 8개를 최신 main 4d80c76 기준으로 통합한 브랜치다. 이 브랜치의 compute는 Spark 풀 enabled=true, 현재 실행 노드는 0대다. infrastructure-alerts는 승인 후 적용·검증했으며 개인 이메일은 여전히 Git 제외 입력을 사용한다. 아래의 operations-alerts는 별도 과거 후보이므로 두 이름을 혼동해 중복 배포하지 않는다. 기존 state/backend 위치와 실제 실행 권한은 유지했다. [통합 검증 결과](../docs/tasks/infra-applied-state-sync.md)를 참고하며, 이전 main 설정으로 apply하지 않는다.
+
 현재 공유 설정은 network/eks/rds/storage/ecr/compute/workload-access/team-access/gold-b-access/agent-development-access/operations-alerts에 준비했다. apps는 기존 backend 위치만 공유한다. Gold B·조사 쓰기·Airflow·개발 접근 소스는 #40·#50·#41·#49로 main에 반영됐다. `operations-alerts` 소스는 여전히 별도 보류 브랜치에 있고 설정 파일만으로 미반영 모듈이 생기지는 않는다.
 
 `operations-alerts`는 계속 미적용 보류다. `athena-query-base`는 Gold B로 대체된 과거 후보라 이번 전환에서 제외했고 함께 apply하지 않는다. SageMaker·ECS 등 팀원 스택의 이 PC에 없는 배포 입력을 추정해 만들지 않는다. Helm `runtime.local.yaml`은 이번 Terraform 변수 분리 범위에 포함하지 않는다.

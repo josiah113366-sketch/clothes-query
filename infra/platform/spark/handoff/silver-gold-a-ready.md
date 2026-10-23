@@ -1,12 +1,14 @@
 # Silver·Gold A 첫 거래 검증 연결
 
-main #82를 반영했고 적용 전 최신 main 083931f까지 확인했다. 팀 입력 두 개는 S3에 존재함을 읽기 확인했다. 2026-10-23 사용자 승인으로 ECR·기본 이미지 발행·S3 endpoint·Spark 실행 계정/권한·RBAC/template까지 적용했다. **업무 이미지 digest와 Airflow 업무 설정 연결은 대기이며 Spark 노드·업무 잡은 실행하지 않았다.**
+2026-10-23 후속 검증까지 반영한 안내다. ECR·기본 이미지·S3 endpoint·Spark 실행 계정/권한·RBAC/template·전용 NodePool을 적용했다. 업무 이미지도 수신했고 첫 거래 실행의 Driver 1개·Executor 2개가 exit=0, Silver·Gold A manifest/completed는 PASS였다. coverage_status는 UNVERIFIED로 업무 범위·추가 사례 검증은 담당자가 확인한다. Spark 노드는 시험 후 자동 종료돼 현재 0대이며 풀은 활성 상태다.
+
+업무 이미지: `827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/silver-gold-a@sha256:241d5b96ac42ec5aff3be1a65059a925e7af1a009fe6b6d698c4aae99a34ee39`. 최신 연결·대기 항목은 [작업 목록](../../../../docs/infra-work-queue.md)을 따른다. 아래 재실행 절차는 새 run_id와 허용 범위를 검토한 뒤 사용하며 이미 끝난 시험을 그대로 반복하지 않는다.
 
 - 적용 namespace: pipelines, SA: silver-gold-a-submitter / silver-gold-a-driver / silver-gold-a-executor
 - 적용 runtime ConfigMap: pipelines/silver-gold-a-runtime
-- 미적용 업무 설정: airflow/airflow-silver-gold-a-runtime, key config → AIRFLOW_PIPELINE_RUNTIME
+- 업무 설정 연결 위치: airflow/airflow-silver-gold-a-runtime, key config → AIRFLOW_PIPELINE_RUNTIME
 - 기존 main GitDagBundle가 infra/platform/airflow/dags를 읽으므로 새 bundle은 추가하지 않는다. silver_gold_a_batch는 수동/paused로 유지한다.
-- 업무 ECR: clothes-query-dev/silver-gold-a, 기본 ECR: clothes-query-dev/spark-base. 두 저장소와 de-ai-18 push 정책은 적용했다. 기본 이미지는 발행·검증 완료했고 업무 이미지 digest는 동료 전달 대기다. [발행 안내](spark-ecr-publish.md)를 따른다. push 담당 de-ai-18과 Pod 실행 역할은 다르다.
+- 업무 ECR: clothes-query-dev/silver-gold-a, 기본 ECR: clothes-query-dev/spark-base. 두 저장소와 de-ai-18 push 정책은 적용했다. 기본·업무 이미지 digest는 수신·검증했다. [발행 안내](spark-ecr-publish.md)를 따른다. push 담당 de-ai-18과 Pod 실행 역할은 다르다.
 
 ## 이미지 없이 가능한 렌더
 
@@ -36,10 +38,10 @@ Spark access 공통 deployment에 첫 거래 검증 설정을 적용했다(enabl
 2. network endpoint 변경 계획 검토 후 반영. 기존 network 전체 drift를 되돌리지 않는다.
 3. spark-access 첫 검증 계획 및 pipelines RBAC/template 검토/반영. 기존 shared namespace 자원은 대조한다.
 4. Airflow actual values와 runtime ConfigMap 연결. 기존 agent/infra bundle·Secret을 보존한다.
-5. Spark NodePool 활성화는 별도 비용 승인 범위다. 지금 비활성 상태를 바꾸지 않는다.
+5. Spark NodePool은 승인 후 활성화됐다. 새 수동 실행은 노드를 생성해 비용이 발생할 수 있으므로 대상·실행 범위를 확인한다. main의 오래된 enabled=false로 apply해 풀을 삭제하지 않는다.
 6. 실행 전 요청/원본 ETag·예상 결과·run 폴더가 비어 있는지·기존 current와 동시 작성자가 없는지 확인한다. 그 뒤에만 두 고정 입력을 순차 수동 실행한다.
 7. 종료 후 남은 Driver/Executor/제출기 Pod와 S3 magic/MPU 상태를 확인한다. 업무 데이터를 임의 일괄 삭제하지 않는다. 시간 초과 시 Driver가 남을 수 있어 재실행 전에 상태를 확인한다.
 
-현재 1번의 기본 이미지까지, 2·3번의 실행 기반 적용까지 완료했다. 남은 것은 업무 이미지 digest → 4번 Airflow 업무 설정 → 별도 노드 활성화/수동 검증이다. 적용 후 pipelines Pod/Job 0개·Spark NodePool 0개이며 기존 노드 3개의 UID는 변하지 않았다. 실제 Pod Identity 자격증명 발급과 S3 입출력은 첫 업무 검증에서 확인한다.
+첫 실제 실행 trade-v2-eks-20261023-b0185ff가 성공했고 실제 S3 출력도 확인했다. 완료 Pod 로그는 airflow-logs/infra-spark-validation/<run_id>/에 보존하고 해당 완료 Pod만 정리했다. 이후 Spark 노드 자동 종료를 확인했으며 NodePool과 결과 데이터는 유지했다. Gold B 상시 Spark와의 동시 실행 용량, 추가 업무 사례, Glue 공개/R6 명세는 아직 검증·확정 전이다.
 
 고정 요청: pipelines/requests/trade-fixed-normal-20261023.json 및 trade-fixed-reference-wait-20261023.json. run_id는 파일명과 동일하다. 출력 루트는 s3://clothes-query-datalake/다. 정상 7,900원 및 참조 대기 기대 결과는 PR 본문과 input-manifests 자료로 실행 직전 다시 대조한다.

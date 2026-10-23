@@ -111,10 +111,11 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 플러그인 자동 갱신 중단, 실환경 복구·조회 검증 완료, 미게시 | |
-| `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | ECR·기본 이미지·S3/실행 계정/RBAC 적용 완료. 업무 이미지 대기·Spark 노드 미기동 | |
-| `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | JP Haiku·#53 표/뷰·첫 쓰기 및 agent ConfigMap/DAG 등록 완료, paused·미게시 | |
-| `infra/bronze-v2-lag-collector` | [infra-bronze-v2-lag-collector.md](tasks/infra-bronze-v2-lag-collector.md) | AWS·EKS 적용, v2 60초 수집·S3/Athena 최신성 검증 완료 | 2026-10-23 |
+| `infra/applied-state-sync` | [infra-applied-state-sync.md](tasks/infra-applied-state-sync.md) | 적용 후속 8개 로컬 통합·9개 state plan 무변경 검증, 원격 공유 전 | |
+| `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 적용·조회 검증 완료, applied-state-sync에 통합·원본 보존 | |
+| `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | 실행 기반 적용·첫 업무 실행 확인, applied-state-sync에 통합·원본 보존 | |
+| `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | JP Haiku·agent 설정 적용, applied-state-sync에 통합·원본 보존 | |
+| `infra/bronze-v2-lag-collector` | [infra-bronze-v2-lag-collector.md](tasks/infra-bronze-v2-lag-collector.md) | v2 실제 수집 검증, applied-state-sync에 통합·원본 보존 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |
@@ -141,10 +142,10 @@ gitGraph
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
 | `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 기반 공유 #75 머지됨. 후속 로컬 변경은 spark-runtime-followup으로 분리 | |
 | `infra/spark-runtime-followup` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | ECR·거래 커미터 권한·패키지 후속, 최신 main 반영. AWS 미적용 | |
-| `infra/spark-nodepool-enable` | [infra-spark-nodepool-enable.md](tasks/infra-spark-nodepool-enable.md) | 전용 Spark 풀 활성화, 검증 Job 일시정지 유지 | 2026-10-23 |
-| `infra/airflow-log-access-restore` | [로그 복구](tasks/infra-airflow-log-access-restore.md), [Gold B 뷰 배포](tasks/infra-gold-b-view-deploy.md) | 로그 API 복구·조회 뷰 실제 계정 검증 완료 | 2026-10-23 |
-| `infra/dashboard-runtime-connect` | [infra-dashboard-runtime-connect.md](tasks/infra-dashboard-runtime-connect.md) | 승인 Pod 권한·인증·모델 패치노트 연결 검증 완료 | 2026-10-23 |
-| `infra/common-cpu-diet` | [infra-common-cpu-diet.md](tasks/infra-common-cpu-diet.md) | CPU 예약 500m 축소·공용 노드 2→1 통합 검증, 로컬 기록 | 2026-10-23 |
+| `infra/spark-nodepool-enable` | [infra-spark-nodepool-enable.md](tasks/infra-spark-nodepool-enable.md) | 첫 실행 PASS·노드 자동 종료 확인, applied-state-sync에 통합·원본 보존 | |
+| `infra/airflow-log-access-restore` | [로그 복구](tasks/infra-airflow-log-access-restore.md), [Gold B 뷰 배포](tasks/infra-gold-b-view-deploy.md) | 로그·기존 뷰 조회 검증, applied-state-sync에 통합·원본 보존 | |
+| `infra/dashboard-runtime-connect` | [infra-dashboard-runtime-connect.md](tasks/infra-dashboard-runtime-connect.md) | 승인 신원·인증·패치노트 검증, applied-state-sync에 통합·원본 보존 | |
+| `infra/common-cpu-diet` | [infra-common-cpu-diet.md](tasks/infra-common-cpu-diet.md) | 공용 노드 2→1 통합 검증, applied-state-sync에 통합·원본 보존 | |
 | `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 
