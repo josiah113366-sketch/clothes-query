@@ -15,7 +15,7 @@ topics:
 trigger_seconds: 60
 
 # 체크포인트가 없을 때(처음 시작할 때) 읽기 시작할 곳.
-# earliest: Kafka에 남은 가장 오래된 메시지부터 (보관 기간 3일), latest: 지금부터
+# earliest: Kafka에 남은 가장 오래된 메시지부터 (보관 기간 7일), latest: 지금부터
 starting_offsets: earliest
 
 # 묶음 하나에 읽는 최대 메시지 수. 밀린 메시지를 한 번에 다 읽어 메모리가 넘치지 않게 한다

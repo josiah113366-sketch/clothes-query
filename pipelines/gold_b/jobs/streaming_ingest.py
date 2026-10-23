@@ -135,7 +135,7 @@ def kafka_options(settings: Settings, config: Config) -> dict[str, str]:
         "subscribePattern": topic_pattern(config.topics),
         "startingOffsets": config.starting_offsets,
         "maxOffsetsPerTrigger": str(config.max_offsets_per_trigger),
-        # 보관 기간(3일)보다 오래 멈춰 메시지가 지워졌어도 멈추지 않고 남은 것부터 읽는다.
+        # 보관 기간(7일)보다 오래 멈춰 메시지가 지워졌어도 멈추지 않고 남은 것부터 읽는다.
         # 빠진 구간은 topic_messages의 오프셋 빈틈으로 보이고 Bronze 재처리로 채운다 (설계 「신뢰성 점검」)
         "failOnDataLoss": "false",
     }

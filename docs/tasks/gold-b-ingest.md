@@ -24,7 +24,7 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 1. **처음 시작:** 체크포인트가 없으면 Kafka에 남은 가장 오래된 메시지부터 읽는다 (`starting_offsets: earliest`).
 2. **묶음 크기:** 묶음 하나에 최대 20,000건 (`max_offsets_per_trigger`). 밀린 메시지를 한 번에 읽어 메모리가 넘치지 않게 한다.
 3. **파일 이름:** (표, 시간 폴더)마다 파일 하나, 이름은 그 파일에 든 메시지 위치로 만든 값(`part-ingest-<16자리>.parquet`). Spark가 끝내지 못한 묶음을 다시 처리하면 덮어써서 두 번 쌓이지 않는다.
-4. **지워진 메시지:** 보관 기간(3일)보다 오래 멈춰 메시지가 지워졌어도 멈추지 않고 남은 것부터 읽는다 (`failOnDataLoss=false`). 빠진 구간은 `topic_messages` 오프셋 빈틈으로 보이고 Bronze 재처리로 채운다 (설계 「신뢰성 점검」).
+4. **지워진 메시지:** 보관 기간(3일 → 2026-10-23 #86으로 7일)보다 오래 멈춰 메시지가 지워졌어도 멈추지 않고 남은 것부터 읽는다 (`failOnDataLoss=false`). 빠진 구간은 `topic_messages` 오프셋 빈틈으로 보이고 Bronze 재처리로 채운다 (설계 「신뢰성 점검」).
 5. **설정 나누기:** 토픽 목록·주기·시작 위치·묶음 크기는 `config/gold_b.yaml`, 원장 저장 위치·체크포인트·Kafka 주소는 환경변수 (버킷 이름·주소를 커밋하지 않음). 설계의 "PG 목록"은 공통 규칙표에 있어 여기 두지 않는다.
 6. **시각:** Kafka 시각은 1970년부터의 밀리초로 받아 UTC로 바꾼다 (Spark에서 파이썬으로 옮길 때 서버 시간대가 섞이지 않게).
 
@@ -110,4 +110,9 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 - **무엇을 했나:** Python 3.10 수정이 든 `pipelines/gold-b-format-check`(최신 `main` #82·#83·#84 포함)를 다시 병합했다. `jobs/README.md`의 「적재 잡 배포에 필요한 것」을 팀 기본 Spark 이미지(Spark 4.2.0, Python 3.10.12) 기준으로 고쳤다: 그 이미지에서 출발해 공통 모듈(`pipelines/*.py`), `pipelines/gold_b/`, 규칙표, Gold B 패키지(3.10은 pyarrow 25.0.1)를 넣는다. 설계 문서 4단계의 배포 항목도 같이 고쳤다.
 - **왜:** #82가 팀 공용 실행 이미지를 Python 3.10.12로 고정했고, 형식 검사 브랜치에서 Gold B 코드를 3.10에 맞췄다. 적재 잡은 Spark 위에서 돌아서 팀 기본 Spark 이미지를 그대로 쓸 수 있다.
 - **확인한 결과:** `pipelines/gold_b/tests` 139개 통과 (Python 3.12). 같은 코드(이 병합과 같은 시험용 병합)로 Python 3.10.12 컨테이너에서도 139개 통과했다 (형식 검사 작업 지시서 「보완: Python 3.10 맞추기」). `pipelines` 전체는 234개 통과, 오류 13개는 #82의 Silver·Gold A Spark 시험(로컬 Spark·`SPARK_TEST_INPUT` 필요)이다. `git diff --check` 통과.
-- **다음 할 일:** Gold B 이미지 Dockerfile (팀 기본 Spark 이미지 FROM), 배포 (재영 님). main의 Kafka 보관 기간이 #86으로 7일이 되어, 재처리 잡의 보관 기준(72시간)과 문서의 "3일"을 맞출지 정해야 한다.
+- **다음 할 일:** Gold B 이미지 Dockerfile (팀 기본 Spark 이미지 FROM), 배포 (재영 님). (Kafka 보관 기간 7일(#86)은 형식 검사 브랜치에서 재처리 잡과 문서에 맞췄다. 아래 보완)
+
+### 보완 (2026-10-23): Kafka 보관 7일
+
+- main의 #86으로 Kafka 보관 기간이 3일에서 7일이 되었다. 형식 검사 브랜치(재처리 잡 보관 기준 7일, 설계 문서·README 고침)를 다시 병합하고, 적재 잡의 주석(`streaming_ingest.py`), 설정 설명(`config/gold_b.yaml`), 이 지시서의 기본값 줄에 남은 3일을 7일로 고쳤다. 동작은 바뀌지 않는다 (적재 잡은 보관 기간 값을 쓰지 않음).
+- `pipelines/gold_b/tests` 140개 통과 (Python 3.12).
