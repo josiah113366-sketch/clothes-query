@@ -1,4 +1,4 @@
-상태: 구현·로컬 검증 완료 · 최신 main 통합 및 PR 검증 중 · 운영 연결 전 · 브랜치: `pipelines/runtime`
+상태: 구현·로컬 검증 완료 · main 대상 PR #82 리뷰 요청 완료 · 운영 연결 전 · 브랜치: `pipelines/runtime`
 
 # Silver·Gold A 운영 실행 연결
 
@@ -149,7 +149,9 @@
 ### main 통합·인프라 리뷰 준비 (2026-10-23)
 
 - origin/main fbc6108을 충돌 없이 통합했다. main에 이미 반영된 Gold A·형식 규칙·Gold B 코드를 유지하며 운영 실행 연결 변경만 비교한다.
-- Python 회귀 135개 통과, Spark 전용 2개 모듈은 Linux 이미지에서 별도 검증한다. 처음 기본 Windows 임시 폴더에서 실행한 검사는 임시 폴더 권한 오류로 중단됐으며, 작업 폴더 내 basetemp를 지정한 재실행은 통과했다.
+- Python 회귀 135개 통과. Linux Spark 4.2 이미지에서 최신 통합 소스를 읽기 전용 마운트해 거래·퍼널 10개(213.696초), 리뷰 3개(74.579초)를 별도 실행하고 모두 통과했다. 처음 기본 Windows 임시 폴더에서 실행한 검사는 임시 폴더 권한 오류로 중단됐으며, 작업 폴더 내 basetemp를 지정한 재실행은 통과했다.
 - 변경한 pipelines Python 파일의 Ruff(py310) 및 git diff --check 통과. 전체 pipelines Ruff는 main에서 추가된 Gold B·기존 시험 파일의 경고 12개가 있어 이번 작업 범위와 구분했다.
 - 브랜치 대장 변경은 후속 취합으로 분리하고 이번 PR에서는 main과 동일하게 유지한다.
 - 인프라 리뷰 범위는 이미지·Spark 제출·실행 계정·S3 권한·커미터·Airflow 연결이다. 실제 배포 이미지 확정·EKS 업무 실행·Glue 공개·R6 완료 시각 및 재처리 DAG는 미완료다.
+
+- PR #82: pipelines/runtime → main, 일반 PR로 생성하고 jaeyan42에게 인프라 리뷰를 요청했다. 생성 시 충돌 없음. 머지·ECR 발행·EKS 실행은 하지 않았다.
