@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-collector
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-collector` (최신 `main` `965fd73` 병합) · main 대상 PR 제출 · 남은 일: 배포(재영 님)와 실제 Connect·S3 확인
+> 상태: 완료 (#78, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-collector` (최신 `main` `965fd73` 병합) · 남은 일: 배포(재영 님)와 실제 Connect·S3 확인
 
 ## 목표
 

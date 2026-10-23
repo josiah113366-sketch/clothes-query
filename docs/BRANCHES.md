@@ -178,6 +178,11 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
-
 | `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
-| `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 검토 대기 | |
+| `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 머지됨 (#78) | 2026-10-23 |
+| `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 검토 대기 | |
+
+### gold-a
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `pipelines/gold-a` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | main 동기화 완료·PR #67 검토 대기 (#34는 Silver에 머지) | |
