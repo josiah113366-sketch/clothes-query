@@ -8,7 +8,7 @@ AWS 자격 증명은 boto3 기본 방식(aws login / aws configure sso / 환경�
 
 태스크 정의는 Terraform 이 아니라 스크립트가 관리한다(이미지 태그·실행 비율이 자주 바뀌어서).
     deploy.py  : 새 이미지로 새 리비전 등록 (다른 설정은 이전 리비전 그대로)
-    switch.py  : REVIEW_RATE 만 바꾼 새 리비전 등록
+    switch.py  : REVIEW_RATE 또는 주문 입력(ORDERS_SOURCE: fake / rds)만 바꾼 새 리비전 등록
     onoff.py   : 스케줄을 최신 리비전으로 켜고 끄기, 한 번 실행
 스케줄이 켜져 있으면 새 리비전을 등록할 때 스케줄도 그 리비전을 가리키게 바꾼다.
 """
@@ -37,6 +37,11 @@ DEFAULT_ENV = {
     "REVIEW_RATE": str(
         RATE_PRESETS["low"]
     ),  # 처음에는 하루 약 100건으로 시작 (비용 확인 후 switch.py high)
+    # 주문을 어디서 읽을지 (2026-10-21). entrypoint.sh 가 이 값으로 명령을 고른다.
+    #   fake : 가짜 주문을 만들고(rsim orders-fake) 그 주문에 리뷰 (예전 방식, 기본값 = 이미 배포한 리비전과 같은 동작)
+    #   rds  : RDS orders 테이블을 읽어 리뷰 (rsim run --source rds). RDS 접속 secret 값과 RDS 쪽 허용이 먼저 있어야 한다
+    # 바꾸기: python deploy/switch.py --orders rds
+    "ORDERS_SOURCE": "fake",
     "ORDERS_PER_DAY": "1000",
     "ORDERS_FAKE_START": "2026-10-01T00:00:00+00:00",
     "ORDERS_SEED": "42",
@@ -45,6 +50,9 @@ DEFAULT_ENV = {
     "LAKE_TRUTH_ROOT": "/tmp/review-truth",
 }
 SECRET_ENV_NAME = "AWS_BEARER_TOKEN_BEDROCK"
+# RDS 접속 주소 환경변수 이름 (rsim 설정 orders_database_url 과 같은 이름)
+ORDERS_DB_ENV_NAME = "ORDERS_DATABASE_URL"
+ORDERS_SOURCES = ("fake", "rds")
 TAGS = [
     {"key": "Project", "value": "clothes-query"},
     {"key": "Component", "value": "ecs-review-simulator"},
@@ -94,6 +102,24 @@ def image_tag_of(td: dict) -> str:
     return td["containerDefinitions"][0]["image"].rsplit(":", 1)[-1]
 
 
+def secrets_of(cfg: dict, env: dict[str, str]) -> list[dict]:
+    """태스크에 넣을 secret 목록.
+
+    - Bedrock API 키: 항상
+    - RDS 접속 주소(ORDERS_DATABASE_URL): ORDERS_SOURCE=rds 일 때만.
+      값이 비어 있는 secret 을 넣으면 태스크가 시작부터 실패하므로, 가짜 주문 모드에서는 넣지 않는다.
+      예전 Terraform(설정에 orders_db_secret_arn 없음)으로 rds 를 고르면 여기서 멈춘다.
+    """
+    secrets = [{"name": SECRET_ENV_NAME, "valueFrom": cfg["secret_arn"]}]
+    if env.get("ORDERS_SOURCE") == "rds":
+        if not cfg.get("orders_db_secret_arn"):
+            raise SystemExit(
+                "설정에 orders_db_secret_arn 이 없습니다. infra/stacks/ecs-review-simulator 를 다시 apply 하세요."
+            )
+        secrets.append({"name": ORDERS_DB_ENV_NAME, "valueFrom": cfg["orders_db_secret_arn"]})
+    return secrets
+
+
 def container_definition(cfg: dict, image: str, env: dict[str, str]) -> dict:
     """컨테이너 정의. 진입점은 deploy/container/entrypoint.sh (인자 없으면 하루치 실행)."""
     return {
@@ -102,8 +128,8 @@ def container_definition(cfg: dict, image: str, env: dict[str, str]) -> dict:
         "essential": True,
         "entryPoint": ["/bin/sh", "/app/deploy/entrypoint.sh"],
         "environment": [{"name": k, "value": v} for k, v in sorted(env.items())],
-        # Bedrock API 키는 Secrets Manager 에서 태스크 시작 때 환경변수로 들어간다(로그·태스크 정의에 값이 안 남음)
-        "secrets": [{"name": SECRET_ENV_NAME, "valueFrom": cfg["secret_arn"]}],
+        # 비밀값은 Secrets Manager 에서 태스크 시작 때 환경변수로 들어간다(로그·태스크 정의에 값이 안 남음)
+        "secrets": secrets_of(cfg, env),
         "logConfiguration": {
             "logDriver": "awslogs",
             "options": {
@@ -229,9 +255,12 @@ def run_task(
     return resp["tasks"][0]["taskArn"]
 
 
-def yesterday_utc() -> str:
-    """로컬 rsim run --source orders 기본 날짜와 같은 '어제(UTC)'."""
-    return (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+def yesterday_kst() -> str:
+    """로컬 rsim run 기본 날짜와 같은 '어제(KST 달력)'. (2026-10-23 에 UTC → KST)
+
+    주문 시뮬레이터가 KST 벽시계 시각을 UTC 처럼 RDS 에 넣어서, 데이터의 날짜 D = KST 날짜 D 다.
+    """
+    return (datetime.now(UTC) + timedelta(hours=9) - timedelta(days=1)).date().isoformat()
 
 
 def split_s3(uri: str) -> tuple[str, str]:

@@ -122,15 +122,21 @@ class Settings:
     # 주문(결제) 파일. 결제 데이터가 S3 에 쌓이기 전까지 쓰는 로컬 입력이다(review/orders.py 참고).
     # rsim orders-fake 가 만든 가짜 주문을 기본으로 읽는다. 회원 ID 가 들어 있어서 .local/ 에만 둔다.
     orders_path: Path = field(default_factory=lambda: _path("ORDERS_PATH", ".local/orders.jsonl"))
+    # RDS 접속 주소 (rsim run --source rds 에서 orders·order_items·payments·상품·회원 테이블을 읽는다, 2026-10-21).
+    # 형식: postgresql://사용자:비밀번호@호스트:5432/DB이름. 비밀번호가 들어 있으므로 .env 또는 ECS Secret 에만 둔다.
+    # 읽기만 하므로 SELECT 권한만 있는 계정을 쓰면 된다. 로컬에서는 kubectl port-forward 로 localhost 를 줘도 된다.
+    orders_database_url: str = field(default_factory=lambda: _env("ORDERS_DATABASE_URL", ""))
     # 주문 중 리뷰를 쓰는 비율 (0~1). 1.0 = 모든 주문에 리뷰. 실제 쇼핑몰 리뷰 작성률에 맞춰 낮추면 된다.
     # 하루 리뷰 수 ≈ 하루 주문 수 x 이 값. 값을 바꾸면 "어느 주문에 리뷰가 달리는지"도 바뀐다.
     review_rate: float = field(default_factory=lambda: float(_env("REVIEW_RATE", "1.0")))
-    # 결제 후 리뷰까지 걸리는 기간(일). 주문마다 이 사이에서 고르게 정해진다(2026-10-14 구상: 1~14일).
+    # 결제 후 리뷰까지 걸리는 기간(일). 주문마다 이 사이에서 고르게 정해진다.
+    # 2026-10-14 구상은 1~14일이었으나 2026-10-21 lemin 결정으로 0~7일로 바꿈(프로젝트 기간이 짧아서 7일로 좁히고, 결제 당일 리뷰도 나오게 최소 0일).
+    # 늘리면 결제 후 리뷰가 늦게 달려 첫 리뷰가 쌓이기까지 더 오래 걸린다.
     review_delay_min_days: float = field(
-        default_factory=lambda: float(_env("REVIEW_DELAY_MIN_DAYS", "1"))
+        default_factory=lambda: float(_env("REVIEW_DELAY_MIN_DAYS", "0"))
     )
     review_delay_max_days: float = field(
-        default_factory=lambda: float(_env("REVIEW_DELAY_MAX_DAYS", "14"))
+        default_factory=lambda: float(_env("REVIEW_DELAY_MAX_DAYS", "7"))
     )
 
     # ---------------------------------------------------------------- 시뮬레이션

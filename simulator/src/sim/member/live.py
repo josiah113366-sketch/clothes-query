@@ -15,11 +15,13 @@ from typing import Protocol
 import psycopg
 from psycopg import sql
 
+from sim.common.api import PhoneTaken, StoreRejected, StoreUnavailable
 from sim.common.clock import SimClock
 from sim.common.control import ControlSource, ControlState
 from sim.common.db import SafeDatabaseError, db_error_info, describe_db_error
 from sim.common.regions import RegionTable
 from sim.common.rng import SimRandom, derive_seed
+from sim.common.stats import STATS_SECONDS
 from sim.member import params
 from sim.member.baseline import COLUMNS
 from sim.member.generate import draw_phone, generate_member
@@ -139,6 +141,7 @@ class LiveRunner:
         duration: float | None = None,
         max_signups: int | None = None,
         out: Callable[[str], None] = print,
+        stats: Callable[[dict], None] | None = None,
     ) -> None:
         self.store = store
         self.regions = regions
@@ -150,6 +153,7 @@ class LiveRunner:
         self.duration = duration
         self.max_signups = max_signups
         self.out = out
+        self.stats = stats  # 컨트롤러 화면용 누적 숫자 (StatsFile.write). 없으면 쓰지 않는다
         self.running = True
         self.summary = LiveSummary()
         self.next_index = 0
@@ -176,7 +180,7 @@ class LiveRunner:
 
         self.clock.restart()  # 연결과 초기화에 든 시간은 실행 시간(--duration)에 넣지 않는다
         due: float | None = None  # 다음 가입 시각 (실제 경과 초). None이면 새로 뽑는다
-        last_poll = last_progress = float("-inf")
+        last_poll = last_progress = last_stats = float("-inf")
         progress_count = 0
         while not self._should_stop():
             now_real = self.clock.real_elapsed()
@@ -190,6 +194,9 @@ class LiveRunner:
                 span = now_real - last_progress
                 self._print_progress(self.summary.total - progress_count, span)
                 last_progress, progress_count = now_real, self.summary.total
+            if self.stats is not None and now_real - last_stats >= STATS_SECONDS:
+                last_stats = now_real
+                self.stats(self.stats_data())
 
             if not self.running:
                 due = None
@@ -215,6 +222,15 @@ class LiveRunner:
 
         self.summary.elapsed_seconds = self.clock.real_elapsed()
         return self.summary
+
+    def stats_data(self) -> dict:
+        """컨트롤러 화면용 누적 숫자. PII 없음."""
+        return {
+            "mode": self.mode,
+            "running": self.running,
+            "signups": self.summary.total,
+            "reconnects": self.summary.reconnects,
+        }
 
     def _should_stop(self) -> bool:
         if self._stop:
@@ -259,6 +275,20 @@ class LiveRunner:
                 self.out(f"DB 연결 오류: {describe_db_error(error)}")
                 self._open_with_retry(initial=False)
                 return False  # 연결이 끊긴 동안 만든 회원은 없다. 인덱스는 다시 센 값이다
+            except StoreUnavailable as error:  # --backend api: 끊긴 동안의 가입은 다시 센다
+                self.out(f"API 연결 오류: {error}")
+                self._open_with_retry(initial=False)
+                return False
+            except PhoneTaken:
+                if retries >= params.PHONE_RETRY_LIMIT:
+                    raise LiveError(
+                        f"전화번호 중복이 {params.PHONE_RETRY_LIMIT}번 재시도 후에도 풀리지 않았습니다."
+                    ) from None
+                retries += 1
+                self.summary.phone_retries += 1
+                member = replace(member, phone=draw_phone(self._member_rng))
+            except StoreRejected as error:
+                raise LiveError(str(error)) from None
             except psycopg.Error as error:
                 info = db_error_info(error)
                 is_phone = info.sqlstate == UNIQUE_VIOLATION and info.constraint == PHONE_CONSTRAINT
@@ -290,10 +320,16 @@ class LiveRunner:
             try:
                 self.store.connect()
                 self.next_index = self.store.count_since(params.BASELINE_END)
-            except psycopg.Error as error:
-                if not isinstance(error, psycopg.OperationalError):
+            except (psycopg.Error, StoreUnavailable) as error:
+                if isinstance(error, psycopg.Error) and not isinstance(
+                    error, psycopg.OperationalError
+                ):
                     raise SafeDatabaseError(describe_db_error(error)) from None
-                self.out(f"DB 연결 실패: {describe_db_error(error)} — {delay}초 뒤 다시 시도")
+                if isinstance(error, psycopg.Error):
+                    reason = f"DB 연결 실패: {describe_db_error(error)}"
+                else:
+                    reason = f"API 연결 실패: {error}"
+                self.out(f"{reason} — {delay}초 뒤 다시 시도")
                 self._sleep_interruptible(delay)
                 if self._stop:
                     return False
