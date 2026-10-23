@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-compact
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-compact` (`pipelines/gold-b-reprocess` 위에서 갈라짐) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 남은 일: DAG (재영 님)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-compact` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 남은 일: DAG (재영 님)
 
 ## 목표
 
@@ -47,6 +47,7 @@
 
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 40개)
 - [x] 재처리 브랜치 병합 뒤 `pipelines/gold_b/tests` 59개, `pipelines` 144개 통과 (실행 입구 시험 포함)
+- [x] 재처리 브랜치(최신 `main` #78 포함)를 다시 병합한 뒤 `pipelines/gold_b/tests` 82개, `pipelines` 167개 통과 (수집기 시험 23개 포함)
 - [x] 합친 뒤 폴더의 줄(`loaded_at` 포함)이 합치기 전과 같은지, 같은 위치 두 줄도 남는지
 - [x] 중간에 멈춘 뒤 다시 돌려도 줄이 두 번 들어가지 않는지
 
