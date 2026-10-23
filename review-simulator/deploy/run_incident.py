@@ -23,7 +23,7 @@ import json
 import re
 from datetime import date, timedelta
 
-from aws_common import load_config, log_tail_hint, run_task, session, upload_input, yesterday_utc
+from aws_common import load_config, log_tail_hint, run_task, session, upload_input, yesterday_kst
 
 
 def build_incident(
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--share", type=float, default=0.6, help="그 상품 리뷰 중 이 속성·감성이 들어갈 비율"
     )
-    ap.add_argument("--date", help="리뷰 날짜(UTC, YYYY-MM-DD). 기본 어제")
+    ap.add_argument("--date", help="리뷰 날짜(YYYY-MM-DD). 기본 어제(KST 달력)")
     ap.add_argument("--id", dest="incident_id", help="이상 상황 ID (기본 INC-<날짜>-<상품>)")
     ap.add_argument("--note", default="")
     ap.add_argument("--fake", action="store_true", help="가짜 문장(Bedrock 비용 0원, 배관 확인용)")
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--region", default=None)
     args = ap.parse_args(argv)
 
-    day = args.date or yesterday_utc()
+    day = args.date or yesterday_kst()
     item = build_incident(
         day=day,
         aspect=args.aspect,

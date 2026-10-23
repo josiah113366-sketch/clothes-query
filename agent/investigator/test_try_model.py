@@ -87,5 +87,13 @@ with contextlib.redirect_stdout(buf):
     res = main(["--scenario", "falsealarm", "--show"], env={}, converse=Quick())
 out = buf.getvalue()
 check("--show: 정답 UNKNOWN과 같게 맞힘, 결론과 주장(사실)·근거가 출력됨", (res[0]["match"], "결론: PG 원인 실패 없음" in out, "[FACT] PG 원인 실패 0건 (근거 payment_summary)" in out), (True, True, True))
+inwin = q(build("mixed"), "SELECT COUNT(DISTINCT order_id) n FROM gold_b.payment_attempts WHERE payment_id LIKE 'dup%' AND loaded_at >= '2026-10-21 15:08:00' AND loaded_at < '2026-10-21 15:23:00'")[0]["n"]
+check("혼합 장부: 중복 성공 결제 3건이 PG 이상 시간대(15:08~15:23) 안에 적재돼 도구가 볼 수 있음", inwin, 3)
+dupwin = q(build("dup"), "SELECT COUNT(DISTINCT order_id) n FROM gold_b.payment_attempts WHERE payment_id LIKE 'dup%' AND loaded_at >= '2026-10-21 15:25:00' AND loaded_at < '2026-10-21 15:30:00'")[0]["n"]
+check("중복 장부: 기존대로 15:25~15:30 안에 적재", dupwin, 3)
+buf2 = io.StringIO()
+with contextlib.redirect_stdout(buf2):
+    main(["--scenario", "mixed"], env={}, converse=Quick())
+check("mixed 출력에 중복 결제 언급 여부가 나옴", "중복 결제 언급" in buf2.getvalue(), True)
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

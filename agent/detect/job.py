@@ -33,6 +33,13 @@ def _in(col, a, b, cfg):
     return f"{col} >= {_ts(a, cfg)} AND {col} < {_ts(b, cfg)}"
 
 
+def _folder(a, b, cfg):
+    """Athena는 시간 폴더(dt, UTC)로 범위를 좁혀야 스캔량이 준다. dt는 topic_messages·malformed_*는 kafka_timestamp, bronze_lag_snapshots는 collected_at 날짜(은서 님 확인)라 조건 시각의 날짜와 같다. 끝 시각은 포함하지 않지만 날짜는 넉넉히 포함한다."""
+    if cfg.dialect != "athena":
+        return ""
+    return f" AND dt BETWEEN '{a:%Y-%m-%d}' AND '{b:%Y-%m-%d}'"
+
+
 def _seen(as_of, cfg):
     """판정 시점에 이미 쌓여 있던 줄만 본다(그때 본 숫자를 재현). 재판정은 교체된 새 줄을 봐야 해서 걸지 않는다."""
     return f" AND loaded_at <= {_ts(as_of, cfg)}" if as_of else ""
@@ -41,11 +48,11 @@ def _seen(as_of, cfg):
 def _r3(query, cfg, run_id, now, tick, w3, as_of):
     """R3: 최근 5분의 지연 측정, 측정 줄이 연속으로 없는지, 증거로 붙일 유입량(R2)."""
     lag_rows = query(f"""SELECT topic, MAX(lag_sec) AS max_lag_sec FROM gold_b.bronze_lag_snapshots
-WHERE {_in('collected_at', tick - timedelta(minutes=2), tick, cfg)} GROUP BY topic""")
+WHERE {_in('collected_at', tick - timedelta(minutes=2), tick, cfg)}{_folder(tick - timedelta(minutes=2), tick, cfg)} GROUP BY topic""")
     snap_rows = query(f"""SELECT topic, COUNT(*) AS snapshots FROM gold_b.bronze_lag_snapshots
-WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)} GROUP BY topic""")
-    vol_now = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w3, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
-    vol_prev = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', w3[0] - timedelta(minutes=STEP_MIN), w3[0], cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)}{_folder(tick - timedelta(minutes=cfg.miss_min), tick, cfg)} GROUP BY topic""")
+    vol_now = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w3, cfg)}{_folder(*w3, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+    vol_prev = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', w3[0] - timedelta(minutes=STEP_MIN), w3[0], cfg)}{_folder(w3[0] - timedelta(minutes=STEP_MIN), w3[0], cfg)}{_seen(as_of, cfg)} GROUP BY topic")
     ingest = {t: (next((r["n"] for r in vol_now if r["topic"] == t), 0), next((r["n"] for r in vol_prev if r["topic"] == t), 0)) for t in cfg.topics}
     return r3_bronze_lag(cfg, run_id, now, w3, {r["topic"]: r["max_lag_sec"] for r in lag_rows},
                          {r["topic"]: r["snapshots"] for r in snap_rows}, ingest)
@@ -120,8 +127,8 @@ GROUP BY pg""")
     # R4: 현재 형식 검사 규칙 버전의 깨진 메시지만 센다. 비율 조건이 있어 3분 대기
     w4 = (tick - wait - timedelta(minutes=cfg.r4_win_min), tick - wait)
     broken = query(f"""SELECT topic, COUNT(*) AS n FROM gold_b.malformed_messages
-WHERE {_in('kafka_timestamp', *w4, cfg)} AND rule_version = '{cfg.format_rule_version}'{_seen(as_of, cfg)} GROUP BY topic""")
-    total = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w4, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
+WHERE {_in('kafka_timestamp', *w4, cfg)}{_folder(*w4, cfg)} AND rule_version = '{cfg.format_rule_version}'{_seen(as_of, cfg)} GROUP BY topic""")
+    total = query(f"SELECT topic, COUNT(*) AS n FROM gold_b.topic_messages WHERE {_in('kafka_timestamp', *w4, cfg)}{_folder(*w4, cfg)}{_seen(as_of, cfg)} GROUP BY topic")
     out += r4_malformed(cfg, run_id, now, w4, {r["topic"]: r["n"] for r in broken}, {r["topic"]: r["n"] for r in total})
     # R5: 한 주문에 성공 결제 2건. 비율 조건이 없어 기다리지 않는다.
     #   순찰은 "방금 적재된" 줄(loaded_at)을 본다. 중복 행의 completed_at은 원래 결제 시각이라 과거일 수 있다.
@@ -173,10 +180,14 @@ def _event(request_id, step, now, ws, we, detail, cfg):
 
 
 def pending_replacements(query):
-    """LEDGER_REPLACED 줄 중, 같은 요청·같은 시간대의 REDETECTED가 아직 없는 것."""
+    """LEDGER_REPLACED 줄 중, 같은 요청·같은 시간대의 REDETECTED가 아직 없는 것.
+
+    Gold B 원장 재처리(source가 KAFKA·BRONZE)만 본다. 은서 님 poller와 같은 조건이다.
+    Silver 재처리(source = 'SILVER', R6)의 교체 줄은 Gold B 규칙으로 다시 판정할 대상이 아니라서 뺀다.
+    """
     return query("""SELECT l.request_id, l.window_start, l.window_end
 FROM gold_b.reprocess_events l
-WHERE l.step = 'LEDGER_REPLACED'
+WHERE l.step = 'LEDGER_REPLACED' AND (l.source IS NULL OR l.source IN ('KAFKA', 'BRONZE'))
   AND NOT EXISTS (SELECT 1 FROM gold_b.reprocess_events r
                   WHERE r.request_id = l.request_id AND r.step = 'REDETECTED'
                     AND r.window_start = l.window_start AND r.window_end = l.window_end)

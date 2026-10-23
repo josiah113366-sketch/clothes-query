@@ -5,6 +5,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 
+import job
 from job import floor_tick, pending_replacements, regular_run, run_once
 from rules import r3_bronze_lag
 from rules import Config, anomaly_id
@@ -138,6 +139,10 @@ check("재처리 전에 PG_A 이상이 기록되어 있음", len(anomalies("WHER
 
 event("rq-0", "LEDGER_REPLACED", at(15, 0), at(16, 0))     # 교체는 했는데 데이터는 그대로 (장애가 진짜였던 경우)
 check("교체 끝났는데 아직 재판정 안 한 줄을 찾음", [(x["request_id"], x["window_start"]) for x in pending_replacements(query)], [("rq-0", "2026-10-20 15:00:00")])
+write("reprocess_events", [{"request_id": "rq-silver", "step": "LEDGER_REPLACED", "at": at(16, 15).strftime(F), "actor": "silver_reprocess", "reason": None,
+                            "window_start": at(15, 0).strftime(F), "window_end": at(16, 0).strftime(F), "rule_version": "v1.0", "source": "SILVER",
+                            "attempt": 1, "parent_request_id": None, "detail": None}])
+check("Silver 재처리(source=SILVER) 교체 줄은 Gold B 재판정 대상이 아님", [x["request_id"] for x in pending_replacements(query)], ["rq-0"])
 s = run_once(query, write, CFG, at(16, 20))
 check("재판정 결과: 장애가 진짜라 이상이 그대로 남음 (STILL_OPEN)", [x["result"] for x in s["redetected"]], ["STILL_OPEN"])
 check("REDETECTED, VERIFIED 줄이 남음", [x["step"] for x in query("SELECT step FROM gold_b.reprocess_events WHERE actor = 'detect_job' AND request_id = 'rq-0' ORDER BY step")], ["REDETECTED", "VERIFIED"])
@@ -291,5 +296,16 @@ check("재판정 재시도: 이상 줄이 두 번 쌓이지 않음", (rd1 > 0, l
 check("재판정 재시도: 순찰 기록 REDETECT가 한 줄만", len(q4("SELECT * FROM gold_b.detection_runs WHERE kind = 'REDETECT'")), 1)
 check("재판정 재시도: 이전 시도가 쓴 이상 줄을 옛 이상으로 착각하지 않음 (옛 이상이 없었으니 NO_ANOMALY_BEFORE)", [x["result"] for x in s2["redetected"]], ["NO_ANOMALY_BEFORE"])
 check("재판정 재시도: VERIFIED가 한 줄만", len(q4("SELECT * FROM gold_b.reprocess_events WHERE step = 'VERIFIED'")), 1)
+# Athena일 때만 시간 폴더(dt) 조건이 붙는다 (스캔량 상한 대응). dt는 조건 시각의 날짜(UTC)
+fa, fb = datetime(2026, 10, 21, 23, 55), datetime(2026, 10, 22, 0, 5)
+check("폴더 조건: Athena는 시작·끝 날짜", job._folder(fa, fb, Config(dialect="athena")), " AND dt BETWEEN '2026-10-21' AND '2026-10-22'")
+check("폴더 조건: sqlite는 없음", job._folder(fa, fb, CFG), "")
+# 공통 형식 규칙 YAML의 버전과 R4 기본값이 같은지 (어긋나면 R4가 0건이 되어 조용히 안 잡힌다)
+import re
+from pathlib import Path
+yaml = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "format_rules.yaml"
+if yaml.exists():
+    m = re.search(r'^version:\s*"?([0-9][^"\s]*)"?', yaml.read_text(encoding="utf-8"), re.M)
+    check("R4 기본 규칙 버전이 공통 형식 규칙 YAML의 version과 같음", (m.group(1) if m else None, Config().format_rule_version), (Config().format_rule_version, Config().format_rule_version))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

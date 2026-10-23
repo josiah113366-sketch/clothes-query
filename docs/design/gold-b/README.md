@@ -209,6 +209,12 @@ s3://clothes-query-datalake/gold_b/
 
 수집기는 Gold B 적재 잡과 따로 돈다 (EKS에서 1분마다). 데이터가 없어도 돌아야 Bronze 멈춤을 잡을 수 있기 때문이다. 토픽별·파티션별로 쌓고, 전체 값이 필요하면 밀린 개수는 합, 밀린 시간은 최댓값으로 본다. 과거 측정값이라 재처리해도 다시 만들지 않는다.
 
+수집 규칙 (2026-10-21, 코드는 `pipelines/gold_b/collector/`):
+- 처리 기록이 없으면 `committed_offset`, `lag_msgs`, `lag_sec`는 NULL이다. 밀린 게 없으면 `lag_sec`는 0이다.
+- 처리할 메시지가 보관 기간으로 지워졌으면 `lag_sec`는 남아 있는 가장 오래된 메시지 기준이다 (실제보다 작음).
+- `connector_state`는 커넥터 상태다. 태스크가 RUNNING이 아니면 그 태스크 상태, Connect에 접속하지 못하면 `UNREACHABLE`, 커넥터가 없으면 `NOT_FOUND`다.
+- Kafka에 접속하지 못하면 그 회차는 줄을 쓰지 않는다. 탐지가 "측정 줄 없음"으로 잡는다.
+
 ### ④ `malformed_events` - 오류 하나 = 한 줄 (한 메시지에 오류가 여러 개면 여러 줄)
 
 | 컬럼 | 타입 | 뜻 | 예시 |
@@ -237,9 +243,9 @@ s3://clothes-query-datalake/gold_b/
 | --- | --- | --- |
 | `REQUESTED` | 주현 (승인 화면) | 재처리 요청 (승인 범위) |
 | `APPROVED` / `REJECTED` | 주현 (승인 화면) | 사람이 승인 또는 거절 |
-| `STARTED` | 은서 (재처리 잡) | 교체 시작 |
-| `LEDGER_REPLACED` | 은서 (재처리 잡) | 시간 폴더 하나 교체 끝 (**실제 교체 범위**) |
-| `FAILED` | 은서 (재처리 잡) | 실패 (`detail`에 이유) |
+| `STARTED` | 은서 (Gold B 재처리 잡) · 현지 (Silver 재처리) | 교체 시작 |
+| `LEDGER_REPLACED` | 은서 (Gold B 재처리 잡) · 현지 (Silver 재처리) | Gold B: 시간 폴더 하나 교체 끝 (**실제 교체 범위**). Silver: 결과 공개 (아래 「Silver 재처리 줄」) |
+| `FAILED` | 은서 (Gold B 재처리 잡) · 현지 (Silver 재처리) | 실패 (`detail`에 이유) |
 | `REDETECTED` | 주현 (판정 잡) | 교체된 시간 폴더 재판정 끝 |
 | `VERIFIED` | 주현 (판정 잡) | 해결 / 미해결 확인 |
 
@@ -251,16 +257,38 @@ s3://clothes-query-datalake/gold_b/
 | `actor` | STRING | 누가 (사람 이름 대신 역할·잡 이름) | 각 단계를 쓰는 사람 |
 | `reason` | STRING | 왜 | 각 단계를 쓰는 사람 |
 | `window_start`, `window_end` | TIMESTAMP | 이 줄이 가리키는 시간대. `REQUESTED`는 승인 범위, `LEDGER_REPLACED`는 실제 교체한 시간 폴더 | 각 단계를 쓰는 사람 |
-| `rule_version` | STRING | 다시 계산에 쓴 형식 검사 규칙 버전 | 은서 (승인 때 주현 님도 함께 적으면 맞춰 보기 좋음) |
-| `source` | STRING | 다시 읽은 곳 (`KAFKA` / `BRONZE`) | 은서 |
-| `attempt` | INT | 몇 번째 시도 | 각 단계를 쓰는 사람 |
+| `rule_version` | STRING | 다시 계산에 쓴 형식 검사 규칙 버전 | 승인 화면(요청·승인 줄), 각 재처리 잡 |
+| `source` | STRING | 재처리 경로. `KAFKA`·`BRONZE`는 Gold B 원장 재처리(다시 읽은 곳), `SILVER`는 Silver·Gold A 재처리 (2026-10-23) | 승인 화면(요청·승인 줄), 각 재처리 잡 |
+| `attempt` | INT | 요청 단위 시도 번호 (같은 이상의 몇 번째 요청인지, 승인 화면이 정함). 한 요청 안에서 다시 돌린 횟수는 `STARTED`의 `detail.run` | 각 단계를 쓰는 사람 |
 | `parent_request_id` | STRING | 이전 요청 (재시도 추적) | 각 단계를 쓰는 사람 |
-| `detail` | STRING | 실패 이유, 교체한 폴더 목록 같은 짧은 설명 | 은서 |
+| `detail` | STRING | 실패 이유, 교체한 폴더 목록 같은 짧은 설명 (JSON) | 각 재처리 잡 |
 
 - **시간 폴더 하나 교체가 끝날 때마다** `LEDGER_REPLACED`를 한 줄씩 쓴다. 14:40~16:20을 승인하면 14·15·16시 폴더마다 한 줄이다. 중간에 실패해도 끝난 폴더는 재판정할 수 있고, 남은 폴더는 `FAILED`로 남는다. `REDETECTED`도 폴더마다 한 줄씩 쓴다.
 - `LEDGER_REPLACED`는 그 폴더의 교체가 **모두 끝난 뒤** 쓴다.
 - 판정 잡이 이 표의 `LEDGER_REPLACED` 줄을 보고 재판정을 시작한다. 그래서 이 표는 누가 언제 어느 범위를 바꿨는지 남기는 기록이면서, 재판정을 시작시키는 신호다.
 - 재처리는 항상 원장 3개를 같이 교체하므로 표 이름은 기록하지 않는다. 한 시간 폴더는 몇 초~1~2분이면 다시 채워진다.
+
+#### 재처리 시작: Gold B poller (2026-10-23)
+
+- Airflow DAG `gold_b_reprocess`가 5분마다 Gold B 재처리 잡의 poller(`jobs/reprocess.py`의 `next_request`)를 부른다. DAG는 한 번에 하나만 돈다 (`max_active_runs` 1).
+- poller는 `reprocess_events`를 S3에서 바로 읽는다. 승인 화면·판정 잡이 Athena `INSERT`로 쓴 파일은 이름에 확장자가 없을 수 있어서, 숨김·임시 파일이 아니면 다 읽는다.
+- `APPROVED` 줄의 `source`가 `KAFKA`·`BRONZE`인 요청만 맡는다. `SILVER` 요청은 승인 화면이 Silver DAG를 직접 부른다.
+- 아직 시작하지 않은 요청은 승인 뒤 60분 안일 때만 시작한다. 승인 화면의 "승인 만료"와 같은 값이다.
+- 다시 돌리는 경우는 둘이다: `FAILED`의 `detail.retryable`이 참일 때, 마지막 `STARTED` 뒤 시간 폴더가 다 끝나지 않은 채 멈췄을 때. 한 요청은 최대 3번(처음 1번 + 자동 재시도 2번)까지 돌린다. 그래도 안 되면 사람이 새로 요청한다 (`parent_request_id`).
+- 한 번 돌 때 승인이 가장 이른 요청 하나만 처리한다.
+
+#### Silver 재처리 줄 (`source = SILVER`, 2026-10-23)
+
+- 현지 님 Silver 재처리도 이 표를 쓴다. 단계 이름은 Gold B와 같고 `source = SILVER`로 나눈다.
+- `detail`(JSON): `status`, `silver_run_id`, `actual_scope`, `held_scopes`, `failure_reason`.
+- **`LEDGER_REPLACED`를 읽는 곳은 `source`로 나눠 읽는다.** Gold B 재판정과 R5 순찰(판정 잡)은 `KAFKA`·`BRONZE`만 본다. 그렇지 않으면 Silver 줄에 Gold B 재판정이 돌고, R5가 그 구간의 결제를 빼고 센다.
+- 제안 (현지 님 확인 중): `LEDGER_REPLACED`는 결과를 공개했을 때(전체 또는 일부)만 쓰고 실패는 `FAILED`로 쓴다. `window_start`·`window_end`는 그 실행이 맡은 범위(승인 범위, UTC)다. 긴 범위 목록은 `detail`에 다 넣지 않고 Silver manifest 경로로 가리킨다.
+
+#### 복구 판단 (2026-10-23)
+
+- 재처리 줄이 쌓였다는 것만으로 복구로 보지 않는다. 복구 완료는 판정 잡이 남기는 `VERIFIED`(해결)로 본다.
+- Gold B: `LEDGER_REPLACED` → 판정 잡이 그 폴더를 재판정(`REDETECTED`) → `VERIFIED`.
+- Silver(제안): `status`가 `SUCCESS`이고 `held_scopes`가 비어 있으며, 그 뒤 Silver 검사에서 해당 주문이 `PASS`이고, 판정 잡이 `VERIFIED`를 남겼을 때. `PARTIAL`이거나 보류 범위가 남으면 이상은 열어 두고, 남은 범위는 새 요청으로 다시 한다. R6가 이미 "다음 실행의 `PASS`만 해소"로 판단한다.
 
 ## 탐지가 읽는 것
 
@@ -641,7 +669,9 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 주현 | `payment_conflicts` 추가, `bronze_lag_snapshots.kafka_partition` 이름 | 탐지 SQL에서 쓰는 이름 | 필요 |
 | 주현 | 조사 에이전트 리포트·실행 기록 표를 둘 곳 (`gold_b` 밖 권장: 에이전트는 `gold_b/`를 읽기만 함) | 에이전트 권한, 정답 노출 방지 | 필요 |
 | 주현 | 허용 지연 (시연 모드별 재측정 후) | 정답표 채점 기준 | 팀 회의 |
-| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 필요 |
+| 주현 | 판정 잡이 `LEDGER_REPLACED`를 읽는 두 곳(`pending_replacements`, `_replaced_filter`)에 `source IN ('KAFKA', 'BRONZE')` | Silver 줄을 Gold B 재처리로 읽지 않기 | 필요 |
+| 현지 | Silver 재처리 줄 쓰는 법(실패는 `FAILED`, 범위, `detail`)과 `gold_b/reprocess_events/` 쓰기 권한 | 같은 표를 두 경로가 함께 쓰기 | 필요 |
+| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 진행 중 (#72) |
 | 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 필요 |
 | 성철 | Bronze 적재 방식 | 지연 측정 방식 결정 | 완료 (S3 Sink) |
 | 성철 | S3 Sink 커넥터 이름, 소비자 그룹 이름 | 수집기가 처리 위치를 물어볼 대상 | 저장소상 `bronze-s3-sink`. 소비자 그룹 확인 필요 |
@@ -757,7 +787,7 @@ pipelines/gold_b/
 - [x]  `views/malformed_messages.sql` (필드·사유 쌍 배열, 시간 폴더 `dt`·`hour`)
 - [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
 - [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#70, 2026-10-23)
 
 ### 4단계: 적재 잡
 
@@ -773,12 +803,12 @@ pipelines/gold_b/
 
 ### 5단계: Bronze 지연 수집기
 
-- [ ]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
-- [ ]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기
+- [x]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
+- [x]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기 (로컬 Kafka로 확인, 실제 S3 쓰기는 배포 때)
 - [ ]  `deploy/gold_b_collector.yaml` (CronJob 또는 상시 파드)
 - [ ]  정상일 때 값이 파일 전환 주기 기준선과 맞는지 확인
 - [ ]  S3 Sink를 잠깐 멈춰서 밀림·멈춤이 잡히는지 확인
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#78, 2026-10-23)
 
 ### 6단계: 파일 합치기
 
@@ -789,16 +819,18 @@ pipelines/gold_b/
 
 ### 7단계: 재처리 잡 (필수 ②)
 
-- [ ]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
-- [ ]  승인 범위를 시간 폴더 단위로 넓히기
-- [ ]  원본 선택: 3일 안은 Kafka(해당 offset부터), 넘으면 Bronze
-- [ ]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
-- [ ]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
-- [ ]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록
-- [ ]  원본이 없는 구간은 재시도 없이 바로 `FAILED`
-- [ ]  실제 교체 범위를 결과로 넘기기
-- [ ]  `tests/test_reprocess.py` 같은 입력으로 두 번 돌려 결과가 같은지 확인
-- [ ]  `dags/gold_b_reprocess.py` 재시도 2번, 한 번에 하나씩 (재영 님과). 재판정은 판정 잡이 `LEDGER_REPLACED`를 읽어 시작하므로 DAG로 잇지 않는다
+- [x]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
+- [x]  승인 범위를 시간 폴더 단위로 넓히기
+- [ ]  원본 선택: 3일 안은 Kafka(해당 offset부터), 넘으면 Bronze (Kafka는 완료. Bronze는 Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정한 뒤)
+- [x]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
+- [x]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
+- [x]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록
+- [x]  원본이 없는 구간은 재시도 없이 바로 `FAILED`
+- [x]  실제 교체 범위를 결과로 넘기기
+- [x]  `tests/test_reprocess.py` 같은 입력으로 두 번 돌려 결과가 같은지 확인
+- [x]  poller `next_request`: 5분마다 `APPROVED` 중 `source`가 `KAFKA`·`BRONZE`인 요청 하나, 승인 만료 60분, 한 요청 최대 3번
+- [ ]  실행 입구(명령줄): 형식 검사기와 함께 만든다 (`pipelines/gold-b-format-check`)
+- [ ]  `dags/gold_b_reprocess.py` 5분마다 poller 실행, 한 번에 하나 (재영 님. DAG 공급 경로가 `infra/platform/airflow/dags/`). 재판정은 판정 잡이 `LEDGER_REPLACED`를 읽어 시작하므로 DAG로 잇지 않는다
 - [ ]  PR 올리고 합치기
 
 ### 8단계: Silver 경로와 맞추기

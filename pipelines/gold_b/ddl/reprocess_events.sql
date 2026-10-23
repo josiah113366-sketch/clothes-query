@@ -9,8 +9,8 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gold_b.reprocess_events (
   window_start      TIMESTAMP COMMENT '이 줄이 가리키는 시간대 시작 (REQUESTED는 승인 범위, LEDGER_REPLACED는 실제 교체한 시간 폴더)',
   window_end        TIMESTAMP COMMENT '이 줄이 가리키는 시간대 끝',
   rule_version      STRING    COMMENT '다시 계산에 쓴 형식 검사 규칙 버전',
-  source            STRING    COMMENT '다시 읽은 곳 (KAFKA, BRONZE)',
-  attempt           INT       COMMENT '몇 번째 시도',
+  source            STRING    COMMENT '재처리 경로 (KAFKA, BRONZE: Gold B 원장 재처리 / SILVER: Silver·Gold A 재처리)',
+  attempt           INT       COMMENT '요청 단위 시도 번호 (한 요청 안의 재실행 횟수는 STARTED의 detail.run)',
   parent_request_id STRING    COMMENT '이전 요청 (재시도 추적)',
   detail            STRING    COMMENT '실패 이유, 교체한 폴더 목록 같은 짧은 설명'
 )
