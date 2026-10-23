@@ -1,0 +1,59 @@
+# 대시보드 Deployment. 이미지 주소와 Secret 은 apply 전에 채운다 (README 참고).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app.kubernetes.io/name: dashboard
+spec:
+  # Streamlit 은 세션을 파드 메모리에 두고 로그인 실패 잠금도 파드별이라 1개로 시작한다.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dashboard
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      # Athena/S3 읽기가 필요해지면 Pod Identity 를 연결한 ServiceAccount 를 만든 뒤 주석을 푼다.
+      # serviceAccountName: dashboard
+      containers:
+        - name: dashboard
+          # 태그보다 digest(@sha256:...)로 고정한다.
+          image: 827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/dashboard@sha256:4dc73ac3a9660dd12095e0475c464659469742b542d9ef8632470ab741a2e01d
+          ports:
+            - name: http
+              containerPort: 8501
+          env:
+            # 고정 계정 3개 로그인. 계정 파일(해시만 들어 있음)은 Secret 으로 마운트한다.
+            - {name: AUTH_MODE, value: "local"}
+            - {name: LOCAL_ACCOUNTS_FILE, value: /etc/dashboard/accounts.json}
+            # 실데이터 연결 전에는 dummy. Athena 조회를 등록하고 읽기 권한을 붙인 뒤 auto 로 바꾼다.
+            - {name: DATA_SOURCE, value: "dummy"}
+          volumeMounts:
+            - {name: accounts, mountPath: /etc/dashboard, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          # 노드가 1대(24GiB 한도)라 작게 잡았다. 실제 사용량을 보고 조정한다.
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: accounts
+          secret:
+            secretName: dashboard-accounts
