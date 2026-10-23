@@ -15,7 +15,7 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 ## 이번 작업의 특례 (사용자 결정, 다른 문서보다 우선)
 
 - 원장 공통 도구(`ledger.py`)를 쓰므로 `pipelines/gold-b-reprocess` 위에서 갈라졌다. ~~push는 #36과 재처리 브랜치가 머지된 뒤, 이 브랜치의 커밋만 `main` 위로 옮긴 다음에 한다.~~ → 2026-10-23 바뀜: 형식 검사기를 쓰려고 `pipelines/gold-b-format-check`(재처리·최신 `main` 포함)를 병합했다. 커밋을 옮기지 않고, 재처리 → 형식 검사·파일 합치기가 머지된 뒤 PR을 올린다.
-- 같은 곳에서 갈라진 `pipelines/gold-b-compact`와 `docs/BRANCHES.md`, `jobs/README.md` 첫 줄을 같이 고쳐서, 나중에 둘을 차례로 머지할 때 작은 충돌이 난다 (두 줄을 합치면 됨).
+- 같은 곳에서 갈라진 `pipelines/gold-b-compact`와 `docs/BRANCHES.md`, `jobs/README.md` 첫 줄을 같이 고쳐서, 나중에 둘을 차례로 머지할 때 작은 충돌이 난다 (두 줄을 합치면 됨). → 2026-10-23에 파일 합치기 브랜치를 이 브랜치에 병합해 충돌을 미리 풀었다 (브랜치 대장, Gold B README, `jobs/README.md` 첫 줄). 그래서 이 PR은 형식 검사·파일 합치기가 머지된 뒤에 올린다.
 - 2026-10-23 보완은 사용자 요청("6 7 8 9 차례대로")으로 했다: 형식 검사기 연결, 실행 입구, 배포에 필요한 것 정리. 배포 설정 파일은 여전히 만들지 않는다.
 - 커밋 메시지에 Claude 공동 작성자 줄을 넣지 않는다.
 
@@ -57,7 +57,7 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 - [x] 같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않는지
 - [x] (보완) 실제 형식 검사기로 샘플 묶음을 쓰면 원장 ② 31줄, ① 9줄, ④는 샘플 기대 오류 수와 같은지
 - [x] (보완) 실행 입구가 형식 검사기(규칙 0.2.0)를 끼워 쿼리를 시작하고, 환경변수가 없으면 Spark를 띄우지 않고 1로 끝나는지 (가짜 쿼리)
-- [x] (보완) `python -m pytest -q pipelines/gold_b/tests`, `python -m pytest -q pipelines` 통과
+- [x] (보완) `python -m pytest -q pipelines/gold_b/tests`, `python -m pytest -q pipelines` 통과 (형식 검사·파일 합치기 병합 뒤 136개, 221개)
 
 ## 작업 결과 (머지 전에 작성한다)
 
@@ -100,5 +100,6 @@ Kafka 토픽을 Spark Structured Streaming으로 1분마다 읽어 원장 ①`pa
 - **확인한 결과:**
   - `python -m pytest -q pipelines/gold_b/tests/test_ingest.py`: 8개 통과. 실제 형식 검사기로 샘플 31건을 쓰면 ② 31줄, ① 9줄, ④는 샘플 기대 오류 수이고 `rule_version`은 모두 0.2.0.
   - `python -m pytest -q pipelines/gold_b/tests`: 108개 통과. `python -m pytest -q pipelines`: 193개 통과 (PC Python 3.12). `git diff --check` 통과.
+  - 형식 검사 브랜치(최신 `main` #78 포함)와 파일 합치기 브랜치를 병합한 뒤 `pipelines/gold_b/tests` 136개, `pipelines` 221개 통과 (수집기 23개, 합치기 5개 포함).
   - 형식 검사기를 끼운 Spark 실행은 하지 않았다. 공용 Spark 이미지(`infra/platform/spark/image`, Spark 4.2.0)는 `spark-sql-kafka`·S3A가 들어 있지만 Python이 3.10이고, 결제 지문 함수는 3.11 기능(`datetime.UTC`)을 쓴다.
 - **다음 할 일:** Python 3.11 이상 실행 이미지(또는 코드를 3.10에 맞출지) 정하기 (현지 님·재영 님), 배포 설정과 EKS 상시 실행 확인 (재영 님), 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인.
