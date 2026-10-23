@@ -180,10 +180,14 @@ def _event(request_id, step, now, ws, we, detail, cfg):
 
 
 def pending_replacements(query):
-    """LEDGER_REPLACED 줄 중, 같은 요청·같은 시간대의 REDETECTED가 아직 없는 것."""
+    """LEDGER_REPLACED 줄 중, 같은 요청·같은 시간대의 REDETECTED가 아직 없는 것.
+
+    Gold B 원장 재처리(source가 KAFKA·BRONZE)만 본다. 은서 님 poller와 같은 조건이다.
+    Silver 재처리(source = 'SILVER', R6)의 교체 줄은 Gold B 규칙으로 다시 판정할 대상이 아니라서 뺀다.
+    """
     return query("""SELECT l.request_id, l.window_start, l.window_end
 FROM gold_b.reprocess_events l
-WHERE l.step = 'LEDGER_REPLACED'
+WHERE l.step = 'LEDGER_REPLACED' AND (l.source IS NULL OR l.source IN ('KAFKA', 'BRONZE'))
   AND NOT EXISTS (SELECT 1 FROM gold_b.reprocess_events r
                   WHERE r.request_id = l.request_id AND r.step = 'REDETECTED'
                     AND r.window_start = l.window_start AND r.window_end = l.window_end)
