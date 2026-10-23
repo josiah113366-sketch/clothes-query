@@ -85,3 +85,4 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
   - 실제 Kafka·S3·Athena로는 돌려 보지 않았다. 배포(이미지, Pod 권한, DAG)는 재영 님과 한다 (`jobs/README.md`의 DAG 명세).
   - 실행 이미지는 Python 3.11 이상이어야 한다 (지문 함수). 재영 님 Spark 이미지는 Python 3.10이라, 재처리 잡은 Spark 없이 Python 3.11+ 이미지로 돌린다.
   - 모르는 실패 코드를 ①에 넣는 확장안, `rule_id` 칸은 하지 않았다 (위 결정).
+- **팀원 확인 표 정리 (2026-10-23):** 주현 님 PR이 main에 들어간 것을 확인하고 설계 문서 팀원 확인 표를 고쳤다. #71 판정 설정 `format_rule_version` 0.2.0, #72 판정·조사 쿼리의 시간 폴더 조건, #80 `pending_replacements`의 `source IN ('KAFKA', 'BRONZE')`. 판정 잡의 `reprocess_events` 정의(`TABLE_SPECS`)도 DDL과 같아졌다(폴더 없음, `attempt` int). 남은 것은 `_replaced_filter`(R5 순찰)의 같은 `source` 조건이다. 재처리 브랜치는 이미 올라가 있어서 이 정리는 이 브랜치에 넣었다.

@@ -679,10 +679,10 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 주현 | `payment_conflicts` 추가, `bronze_lag_snapshots.kafka_partition` 이름 | 탐지 SQL에서 쓰는 이름 | 필요 |
 | 주현 | 조사 에이전트 리포트·실행 기록 표를 둘 곳 (`gold_b` 밖 권장: 에이전트는 `gold_b/`를 읽기만 함) | 에이전트 권한, 정답 노출 방지 | 필요 |
 | 주현 | 허용 지연 (시연 모드별 재측정 후) | 정답표 채점 기준 | 팀 회의 |
-| 주현 | 판정 잡이 `LEDGER_REPLACED`를 읽는 두 곳(`pending_replacements`, `_replaced_filter`)에 `source IN ('KAFKA', 'BRONZE')` | Silver 줄을 Gold B 재처리로 읽지 않기 | 필요 |
+| 주현 | 판정 잡이 `LEDGER_REPLACED`를 읽는 두 곳(`pending_replacements`, `_replaced_filter`)에 `source IN ('KAFKA', 'BRONZE')` | Silver 줄을 Gold B 재처리로 읽지 않기 | 일부 완료: #80이 `pending_replacements`에 넣음. `_replaced_filter`(R5 순찰)는 아직이라, Silver 교체 기록이 있으면 그 시간대에 방금 쌓인 성공 결제 줄을 R5가 뺄 수 있음 |
 | 현지 | Silver 재처리 줄 쓰는 법(실패는 `FAILED`, 범위, `detail`)과 `gold_b/reprocess_events/` 쓰기 권한 | 같은 표를 두 경로가 함께 쓰기 | 필요 |
-| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 진행 중 (#72) |
-| 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 필요 |
+| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 완료 (#72) |
+| 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 완료 (#71) |
 | 성철 | Bronze 적재 방식 | 지연 측정 방식 결정 | 완료 (S3 Sink) |
 | 성철 | S3 Sink 커넥터 이름, 소비자 그룹 이름 | 수집기가 처리 위치를 물어볼 대상 | 저장소상 `bronze-s3-sink`. 소비자 그룹 확인 필요 |
 | 성철 | 파일 전환 주기 | 정상일 때의 지연 기준선 | 저장소상 15분. 확인 필요 |
