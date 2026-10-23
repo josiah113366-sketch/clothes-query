@@ -86,7 +86,17 @@ row6 = fetch_rows(query, r6["request_id"])[0]
 check("요청: R6는 Silver 기준(시간대 그대로, 주문 id 목록)이고 재처리로 안 풀릴 수 있다는 경고가 붙음",
       (row6["source"], row6["window_start"], json.loads(row6["detail"])["order_ids"], r6["warning"]), ("SILVER", "2026-10-22 15:00:00", ["o1", "o2"], "UNFIXABLE_BY_REPROCESS"))
 check("요청: R1은 재처리로 풀릴 수 있어 경고 없음", r["warning"], None)
-check("요청: 재시도가 한도(2번)를 넘으면 거절", code(lambda: request_reprocess(dict(R1, anomaly_id="a9"), "rep-9", ME, T0, query, write, CFG, attempt=4)), "TOO_MANY_ATTEMPTS")
+A9 = dict(R1, anomaly_id="a9")
+hist = []
+for i in range(3):      # 실패 기록을 남긴 뒤 다시 요청: 시도 번호는 서버가 이력으로 계산한다 (호출자가 줄 수 없다)
+    t = T0 + timedelta(minutes=10 * i)
+    rr = request_reprocess(A9, "rep-9", ME, t, query, write, CFG)
+    row9 = fetch_rows(query, rr["request_id"])[0]
+    hist.append((row9["attempt"], row9["parent_request_id"]))
+    write("reprocess_events", [dict(row9, step="FAILED", at=(t + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"), reason="시험용 실패")])
+check("요청: 실패할 때마다 시도 번호가 1,2,3으로 오르고 이전 요청이 연결됨", [h[0] for h in hist], [1, 2, 3])
+check("요청: 첫 요청의 이전 요청은 없고 재시도는 직전 실패 요청을 가리킴", (hist[0][1], hist[1][1] is not None, hist[2][1] != hist[1][1]), (None, True, True))
+check("요청: 재시도가 한도(2번)를 넘으면 거절(실패 기록이 3건이면 네 번째 요청 불가)", code(lambda: request_reprocess(A9, "rep-9", ME, T0 + timedelta(minutes=40), query, write, CFG)), "TOO_MANY_ATTEMPTS")
 check("요청: 이상 id에 따옴표 같은 글자가 있으면 거절(쿼리 주입 방지)", code(lambda: request_reprocess(dict(R1, anomaly_id="a' OR '1'='1"), "rep-1", ME, T0, query, write, CFG)), "BAD_ID")
 
 # --- 승인 ---

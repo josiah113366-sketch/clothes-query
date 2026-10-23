@@ -119,8 +119,12 @@ def _hours(start, end, source):
     return s, e
 
 
-def request_reprocess(anomaly, report_id, actor, now, query, write, cfg=ApprovalConfig(), attempt=1, parent_request_id=None):
-    """이상 하나에 대한 재처리를 요청한다(REQUESTED 줄). anomaly는 anomaly_current의 한 줄(딕셔너리)."""
+def request_reprocess(anomaly, report_id, actor, now, query, write, cfg=ApprovalConfig()):
+    """이상 하나에 대한 재처리를 요청한다(REQUESTED 줄). anomaly는 anomaly_current의 한 줄(딕셔너리).
+
+    시도 번호(attempt)와 이전 요청(parent_request_id)은 호출자가 주지 않고 여기서 이력으로 계산한다.
+    같은 이상의 이전 요청 중 FAILED로 끝난 것의 수 + 1이 attempt이고, 가장 최근 FAILED 요청이 parent다.
+    """
     actor = check_actor(actor)
     rule = anomaly.get("rule_id")
     if rule not in cfg.dag_by_rule:
@@ -129,14 +133,19 @@ def request_reprocess(anomaly, report_id, actor, now, query, write, cfg=Approval
     if not dag_id:
         raise ApprovalError("DAG_NOT_CONFIGURED", f"{rule}에 연결된 재처리 DAG가 아직 정해지지 않았습니다.")
     anomaly_id = _check_id(anomaly.get("anomaly_id"), "anomaly_id")
-    if attempt > cfg.max_attempts + 1:
-        raise ApprovalError("TOO_MANY_ATTEMPTS", f"재시도는 최대 {cfg.max_attempts}번입니다.")
-    since = (now - timedelta(hours=6)).strftime(FMT)
-    for row in query(f"SELECT request_id FROM gold_b.reprocess_events WHERE step = 'REQUESTED' AND at >= {_ts(since, cfg)} "
-                     f"AND detail LIKE '%\"anomaly_id\": \"{anomaly_id}\"%'"):
+    recent = (now - timedelta(hours=6)).strftime(FMT)
+    failed = []     # (요청 시각, request_id): FAILED로 끝난 이전 요청. 기간 제한 없이 센다
+    for row in query(f"SELECT request_id, at FROM gold_b.reprocess_events WHERE step = 'REQUESTED' "
+                     f"AND detail LIKE '%\"anomaly_id\": \"{anomaly_id}\"%' ORDER BY at"):
         state = derive_state(fetch_rows(query, row["request_id"]), now, cfg)
-        if state not in TERMINAL and state not in ("EXPIRED_REQUEST", "EXPIRED_APPROVAL", "FAILED"):
+        if state == "FAILED":
+            failed.append((_parse(row["at"]), row["request_id"]))
+        elif state not in TERMINAL and state not in ("EXPIRED_REQUEST", "EXPIRED_APPROVAL") and _parse(row["at"]) >= _parse(recent):
             raise ApprovalError("DUPLICATE_REQUEST", f"이미 진행 중인 요청({row['request_id']})이 있습니다.")
+    attempt = len(failed) + 1
+    if attempt > cfg.max_attempts + 1:
+        raise ApprovalError("TOO_MANY_ATTEMPTS", f"재시도는 최대 {cfg.max_attempts}번입니다(실패한 요청 {len(failed)}건).")
+    parent_request_id = max(failed)[1] if failed else None
     start, end = _hours(_parse(anomaly["window_start"]), _parse(anomaly["window_end"]), source)
     request_id = f"rq-{now:%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
     detail = {"anomaly_id": anomaly_id, "report_id": report_id, "rule_id": rule, "dag_id": dag_id}
