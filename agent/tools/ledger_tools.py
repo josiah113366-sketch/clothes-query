@@ -38,11 +38,10 @@ def _range(col, a, b, dialect):
 
 
 def _folder(a, b, dialect):
-    """Athena는 시간 폴더(dt)로 읽을 범위를 좁혀야 스캔량이 준다(1GiB 상한). dt가 어느 시각 기준이든 덮이게 앞뒤 하루씩 넉넉히 둔다. 시각 조건은 따로 걸려 있어 결과는 같다."""
+    """Athena는 시간 폴더(dt, UTC)로 읽을 범위를 좁혀야 스캔량이 준다(1GiB 상한). dt는 kafka_timestamp(topic_messages·malformed_*)·collected_at(bronze_lag_snapshots)의 날짜라 조건 시각의 날짜와 같다(은서 님 확인). payment_*는 뷰에 폴더 칸이 없어 쓰지 않는다."""
     if dialect != "athena":
         return ""
-    lo, hi = (a - timedelta(days=1)).strftime("%Y-%m-%d"), (b + timedelta(days=1)).strftime("%Y-%m-%d")
-    return f" AND dt BETWEEN '{lo}' AND '{hi}'"
+    return f" AND dt BETWEEN '{a:%Y-%m-%d}' AND '{b:%Y-%m-%d}'"
 
 
 def _recent(b, dialect):

@@ -34,10 +34,10 @@ def _in(col, a, b, cfg):
 
 
 def _folder(a, b, cfg):
-    """Athena는 시간 폴더(dt)로 범위를 좁혀야 스캔량이 준다. dt 기준 시각이 달라도 덮이게 앞뒤 하루씩 둔다. 시각 조건은 따로 걸려 있어 결과는 같다."""
+    """Athena는 시간 폴더(dt, UTC)로 범위를 좁혀야 스캔량이 준다. dt는 topic_messages·malformed_*는 kafka_timestamp, bronze_lag_snapshots는 collected_at 날짜(은서 님 확인)라 조건 시각의 날짜와 같다. 끝 시각은 포함하지 않지만 날짜는 넉넉히 포함한다."""
     if cfg.dialect != "athena":
         return ""
-    return f" AND dt BETWEEN '{(a - timedelta(days=1)).strftime('%Y-%m-%d')}' AND '{(b + timedelta(days=1)).strftime('%Y-%m-%d')}'"
+    return f" AND dt BETWEEN '{a:%Y-%m-%d}' AND '{b:%Y-%m-%d}'"
 
 
 def _seen(as_of, cfg):
