@@ -277,7 +277,7 @@ Gold B 뷰가 최신 결과만 담고 있어 과거 원천 범위로 고정할 �
 | ☐ 원본 보존 | 성철: [#32 CDC/Sink](https://github.com/josiah113366-sketch/clothes-query/pull/32), connectors/bronze-s3-sink.yaml | Kafka 행별 위치·시각 보존 방식, timestamp 유형, 실제 샘플. 경로 날짜 설정만으로 각 행 정보가 보존되는 것은 아님 |
 | ☐ 공통 기준 | 현지·은서: [#20 계약](https://github.com/josiah113366-sketch/clothes-query/pull/20) | 비교 필드·오류 제외·미등록 코드 정책과 적용 버전. 문서 머지가 모든 제안 수용은 아님 |
 | ☐ Silver 추적 | 현지: [#26 Silver](https://github.com/josiah113366-sketch/clothes-query/pull/26) 및 이번 후속 로컬 변경 | current.json → impact_candidates/격리 → Bronze 파일·줄·Kafka 참조 연결. 후속 변경은 기존 #26에 포함됐다고 보지 않음 |
-| ☐ Gold B 입력 | 은서: pipelines/gold-b, 확인일 현재 해당 head의 PR 없음 | 실제 중복 제거 뷰 이름·보존 컬럼·격리 조회·과거 범위 고정·실행 기록. PR이 생기면 이 표에 링크 추가 |
+| ☐ Gold B 입력 | 은서: [#36 원장 정의](https://github.com/josiah113366-sketch/clothes-query/pull/36), main 머지됨 | DDL·샘플만 반영됐다. 정리 뷰의 해시·버전 출력·격리 조회·과거 범위 고정·실행 기록은 후속 구현에서 확인 |
 | ☐ Gold A 기준 | 현지: [#34 Gold A](https://github.com/josiah113366-sketch/clothes-query/pull/34) | inputs의 Silver 실행 참조, KST 계산·PARTIAL/held_scopes 처리. Gold A 결과와 같은 Silver 묶음으로 기대값 계산 |
 | ☐ 탐지 결과 연결 | 주현: [#28 이상 이력](https://github.com/josiah113366-sketch/clothes-query/pull/28), [#29 판정 잡](https://github.com/josiah113366-sketch/clothes-query/pull/29) | 대조 상태를 어떻게 기록·알림할지. WAITING/NOT_COMPARABLE을 업무 장애로 오탐하지 않기 |
 | ☐ 조사 조회 | 주현: [#30 조사 도구](https://github.com/josiah113366-sketch/clothes-query/pull/30) | 실행·차이·오류 참조 조회와 접근 권한. 도구가 이미 연결됐다고 가정하지 않음 |
@@ -310,6 +310,26 @@ Gold B 뷰가 최신 결과만 담고 있어 과거 원천 범위로 고정할 �
 재처리는 수정 후 해당 범위를 명시해 실행할 수 있도록 하며, 다음 정기 배치를 기다리는 방식으로 한정하지 않는다. 자동 실행 연결과 복구 소요 시간 보장은 아직 없으며 실제 데이터로 측정한다. Gold A별 영향 범위 기준과 현재 부분 교체 기능의 제한은 Gold A README에서 관리한다.
 
 ## 9. 다음 합의와 적용 순서
+
+### 리뷰 분석 날짜 계약 — KST 작성일 (2026-10-22 결정)
+
+비즈니스 분석 날짜는 리뷰 created_at의 Asia/Seoul 날짜로 통일한다. SageMaker 실행일·결과 생성일·emitted_at 날짜로 리뷰 집계일을 바꾸지 않는다. 아래 계약은 리뷰 실행 연결용이며 거래 format_rules.yaml에 리뷰 규칙을 추가하는 변경은 아니다.
+
+| 구간 | 날짜 기준과 처리 |
+|---|---|
+| Bronze 리뷰 원본 | 시뮬레이터 LakeSink가 created_at의 UTC 날짜로 year/month/day 폴더에 보관 |
+| Silver 리뷰 | normalize_review에서 created_at_utc·created_at_kst·review_date_kst 생성. 출력 year/month/day는 KST 작성일 |
+| SageMaker 입력 선택 | Silver의 지정 KST 작성일 범위에 속한 리뷰 ID·본문을 사용. 이미 KST인 값에 9시간을 다시 더하지 않음 |
+| SageMaker 결과 | review_id/aspect/score. 현재 점수화 코드는 날짜 변환·작성일 파티셔닝을 하지 않고 작업 이름별 출력 위치에 저장 |
+| Gold A 리뷰 집계 | review_id로 해당 Silver 리뷰와 연결해 review_date_kst로 별점·속성 점수 집계. 모델 분석이 다음 날 끝나도 원래 작성일에 반영 |
+
+예: 2026-10-22T00:30:00+09:00은 UTC 2026-10-21T15:30:00Z와 같은 순간이다. Bronze에서는 UTC 21일 폴더, Silver·Gold A에서는 KST 22일에 속한다. KST 하루 D는 UTC D-1일 15:00 이상~D일 15:00 미만이며, Silver는 D-1·D의 UTC 폴더를 읽은 뒤 KST 날짜로 필터링한다. 날짜 범위 끝은 작성일 기준 포함이나 실제 시각 구간 끝은 제외한다.
+
+입력 시각은 Z 또는 +09:00 등 시간대가 명시되어야 한다. Silver는 시간대 없는 시각을 거부하며 원천 시간대를 임의로 추정하지 않는다. 이미 KST인 입력도 astimezone 변환이므로 중복으로 9시간을 더하지 않는다.
+
+후속 DAG/모델 입력 생성기는 모델 작업과 Silver 고정 실행 참조·대상 KST 시작/종료일·리뷰 ID 목록/건수·모델 버전을 연결할 기록을 남겨야 한다. Airflow의 UTC logical_date/ds나 SageMaker 작업 이름에 있는 날짜를 리뷰 작성일로 대신 쓰지 않는다. 필요한 날짜는 Asia/Seoul로 명시적으로 산정한다. 모델 입력 생성·작업 실행·완료 확인·입력 범위 기록의 자동 연결은 아직 구현 완료가 아니다.
+
+### 공통 계약 후속 적용
 
 1. Gold B의 `order_id` 필수화, 실패 코드 누락과 UNKNOWN 처리, 내용 충돌 기록에 대한 반영 확인.
 2. 규칙 파일 형식・최종 위치・버전 배포와 검사 코드 분담 확정.
