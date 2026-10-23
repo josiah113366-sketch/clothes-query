@@ -21,6 +21,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  runtime-preparation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install rendering dependencies
+        run: python -m pip install -r infra/platform/spark/requirements.txt
+      - name: Check runtime permissions and configuration without AWS
+        run: |
+          python -m unittest discover -s infra/platform/gold-b -p 'test_*.py' -v
+          python -m unittest discover -s infra/platform/airflow -p 'test_*.py' -v
+          python -m unittest discover -s infra/platform/bronze-lag-collector -p 'test_*.py' -v
+
   terraform:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

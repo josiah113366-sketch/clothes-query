@@ -62,6 +62,8 @@ Dashboard 모델 registry 읽기와 JP Haiku 활성 설정은 최신 적용값�
 
 ## 작업 결과
 
+2026-10-24 사용자가 남은 CI 작업을 요청했다. 기존 #102의 12개 원격 검사는 통과한 상태이며, 로컬에만 있던 Gold B 실행 기반 7개·Airflow 설정 6개·Bronze 지연 수집기 배치 4개를 Infrastructure checks의 `runtime-preparation` 작업에 연결했다. 로컬 17개 검사와 diff 공백 검사를 통과했다. AWS 인증·배포·업무 DAG 실행은 없으며 앱 업무 계산·이미지 빌드 CI는 별도 범위다.
+
 2026-10-24 #102 생성 뒤 사용자가 CI 실패 두 건을 먼저 해결하도록 요청해 이전 제외 범위를 변경했다. dashboard lock에 공식 서명으로 확인한 AWS 6.70.0 Linux h1만 추가했고 버전·기존 해시는 유지했다. Debezium의 기존 pin은 공식 파일·SHA-512와 일치하므로 바꾸지 않았다. BuildKit 원격 ADD를 컨테이너 HTTPS 다운로드·동일 SHA-256 검증·3회 제한 재시도로 바꿨다. Linux readonly init/validate, 정상·일시 오류·연속 오류 차단 fixture, 실제 이미지 빌드를 확인했다. [복구 기록](../operations/ci-checksum-recovery.md)을 따르며 AWS apply·운영 이미지 교체·DAG 실행은 하지 않는다.
 
 2026-10-24 사용자가 CI를 제외한 가능한 인프라 작업 후 push를 요청했다. #100이 머지된 최신 main을 통합했고 #101 앱 코드는 가져오지 않았다. Gold B 실행 기반 준비 도구와 좁은 권한 map을 추가했다. ECR gold-b 저장소 1개, IAM 역할·정책·Pod Identity 9개를 create-only 계획으로 적용했다. 기존 리소스 변경·삭제·교체는 없고 적용 뒤 두 스택 plan은 변경 없음이었다. Kubernetes 계정/RBAC/ConfigMap/KafkaUser/NetworkPolicy 14개와 TLS Secret 2개, Airflow gold_b_ledger 1슬롯 pool을 준비했다.
