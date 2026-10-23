@@ -1,6 +1,6 @@
 # 공용 노드 CPU 예약 축소
 
-상태: CPU 예약 축소 적용·검증 완료, 노드 통합은 별도 조정 필요 (2026-10-23)
+상태: CPU 예약 축소·공용 노드 통합 및 검증 완료 (2026-10-23, 원격 공유 전)
 브랜치: infra/common-cpu-diet
 
 ## 목적과 범위
@@ -36,6 +36,22 @@ Helm lint, standard/single-node/CDC/Sink/pipeline/metrics 렌더, 고정 Strimzi
 
 - 공용 상시 CPU requests는 실제 1,400m, 메모리는 5,504Mi다. 관리 Deployment와 dashboard 모두 Ready이며 broker UID와 재시작 횟수는 유지됐다. CDC source와 Bronze Sink 두 개 모두 RUNNING이다.
 - 적용 이후 판정 예약 실행은 21:45~22:05 KST 연속 성공했고, 최신 로그의 S3 저장도 확인했다. 대시보드 approval-dashboard 실행 신원과 기존 환경변수 연결도 유지됐다.
-- 약 18분 관찰 후에도 공용 노드는 두 대다. API 한 대를 포함해 총 세 대이며 Spark 노드는 없다. 따라서 노드 요금 절감이 실현됐다고 보고하지 않는다.
+- 최초 약 18분 관찰 후에도 공용 노드는 두 대였다. 이 시점에는 API 한 대를 포함해 총 세 대였으며 Spark 노드는 없었다. 이후 아래 사용자 승인 순차 통합으로 공용 노드 한 대를 종료했다.
 - 공용 자동 통합의 consolidateAfter는 기존 10분 그대로다. 제거 대상 노드에 판정 Pod가 5분마다 배치·종료되는 이벤트를 확인했다. Karpenter는 Pod 추가·제거 시 대기 시간을 초기화하므로 이 주기와 대기 시간 조합이 통합을 지연시키는 것으로 판단한다. 예약량만으로 통합을 보장하지 않는다. [공식 동작 설명](https://karpenter.sh/v1.15/concepts/disruption/)
 - 다음 단계는 공용 통합 대기 시간 조정과 이동 중 Connect·Airflow 가용성 검토다. 이번에는 NodePool 대기 시간·한도·노드 타입을 변경하거나 노드를 강제로 삭제하지 않았다. Kafka PDB 보호는 유지한다. CPU와 메모리를 더 줄이기 전에는 지속 사용량과 피크를 측정한다.
+
+## 사용자 승인 후 순차 통합
+
+사용자가 짧은 중단을 감수하는 통합을 승인했다. 자동 통합 대기 시간이나 용량 한도를 바꾸는 대신 Kafka 브로커가 없는 공용 노드의 기존 Pod를 순서대로 이동한다. 원래 판정·조사 DAG의 pause 상태를 저장하고 활성 판정 예약만 일시 정지한 뒤, 실행 중인 작업이 없는 것을 확인한다. 이동 대상 노드를 cordon하고, Entity Operator → Dashboard → Airflow DAG processor → API server → Kafka Connect 순서로 UID 조건을 둔 Eviction API를 사용한다. 각 대체 Pod가 Kafka 브로커 노드에서 Ready인 것을 확인한 다음 다음 Pod를 이동한다.
+
+이동 동안 자동 disruption budget만 잠시 0으로 두고 종료 시 원래 1로 복원한다. 단일 브로커 PDB는 유지하며 매 단계 broker UID·재시작 횟수를 대조한다. Connect 복구와 전체 커넥터 RUNNING을 확인하고, 대상 노드가 완전히 빈 것을 확인한 뒤 해당 NodeClaim만 정상 종료한다. 강제 삭제·직접 EC2 종료·PVC 삭제·전체 drain을 사용하지 않는다. 기존 활성 판정 예약은 복원하고, 원래 paused였던 조사 DAG는 켜지 않는다.
+
+### 통합 결과
+
+- 22:56:29 KST에 공용 한 대의 EC2 terminated와 총 노드 두 대를 확인했다. 현재 API t3a.medium 한 대, 공용 t3a.large 한 대, Spark 노드 0대다. 용량 한도와 자동 증설 기능은 유지하므로 이후 부하에 따라 다시 늘 수 있다.
+- Kafka 브로커의 UID와 재시작 횟수 0은 그대로다. 다른 공용 노드의 다섯 Pod만 순차 재생성했고 최종 모든 Pod Ready, 재시작 횟수 0을 확인했다. Connect REST API에서 CDC·기존 Bronze Sink·v2 Sink와 각 Task 모두 RUNNING을 확인했다. 새 업무 데이터 주입 시험은 하지 않았다.
+- 판정 예약을 복원했고 22:50·22:55 예약 실행 success와 S3 로그 저장을 확인했다. 조사 DAG는 원래 paused 상태를 유지했다. 이동 중 판정 예약을 잠시 멈췄으므로 모든 5분 슬롯이 실행됐다고 표현하지 않는다.
+- 새 Dashboard Pod에서 실제 Pod Identity, REAL Athena 읽기, 모델 레지스트리 읽기, Airflow 토큰 인증 HTTP 201을 확인했다. 재처리 DAG 두 개의 기존 404는 그대로이며 승인·재처리 실행은 하지 않았다.
+- 통합 직후 공용 노드 실제 CPU 428m(24%), 메모리 4,948Mi(70%)를 확인했다. 상시 예약은 1,400m/5,504Mi다. Connect 시작 중 CPU 1,874m, Airflow API 초기화 중 일시 네트워크·probe 경고가 관측됐지만 최종 정상 복구됐다. 이 값은 단기 관측이며 장기 최대 부하 검증이 아니다.
+- 커넥터 상태 조회 중 로컬→Kubernetes API 일시 시간초과가 발생해 첫 종료 시도를 보류하고 예약·disruption budget·cordon을 복원했다. 실제 REST와 상태를 재확인한 뒤 다시 cordon했다. 사이에 들어온 판정 Pod도 종료될 때까지 기다려 완전히 빈 노드만 정상 종료했다. 최종 disruption budget=1, consolidateAfter=10m, Kafka PDB 보호를 유지했다.
+- 노드의 실제 종료로 t3a.large 한 대의 실행 비용이 줄었다. 정확한 금액은 별도 비용 조회 없이 산정하지 않는다. 이 변경은 로컬 기록만 남기고 push·PR·승인·머지는 하지 않았다.
