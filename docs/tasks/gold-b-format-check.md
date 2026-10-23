@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-format-check
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #84까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #84까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨, `pipelines/gold-b-compact` 머지 뒤) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
 
 ## 목표
 
@@ -102,3 +102,4 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
   - 시험: 보관 기간 밖 거부 시험의 시각을 7일 뒤로 옮기고, 6일 전 구간은 받고 7일이 넘으면 거부하는 시험을 더했다. `pipelines/gold_b/tests` 127개 통과 (Python 3.12).
   - 문서: 설계 문서, `jobs/README.md`, 수집기 README의 Kafka 보관 3일(72시간)을 7일로 고쳤다. 재처리 작업 지시서의 기본값 줄에 바뀐 것을 적었다.
   - 승인 화면(`agent/approval/approval.py`)의 `kafka_retention_days`는 아직 3이라, 3~7일 전 구간에 "보관 기간 밖" 경고가 붙는다. 주현 님 코드라 고치지 않고 설계 문서 팀원 확인 표에 요청을 적었다.
+- **PR 순서 (2026-10-23):** compact → 형식 검사 → 적재 잡. 형식 검사와 파일 합치기 브랜치가 브랜치 대장과 Gold B README 표의 같은 자리를 고쳐서, 어느 쪽을 먼저 머지해도 두 번째 PR이 충돌한다 (main 위에 임시로 합쳐 확인). 그래서 파일 합치기 브랜치를 이 브랜치에 병합해 충돌을 미리 풀었다. compact가 먼저 머지되면 이 PR에는 이 브랜치의 변경만 보인다. `pipelines/gold_b/tests` 132개 통과 (합치기 시험 5개 포함).
