@@ -5,3 +5,5 @@ pandas>=2.0
 numpy>=1.26
 # OIDC 로그인(st.login)에 필요
 Authlib>=1.3
+# 재처리 승인 화면이 진짜 Athena를 읽고 쓸 때만 필요 (연습 모드는 없어도 됨)
+boto3>=1.34
