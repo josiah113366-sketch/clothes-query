@@ -789,7 +789,7 @@ pipelines/gold_b/
 - [x]  `raw_sample` 마스킹 (필드 이름 유지, 개인정보가 아닌 업무 값만 남김)
 - [x]  `tests/test_format_check.py` 샘플로 검사 결과 확인
 - [ ]  샘플로 원장 ①②④를 S3에 쌓아 보기
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#91, 2026-10-23)
 
 ### 3단계: 정리 뷰
 
@@ -811,7 +811,7 @@ pipelines/gold_b/
 - [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md`. 이미지는 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지를 더함)
 - [ ]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인
 - [x]  잡을 재시작해도 빠지거나 두 번 쌓이지 않는지 확인 (체크포인트, 로컬 Docker)
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#92, 2026-10-23)
 
 ### 5단계: Bronze 지연 수집기
 
@@ -828,7 +828,7 @@ pipelines/gold_b/
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.compact` (날짜를 주지 않으면 어제 UTC)
 - [ ]  `dags/gold_b_compact.py` 하루 1회, 재처리와 같은 폴더를 동시에 건드리지 않게 (재영 님. DAG 공급 경로가 `infra/platform/airflow/dags/`)
 - [x]  합친 뒤 조회 결과가 같은지 확인 (합치기 전후 줄이 `loaded_at`까지 같음, 시험)
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#88, 2026-10-23)
 
 ### 7단계: 재처리 잡 (필수 ②)
 
