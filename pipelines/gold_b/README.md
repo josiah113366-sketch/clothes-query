@@ -16,13 +16,13 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `tests/test_ddl.py` | DDL이 설계 표와 같은지, 샘플이 규칙에 맞는지, 샘플 원장을 시간 폴더 Parquet으로 쓰고 읽을 수 있는지 |
 | `views/` | 정리 뷰 SQL 4개 (`payment_states`, `payment_conflicts`, `payment_attempts`, `malformed_messages`), Athena에서 만드는 순서와 표 칸 추가 ([설명](views/README.md)) |
 | `tests/test_views.py` | 뷰 SQL 파일이 설계 문서의 SQL과 같은지 |
-| `tests/test_payment_states.py` | 결제 정리 뷰: 샘플을 실제 형식 검사기로 원장에 넣고 뷰 SQL을 SQLite로 돌려 결제마다 마지막 이벤트·보류 사유가 기대 결과와 같은지, 재처리 뒤 결제 상태 (복구, 보류 유지, 늦게 온 수정의 한계) |
+| `tests/test_payment_states.py` | 결제 정리 뷰: 샘플을 실제 형식 검사기로 원장에 넣고 뷰 SQL을 SQLite로 돌려 결제마다 마지막 이벤트·보류 사유가 기대 결과와 같은지, 재처리 뒤 결제 상태 (복구, 보류 유지, 늦게 온 수정을 Kafka 시각 폴더만으로 복구, 대상이 아닌 메시지는 그대로, 중간에 멈춰도 결과 유지) |
 | `collector/` | Bronze 지연 수집기: ③ `bronze_lag_snapshots`를 1분마다 쌓음 ([설명](collector/README.md)) |
 | `tests/test_lag_collector.py` | 수집기 계산·상태·파일 쓰기 (가짜 Kafka·Connect) |
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
 | `format_check.py` | 형식 검사기: 메시지 하나를 공통 형식 규칙(`gold_b`)으로 검사해 ① 결제 줄(지문 포함)과 ④ 오류 목록을 만듦. 적재 잡·재처리 잡이 같이 씀 |
 | `tests/test_format_check.py` | 샘플 전부의 기대 결과, 결제 줄과 지문, `raw_sample` 마스킹, 읽을 수 없는 값 |
-| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체. poller와 실행 입구 ([설명](jobs/README.md)) |
+| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대에 Kafka에 들어온 메시지를 다시 검사해 그 메시지들의 옛 결과(①②④)만 새 결과로 바꿈. 범위 밖 결제 시각 폴더도 고침. poller와 실행 입구 ([설명](jobs/README.md)) |
 | `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패, poller, 실행 입구 (가짜 Kafka, 샘플 메시지) |
 | `jobs/compact.py` | 파일 합치기: 끝난 하루의 시간 폴더마다 작은 파일을 하나로 (줄은 그대로) ([설명](jobs/README.md)) |
 | `tests/test_compact.py` | 합친 뒤 줄이 그대로인지, 안 끝난 날 거부, 중간에 멈춘 뒤 다시 돌리기 |
