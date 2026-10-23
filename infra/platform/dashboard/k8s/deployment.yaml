@@ -60,9 +60,9 @@ spec:
             httpGet: {path: /_stcore/health, port: http}
             initialDelaySeconds: 15
             periodSeconds: 20
-          # 노드가 1대(24GiB 한도)라 작게 잡았다. 실제 사용량을 보고 조정한다.
+          # 개발 부하에 맞춘 CPU 예약이며, 메모리와 CPU 상한은 유지한다.
           resources:
-            requests: {cpu: 250m, memory: 512Mi}
+            requests: {cpu: 100m, memory: 512Mi}
             limits: {cpu: "1", memory: 1Gi}
           securityContext:
             allowPrivilegeEscalation: false
