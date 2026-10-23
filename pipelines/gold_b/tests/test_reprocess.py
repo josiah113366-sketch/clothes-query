@@ -13,10 +13,12 @@ import pytest
 
 pytest.importorskip("pyarrow")
 
+import pyarrow.parquet as pq  # noqa: E402
+
 from pipelines.gold_b.jobs.reprocess import (ReprocessError, Request, TopicMissing,  # noqa: E402
-                                             hour_folders, run)
+                                             hour_folders, main, next_request, read_events, run)
 from pipelines.gold_b.ledger import (EVENT_TIME, TABLE_COLUMNS, Judgement, KafkaMessage,  # noqa: E402
-                                     LocalStore, hour_folder, hour_of, message_rows)
+                                     LocalStore, hour_folder, hour_of, message_rows, to_arrow)
 from test_ddl import _utc, load_samples, parse_ddl, stand_in_fingerprint  # noqa: E402
 
 UTC = timezone.utc
@@ -68,6 +70,9 @@ class FakeKafka:
         return [m for m in self.messages
                 if (m.topic, m.partition) in ranges
                 and ranges[(m.topic, m.partition)][0] <= m.offset < ranges[(m.topic, m.partition)][1]]
+
+    def close(self):
+        pass
 
 
 class SampleChecker:
@@ -311,3 +316,117 @@ def test_failure_midway_then_retry(tmp_path):
     for table in TABLES:
         assert comparable(folder_rows(store, table, H06)) == comparable(expected[table]), table
         assert comparable(folder_rows(store, table, H05)) == comparable(in_hour(clean[table], table, H05)), table
+
+
+# ---------- poller (다음에 돌릴 요청 고르기) ----------
+
+T = datetime(2026, 10, 21, 8, 0)    # 시험의 기준 시각 (UTC)
+FOLDER_06 = ((6, 0), (7, 0))
+FOLDER_05 = ((5, 0), (6, 0))
+
+
+def ev(rid, step, minutes, *, source="KAFKA", window=((6, 10), (6, 30)), detail=None, attempt=1, parent=None):
+    """reprocess_events 한 줄. minutes는 T로부터 몇 분 뒤에 기록했는지."""
+    (sh, sm), (eh, em) = window
+    return {"request_id": rid, "step": step, "at": T + timedelta(minutes=minutes), "actor": "test", "reason": None,
+            "window_start": datetime(2026, 10, 21, sh, sm), "window_end": datetime(2026, 10, 21, eh, em),
+            "rule_version": "0.2.0", "source": source, "attempt": attempt, "parent_request_id": parent,
+            "detail": None if detail is None else json.dumps(detail)}
+
+
+def test_poller_takes_gold_b_approvals_oldest_first():
+    rows = [ev("rq-silver", "REQUESTED", 0, source="SILVER"), ev("rq-silver", "APPROVED", 1, source="SILVER"),
+            ev("rq-late", "REQUESTED", 2), ev("rq-late", "APPROVED", 4),
+            ev("rq-early", "REQUESTED", 2), ev("rq-early", "APPROVED", 3, attempt=2, parent="rq-old"),
+            ev("rq-waiting", "REQUESTED", 1)]
+    found = next_request(rows, T + timedelta(minutes=10))
+    assert found.run_number == 1
+    assert found.request == Request("rq-early", datetime(2026, 10, 21, 6, 10), datetime(2026, 10, 21, 6, 30),
+                                    "0.2.0", attempt=2, parent_request_id="rq-old")
+
+
+RETRYABLE, FINAL = {"error": "KafkaException", "retryable": True}, {"error": "보관 기간 밖", "retryable": False}
+
+
+@pytest.mark.parametrize("rows,minutes,expected", [
+    ([ev("rq-1", "APPROVED", 0)], 10, ("rq-1", 1)),                                            # 처음 돌림
+    ([ev("rq-1", "APPROVED", 0)], 61, None),                                                   # 승인 뒤 60분 넘음: 승인 만료
+    ([ev("rq-1", "REQUESTED", 0), ev("rq-1", "REJECTED", 1)], 10, None),                       # 거절
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_06)], 10, None),                          # 끝남
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "FAILED", 1, detail=FINAL)], 10, None),            # 다시 돌려도 소용없는 실패
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "FAILED", 2, detail=RETRYABLE)], 10, ("rq-1", 2)),                            # 일시 실패: 다시 돌림
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "FAILED", 2, detail=RETRYABLE)], 120, ("rq-1", 2)),                           # 시작한 뒤에는 승인 만료 없음
+    ([ev("rq-1", "APPROVED", 0, window=((5, 10), (6, 30))), ev("rq-1", "STARTED", 1, window=((5, 10), (6, 30))),
+      ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05)], 10, ("rq-1", 2)),                   # 06시 폴더 전에 멈춤
+    ([ev("rq-1", "APPROVED", 0)] + [ev("rq-1", step, n, detail=RETRYABLE if step == "FAILED" else None)
+                                    for n, step in enumerate(["STARTED", "FAILED"] * 3, 1)], 10, None),   # 세 번 다 돌림
+])
+def test_poller_rules(rows, minutes, expected):
+    found = next_request(rows, T + timedelta(minutes=minutes))
+    assert (None if found is None else (found.request.request_id, found.run_number)) == expected
+
+
+def test_read_events_also_reads_files_athena_wrote(tmp_path):
+    """승인 화면·판정 잡은 Athena INSERT로 쓴다. 그 파일은 이름에 확장자가 없을 수 있다."""
+    store = LocalStore(tmp_path)
+    store.write("reprocess_events/part-20261021T080100-started-abcd.parquet", "reprocess_events",
+                [ev("rq-1", "STARTED", 1)])
+    folder = tmp_path / "reprocess_events"
+    pq.write_table(to_arrow("reprocess_events", [ev("rq-1", "APPROVED", 0)]), folder / "20261021_080000_00001_abcde")
+    (folder / ".part-x.parquet.tmp").write_bytes(b"temp")
+    (folder / "_SUCCESS").write_bytes(b"")
+    assert sorted(row["step"] for row in read_events(store)) == ["APPROVED", "STARTED"]
+    # 원장을 읽을 때 쓰는 기본 목록은 그대로 우리 잡이 쓴 .parquet만
+    assert store.files("reprocess_events") == ["reprocess_events/part-20261021T080100-started-abcd.parquet"]
+
+
+def test_run_number_is_recorded_and_finished_request_is_not_picked_again(tmp_path):
+    store, checker = LocalStore(tmp_path), SampleChecker()
+    write_ledgers(store, streamed_rows(checker))
+    run(request(), source=FakeKafka(sample_messages()), store=store, checker=checker, now=ticking(),
+        log=lambda _: None, run_number=2)
+    assert json.loads(events(store)[0]["detail"])["run"] == 2
+    approved = {**ev("rq-1", "APPROVED", 0), "rule_version": "test"}
+    assert next_request([approved, *read_events(store)], NOW) is None
+
+
+# ---------- 실행 입구 (python -m pipelines.gold_b.jobs.reprocess) ----------
+
+def write_approval(root, rid: str = "rq-1", minutes: int = 30) -> None:
+    """승인 화면이 Athena INSERT로 쓴 것처럼 확장자 없는 파일에 APPROVED 줄을 둔다 (규칙 버전은 규칙표와 같은 0.2.0)."""
+    folder = root / "reprocess_events"
+    folder.mkdir(parents=True, exist_ok=True)
+    pq.write_table(to_arrow("reprocess_events", [ev(rid, "APPROVED", minutes)]), folder / f"approval_{rid}")
+
+
+def test_main_needs_ledger_root_and_reports_nothing_to_do(tmp_path):
+    logs: list[str] = []
+    assert main([], env={}, log=logs.append) == 1
+    assert main([], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
+    assert logs[-1] == "돌릴 재처리 요청이 없다"
+
+
+def test_main_dry_run_only_names_the_request(tmp_path):
+    write_approval(tmp_path)
+    logs: list[str] = []
+    assert main(["--dry-run"], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
+    assert "rq-1" in logs[-1] and "1번째 실행" in logs[-1]
+    assert [row["step"] for row in read_events(LocalStore(tmp_path))] == ["APPROVED"]
+
+
+def test_main_runs_the_approved_request_with_the_format_checker(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    from pipelines.gold_b.jobs import reprocess
+
+    write_approval(tmp_path)
+    monkeypatch.setattr(reprocess, "KafkaReader", lambda config: FakeKafka(sample_messages()))
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path), "KAFKA_BOOTSTRAP": "localhost:9092"}
+    assert main([], env=env, now=ticking(), log=lambda _: None) == 0
+    steps = [row["step"] for row in sorted(read_events(LocalStore(tmp_path)), key=lambda row: row["at"])]
+    assert steps == ["APPROVED", "STARTED", "LEDGER_REPLACED"]
+    assert folder_rows(LocalStore(tmp_path), "payment_events", H06)   # 실제 형식 검사기로 결제 줄을 만들었다
+    assert main([], env=env, now=ticking(), log=lambda _: None) == 0   # 끝난 요청은 다시 고르지 않는다
+    assert len(read_events(LocalStore(tmp_path))) == 3

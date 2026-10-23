@@ -3,6 +3,7 @@
 - /api/*는 Authorization: Bearer <SIM_CONTROLLER_TOKEN>이 필요하다. 로컬 바인딩에서만 토큰 없이 켤 수 있다.
 - 응답 본문에 DB 오류 내용, 접속 정보, 토큰을 싣지 않는다.
 - 백그라운드 스레드가 1초마다 service.tick()을 부른다 (자동 복귀, 끝 기록 재시도).
+- traffic이 있으면 다른 스레드가 2초마다 표본을 만든다. GET /api/traffic?since=<epoch 초>로 받는다.
 """
 
 import hmac
@@ -10,6 +11,7 @@ import json
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 from sim.controller.log import IncidentLogError
 from sim.controller.page import PAGE
@@ -20,6 +22,7 @@ from sim.controller.service import (
     InvalidRequestError,
     UnavailableError,
 )
+from sim.controller.traffic import SAMPLE_SECONDS, TrafficMonitor
 
 LOCAL_BIND_HOSTS = ("127.0.0.1", "localhost", "::1")
 MAX_BODY_BYTES = 10_000
@@ -37,7 +40,17 @@ def check_bind(host: str, token: str | None) -> None:
         )
 
 
-def _handler(service: ControllerService, token: str | None) -> type[BaseHTTPRequestHandler]:
+def _since(query: str) -> float | None:
+    values = parse_qs(query).get("since")
+    try:
+        return float(values[0]) if values else None
+    except ValueError:
+        return None
+
+
+def _handler(
+    service: ControllerService, token: str | None, traffic: TrafficMonitor | None
+) -> type[BaseHTTPRequestHandler]:
     routes: dict[str, Callable[[dict], dict]] = {
         "/api/mode": lambda b: service.set_mode(b.get("mode")),
         "/api/running": lambda b: service.set_running(b.get("running")),
@@ -54,13 +67,20 @@ def _handler(service: ControllerService, token: str | None) -> type[BaseHTTPRequ
         server_version = "sim-controller"
 
         def do_GET(self) -> None:
-            if self.path == "/":
+            url = urlsplit(self.path)
+            if url.path == "/":
                 self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
-            elif self.path == "/healthz":
+            elif url.path == "/healthz":
                 self._json(200, {"ok": True})
-            elif self.path == "/api/status":
+            elif url.path == "/api/status":
                 if self._authorized():
                     self._json(200, service.status())
+            elif url.path == "/api/traffic":
+                if self._authorized():
+                    if traffic is None:
+                        self._json(200, {"samples": [], "api_configured": False})
+                    else:
+                        self._json(200, traffic.history(_since(url.query)))
             else:
                 self._json(404, {"error": "없는 경로입니다."})
 
@@ -125,10 +145,18 @@ def _handler(service: ControllerService, token: str | None) -> type[BaseHTTPRequ
 
 
 class ControllerServer:
-    def __init__(self, service: ControllerService, host: str, port: int, token: str | None) -> None:
+    def __init__(
+        self,
+        service: ControllerService,
+        host: str,
+        port: int,
+        token: str | None,
+        traffic: TrafficMonitor | None = None,
+    ) -> None:
         check_bind(host, token)
         self.service = service
-        self.httpd = ThreadingHTTPServer((host, port), _handler(service, token))
+        self.traffic = traffic
+        self.httpd = ThreadingHTTPServer((host, port), _handler(service, token, traffic))
         self.httpd.daemon_threads = True
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -140,7 +168,10 @@ class ControllerServer:
     def start(self) -> None:
         """제어 파일을 깨끗한 상태로 쓰고, 서버와 tick 스레드를 시작한다."""
         self.service.start()
-        for target in (self.httpd.serve_forever, self._tick_loop):
+        targets = [self.httpd.serve_forever, self._tick_loop]
+        if self.traffic is not None:
+            targets.append(self._traffic_loop)
+        for target in targets:
             thread = threading.Thread(target=target, daemon=True)
             thread.start()
             self._threads.append(thread)
@@ -151,6 +182,16 @@ class ControllerServer:
                 self.service.tick()
             except Exception as error:  # noqa: BLE001  tick 스레드는 죽지 않는다. 내용은 남기지 않는다
                 self.service.last_error = f"tick 오류 ({type(error).__name__})"
+
+    def _traffic_loop(self) -> None:
+        assert self.traffic is not None
+        while True:
+            try:
+                self.traffic.sample()
+            except Exception as error:  # noqa: BLE001  표본 하나를 놓쳐도 화면만 한 칸 빈다
+                self.service.last_error = f"트래픽 표본 오류 ({type(error).__name__})"
+            if self._stop.wait(SAMPLE_SECONDS):
+                return
 
     def stop(self) -> None:
         """진행 중 사건을 shutdown으로 끝내고 서버를 닫는다."""

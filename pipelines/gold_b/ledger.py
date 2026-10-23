@@ -147,9 +147,13 @@ def message_rows(message: KafkaMessage, judgement: Judgement, rule_version: str,
 # ---------- 파일 저장소 ----------
 
 class Store(Protocol):
-    """원장 파일을 읽고 쓰는 곳. 경로는 저장 위치(예: s3://<버킷>/gold_b) 아래의 상대 경로다."""
+    """원장 파일을 읽고 쓰는 곳. 경로는 저장 위치(예: s3://<버킷>/gold_b) 아래의 상대 경로다.
 
-    def files(self, folder: str) -> list[str]: ...
+    files()는 기본으로 우리 잡이 쓴 .parquet 파일만 돌려준다. any_name=True면 확장자와 상관없이
+    Athena가 읽는 파일을 모두 돌려준다 (Athena INSERT INTO가 쓴 파일은 이름에 확장자가 없을 수 있다).
+    """
+
+    def files(self, folder: str, any_name: bool = False) -> list[str]: ...
     def read(self, path: str, table: str) -> list[dict]: ...
     def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None: ...
     def delete(self, paths: Sequence[str]) -> None: ...
@@ -158,6 +162,15 @@ class Store(Protocol):
 def _visible_parquet(name: str) -> bool:
     # Athena는 '.'·'_'로 시작하는 파일을 읽지 않는다 (임시 파일, _SUCCESS)
     return name.endswith(".parquet") and not name.startswith((".", "_"))
+
+
+def _visible_any(name: str) -> bool:
+    """확장자와 상관없이 Athena가 읽는 파일. 숨김·임시 파일과 S3 폴더 표시는 뺀다."""
+    return not name.startswith((".", "_")) and not name.endswith((".tmp", "$folder$"))
+
+
+def _visible(name: str, any_name: bool) -> bool:
+    return _visible_any(name) if any_name else _visible_parquet(name)
 
 
 def to_arrow(table: str, rows: Sequence[Mapping]) -> pa.Table:
@@ -188,12 +201,12 @@ class LocalStore:
     def __repr__(self) -> str:
         return "LocalStore(...)"
 
-    def files(self, folder: str) -> list[str]:
+    def files(self, folder: str, any_name: bool = False) -> list[str]:
         directory = self._root / folder
         if not directory.is_dir():
             return []
         return sorted(f"{folder}/{item.name}" for item in directory.iterdir()
-                      if item.is_file() and _visible_parquet(item.name))
+                      if item.is_file() and _visible(item.name, any_name))
 
     def read(self, path: str, table: str) -> list[dict]:
         return from_arrow(table, pq.read_table(self._root / path))
@@ -230,13 +243,13 @@ class S3Store:
     def _key(self, path: str) -> str:
         return f"{self._prefix}/{path}" if self._prefix else path
 
-    def files(self, folder: str) -> list[str]:
+    def files(self, folder: str, any_name: bool = False) -> list[str]:
         start = self._key(folder) + "/"
         found = []
         for page in self._s3.get_paginator("list_objects_v2").paginate(Bucket=self._bucket, Prefix=start):
             for item in page.get("Contents", []):
                 name = item["Key"][len(start):]
-                if "/" not in name and _visible_parquet(name):
+                if name and "/" not in name and _visible(name, any_name):
                     found.append(f"{folder}/{name}")
         return sorted(found)
 

@@ -113,6 +113,9 @@ run "x" { command = plan module { source = "../modules/example" } }
         bootstrap.mkdir(parents=True)
         (bootstrap / "main.tf").write_text("# original")
         (bootstrap / ".terraform.lock.hcl").write_text("# lock")
+        (bootstrap / "deployment.auto.tfvars.json").write_text('{"enabled": true}')
+        (bootstrap / "deployment.backend.hcl").write_text('bucket = "test-state"')
+        (bootstrap / "deployment.local.tfvars.json").write_text('{"personal": "local-only"}')
         subprocess.run(["git", "-C", str(repo), "add", "infra"], check=True)
         (bootstrap / "main.tf").write_text("# tracked working edit")
         (bootstrap / "terraform.tfstate").write_text("local state")
@@ -125,7 +128,10 @@ run "x" { command = plan module { source = "../modules/example" } }
         copied = destination / "infra" / "bootstrap"
         self.assertEqual((copied / "main.tf").read_text(), "# tracked working edit")
         self.assertTrue((copied / ".terraform.lock.hcl").is_file())
-        self.assertEqual(len(list(copied.iterdir())), 2)
+        self.assertEqual((copied / "deployment.auto.tfvars.json").read_text(), '{"enabled": true}')
+        self.assertFalse((copied / "deployment.local.tfvars.json").exists())
+        self.assertFalse((copied / "deployment.backend.hcl").exists())
+        self.assertEqual(len(list(copied.iterdir())), 3)
         self.assertEqual((bootstrap / "terraform.tfstate").read_text(), "local state")
         self.assertEqual((bootstrap / ".terraform" / "terraform.tfstate").read_text(),
                          "backend metadata")

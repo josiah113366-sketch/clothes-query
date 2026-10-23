@@ -1,0 +1,6 @@
+# deployment.local.tfvars (Git 제외)로 복사해서 비공개로 채운다.
+# 계정 ID는 TF_VAR_expected_account_id 로 준다. tfvars 에 자격 증명을 넣지 않는다.
+state_bucket = "REPLACE_WITH_STATE_BUCKET"
+# 두 번째 apply(이미지 push 후)에만 넣는다. 비우면 기반만.
+image_digest = ""
+api_url      = "http://REPLACE_WITH_INTERNAL_ALB_HOSTNAME"

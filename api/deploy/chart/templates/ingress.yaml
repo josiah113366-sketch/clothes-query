@@ -1,0 +1,48 @@
+{{- if .Values.ingress.enabled }}
+# EKS Auto Mode 가 이 세 개를 보고 내부 ALB 를 만든다 (scheme internal, HTTP 80, app 서브넷)
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: {{ .Values.ingress.className }}
+spec:
+  scheme: internal
+  targetType: ip
+  inboundCIDRs:
+    {{- toYaml .Values.ingress.inboundCIDRs | nindent 4 }}
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ .Release.Namespace }}
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: {{ .Values.ingress.className }}
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: {{ .Values.ingress.className }}
+    scope: Cluster
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /readyz
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.name }}
+                port: {number: 80}
+{{- end }}

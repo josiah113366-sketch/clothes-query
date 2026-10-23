@@ -35,21 +35,21 @@
 - ecr: WEB/WAS 저장소, immutable tag, 이미지 자동 삭제 없음.
 - apps: Pod Identity로 지정 S3 prefix만 Get/Put/List, WEB/WAS Service와 Deployment, PDB 및 Auto Mode ALB.
 
-각 스택의 backend는 기존 이름 관례의 고유 dev key를 가진다. bucket과 backend region은 비공개 `*.backend.hcl`에서 공급한다. 이는 새 스택에 대한 partial backend 구성이고 기존 bootstrap backend migration이 아니다. 리소스는 Terraform이 생성·관리하는 새 주소이므로 다른 state의 기존 자산과 자동 병합되지 않는다.
+각 스택의 backend는 기존 이름 관례의 고유 dev key를 가진다. 승인된 bucket과 backend region은 추적되는 `deployment.backend.hcl`에서 공급한다. 이는 partial backend 구성이고 기존 bootstrap backend migration이 아니다. 리소스는 다른 state의 기존 자산과 자동 병합되지 않는다.
 
 ## 계정 및 state 확인
 
-팀원에게 bootstrap 관리 PC/state 보관 위치, bucket/region, 사용 profile 또는 role, 이미 배포된 리소스 범위를 확인한다. state 파일을 이 공개 저장소에 복사하지 않는다. 계정 ID/ARN/endpoint는 비공개 입력에만 둔다.
+팀원에게 bootstrap 관리 PC/state 보관 위치, bucket/region, 사용 profile 또는 role, 이미 배포된 리소스 범위를 확인한다. state 파일을 이 공개 저장소에 복사하지 않는다. 사용자 승인된 계정 ID·SG ID·일반 ARN·bucket 이름은 공통 배포 입력으로 공유하며 인증 비밀·개인 IP·이메일은 제외한다. 접속 endpoint 공개는 별도 결정한다.
 
 모든 신규 AWS provider는 `expected_account_id`를 요구하고 `allowed_account_ids`로 다른 계정 실행을 차단한다. AWS profile 또는 역할 인증은 사용자 환경에서 설정한다. 앱 Kubernetes 인증도 AWS CLI를 사용하므로 Terraform AWS provider와 동일한 AWS_PROFILE/역할 세션이어야 한다.
 
 ## 입력 준비와 검증
 
-각 스택의 `terraform.tfvars.example`을 `deployment.local.tfvars`로 복사한다. 예제 CIDR/용량은 샘플이지 사용자 승인된 실배포 값이 아니다. 버전·사양·AZ와 기존 네트워크의 충돌 여부를 먼저 확인한다.
+기존 `terraform.tfvars` 위에 승인된 `deployment.auto.tfvars.json`이 자동 로드된다. 개인 IP·이메일이 필요한 스택만 `deployment.local.tfvars.json`을 별도로 준비한다. 기존 전체 로컬 파일이 있으면 공통값을 제거해 공유 설정을 가리지 않게 한다. 예제는 샘플이지 실제 배포 값이 아니며 버전·사양·AZ와 기존 네트워크의 충돌 여부를 먼저 확인한다. [공유 배포 설정](DEPLOYMENT_CONFIG.md)을 따른다.
 
-필수 공통 환경변수는 `TF_VAR_expected_account_id`, 종속 스택은 `TF_VAR_state_bucket`이다. 리전이 다르면 backend와 remote state region도 담당자와 대조한다. AWS 비밀키를 tfvars에 넣지 않는다.
+공유 파일에 `expected_account_id`, 종속 스택에는 `state_bucket`을 포함한다. `TF_VAR_*` 환경변수보다 tfvars 값이 우선하므로 계정 변경은 공유 설정과 명시적 override를 검토한다. 리전이 다르면 backend와 remote state region도 담당자와 대조한다. AWS 비밀키를 tfvars에 넣지 않는다.
 
-비공개 `deployment.backend.hcl`에는 아래 두 값만 실제 승인된 값으로 넣는다.
+추적되는 `deployment.backend.hcl`에는 아래 두 값만 실제 승인된 값으로 넣는다. 인증정보는 넣지 않는다.
 
 ```hcl
 bucket = "REPLACE_WITH_EXISTING_STATE_BUCKET"
@@ -66,7 +66,9 @@ terraform validate
 
 # 기존 state 소유권과 AWS 인증 확인 후에만 실행
 terraform init -backend-config=deployment.backend.hcl -lockfile=readonly
-terraform plan -input=false -var-file=deployment.local.tfvars
+terraform plan -input=false
+# 개인 IP·이메일 등 로컬 입력이 필요한 스택:
+terraform plan -input=false -var-file=deployment.local.tfvars.json
 ```
 
 기존 backend를 변경하거나 `-migrate-state`, import, state mv/rm을 실행하지 않는다. 실제 plan에서 기존 자산의 destroy/replace 또는 예상 외 생성이 보이면 중단하고 관리 주소를 대조한다. 사용자가 최종 plan을 검토한 후 apply한다. 새 스택의 선행 output이 아직 없으면 후속 plan부터 실행하지 않는다.

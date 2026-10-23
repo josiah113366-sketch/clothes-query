@@ -1,0 +1,5 @@
+# 이 폴더를 바꾸는 PR에는 아래 사람이 리뷰어로 자동 지정된다. (PR 작성자 본인은 제외된다)
+# 리뷰 요청이 늦어지지 않게 하려는 것이고, "코드 소유자 승인 필수" 규칙은 켜지 않는다.
+/agent/                @LES0915 @jaeyan42
+/docs/design/agent/    @LES0915 @jaeyan42
+/docs/tasks/agent-*    @LES0915 @jaeyan42

@@ -14,15 +14,19 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `ddl/reprocess_events.sql` | ⑤ 재처리 단계 기록 (시간 폴더 없음) |
 | `tests/samples/` | 형식 검사·뷰·적재 잡 확인용 샘플 메시지와 기대 결과 ([설명](tests/samples/README.md)) |
 | `tests/test_ddl.py` | DDL이 설계 표와 같은지, 샘플이 규칙에 맞는지, 샘플 원장을 시간 폴더 Parquet으로 쓰고 읽을 수 있는지 |
+| `views/` | 정리 뷰 SQL 3개 (`payment_conflicts`, `payment_attempts`, `malformed_messages`), Athena에서 만드는 순서 ([설명](views/README.md)) |
+| `tests/test_views.py` | 뷰 SQL 파일이 설계 문서의 SQL과 같은지 |
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
-| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체 ([설명](jobs/README.md)) |
-| `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패 (가짜 Kafka, 샘플 메시지) |
+| `format_check.py` | 형식 검사기: 메시지 하나를 공통 형식 규칙(`gold_b`)으로 검사해 ① 결제 줄(지문 포함)과 ④ 오류 목록을 만듦. 적재 잡·재처리 잡이 같이 씀 |
+| `tests/test_format_check.py` | 샘플 전부의 기대 결과, 결제 줄과 지문, `raw_sample` 마스킹, 읽을 수 없는 값 |
+| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체. poller와 실행 입구 ([설명](jobs/README.md)) |
+| `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패, poller, 실행 입구 (가짜 Kafka, 샘플 메시지) |
 | `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`, `PyYAML`). Spark는 실행 환경이 준다 |
-| `jobs/streaming_ingest.py` | 적재 잡: Kafka를 Spark로 1분마다 읽어 원장 ①②④에 쌓음 ([설명](jobs/README.md)) |
+| `jobs/streaming_ingest.py` | 적재 잡: Kafka를 Spark로 1분마다 읽어 형식 검사기로 원장 ①②④에 쌓음. 실행 입구 ([설명](jobs/README.md)) |
 | `config/gold_b.yaml` | 적재 잡 설정: 토픽 목록, 주기, 처음 읽기 시작할 곳, 묶음 크기 (주소·버킷 이름은 환경변수) |
-| `tests/test_ingest.py` | 묶음 하나가 시간 폴더로 가는지, 같은 묶음을 다시 써도 두 번 쌓이지 않는지, 설정 |
+| `tests/test_ingest.py` | 묶음 하나가 시간 폴더로 가는지, 같은 묶음을 다시 써도 두 번 쌓이지 않는지, 설정, 형식 검사기 연결, 실행 입구 |
 
-정리 뷰(`payment_conflicts`, `payment_attempts`, `malformed_messages`) SQL은 설계 문서에 있고, 파일은 3단계에서 `views/`에 만든다.
+정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena에서 만드는 것은 권한이 생긴 뒤에 한다.
 
 ## 저장 위치와 시간 폴더
 
