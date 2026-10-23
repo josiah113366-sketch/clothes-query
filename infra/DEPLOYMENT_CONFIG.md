@@ -61,3 +61,5 @@ EKS 개인 파일 예시:
 기존 작업 문서의 '계정 ID/ARN은 항상 비공개'는 이전 정책이다. 현재 입력 방식은 이 문서를 우선한다. 현재 적용 환경과 다른 스택을 무작정 실행하거나 새 공유값을 확인 없이 적용하지 않는다.
 
 과거 network 로컬 파일의 state_bucket은 그 스택에서 선언·사용하지 않는 값이라 공통 tfvars에서 제거했다. 실제 backend bucket은 기존 deployment.backend.hcl에 그대로 유지한다. 그 외 선언된 배포 입력은 분리 전과 같다. 과거 일회성 로컬 스크립트가 전체 입력이 개인 파일에 있다고 가정할 수 있으므로 재사용할 때 공유 파일을 먼저 읽도록 확인한다.
+
+`gold-b-catalog`는 기존 storage state만 읽는 독립 Glue DB 스택이다. backend key는 clothes-query/dev/gold-b-catalog/terraform.tfstate이며 기존 DB를 같은 state로 관리한다. database.sql은 실행하지 않고 표·뷰 DDL은 pipelines 담당 SQL을 Athena에 별도 반영한다. 2026-10-24 draft #74의 누락 소스를 통합했으며 이미 적용된 JP Haiku와 대시보드 후속 설정은 보존했다.

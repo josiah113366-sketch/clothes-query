@@ -1,6 +1,8 @@
 # 배포 스택
 
 - [bronze-lag-collector](bronze-lag-collector/README.md): eks/storage 이후, v2 지연 수집기 독립 AWS 기반. 별도 key를 사용하며 기존 workload-access를 덮어쓰지 않음
+- [dashboard-access](dashboard-access/README.md): 기존 EKS/storage 이후 승인 화면 접근을 독립 state로 관리한다. 앱·노드·업무 표는 배포하지 않는다.
+- [gold-b-catalog](gold-b-catalog/README.md): storage 이후 Glue gold_b DB를 독립 state로 관리한다. 접근 권한·agent DB·데이터 수명주기와 분리한다.
 
 기존 bootstrap은 보존한다. 이번 구현은 dev 환경이며 backend key와 리소스 이름이 dev로 고정되어 있다. 다른 환경에는 새 key/이름 설계를 먼저 검토한다.
 

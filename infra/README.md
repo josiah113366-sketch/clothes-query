@@ -1,6 +1,9 @@
 # infra
 
 Bronze v2 지연 수집기는 [전용 스택](stacks/bronze-lag-collector/README.md)과 [배포 안내](platform/bronze-lag-collector/README.md)로 관리한다. 기존 eks/storage 이후 준비하며 Spark·추가 노드를 생성하지 않는다.
+2026-10-22 판정·조사 연결: [Git DAG 경로와 이미지 안내](platform/agent-development/README.md), [projection INSERT 실측](platform/agent-access/projection-validation.md), [승인 대시보드 접근](stacks/dashboard-access/README.md)을 준비한다. 업무 DAG·모델·SQL·승인 로직은 담당자 소유이며 [진행 기록](../docs/tasks/infra-agent-runtime-connections.md)에서 적용·미적용을 구분한다. 자동 머지는 하지 않는다.
+
+Gold B 표 등록: Glue `gold_b` DB는 [gold-b-catalog](stacks/gold-b-catalog/README.md) Terraform 스택이 관리한다. `pipelines/gold_b/ddl/database.sql`은 실행하지 않으며, 나머지 5개 테이블은 담당자 SQL을 Athena에서 실행해 등록한다. 기존 권한 스택과 state가 분리돼 있고 데이터 입력은 하지 않는다. [적용 기록](../docs/tasks/infra-gold-b-catalog.md).
 
 2026-10-21 입력 공유 결정: 공통 배포값은 추적되는 `deployment.auto.tfvars.json`과 `deployment.backend.hcl`로 관리하고 개인 IP·이메일만 로컬 override에 둔다. Terraform은 공유 auto 파일을 자동 로드한다. [파일 구분·실행 방법·보류 스택](DEPLOYMENT_CONFIG.md)을 먼저 따른다. 아래의 비공개 계정 입력 설명은 이전 기록이다.
 2026-10-21 개발 Airflow 배포 완료: [Airflow 실행 기반](platform/airflow/README.md)은 기존 RDS 전용 DB·Simple Auth Manager·별도 업무 Pod 실행 신원과 연결했다. API 권한·S3 task 로그·5분 합성 cron 검증을 통과했고 테스트 DAG는 다시 pause했다. 기존 Kafka/API 노드 2개를 유지하며 새 노드·ALB·PVC·RDS 서버를 추가하지 않았다. 실제 판정/조사/재처리 DAG·업무 이미지·Athena 업무 쿼리·Spark 연결은 후속이다. [검증 기록](../docs/tasks/infra-airflow-runtime.md).

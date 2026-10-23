@@ -1,6 +1,8 @@
 # Terraform modules
 
 - [bronze-lag-collector](bronze-lag-collector/README.md): 지연 수집기 전용 ECR·S3 쓰기 역할·Pod Identity
+- [dashboard-access](dashboard-access/README.md): 승인 화면 전용 Pod Identity·Athena·이상/리포트 읽기와 재처리 이력 경로 쓰기. 행 상태 제한은 앱 담당.
+- [gold-b-catalog](gold-b-catalog/README.md): 기존 S3 gold_b/를 가리키는 Glue DB만 관리한다. 테이블 정의는 pipelines 담당 SQL로 등록한다.
 
 각 모듈은 스택에서 호출하며 직접 배포하지 않는다. provider와 backend는 호출 스택에서 설정한다. AWS provider는 기존 bootstrap과 같은 6.68.0 lock을 사용한다.
 

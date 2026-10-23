@@ -9,3 +9,5 @@ Airflow 내부 주소는 http://airflow-api-server.airflow.svc.cluster.local:808
 2026-10-23에는 기존 대시보드 Deployment에 이 계정과 환경변수 연결을 적용했다. 이미지·사용자 계정 파일은 변경하지 않았다. 실제 Pod의 승인 후보/요청 읽기·모델 registry 읽기와 Airflow 인증 성공을 확인했다. 업무 DAG는 별도이며 gold_b_reprocess와 silver_gold_a_reprocess 조회는 현재 404다. [작업 기록](../../../docs/tasks/infra-dashboard-runtime-connect.md)을 참고한다.
 
 자격증명 상태: 기존에 승인·생성된 dashboard/airflow-api-client Secret의 username/password를 AIRFLOW_API_USER/PASSWORD로 참조한다. 실제 값은 문서·Git·로그에 두지 않는다. 이번 연결에서는 비밀번호를 새로 복제하거나 변경하지 않았다.
+
+앱 컨테이너의 [환경변수 예제](airflow-client-env.example.yaml)는 전체 Deployment가 아닌 참조용 조각이다. 현재 실제 Deployment의 APPROVAL_ATHENA_WORKGROUP과 기존 Secret username/password 연결이 우선한다. 원본 approval 비밀번호가 회전되면 연결된 Secret도 운영 담당자가 갱신하고 내부 Service 호출의 프록시 우회를 확인한다.

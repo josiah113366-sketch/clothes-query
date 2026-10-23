@@ -129,6 +129,10 @@ gitGraph
 | `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
 | `infra/gold-b-access-prep` | [infra-gold-b-access-prep.md](tasks/infra-gold-b-access-prep.md) | 조회 기반 적용·실제 Pod 접근 검증 완료 | |
 | `infra/agent-data-write` | [infra-agent-data-write.md](tasks/infra-agent-data-write.md) | 실제 적용·PR #50 검토 대기 | |
+| `infra/data-runtime-share` | [infra-data-runtime-share.md](tasks/infra-data-runtime-share.md) | Airflow·카탈로그·점검·현황 통합 공유, 승인·머지 대기 | |
+| `infra/agent-runtime-connections` | [infra-agent-runtime-connections.md](tasks/infra-agent-runtime-connections.md) | Git DAG·dashboard 권한/인증 적용·검증, 담당자 입력 대기 | |
+| `infra/gold-b-catalog` | [infra-gold-b-catalog.md](tasks/infra-gold-b-catalog.md) | Glue DB·Athena 표 5개 실제 등록/검증 완료 | |
+| `infra/live-code-audit` | [infra-live-code-audit.md](tasks/infra-live-code-audit.md) | 배포·main / DAG 공급 / RDS·Kafka 1~3단계 읽기 전용 점검 완료 | |
 | `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | 머지됨 (PR #11) | 2026-10-16 |
 | `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | 머지됨 (infra/ready에 통합) | 2026-10-16 |
 | `infra/deploy-result` | [infra-deploy-result.md](tasks/infra-deploy-result.md) | 머지됨 | 2026-10-16 |
