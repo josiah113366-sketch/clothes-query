@@ -2,6 +2,8 @@
 
 main의 Python 수집기를 상시 Pod 1개, --interval 60으로 실행한다. Spark는 사용하지 않는다. 대상은 bronze-s3-sink-v2 및 connect-bronze-s3-sink-v2이며 5개 업무 토픽을 고정한다. 결과는 기존 gold_b.bronze_lag_snapshots 표의 경로로 쓴다. 상시 적재 Spark 잡과 별개다.
 
+현재 발행 이미지와 소스 커밋은 release.json에 기록한다. 2026-10-23 실제 EKS 배포 후 60초 간격 2회, 회당 15행·5개 토픽·RUNNING을 S3와 Athena에서 확인했다. 구체적인 검증·인증서 갱신 주의사항은 docs/tasks/infra-bronze-v2-lag-collector.md를 참고한다.
+
 Dockerfile은 저장소 루트를 context로 쓰며 .dockerignore allowlist로 collector Python과 고정 requirements만 포함한다. .env·시드·자격증명·다른 업무 코드를 포함하지 않는다. linux/amd64의 고정 digest를 발행한 뒤 render.py --image <ECR@sha256:...> --output <Git 제외 JSON>으로 준비한다. --image가 없으면 KafkaUser와 추가 NetworkPolicy만 렌더한다.
 
 AWS는 ../../stacks/bronze-lag-collector에서 ECR·쓰기 전용 S3 역할·Pod Identity를 관리한다. 기존 workload-access map을 변경하지 않는다. Kubernetes는 pipelines의 전용 ServiceAccount와 Kafka namespace의 mTLS 사용자·수집기 라벨만 허용하는 9093/8083 네트워크 경로를 쓴다. 기존 Kafka/Connect CR·listener·broker 설정은 바꾸지 않는다.
