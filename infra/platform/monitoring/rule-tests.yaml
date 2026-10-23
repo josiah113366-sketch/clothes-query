@@ -1,0 +1,82 @@
+rule_files: [chart/files/rules.yaml]
+evaluation_interval: 1m
+tests:
+  - name: disappeared Connect target is not silently healthy
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-kafka"}'
+        values: '1+0x6'
+      - series: 'up{job="clothes-query-kafka-lag"}'
+        values: '1+0x6'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MissingConnectTarget
+        exp_alerts:
+          - exp_labels: {job: clothes-query-connect, severity: warning}
+            exp_annotations:
+              summary: 'No discovered target: clothes-query-connect'
+  - name: transient scrape failure does not page immediately
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-api",instance="api:80"}'
+        values: '1 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MonitoringTargetDown
+        exp_alerts: []
+  - name: sustained scrape failure becomes visible
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-api",instance="api:80"}'
+        values: '0+0x6'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MonitoringTargetDown
+        exp_alerts:
+          - exp_labels: {job: clothes-query-api, instance: 'api:80', severity: warning}
+            exp_annotations:
+              summary: 'Metrics target unavailable: clothes-query-api'
+  - name: missing CDC metric is unknown rather than healthy
+    interval: 1m
+    input_series:
+      - series: 'up{job="clothes-query-connect"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: MissingCDCMetric
+        exp_alerts:
+          - exp_labels: {job: clothes-query-connect, context: streaming, severity: warning}
+            exp_annotations:
+              summary: CDC streaming metric is absent; connection health is unknown
+      - eval_time: 6m
+        alertname: MissingConnectTaskMetric
+        exp_alerts:
+          - exp_labels: {job: clothes-query-connect, severity: warning}
+            exp_annotations:
+              summary: Connect task status metric is absent; task health is unknown
+  - name: connected CDC and running task do not produce absence alerts
+    interval: 1m
+    input_series:
+      - series: 'debezium_postgres_connected{job="clothes-query-connect",context="streaming"}'
+        values: '1+0x8'
+      - series: 'kafka_connect_task_status{job="clothes-query-connect",status="running"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: MissingCDCMetric
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MissingConnectTaskMetric
+        exp_alerts: []
+  - name: failed Prometheus configuration reload becomes visible
+    interval: 1m
+    input_series:
+      - series: 'prometheus_config_last_reload_successful{job="prometheus"}'
+        values: '0+0x5'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PrometheusConfigReloadFailed
+        exp_alerts:
+          - exp_labels: {job: prometheus, severity: warning}
+            exp_annotations:
+              summary: Prometheus configuration reload failed; inspect the previous active configuration

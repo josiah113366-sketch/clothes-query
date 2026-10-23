@@ -1,0 +1,46 @@
+# Reuse the existing WAS node. No NodePool/NodeClass is created by default.
+nodePool:
+  create: false
+  name: clothes-query-dev-api
+  nodeClass: clothes-query-dev-compute
+  instanceType: t3a.medium
+  zones: [ap-northeast-1a, ap-northeast-1c]
+  taintKey: clothes-query/dedicated
+  taintValue: api
+  cpuLimit: "2"
+  memoryLimit: 4Gi
+storage:
+  className: clothes-query-monitoring-gp3
+  createClass: true
+  prometheusSize: 5Gi
+  grafanaSize: 1Gi
+prometheus:
+  # Official v3.15.1 multi-platform manifest, verified 2026-10-22.
+  image: docker.io/prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+  retentionTime: 48h
+  retentionSize: 1GB
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {cpu: 500m, memory: 1Gi}
+grafana:
+  # Official 13.2.4 multi-platform manifest.
+  image: docker.io/grafana/grafana@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+  adminSecret: monitoring-grafana-admin
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+alertmanager:
+  enabled: false
+  # Official v0.34.1; SNS uses the Pod Identity default AWS credential chain.
+  image: docker.io/prom/alertmanager@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+  topicArn: ""
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+metricsServer:
+  enabled: true
+  # Official v0.9.0, compatible with Kubernetes 1.36.
+  image: registry.k8s.io/metrics-server/metrics-server@sha256:d9862115e7c7881280d3d75ca26bda8ffc0fc213315979575bf23ce9826205c0
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 256Mi}

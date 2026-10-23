@@ -1,0 +1,97 @@
+- job_name: clothes-query-kafka
+  scrape_interval: 60s
+  scrape_timeout: 10s
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names:
+      - kafka
+  relabel_configs:
+  - source_labels:
+    - __meta_kubernetes_pod_phase
+    regex: Running
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_label_strimzi_io_cluster
+    regex: clothes-query-dev-kafka
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_label_strimzi_io_pool_name
+    regex: combined
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_container_port_name
+    regex: tcp-prometheus
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_namespace
+    target_label: namespace
+  - source_labels:
+    - __meta_kubernetes_pod_name
+    target_label: pod
+  sample_limit: 10000
+- job_name: clothes-query-connect
+  scrape_interval: 60s
+  scrape_timeout: 10s
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names:
+      - kafka
+  relabel_configs:
+  - source_labels:
+    - __meta_kubernetes_pod_phase
+    regex: Running
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_label_strimzi_io_name
+    regex: clothes-query-dev-connect-connect
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_container_port_name
+    regex: tcp-prometheus
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_namespace
+    target_label: namespace
+  - source_labels:
+    - __meta_kubernetes_pod_name
+    target_label: pod
+  sample_limit: 10000
+- job_name: clothes-query-kafka-lag
+  scrape_interval: 60s
+  scrape_timeout: 10s
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names:
+      - kafka
+  relabel_configs:
+  - source_labels:
+    - __meta_kubernetes_pod_phase
+    regex: Running
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_label_strimzi_io_name
+    regex: clothes-query-dev-kafka-kafka-exporter
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_pod_container_port_name
+    regex: tcp-prometheus
+    action: keep
+  - source_labels:
+    - __meta_kubernetes_namespace
+    target_label: namespace
+  - source_labels:
+    - __meta_kubernetes_pod_name
+    target_label: pod
+  sample_limit: 10000
+- job_name: clothes-query-api
+  sample_limit: 5000
+  static_configs:
+  - targets:
+    - api.api.svc.cluster.local:80
+- job_name: prometheus
+  static_configs:
+  - targets:
+    - localhost:9090

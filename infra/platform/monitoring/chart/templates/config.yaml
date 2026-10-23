@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-prometheus
+  namespace: {{ .Release.Namespace }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 60s
+      evaluation_interval: 60s
+    rule_files: [/etc/prometheus/rules.yml]
+    {{- if .Values.alertmanager.enabled }}
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: [monitoring-alertmanager:9093]
+    {{- end }}
+    scrape_configs:
+{{ .Files.Get "files/scrape-jobs.yaml" | indent 6 }}
+  rules.yml: |
+{{ .Files.Get "files/rules.yaml" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-grafana-provisioning
+  namespace: {{ .Release.Namespace }}
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://monitoring-prometheus:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: 60s
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: infrastructure
+        orgId: 1
+        folder: Infrastructure
+        type: file
+        disableDeletion: true
+        editable: false
+        updateIntervalSeconds: 30
+        options:
+          path: /etc/grafana/infra-dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-grafana-dashboard
+  namespace: {{ .Release.Namespace }}
+data:
+  infrastructure.json: |
+{{ .Files.Get "files/dashboard.json" | indent 4 }}

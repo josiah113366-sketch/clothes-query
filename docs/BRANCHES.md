@@ -27,7 +27,6 @@
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
 | `dashboard` | `dashboard/` | 대시보드 앱(Streamlit, 상품 관리·데이터 관리 Role). 배포 소스는 `infra/platform/dashboard/`(infra 영역) | 사용 중 |
 | `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 시작 전 |
-| `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 사용 중 |
 | `ci` | `.github/` | GitHub Actions | 시작 전 |
 | `api` | `api/` | 업무 API(WAS, FastAPI). 시뮬레이터 → API → RDS·Kafka(clickstream). 설계: `docs/design/api.md` | 시작 전 |
 
@@ -97,7 +96,6 @@ gitGraph
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
 | `sim/sink-pause` | [sim-sink-pause.md](tasks/sim-sink-pause.md) | 진행 중 | |
 | `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
-| `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 머지됨 | 2026-10-22 (#60) |
 | `sim/console` | `docs/tasks/sim-console.md` | 머지됨 | |
 
 ### docs
@@ -113,9 +111,15 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 플러그인 자동 갱신 중단, 실환경 복구·조회 검증 완료, 미게시 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |
+| `infra/incident-readiness` | [infra-incident-readiness.md](tasks/infra-incident-readiness.md) | 복구 절차·읽기 점검·기존 경보 보강 및 승인된 인프라 이메일 연결, 새 노드 없음 | |
+| `infra/kafka-retention-week` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 업무·heartbeat 7일 보관, alias 충돌 수정·실제 복구 확인 | |
+| `infra/operations-tools-share` | [infra-operations-tools-share.md](tasks/infra-operations-tools-share.md) | 모니터링·Argo CD 통합 공유, 승인·머지 대기 | |
+| `infra/monitoring-baseline` | [infra-monitoring-baseline.md](tasks/infra-monitoring-baseline.md) | WAS 노드 설치·수집 검증·2분 실측 완료, 로컬 보관 | |
+| `infra/argocd-runtime` | [infra-argocd-runtime.md](tasks/infra-argocd-runtime.md) | WAS 노드 설치·로그인·저장소·권한 검증 완료, 앱 등록 전 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
 | `infra/agent-development-access` | [infra-agent-development-access.md](tasks/infra-agent-development-access.md) | 실제 적용·PR #49 검토 대기 | |
 | `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
