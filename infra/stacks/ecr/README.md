@@ -1,5 +1,7 @@
 # ecr stack
 
+Spark 후속 준비: 공유 입력은 enable_spark_repositories=true와 개발자 de-ai-18을 선택한다. plan 시 spark-base/silver-gold-a 저장소 2개와 해당 사용자 push 정책 1개만 추가되고 기존 web/was/connect는 유지되어야 한다. plan과 실제 apply/이미지 발행 완료는 구분한다. 실행 Pod의 AWS 역할은 별도 spark-access 스택이다.
+
 WEB/WAS용 ECR 두 개와 선택적 Connect 저장소, immutable tag·scan on push.
 
 2026-10-18 사용자 승인으로 Connect 저장소를 추가하고 PostgreSQL CDC/S3 Sink 플러그인 이미지의 실제 push·EKS pull을 확인했다. 현재 저장소3개이며 비공개 실배포 입력의 enable_connect_repository=true를 유지한다. 시험 데이터가 들어 있지 않은 이미지는 재사용을 위해 남겼다. 시험 Connect 런타임은 제거했다. [시험 결과](../../../docs/tasks/infra-pipeline-smoke.md).

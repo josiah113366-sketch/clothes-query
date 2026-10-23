@@ -1,5 +1,7 @@
 # Silver·Gold A 연결 준비
 
+**최신 상태(2026-10-23, #82 머지 후)는 [연결 준비 결과](silver-gold-a-ready.md)를 따른다.** 아래는 경로 확정 전 준비 이력이다. namespace·고정 입력·상품 기준정보 중 확인된 항목과 현재 검토용 권한은 최신 문서에 정리했다. 준비 완료와 실제 AWS 적용은 구분한다.
+
 동료의 상세 명세를 [계약 예시](silver-gold-a.example.yaml)에 반영했고, [전달 문안](message-to-pipelines.md)을 준비했다. 출력을 제안 경로로 코드에 준비했으며 실제 권한 적용은 하지 않았다. 실행 요청 JSON prefix와 namespace·계정은 아직 미정이다.
 
 ## 경로별 권한 준비 도구
@@ -37,7 +39,7 @@ python infra/platform/spark/runtime.py `
 ## 정보를 받으면 연결할 순서
 
 1. namespace 공유·계정 이름, 정확한 읽기/쓰기/삭제 prefix와 Glue 필요 여부를 확정한다. ground_truth 접근은 추가하지 않는다. ListBucket은 prefix 조건, 객체 권한은 해당 경로로 제한한다. 쓰기 권한은 기존 파일 덮어쓰기도 가능하므로 재실행 계약을 확인한다.
-2. 기존 workload-access bindings에 IAM/Pod Identity를 병합한다. 새 map으로 기존 CDC·Airflow 연결을 덮어쓰지 않는다. ECR/push 주체 ARN과 이미지 발행 절차를 맞춘다.
+2. 거래 magic committer 권한은 새 spark-access 스택으로 분리한다. 기존 workload-access bindings와 동일한 ServiceAccount를 중복 관리하지 않는다. prepare_trade_access.py의 기존 병합 출력은 Get/Put 검토용이며 magic 삭제·multipart를 포함한 최종 실행 정책이 아니다. 새 map으로 기존 CDC·Airflow 연결을 덮어쓰지 않는다. ECR/push 주체 ARN과 이미지 발행 절차를 맞춘다.
 3. 실제 이미지 digest·진입 파일·인자를 받아 제출 Job을 렌더한다. 입력값이 미정인 상태에서 업무 실행 파일이나 권한을 추측해 채우지 않는다.
 4. Airflow의 현재 DAG 공급 설정을 다시 확인하고 소스 경로/갱신 절차를 확정한다. 이전 대화의 Git bundle 안내만으로 현재 적용 상태라고 단정하지 않는다.
 5. 동료가 작성한 DAG에서 먼저 Silver 성공 확인 후 Gold A를 실행한다. 순서·중복 실행 방지·동시성·완료 조건은 DAG 담당자가 구현하고, 인프라는 실행/취소 시 Driver·Executor 정리를 함께 검증한다. Job TTL은 업무 데이터 정리나 Driver 종료를 보장하지 않는다.
@@ -51,3 +53,16 @@ Driver: `kubectl -n <namespace> logs <run-name>-driver`
 Executor 목록: `kubectl -n <namespace> get pods -l spark-role=executor`
 
 동시에 여러 작업이 있다면 Spark application ID 라벨로 추가 필터한다. 현재 확인한 것은 Kubernetes Pod 로그다. Spark event log와 장기 S3 로그의 경로/권한은 미정이며 Airflow task 로그와 Spark 내부 로그는 서로 다르다. 업무 패키지의 Python 3.10.12 호환성은 팀원 확인이 필요하다.
+
+## 2026-10-23 받은 명세 반영
+
+- 계정 이름은 silver-gold-a-submitter / silver-gold-a-driver / silver-gold-a-executor로 준비했다. namespace는 Gold B 담당 확인 전 null이다.
+- pipelines namespace를 공유한다면 runtime.py --existing-namespace 옵션으로 Namespace/ResourceQuota 소유권을 건드리지 않는 10개 객체를 검토한다. 이 렌더 자체는 namespace 공유를 승인하거나 리소스를 적용하지 않는다.
+- 요청·입력 manifest 경로는 pipelines/requests/와 pipelines/input-manifests/ 기준이다. S3는 폴더 생성이 필요 없으므로 빈 placeholder를 쓰지 않는다. 정확한 요청 객체는 전달 대기다.
+- 최초 S3 정책은 거래 Bronze 3개와 silver/runtime/trade/, gold_a/runtime/trade/만 준비한다. funnels/reviews가 코드에 있다는 이유로 접근 범위를 확장하지 않는다. 상품 기준정보 경로도 미정이다.
+- DeleteObject는 각 출력의 runs/<run_id>/<dataset>/__magic_job-*/ 작업 객체로 제한한다. 정상 결과·manifest·완료 기록 삭제는 허용하지 않는다. AbortMultipartUpload와 ListMultipartUploadParts는 출력 최종 객체 경로에도 허용한다.
+- S3 endpoint는 IAM과 별개다. network-magic.tfvars.example은 기존 작업을 보존해 추가할 전송 권한 검토안이고 자동 적용 파일이 아니다. 실제 AWS 검증 전 최종 committer 설정과 객체 경로를 맞춰야 한다.
+- fs.s3a.committer.abort.pending.uploads=true는 목적지 아래 다른 진행 중 업로드도 조회/중단할 수 있다. 실제 업무 코드 확인 전 bucket multipart metadata listing은 기본 비활성이다. 설정과 필요 권한을 담당자에게 요청한다.
+- 908c252는 현재 원격에 없어 소스 검증을 하지 못했다. 로컬 패키지/기본 이미지 검증과 업무 검증은 구분한다. 최초 입력 목록·상품 스냅샷·기대값·R6 completed_at/Glue 공개 명세도 대기다.
+
+공식 참고: [Hadoop 3.5 S3A committers](https://hadoop.apache.org/docs/r3.5.0/hadoop-aws/tools/hadoop-aws/committers.html), [S3A 권한 설명](https://apache.github.io/hadoop/hadoop-aws/tools/hadoop-aws/assumed_roles.html). Python 패키지 최소 버전은 [PyArrow 25.0.1](https://pypi.org/project/pyarrow/25.0.1/)·[boto3 1.43.71](https://pypi.org/project/boto3/1.43.71/)의 Python>=3.10과 실제 이미지 실행을 확인했다.

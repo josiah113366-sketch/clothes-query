@@ -6,6 +6,14 @@ variable "enable_connect_repository" {
   type    = bool
   default = false
 }
+variable "enable_spark_repositories" {
+  type    = bool
+  default = false
+}
+variable "spark_publisher_user_arns" {
+  type    = set(string)
+  default = []
+}
 variable "expected_account_id" {
   description = "Supply privately via TF_VAR_expected_account_id; prevents use of the wrong AWS account."
   type        = string

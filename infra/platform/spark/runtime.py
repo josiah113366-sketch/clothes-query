@@ -70,7 +70,7 @@ def properties(placement, *, namespace="spark", name_prefix="spark"):
     return "\n".join(f"{k} {v}" for k, v in settings.items()) + "\n"
 
 
-def resources(placement="dedicated", *, namespace="spark", name_prefix="spark", node_pool=None):
+def resources(placement="dedicated", *, namespace="spark", name_prefix="spark", node_pool=None, existing_namespace=False):
     validate_names(namespace, name_prefix, node_pool)
     if placement not in {"dedicated", "shared-memory"}:
         raise ValueError("Unknown placement")
@@ -110,6 +110,9 @@ def resources(placement="dedicated", *, namespace="spark", name_prefix="spark", 
         "spark.properties": properties(placement, namespace=namespace, name_prefix=name_prefix),
         **{name + "-pod-template.yaml": yaml.safe_dump(pod_template(name, placement, name_prefix=name_prefix, node_pool=node_pool), sort_keys=False) for name in ["driver", "executor"]},
     }))
+    if existing_namespace:
+        # Shared namespace ownership/quota belongs to the platform owner, not one job.
+        objects = [obj for obj in objects if obj["kind"] not in {"Namespace", "ResourceQuota"}]
     return objects
 
 
@@ -151,6 +154,7 @@ def main():
     parser.add_argument("--namespace", default="spark")
     parser.add_argument("--name-prefix", default="spark")
     parser.add_argument("--node-pool")
+    parser.add_argument("--existing-namespace", action="store_true", help="Do not manage a shared Namespace or its ResourceQuota")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--include-job", action="store_true")
     parser.add_argument("--image")
@@ -159,7 +163,7 @@ def main():
     parser.add_argument("--application-arg", action="append", default=[])
     args = parser.parse_args()
     options = dict(namespace=args.namespace, name_prefix=args.name_prefix, node_pool=args.node_pool)
-    objects = resources(args.placement, **options)
+    objects = resources(args.placement, existing_namespace=args.existing_namespace, **options)
     if args.include_job:
         if not args.image or not args.application_file:
             parser.error("--include-job requires --image and --application-file")

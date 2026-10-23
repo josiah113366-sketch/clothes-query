@@ -5,6 +5,7 @@
 - [network](network/README.md)
 - [eks](eks/README.md)
 - [compute](compute/README.md)
+- [spark-access](spark-access/README.md): eks/storage/network 이후 독립 state. namespace 확정 전 enabled=false로 유지한다.
 - [rds](rds/README.md)
 - [storage](storage/README.md)
 - [ecr](ecr/README.md)

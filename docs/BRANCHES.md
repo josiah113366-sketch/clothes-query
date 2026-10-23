@@ -112,6 +112,7 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 플러그인 자동 갱신 중단, 실환경 복구·조회 검증 완료, 미게시 | |
+| `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | ECR·기본 이미지·S3/실행 계정/RBAC 적용 완료. 업무 이미지 대기·Spark 노드 미기동 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |
@@ -136,7 +137,8 @@ gitGraph
 | `infra/sagemaker-model-release` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (점수화 SSM 을 릴리스 묶음 기준으로. `dashboard/model-benchmark`에 머지해 함께 올림) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
-| `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 비활성 Spark 기반 통합 공유, 업무 명세·배포 대기 | |
+| `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 기반 공유 #75 머지됨. 후속 로컬 변경은 spark-runtime-followup으로 분리 | |
+| `infra/spark-runtime-followup` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | ECR·거래 커미터 권한·패키지 후속, 최신 main 반영. AWS 미적용 | |
 | `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 

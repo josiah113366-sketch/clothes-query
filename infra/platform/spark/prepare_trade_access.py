@@ -38,7 +38,7 @@ def access_plan(contract):
     return {'bucket': bucket, 'read_prefixes': reads, 'read_write_prefixes': writes,
             'delete_permissions': False, 'missing_binding_inputs': missing,
             'complete_job_policy': False, 'applied': False,
-            'remaining_job_contract': ['S3 committer and temporary cleanup', 'business image/entry/arguments',
+            'remaining_job_contract': ['Remote business code and exact magic cleanup settings', 'business image digest and fixed request object',
                                        'fixed test inputs', 'Glue schemas/publication', 'namespace sharing']}
 
 

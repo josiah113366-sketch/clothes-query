@@ -2,6 +2,8 @@
 
 사용자 결정(2026-10-21): 공통 배포값을 Git으로 관리하고 개인정보·인증 비밀을 분리한다. 설정 공유는 AWS 배포 실행이 아니며 자동 apply를 추가하지 않는다.
 
+2026-10-23 Spark 준비: ecr 공유 auto 입력은 기존 저장소를 보존하며 Spark 저장소 2개와 de-ai-18 push 정책만 추가하도록 선택했다. plan과 적용 완료는 구분한다. spark-access는 별도 backend key를 쓰며 namespace=null·enabled=false다. network의 추가 S3 action은 platform/spark/handoff/network-magic.tfvars.example 검토안으로만 두고 아직 공유 auto 입력에 적용하지 않았다. compute Spark enabled=false도 유지한다.
+
 ## 파일과 우선순위
 
 | 파일 | Git | 내용 |
