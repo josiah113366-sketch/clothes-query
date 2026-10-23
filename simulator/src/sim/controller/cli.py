@@ -31,7 +31,9 @@ from sim.controller.model import (
     DEFAULT_PG_EXTRA_FAIL,
     DEFAULT_PG_OUTAGE_MINUTES,
     DEFAULT_POLLUTION_COUNT,
+    DEFAULT_SINK_PAUSE_MINUTES,
     ORDER_TOTAL_MISMATCH,
+    SINK_CONNECTORS,
 )
 from sim.controller.pollution import DbPollution
 from sim.controller.server import ControllerServer, ServerConfigError
@@ -227,6 +229,20 @@ def pollution(
 ) -> None:
     """데이터 오염을 만든다 (DB 제약은 통과하지만 업무 규칙을 어기는 행)."""
     _call(url, "POST", "/api/incidents/data-pollution", {"kind": kind, "count": count})
+
+
+@app.command("sink-pause")
+def sink_pause(
+    connector: Annotated[str, typer.Option(help=" | ".join(SINK_CONNECTORS))] = (
+        SINK_CONNECTORS[0]
+    ),
+    minutes: Annotated[
+        float, typer.Option(help="계획한 정지 시간(분, 최대 60). 자동 종료하지 않는다")
+    ] = DEFAULT_SINK_PAUSE_MINUTES,
+    url: UrlOption = DEFAULT_URL,
+) -> None:
+    """S3 Sink 정지의 시작 기록만 남긴다. 정지·재개는 kubectl, 재개 확인 뒤 end."""
+    _call(url, "POST", "/api/incidents/sink-pause", {"connector": connector, "minutes": minutes})
 
 
 @app.command()

@@ -79,6 +79,12 @@ def test_normal_flow_and_errors(server) -> None:
         {"kind": "ORDER_TOTAL_MISMATCH", "count": 3},
     )
     assert status == 200 and "result" not in json.dumps(body)  # 정답표 내용은 싣지 않는다
+    status, body = call(server, "POST", "/api/incidents/sink-pause", {})
+    assert status == 200 and body["active"]["type"] == "SINK_PAUSE"
+    assert body["active"]["ends_at"] is None
+    assert call(server, "POST", "/api/incidents/sink-pause", {})[0] == 409
+    assert call(server, "POST", "/api/incidents/end", {})[0] == 200
+    assert call(server, "POST", "/api/incidents/sink-pause", {"connector": "x"})[0] == 400
 
 
 def test_bad_json_is_400(server) -> None:

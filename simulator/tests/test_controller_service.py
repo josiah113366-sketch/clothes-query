@@ -283,3 +283,52 @@ def test_records_have_no_pii() -> None:
     service.start_data_pollution("ORDER_TOTAL_MISMATCH", 3)
     text = str(log.records)
     assert "example.com" not in text and "010-" not in text
+
+
+def test_sink_pause_records_only_and_ends_manually() -> None:
+    service, log, writer, clock, events = make()
+    service.start_sink_pause("bronze-s3-sink-v2", 25)
+    assert events.items == [("log", "start", "SINK_PAUSE")]  # 제어 파일은 건드리지 않는다
+    assert log.records[0]["params"] == {"connector": "bronze-s3-sink-v2", "planned_minutes": 25.0}
+    assert service.status()["active"]["ends_at"] is None
+    with pytest.raises(IncidentActiveError):
+        service.start_pg_outage("PG_A")
+    clock.advance(minutes=90)
+    service.tick()  # 자동 종료하지 않는다
+    assert service.active is not None
+    service.end_active()
+    assert writer.writes == [] and service.active is None
+    end = log.records[-1]
+    assert (end["type"], end["ended_by"], end["at"]) == (
+        "SINK_PAUSE",
+        "manual",
+        "2026-10-18T09:30:00Z",
+    )
+
+
+def test_sink_pause_start_record_failure_changes_nothing() -> None:
+    service, log, _, _, _ = make()
+    log.fail_next = 1
+    with pytest.raises(IncidentLogError):
+        service.start_sink_pause()
+    assert service.active is None
+
+
+def test_sink_pause_shutdown_writes_end() -> None:
+    service, log, _, _, _ = make()
+    service.start_sink_pause()
+    service.shutdown()
+    assert [(r["type"], r["ended_by"]) for r in log.records if r["phase"] == "end"] == [
+        ("SINK_PAUSE", "shutdown")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("connector", "minutes"),
+    [("bronze-s3-sink", 25), ("nope", 25), ("bronze-s3-sink-v2", 0), ("bronze-s3-sink-v2", 61)],
+)
+def test_sink_pause_validation(connector, minutes) -> None:
+    service, log, _, _, _ = make()
+    with pytest.raises(InvalidRequestError):
+        service.start_sink_pause(connector, minutes)
+    assert log.records == []

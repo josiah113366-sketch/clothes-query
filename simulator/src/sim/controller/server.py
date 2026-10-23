@@ -60,6 +60,9 @@ def _handler(
         "/api/incidents/data-pollution": lambda b: service.start_data_pollution(
             b.get("kind", "ORDER_TOTAL_MISMATCH"), b.get("count", 30)
         ),
+        "/api/incidents/sink-pause": lambda b: service.start_sink_pause(
+            b.get("connector", "bronze-s3-sink-v2"), b.get("minutes", 25)
+        ),
         "/api/incidents/end": lambda b: service.end_active("manual"),
     }
 

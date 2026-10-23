@@ -17,7 +17,16 @@ TOKEN = "cli-token-xyz"
 def test_help_lists_commands_and_serve_options() -> None:
     result = runner.invoke(app, ["controller", "--help"])
     assert result.exit_code == 0
-    for command in ("serve", "status", "mode", "running", "pg-outage", "pollution", "end"):
+    for command in (
+        "serve",
+        "status",
+        "mode",
+        "running",
+        "pg-outage",
+        "pollution",
+        "sink-pause",
+        "end",
+    ):
         assert command in result.output
     result = runner.invoke(app, ["controller", "serve", "--help"])
     for option in (
@@ -79,6 +88,9 @@ def test_client_commands_talk_to_server(monkeypatch) -> None:
         assert runner.invoke(app, ["controller", "running", "maybe", "--url", url]).exit_code == 1
         result = runner.invoke(app, ["controller", "end", "--url", url])
         assert result.exit_code == 1 and "400" in result.output  # 진행 중 사건 없음
+        result = runner.invoke(app, ["controller", "sink-pause", "--url", url])
+        assert result.exit_code == 0 and json.loads(result.output)["active"]["type"] == "SINK_PAUSE"
+        assert runner.invoke(app, ["controller", "end", "--url", url]).exit_code == 0
         assert TOKEN not in result.output
     finally:
         server.stop()
