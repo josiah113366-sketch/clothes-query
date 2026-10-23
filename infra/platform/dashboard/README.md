@@ -9,7 +9,9 @@
 | `k8s/deployment.yaml` | 파드 1개, `AUTH_MODE=local`, 계정 Secret 마운트, `DATA_SOURCE=auto`(실데이터가 없거나 실패하면 더미), `MODEL_REGISTRY_URI` |
 | `k8s/service.yaml` | ClusterIP 8501 |
 
-## 배포 순서 (모두 아직 실행하지 않았다)
+## 배포 순서
+
+2026-10-23 실제 승인 연결: ServiceAccount는 `dashboard/approval-dashboard`, workgroup은 `clothes-query-dev-dashboard`다. 기존 Secret `dashboard/airflow-api-client`의 `username`·`password`를 사용한다. 기존 역할과 전용 workgroup은 [dashboard-access](../../stacks/dashboard-access/README.md)에서 관리한다. 실제 Pod의 승인 조회·S3 패치노트·Airflow 인증을 확인했으며, 재처리 DAG 두 개는 아직 미등록이다. [배포·검증 기록](../../../docs/tasks/infra-dashboard-runtime-connect.md)을 참고한다.
 0. ECR 저장소 준비: [`stacks/dashboard`](../../stacks/dashboard/README.md)에서 plan(1 to add)을 검토하고 apply한다.
 1. 이미지 빌드·ECR 업로드 (repo 루트에서)
    ```
@@ -32,5 +34,4 @@
 ## 알아둘 것
 - 로그인 실패 잠금은 파드별 메모리라 replicas 는 1로 둔다.
 - HTTP 구간에서는 비밀번호가 암호화되지 않는다. 운영 전 도메인과 HTTPS 로 바꾼다.
-- 실데이터를 읽으려면 Athena 조회 함수 등록, 읽기 전용 Pod Identity ServiceAccount(`gold_a/`·`gold_b/`·`review-score/model-registry/releases/`만, `ground_truth/` 금지)가 필요하다(`DATA_SOURCE=auto` 는 이미 설정됨). 모델 패치노트 위치(`MODEL_REGISTRY_URI`)는 `deployment.yaml`에 채워 두었다. 할 일은 `dashboard/TODO.md` 의 F3, F4.
-- 이미지 빌드·ECR 저장소, 위 YAML 의 실제 적용은 하지 않았고 `kubectl apply --dry-run=server` 도 해 보지 않았다.
+- `DATA_SOURCE=auto`는 데이터별 연결 상태에 따라 실데이터 또는 더미를 쓴다. 실제 연결된 것은 승인 조회와 모델 패치노트이며, Gold A 등 나머지 분석 화면을 모두 연결한 것은 아니다. 패치노트 prefix는 읽기만, 승인 이벤트 prefix는 필요한 쓰기만 허용하며 `ground_truth/`는 명시 거부한다. 앱 담당의 Athena 함수 연결은 별도다.
