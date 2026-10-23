@@ -1,6 +1,6 @@
 # pipelines/gold_b/jobs
 
-Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수 ②)과 **적재 잡**(`streaming_ingest.py`, 4단계)이 있다. 파일 합치기(6단계)는 나중에 여기에 만든다.
+Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수 ②), **적재 잡**(`streaming_ingest.py`, 4단계), **파일 합치기**(`compact.py`, 6단계)가 있다.
 
 ## 적재 잡 (`streaming_ingest.py`)
 
@@ -145,3 +145,39 @@ python -m pytest -q pipelines/gold_b/tests/test_reprocess.py
 ```
 
 가짜 Kafka와 샘플 메시지(`tests/samples/`)로 교체 결과, 두 번 돌린 결과, 남기는 줄, 시작 전 거부, 중간 실패와 다시 돌리기를 확인한다. poller는 승인 순서, `SILVER` 제외, 승인 만료, 거절, 끝남, 다시 돌리기(일시 실패, 중간에 멈춤), 최대 3번, 확장자 없는 Athena 파일 읽기를 확인한다.
+
+## 파일 합치기 (`compact.py`)
+
+적재 잡과 수집기가 1분마다 파일을 하나씩 만들어서 한 시간 폴더에 60개 넘게 쌓인다. 하루 1회, 끝난 UTC 하루의 시간 폴더마다 파일을 하나로 합친다.
+
+1. 그 날 끝 + 10분이 안 지났으면 거부한다.
+2. 원장 4개 × 24개 시간 폴더마다, 파일이 2개 이상이면 합친다. `reprocess_events`는 합치지 않는다.
+3. **줄은 하나도 빼거나 고치지 않는다** (`loaded_at` 포함). `topic_messages`의 같은 위치 두 줄도 탐지가 보는 신뢰성 신호라서 그대로 둔다.
+4. 합친 파일(`part-compact-…`)을 먼저 쓰고 줄 수를 확인한 뒤 원래 파일을 지운다. 합친 파일에는 원래 파일 이름 목록을 적어 둔다. 지우다가 멈춘 뒤 다시 돌리면, 남은 원래 파일은 다시 합치지 않고 지운다 (줄이 두 번 들어가지 않음).
+5. 적재 잡이 그 사이 새로 쓴 파일은 목록에 없어서 지워지지 않고, 다음에 합친다.
+
+**재처리 잡과 같은 폴더를 동시에 건드리면 안 된다.** DAG(재영 님과 만듦)에서 둘을 한 번에 하나씩 돌린다.
+
+```bash
+python -m pipelines.gold_b.jobs.compact                    # 어제(UTC)를 합친다
+python -m pipelines.gold_b.jobs.compact --day 2026-10-21   # 그 날(UTC)을 합친다
+```
+
+환경변수는 `GOLD_B_LEDGER_ROOT`(원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더) 하나다. 성공하면 0, 실패하면 1로 끝난다. 그 날이 끝나고 10분이 지나지 않았으면 거부한다.
+
+DAG 명세 (재영 님께, DAG 파일은 `infra/platform/airflow/dags/`):
+- DAG `gold_b_compact`: 하루 1번, UTC 00:30 이후 (그 날 끝 + 10분 여유 뒤), `max_active_runs` 1, `catchup` 끔
+- 제안: 재처리 DAG(`gold_b_reprocess`)와 같은 Airflow pool(슬롯 1개)에 넣어 두 작업이 겹치지 않게 한다. 지금 Airflow는 전체 동시 작업이 1개라 겹치지 않지만, 그 설정이 바뀌어도 막히게 한다.
+- Pod 권한: S3 원장 4개 폴더(`payment_events`, `topic_messages`, `bronze_lag_snapshots`, `malformed_events`) 읽기·쓰기·지우기
+
+코드에서 부를 때는 이렇게 한다.
+
+```python
+from datetime import date
+from pipelines.gold_b.jobs.compact import run
+from pipelines.gold_b.ledger import open_store
+
+run(date(2026, 10, 21), store=open_store(…))   # s3://<버킷>/gold_b 또는 로컬 폴더. DAG는 어제(UTC)를 넘긴다
+```
+
+S3 권한은 원장 4개 폴더 읽기·쓰기·지우기다. 확인은 `python -m pytest -q pipelines/gold_b/tests/test_compact.py`.

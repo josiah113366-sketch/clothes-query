@@ -155,7 +155,9 @@ class Store(Protocol):
 
     def files(self, folder: str, any_name: bool = False) -> list[str]: ...
     def read(self, path: str, table: str) -> list[dict]: ...
-    def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None: ...
+    def write(self, path: str, table: str, rows: Sequence[Mapping],
+              metadata: Mapping[str, str] | None = None) -> None: ...
+    def metadata(self, path: str) -> dict[str, str]: ...
     def delete(self, paths: Sequence[str]) -> None: ...
 
 
@@ -173,10 +175,15 @@ def _visible(name: str, any_name: bool) -> bool:
     return _visible_any(name) if any_name else _visible_parquet(name)
 
 
-def to_arrow(table: str, rows: Sequence[Mapping]) -> pa.Table:
+def to_arrow(table: str, rows: Sequence[Mapping], metadata: Mapping[str, str] | None = None) -> pa.Table:
+    """metadata는 Parquet 파일에 함께 적는 짧은 글 (예: 파일 합치기가 합친 원래 파일 목록)."""
     schema = SCHEMAS[table]
-    return pa.Table.from_pylist([{name: row.get(name) for name in schema.names} for row in rows],
-                                schema=schema)
+    data = pa.Table.from_pylist([{name: row.get(name) for name in schema.names} for row in rows], schema=schema)
+    return data.replace_schema_metadata(dict(metadata)) if metadata else data
+
+
+def _decode(metadata) -> dict[str, str]:
+    return {key.decode(): value.decode() for key, value in (metadata or {}).items()}
 
 
 def from_arrow(table: str, data: pa.Table) -> list[dict]:
@@ -211,13 +218,17 @@ class LocalStore:
     def read(self, path: str, table: str) -> list[dict]:
         return from_arrow(table, pq.read_table(self._root / path))
 
-    def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None:
+    def write(self, path: str, table: str, rows: Sequence[Mapping],
+              metadata: Mapping[str, str] | None = None) -> None:
         target = self._root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         # '.'으로 시작하는 임시 이름에 다 쓴 뒤 바꾼다. 쓰는 도중의 파일을 Athena가 읽지 않는다
         temp = target.with_name(f".{target.name}.tmp")
-        pq.write_table(to_arrow(table, rows), temp, compression="snappy")
+        pq.write_table(to_arrow(table, rows, metadata), temp, compression="snappy")
         os.replace(temp, target)
+
+    def metadata(self, path: str) -> dict[str, str]:
+        return _decode(pq.read_schema(self._root / path).metadata)
 
     def delete(self, paths: Sequence[str]) -> None:
         for path in paths:
@@ -257,10 +268,15 @@ class S3Store:
         body = self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
         return from_arrow(table, pq.read_table(pa.BufferReader(body)))
 
-    def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None:
+    def write(self, path: str, table: str, rows: Sequence[Mapping],
+              metadata: Mapping[str, str] | None = None) -> None:
         buffer = pa.BufferOutputStream()
-        pq.write_table(to_arrow(table, rows), buffer, compression="snappy")
+        pq.write_table(to_arrow(table, rows, metadata), buffer, compression="snappy")
         self._s3.put_object(Bucket=self._bucket, Key=self._key(path), Body=buffer.getvalue().to_pybytes())
+
+    def metadata(self, path: str) -> dict[str, str]:
+        body = self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
+        return _decode(pq.read_schema(pa.BufferReader(body)).metadata)
 
     def delete(self, paths: Sequence[str]) -> None:
         keys = [self._key(path) for path in paths]

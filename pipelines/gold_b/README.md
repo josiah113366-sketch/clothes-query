@@ -23,6 +23,8 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `tests/test_format_check.py` | 샘플 전부의 기대 결과, 결제 줄과 지문, `raw_sample` 마스킹, 읽을 수 없는 값 |
 | `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체. poller와 실행 입구 ([설명](jobs/README.md)) |
 | `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패, poller, 실행 입구 (가짜 Kafka, 샘플 메시지) |
+| `jobs/compact.py` | 파일 합치기: 끝난 하루의 시간 폴더마다 작은 파일을 하나로 (줄은 그대로) ([설명](jobs/README.md)) |
+| `tests/test_compact.py` | 합친 뒤 줄이 그대로인지, 안 끝난 날 거부, 중간에 멈춘 뒤 다시 돌리기 |
 | `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`, `PyYAML`). Spark는 실행 환경이 준다 |
 | `jobs/streaming_ingest.py` | 적재 잡: Kafka를 Spark로 1분마다 읽어 형식 검사기로 원장 ①②④에 쌓음. 실행 입구 ([설명](jobs/README.md)) |
 | `config/gold_b.yaml` | 적재 잡 설정: 토픽 목록, 주기, 처음 읽기 시작할 곳, 묶음 크기 (주소·버킷 이름은 환경변수) |
