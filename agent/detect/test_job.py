@@ -150,6 +150,15 @@ event("rq-1", "LEDGER_REPLACED", at(15, 0), at(16, 0))
 s = run_once(query, write, CFG, at(16, 30))
 check("재처리로 원장이 바뀐 뒤 재판정: 이상이 사라짐 (RESOLVED)", [x["result"] for x in s["redetected"]], ["RESOLVED"])
 check("옛 이상 줄은 지워지지 않음 (쌓기만 함)", len(anomalies()) >= before, True)
+res = anomalies("WHERE status = 'RESOLVED'")
+check("재처리로 사라진 이상마다 RESOLVED 줄이 쌓임 (재판정 번호로, 규칙 R3·R6 제외)", (len(res) > 0, {x["run_id"].split("-RD-")[1] for x in res}, {x["rule_id"] for x in res} <= {"R1_PG_FAILURES", "R5_DUPLICATE_SUCCESS", "R4_MALFORMED"}), (True, {"rq-1"}, True))
+latest = {}
+for x in anomalies():                                      # 뷰 anomaly_current와 같은 기준(detected_at, run_id가 큰 줄)으로 이상별 최근 줄만 남긴다
+    if x["anomaly_id"] not in latest or (x["detected_at"], x["run_id"]) > (latest[x["anomaly_id"]]["detected_at"], latest[x["anomaly_id"]]["run_id"]):
+        latest[x["anomaly_id"]] = x
+check("anomaly_current 기준으로 해결된 이상이 RESOLVED로 보임", all(latest[x["anomaly_id"]]["status"] == "RESOLVED" for x in res), True)
+check("STILL_OPEN이었던 재처리(rq-0)는 RESOLVED 줄을 쓰지 않음", [x for x in res if x["run_id"].endswith("-RD-rq-0")], [])
+check("RESOLVED 줄 근거에 요청·원래 회차가 남음", all('"resolved_by_request": "rq-1"' in x["evidence_ref"] and '"original_run_id"' in x["evidence_ref"] for x in res), True)
 check("재판정 순찰 기록 2건(REDETECT)", len(query("SELECT * FROM gold_b.detection_runs WHERE kind = 'REDETECT'")), 2)
 check("VERIFIED 내용에 해결 결과가 들어감", '"result": "RESOLVED"' in query("SELECT detail FROM gold_b.reprocess_events WHERE request_id='rq-1' AND step='VERIFIED'")[0]["detail"], True)
 

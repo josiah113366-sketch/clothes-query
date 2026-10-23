@@ -38,6 +38,7 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 | 저장·조회 | S3 `clothes-query-datalake/gold_b/`, Athena로 조회 (테이블·뷰 정의는 Athena가 Glue 카탈로그 `gold_b`에 저장), 이름에 접두어 없음 |
 | 정리 뷰 중복 제거 | 같은 `payment_id`이고 내용도 같으면 가장 먼저 쌓인 줄(`loaded_at`이 가장 이른 줄) 하나만 남긴다 |
 | 정리 뷰 충돌 처리 | 같은 `payment_id`인데 내용이 다르면 **그 결제의 모든 줄을 `payment_attempts`에서 빼고** `payment_conflicts` 뷰로 보여 준다. Silver(PR #26)와 공통 계약(`docs/contracts/README.md` 「내용 충돌」)에 맞춘 것 (2026-10-21) |
+| 깨진 메시지 뷰의 시간 폴더 | `malformed_messages`도 ④의 시간 폴더(`dt`, `hour`)를 칸으로 내보낸다. 판정·조사 쿼리가 폴더 조건을 같이 주면 그 폴더만 읽어서, 5분마다 ④ 전체를 읽지 않는다. `payment_attempts`·`payment_conflicts`는 예전에 쌓인 같은 결제와도 비교해야 해서 원장 전체를 읽는다 (2026-10-22) |
 | 결제 내용 지문 | 내용이 같은지는 **업무 필드 9개**(`order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, `requested_at`, `completed_at`)를 정규화한 지문 `payment_content_hash`로 판단한다. 원장에는 지문과 `fingerprint_version` 두 칸만 더하고, `amount`·`method`·`requested_at`은 컬럼으로 두지 않고 지문에만 넣는다. Silver와 Gold B가 같은 함수(`pipelines/payment_fingerprint.py`)로 지문을 만든다. Kafka 위치와 적재 시각은 지문에 넣지 않는다 (현지 님 PR #36 리뷰, 2026-10-21) |
 | 결제 필수 필드 | `order_id`, `attempt_no`도 원장에 넣고 형식 검사 필수로 본다 (원천 DDL에서 NOT NULL, 2026-10-21) |
 | 컬럼 이름 | Kafka 파티션 번호는 모든 표에서 `kafka_partition` (2026-10-21) |
@@ -361,9 +362,10 @@ SELECT topic, kafka_partition, kafka_offset, rule_version,
        MIN(kafka_timestamp)        AS kafka_timestamp,
        COUNT(DISTINCT field)       AS error_count,
        ARRAY_AGG(CAST(ROW(field, reason) AS ROW(field VARCHAR, reason VARCHAR))) AS errors,
-       MIN(loaded_at)              AS loaded_at
+       MIN(loaded_at)              AS loaded_at,
+       dt, hour
 FROM gold_b.malformed_events
-GROUP BY topic, kafka_partition, kafka_offset, rule_version;
+GROUP BY topic, kafka_partition, kafka_offset, rule_version, dt, hour;
 ```
 
 | kafka_offset | error_count | errors |
@@ -371,6 +373,19 @@ GROUP BY topic, kafka_partition, kafka_offset, rule_version;
 | 5230 | 3 | `[{pg, INVALID_VALUE}, {failure_code, MISSING_FIELD}, {completed_at, TYPE_MISMATCH}]` |
 
 깨진 메시지 수를 셀 때는 **현재 `rule_version`의 줄만** 센다. 규칙 버전이 섞이면 같은 메시지가 중복으로 세어진다. `ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[…])` 문법은 Athena에서 처음 만들 때 한 번 돌려서 확인한다.
+
+`dt`·`hour`는 ④의 시간 폴더(Kafka 기록 시각, UTC)를 그대로 내보낸다. 한 메시지의 오류 줄은 모두 같은 시간 폴더에 있어서 묶음은 바뀌지 않는다. 판정·조사 쿼리가 `kafka_timestamp` 조건과 함께 그 구간이 걸친 시간 폴더를 조건으로 주면 그 폴더의 ④만 읽는다. 폴더 조건이 없으면 조회할 때마다 ④ 전체를 읽는다 (2026-10-22).
+
+```sql
+-- 예: 2026-10-22 10:58~11:03(UTC) 구간. 구간이 걸친 시간 폴더를 모두 준다 (자정을 넘기면 날짜도 둘)
+SELECT topic, COUNT(*) AS broken_messages
+FROM gold_b.malformed_messages
+WHERE dt = '2026-10-22' AND hour IN ('10', '11')
+  AND kafka_timestamp >= TIMESTAMP '2026-10-22 10:58:00'
+  AND kafka_timestamp <  TIMESTAMP '2026-10-22 11:03:00'
+  AND rule_version = '0.2.0'
+GROUP BY topic;
+```
 
 ### 원장을 그대로 읽는 것 (시나리오 2, 3)
 
@@ -626,6 +641,8 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 주현 | `payment_conflicts` 추가, `bronze_lag_snapshots.kafka_partition` 이름 | 탐지 SQL에서 쓰는 이름 | 필요 |
 | 주현 | 조사 에이전트 리포트·실행 기록 표를 둘 곳 (`gold_b` 밖 권장: 에이전트는 `gold_b/`를 읽기만 함) | 에이전트 권한, 정답 노출 방지 | 필요 |
 | 주현 | 허용 지연 (시연 모드별 재측정 후) | 정답표 채점 기준 | 팀 회의 |
+| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 필요 |
+| 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 필요 |
 | 성철 | Bronze 적재 방식 | 지연 측정 방식 결정 | 완료 (S3 Sink) |
 | 성철 | S3 Sink 커넥터 이름, 소비자 그룹 이름 | 수집기가 처리 위치를 물어볼 대상 | 저장소상 `bronze-s3-sink`. 소비자 그룹 확인 필요 |
 | 성철 | 파일 전환 주기 | 정상일 때의 지연 기준선 | 저장소상 15분. 확인 필요 |
@@ -635,9 +652,9 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 성철 | 결제 데이터 계약, 결과 시각을 정하면 바로 저장 | 중복 제거와 재시도 구분, 늦은 데이터 방지 | 필요 |
 | 성철 | 시나리오별 시연 모드(3배·10배), 평소 변동 | 탐지 기준과 허용 지연 | 필요 |
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
-| 현지 | 공통 형식 검사 코드(`pipelines/format_rules.py`)를 Gold B도 쓰는 방법: 규칙표의 `gold_b` 사용 승인, 한 메시지의 오류를 전부 돌려주는 함수, 클릭·회원·리뷰 규칙에 필요한 종류(10자리 문자열, true/false 값, 최댓값, 개인정보 컬럼 금지) | Gold B와 Silver가 같은 규칙으로 판단 | 필요 (규칙표 `docs/contracts/format_rules.yaml`은 PR #20으로 머지됨) |
-| 현지 | `unit_price` 최솟값 5,900 (계약 초안은 1) | 같은 메시지를 다르게 판단하지 않기 | 필요 |
-| 현지 | 결제 지문 규칙(필드 9개의 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 | Silver와 Gold B가 같은 함수로 같은 지문을 만들기 | 필요 |
+| 현지 | 공통 형식 검사 코드(`pipelines/format_rules.py`)를 Gold B도 쓰는 방법: 규칙표의 `gold_b` 사용 승인, 한 메시지의 오류를 전부 돌려주는 함수, 클릭·회원·리뷰 규칙에 필요한 종류(10자리 문자열, true/false 값, 최댓값, 개인정보 컬럼 금지) | Gold B와 Silver가 같은 규칙으로 판단 | 완료 (#63, 규칙표 0.2.0) |
+| 현지 | `unit_price` 최솟값 5,900 (계약 초안은 1) | 같은 메시지를 다르게 판단하지 않기 | 완료 (#63) |
+| 현지 | 결제 지문 규칙(필드 9개의 순서, 시각·NULL·숫자 정규화, 직렬화, 해시)과 `pipelines/payment_fingerprint.py`를 누가 언제 만들지 | Silver와 Gold B가 같은 함수로 같은 지문을 만들기 | 완료 (#55) |
 | 현지 | Silver 격리 기준 일치 | 같은 메시지를 다르게 판단하지 않기 | 필요 |
 | 현지 | 격리 해제와 Silver 재처리 방식 (upsert / 구간 교체), Silver 처리 범위 기록 | 같은 승인으로 Silver·Gold A를 다시 돌리기 | 필요 |
 | 현지 | `payment_attempts` 이름 겹침, Gold A 데이터셋 이름 | 발표와 문서에서 헷갈리지 않기 | 필요 |
@@ -718,15 +735,15 @@ pipelines/gold_b/
 - [ ]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인 (이 PC에서는 Spark가 안 떠서 DDL과 설계 표 비교, pyarrow 시간 폴더 왕복으로 대신 확인)
 - [ ]  Athena에서 `CREATE DATABASE gold_b`, 테이블 생성, 빈 조회 확인 (권한 준비 후)
 - [x]  `reprocess_events` 최종 컬럼을 주현 님께 공유 (#29 리뷰, #36 리뷰 요청)
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#36, 2026-10-22)
 
 ### 2단계: 정제·형식 검사
 
 (현지 님과 공용 모듈 위치·분담 먼저 확정)
 
-- [ ]  규칙표에 6개 토픽 규칙 추가 (`docs/contracts/format_rules.yaml`과 합칠지 현지 님과)
+- [x]  규칙표에 토픽 규칙 추가: 공통 `docs/contracts/format_rules.yaml`에 회원·클릭·리뷰 추가 (#63). 회원·클릭은 #65로 Silver와 공동 규칙. `reviews.raw`를 검사할지는 형식 검사 때 정함
 - [ ]  CDC 표시 읽기 (`__op = c` 또는 `r`)
-- [ ]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, 규칙은 현지 님과 확정)
+- [x]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, #55)
 - [ ]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록)
 - [ ]  `raw_sample` 마스킹 (필드 이름 유지, 값만 가림)
 - [ ]  `tests/test_format_check.py` 샘플로 검사 결과 확인
@@ -735,11 +752,11 @@ pipelines/gold_b/
 
 ### 3단계: 정리 뷰
 
-- [ ]  `views/payment_conflicts.sql` (지문 비교, 같은 지문 버전끼리, 충돌 필드명)
-- [ ]  `views/payment_attempts.sql` (충돌 제외, 가장 먼저 쌓인 줄, 원인 분류)
-- [ ]  `views/malformed_messages.sql` (필드·사유 쌍 배열)
-- [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`)
-- [ ]  샘플로 확인: 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
+- [x]  `views/payment_conflicts.sql` (지문 비교, 같은 지문 버전끼리, 충돌 필드명)
+- [x]  `views/payment_attempts.sql` (충돌 제외, 가장 먼저 쌓인 줄, 원인 분류)
+- [x]  `views/malformed_messages.sql` (필드·사유 쌍 배열, 시간 폴더 `dt`·`hour`)
+- [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
+- [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
 - [ ]  PR 올리고 합치기
 
 ### 4단계: 적재 잡
