@@ -28,7 +28,7 @@ from typing import Callable, Mapping, Protocol, Sequence
 import uuid
 
 from pipelines.gold_b.ledger import (EVENT_TIME, HOUR, SCHEMAS, Checker, KafkaMessage, Store,
-                                     hour_folder, hour_of, message_rows, utc_naive)
+                                     hour_folder, hour_of, message_rows, open_store, utc_naive)
 
 ACTOR = "reprocess_job"   # reprocess_events.actor (판정 잡은 detect_job)
 SOURCE_KAFKA = "KAFKA"
@@ -504,3 +504,75 @@ def _to_message(message) -> KafkaMessage:
     return KafkaMessage(topic=message.topic(), partition=message.partition(), offset=message.offset(),
                         timestamp=datetime.fromtimestamp(millis / 1000, tz=timezone.utc),
                         value=message.value(), key=message.key())
+
+
+# ---------- 실행 입구 ----------
+
+ENV_LEDGER_ROOT = "GOLD_B_LEDGER_ROOT"    # s3://<버킷>/gold_b 또는 로컬 폴더 (필수)
+ENV_RULES_PATH = "GOLD_B_RULES_PATH"      # 형식 규칙표 경로 (생략하면 저장소의 docs/contracts/format_rules.yaml)
+
+
+def kafka_config_from_env(env: Mapping[str, str]) -> dict[str, object]:
+    """수집기와 같은 KAFKA_* 환경변수로 confluent-kafka 설정을 만든다. 주소는 로그에 남기지 않는다."""
+    bootstrap = (env.get("KAFKA_BOOTSTRAP") or "").strip()
+    if not bootstrap:
+        raise ReprocessError("KAFKA_BOOTSTRAP이 없다", retryable=False)
+    protocol = (env.get("KAFKA_SECURITY_PROTOCOL") or "PLAINTEXT").strip().upper()
+    if protocol not in ("PLAINTEXT", "SSL"):
+        raise ReprocessError("KAFKA_SECURITY_PROTOCOL은 PLAINTEXT, SSL 중 하나여야 한다", retryable=False)
+    config: dict[str, object] = {"bootstrap.servers": bootstrap, "security.protocol": protocol}
+    for key, name in (("KAFKA_SSL_CA_FILE", "ssl.ca.location"), ("KAFKA_SSL_CERT_FILE", "ssl.certificate.location"),
+                      ("KAFKA_SSL_KEY_FILE", "ssl.key.location"), ("KAFKA_ADDRESS_FAMILY", "broker.address.family")):
+        if env.get(key):
+            config[name] = env[key]
+    return config
+
+
+def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None,
+         now: Callable[[], datetime] = _utc_now, log: Callable[[str], None] = _log) -> int:
+    """poller로 승인된 요청 하나를 골라 돌린다. Airflow DAG가 5분마다 부른다 (한 번에 하나).
+
+    할 일이 없거나 성공하면 0, 실패하면 1이다. 다시 돌릴지는 다음 번에 poller가 reprocess_events를 보고 정한다.
+    """
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(prog="python -m pipelines.gold_b.jobs.reprocess",
+                                     description="Gold B 재처리: 승인된 요청 하나를 골라 원장 ①②④를 교체한다")
+    parser.add_argument("--dry-run", action="store_true", help="고른 요청만 알려 주고 돌리지 않는다")
+    args = parser.parse_args(argv)
+    env = os.environ if env is None else env
+    root = (env.get(ENV_LEDGER_ROOT) or "").strip()
+    if not root:
+        log(f"{ENV_LEDGER_ROOT}가 없다")
+        return 1
+    store = open_store(root)
+    pending = next_request(read_events(store), now())
+    if pending is None:
+        log("돌릴 재처리 요청이 없다")
+        return 0
+    request = pending.request
+    log(f"재처리 {request.request_id}: {request.window_start:%Y-%m-%d %H:%M}~{request.window_end:%Y-%m-%d %H:%M} UTC, "
+        f"{pending.run_number}번째 실행")
+    if args.dry_run:
+        return 0
+    from pipelines.gold_b.format_check import FormatChecker   # 규칙표와 지문 함수는 돌릴 때만 읽는다
+
+    try:
+        checker = FormatChecker(rules_path=env.get(ENV_RULES_PATH) or None)
+        reader = KafkaReader(kafka_config_from_env(env))
+    except Exception as exc:   # 실행 환경 문제라 요청을 실패로 남기지 않는다 (다음 번에 다시 고름)
+        log(f"재처리 {request.request_id}: 준비 실패 ({_error_label(exc)})")
+        return 1
+    try:
+        run(request, source=reader, store=store, checker=checker, now=now, log=log,
+            run_number=pending.run_number)
+    except Exception:   # run()이 FAILED를 쓰고 이유를 로그에 남겼다
+        return 1
+    finally:
+        reader.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
