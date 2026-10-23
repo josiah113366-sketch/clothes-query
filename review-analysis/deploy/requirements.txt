@@ -4,3 +4,5 @@ transformers==4.53.3
 accelerate
 boto3
 pyarrow   # Parquet 출력(.parquet)용
+pyyaml   # 패치노트(releases/*.yaml) 검사·변환용
+# 실행 환경(컨테이너)에서 설치하는 버전 고정 목록은 runtime-requirements.txt (릴리스 묶음에 복사됨)

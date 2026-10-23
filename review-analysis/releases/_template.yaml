@@ -1,0 +1,35 @@
+# 예시 파일입니다. 내용은 양식을 보이기 위한 값이며 실제 패치노트가 아닙니다.
+model_version: 2.4b_score_s2c        # 파일 이름과 같아야 함
+model_version_no: 1.0                # x.y 형식. 점수 테이블의 model_version_no 와 1:1
+change_type: 메이저                   # 최초 / 메이저 / 마이너
+released_at: 2026-10-14              # KST
+summary: LoRA 병합 배포, 극단 점수 학습 보강, 출력 형식 정리, 평가 세트 교체
+rescore_required: true               # 기존 후기를 다시 점수화해야 하는지
+
+changes:
+  - category: 모델
+    item: LoRA 병합 배포
+    detail: 어댑터를 기본 모델에 병합해 배포 형태를 바꿈
+  - category: 학습 데이터
+    item: 극단 점수 보강
+    detail: -2, +2 예시를 더 넣어 약한 부정·강한 긍정 구분을 개선
+  - category: 프롬프트·후처리
+    item: 출력 형식
+    detail: 속성별 한 줄 출력. 파싱 실패 후기는 다음 실행에서 다시 시도
+  - category: 평가
+    item: 평가 세트 교체
+    detail: 사람 평가 세트 v2로 바뀜. 이전 버전 수치와 직접 비교할 수 없음
+  - category: 배포
+    item: 전체 재점수화
+    detail: 메이저 번호가 올라 기존 후기가 모두 재점수화 대상이 됨
+
+evaluation:                          # 사람이 쓰지 않고 평가 결과 파일에서 채움
+  eval_set: 사람 평가 세트 v2
+  eval_n: 99
+  f1: 0.868
+  mae: 0.263
+  qwk: 0.915
+  source: score_eval.json            # 지표를 만든 결과 파일 이름 (후기 원문은 넣지 않음)
+
+notes: []                            # 배포 뒤 정정·추가: - {date: 2026-10-20, text: "..."}
+# based_on: 2.4b_score_s2c            # 되돌림 버전만 쓴다(원래 버전 이름). 아니면 이 줄을 지운다
