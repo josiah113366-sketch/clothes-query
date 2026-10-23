@@ -19,11 +19,18 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `collector/` | Bronze 지연 수집기: ③ `bronze_lag_snapshots`를 1분마다 쌓음 ([설명](collector/README.md)) |
 | `tests/test_lag_collector.py` | 수집기 계산·상태·파일 쓰기 (가짜 Kafka·Connect) |
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
-| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체 ([설명](jobs/README.md)) |
+
+| `format_check.py` | 형식 검사기: 메시지 하나를 공통 형식 규칙(`gold_b`)으로 검사해 ① 결제 줄(지문 포함)과 ④ 오류 목록을 만듦. 적재 잡·재처리 잡이 같이 씀 |
+| `tests/test_format_check.py` | 샘플 전부의 기대 결과, 결제 줄과 지문, `raw_sample` 마스킹, 읽을 수 없는 값 |
+| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체. poller와 실행 입구 ([설명](jobs/README.md)) |
+| `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패, poller, 실행 입구 (가짜 Kafka, 샘플 메시지) |
 | `jobs/compact.py` | 파일 합치기: 끝난 하루의 시간 폴더마다 작은 파일을 하나로 (줄은 그대로) ([설명](jobs/README.md)) |
 | `tests/test_compact.py` | 합친 뒤 줄이 그대로인지, 안 끝난 날 거부, 중간에 멈춘 뒤 다시 돌리기 |
-| `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패 (가짜 Kafka, 샘플 메시지) |
-| `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`) |
+| `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`, `PyYAML`). Spark는 실행 환경이 준다 |
+| `jobs/streaming_ingest.py` | 적재 잡: Kafka를 Spark로 1분마다 읽어 형식 검사기로 원장 ①②④에 쌓음. 실행 입구 ([설명](jobs/README.md)) |
+| `config/gold_b.yaml` | 적재 잡 설정: 토픽 목록, 주기, 처음 읽기 시작할 곳, 묶음 크기 (주소·버킷 이름은 환경변수) |
+| `tests/test_ingest.py` | 묶음 하나가 시간 폴더로 가는지, 같은 묶음을 다시 써도 두 번 쌓이지 않는지, 설정, 형식 검사기 연결, 실행 입구 |
+
 
 정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena에서 만드는 것은 권한이 생긴 뒤에 한다.
 
@@ -54,5 +61,5 @@ Athena에 만들기 (권한 준비 후): `ddl/database.sql` → 나머지 5개 �
 
 - 입력 토픽과 메시지 모양: `connectors/cdc-source.yaml` (봉투가 풀린 평평한 CDC JSON, `__op`), 시뮬레이터의 `clickstream`
 - 결제 컬럼: `db/schema/004_orders.sql`
-- 형식 검사 규칙표: `docs/contracts/format_rules.yaml` (2단계에서 연결)
-- 결제 내용 지문: `pipelines/payment_fingerprint.py` (2단계, Silver와 같은 함수. 규칙은 현지 님과 정함)
+- 형식 검사 규칙표: `docs/contracts/format_rules.yaml` (형식 검사기 `format_check.py`가 `gold_b` 규칙으로 읽음)
+- 결제 내용 지문: `pipelines/payment_fingerprint.py` (형식 검사기가 결제 줄에 붙임. Silver와 같은 함수)

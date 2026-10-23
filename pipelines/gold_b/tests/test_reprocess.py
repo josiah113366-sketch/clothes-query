@@ -15,8 +15,8 @@ pytest.importorskip("pyarrow")
 
 import pyarrow.parquet as pq  # noqa: E402
 
-from pipelines.gold_b.jobs.reprocess import (ReprocessError, Request, TopicMissing,  # noqa: E402
-                                             hour_folders, next_request, read_events, run)
+from pipelines.gold_b.jobs.reprocess import (Options, ReprocessError, Request, TopicMissing,  # noqa: E402
+                                             check_request, hour_folders, main, next_request, read_events, run)
 from pipelines.gold_b.ledger import (EVENT_TIME, TABLE_COLUMNS, Judgement, KafkaMessage,  # noqa: E402
                                      LocalStore, hour_folder, hour_of, message_rows, to_arrow)
 from test_ddl import _utc, load_samples, parse_ddl, stand_in_fingerprint  # noqa: E402
@@ -70,6 +70,9 @@ class FakeKafka:
         return [m for m in self.messages
                 if (m.topic, m.partition) in ranges
                 and ranges[(m.topic, m.partition)][0] <= m.offset < ranges[(m.topic, m.partition)][1]]
+
+    def close(self):
+        pass
 
 
 class SampleChecker:
@@ -254,8 +257,8 @@ def test_refuses_before_start(tmp_path, case):
     req, now = request(), NOW
     if case == "unfinished":            # 06시 폴더 끝 07:00 + 10분이 아직 안 됨
         now = datetime(2026, 10, 21, 7, 5, tzinfo=UTC)
-    elif case == "out_of_retention":    # 05:50부터 읽어야 하는데 72시간이 지남
-        now = datetime(2026, 10, 24, 6, 0, tzinfo=UTC)
+    elif case == "out_of_retention":    # 05:50부터 읽어야 하는데 7일이 지남
+        now = datetime(2026, 10, 28, 6, 0, tzinfo=UTC)
     elif case == "rule_version":
         req = request(rule_version="v9")
     else:
@@ -269,6 +272,15 @@ def test_refuses_before_start(tmp_path, case):
     assert json.loads(events(store)[0]["detail"])["retryable"] is False
     assert kafka.reads == 0
     assert ledger_files(tmp_path) == before
+
+
+def test_kafka_retention_is_seven_days():
+    """Kafka 보관 기간은 7일이다 (#86). 3~7일 전 구간도 Kafka에서 다시 읽고, 7일이 넘으면 거부한다."""
+    assert Options().retention == timedelta(days=7)
+    assert check_request(request(), SampleChecker(), Options(), datetime(2026, 10, 27, 6, 0)) == [
+        datetime(2026, 10, 21, 6)]   # 6일 전 (예전 72시간 기준이면 거부)
+    with pytest.raises(ReprocessError):
+        check_request(request(), SampleChecker(), Options(), datetime(2026, 10, 28, 6, 0))
 
 
 class CrashOnceStore(LocalStore):
@@ -388,3 +400,42 @@ def test_run_number_is_recorded_and_finished_request_is_not_picked_again(tmp_pat
     assert json.loads(events(store)[0]["detail"])["run"] == 2
     approved = {**ev("rq-1", "APPROVED", 0), "rule_version": "test"}
     assert next_request([approved, *read_events(store)], NOW) is None
+
+
+# ---------- 실행 입구 (python -m pipelines.gold_b.jobs.reprocess) ----------
+
+def write_approval(root, rid: str = "rq-1", minutes: int = 30) -> None:
+    """승인 화면이 Athena INSERT로 쓴 것처럼 확장자 없는 파일에 APPROVED 줄을 둔다 (규칙 버전은 규칙표와 같은 0.2.0)."""
+    folder = root / "reprocess_events"
+    folder.mkdir(parents=True, exist_ok=True)
+    pq.write_table(to_arrow("reprocess_events", [ev(rid, "APPROVED", minutes)]), folder / f"approval_{rid}")
+
+
+def test_main_needs_ledger_root_and_reports_nothing_to_do(tmp_path):
+    logs: list[str] = []
+    assert main([], env={}, log=logs.append) == 1
+    assert main([], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
+    assert logs[-1] == "돌릴 재처리 요청이 없다"
+
+
+def test_main_dry_run_only_names_the_request(tmp_path):
+    write_approval(tmp_path)
+    logs: list[str] = []
+    assert main(["--dry-run"], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
+    assert "rq-1" in logs[-1] and "1번째 실행" in logs[-1]
+    assert [row["step"] for row in read_events(LocalStore(tmp_path))] == ["APPROVED"]
+
+
+def test_main_runs_the_approved_request_with_the_format_checker(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    from pipelines.gold_b.jobs import reprocess
+
+    write_approval(tmp_path)
+    monkeypatch.setattr(reprocess, "KafkaReader", lambda config: FakeKafka(sample_messages()))
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path), "KAFKA_BOOTSTRAP": "localhost:9092"}
+    assert main([], env=env, now=ticking(), log=lambda _: None) == 0
+    steps = [row["step"] for row in sorted(read_events(LocalStore(tmp_path)), key=lambda row: row["at"])]
+    assert steps == ["APPROVED", "STARTED", "LEDGER_REPLACED"]
+    assert folder_rows(LocalStore(tmp_path), "payment_events", H06)   # 실제 형식 검사기로 결제 줄을 만들었다
+    assert main([], env=env, now=ticking(), log=lambda _: None) == 0   # 끝난 요청은 다시 고르지 않는다
+    assert len(read_events(LocalStore(tmp_path))) == 3

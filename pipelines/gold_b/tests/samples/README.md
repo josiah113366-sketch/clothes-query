@@ -5,7 +5,7 @@ Kafka에서 읽은 메시지 한 개 = 배열의 원소 하나다. 2단계(형�
 | 파일 | 내용 |
 |---|---|
 | `payments.json` | 결제 토픽. 정상·PG 원인 실패·고객 원인 실패·재시도·중복·충돌 두 쌍(상태가 다름, 금액만 다름)·모르는 실패 코드·필드 누락·이름 변경·`PG_C`·오류 여러 개·파싱 실패·`op u` |
-| `other_topics.json` | `clickstream`, `orders`, `order-items`, `members-events`, `reviews.raw` 각각 정상 1개 이상 + 오류 예 |
+| `other_topics.json` | `clickstream`, `orders`, `order-items`, `members-events`, `reviews.raw` 각각 정상 1개 이상 + 오류 예. `reviews.raw`는 형식 검사를 하지 않아서(2026-10-23 결정) 오류 예도 기대 오류가 없다 |
 
 ## 원소 모양
 
