@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from functools import wraps
 from inspect import signature
 from pathlib import Path
@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from pipelines.silver.common import publish_bundle
+from pipelines.timestamps import parse_iso_datetime
 
 
 def exclusive_output(dataset: str):
@@ -238,7 +239,7 @@ def save_gold(base: str, result: dict[str, list[dict]], inputs: dict, reprocess:
             raise ValueError("Gold A 고유 키 중복")
     return publish_bundle(base, result, {"status": "PASS", "inputs": inputs,
                           "reprocess": reprocess, "previous_result": previous_ref,
-                          "published_at": datetime.now(UTC).isoformat(),
+                          "published_at": datetime.now(timezone.utc).isoformat(),
                           "check_version": "gold-a.metrics.v2"}, _write_text)
 
 
@@ -280,7 +281,9 @@ def previous_gold(base: str) -> dict | None:
 
 
 def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
-                     clicks: list[dict] | None = None) -> tuple[list[dict], set[str], list[dict]]:
+                     clicks: list[dict] | None = None, *, previous_candidates: list[dict] | None = None,
+                     previous_funnel_rows: list[dict] | None = None, error_refs_limit: int | None = None
+                     ) -> tuple[list[dict], set[str], list[dict]]:
     """모든 현재/이전 후보로 범위를 찾는다. 추적 불가는 관련 결과 묶음 전체 보류."""
     issues = trade["quarantined_records"]
     if not issues:
@@ -290,7 +293,9 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
     if previous:
         ref = previous.get("inputs", {}).get("silver_transactions", {})
         path = ref.get("outputs", {}).get("impact_candidates")
-        if path:
+        if previous_candidates is not None:
+            candidates += previous_candidates
+        elif path:
             candidates += read_rows(path)
         else:
             # 예전 결과의 연결 정보가 없으면 좁혀 갱신하지 않는다.
@@ -331,10 +336,10 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
             "order_ids": sorted(affected),
             "error_refs": [{key: issue.get(key) for key in (
                 "source_dataset", "record_key", "error_code", "source_file", "source_line")}
-                for issue in issues]}
+                for issue in issues[:error_refs_limit]]}
 
     def kst(value):
-        parsed = datetime.fromisoformat(value)
+        parsed = parse_iso_datetime(value)
         if parsed.tzinfo is None:
             raise ValueError("시간대가 없는 후보 시각")
         return parsed.astimezone(ZoneInfo("Asia/Seoul"))
@@ -369,7 +374,8 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
                             hold("funnel_daily", {"funnel_date_kst": str(min(views).date()), "article_id": article})
                 if previous:
                     path = previous["outputs"].get("funnel_session_product.jsonl")
-                    for row in read_rows(path) if path else []:
+                    prior_rows = previous_funnel_rows if previous_funnel_rows is not None else (read_rows(path) if path else [])
+                    for row in prior_rows:
                         if any(row["session_id"] == order.get("session_id") for order in orders[order_id]):
                             hold("funnel_session_product", {"session_id": row["session_id"], "article_id": row["article_id"]})
                             hold("funnel_daily", {"funnel_date_kst": row["first_view_at_kst"][:10], "article_id": row["article_id"]})
@@ -383,6 +389,202 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
         for table in tables:
             hold(table, {})
     return list(holds.values()), affected, list({json.dumps(row, sort_keys=True): row for row in context}.values())
+
+
+def previous_spark_gold(channel: str) -> dict | None:
+    """이전 고정 Parquet 결과를 찾는다. 실제 읽기 오류를 결과 없음으로 숨기지 않는다."""
+    try:
+        result = json.loads(_read_text(channel + "/current.json"))
+    except FileNotFoundError:
+        return None
+    except Exception as error:
+        from botocore.exceptions import ClientError
+
+        if isinstance(error, ClientError) and error.response["Error"]["Code"] in {"NoSuchKey", "404"}:
+            return None
+        raise
+    if result.get("status") not in {"PASS", "PARTIAL"} or result.get("engine") != "spark":
+        raise ValueError("이전 Spark Gold 결과의 상태·엔진을 확인할 수 없습니다")
+    return result
+
+
+def plan_spark_holds(trade, previous, names, click_tables=None):
+    """관련 후보만 Driver로 제한해 기존 영향 규칙을 재사용한다. 한도 초과는 전체 보류다."""
+    from pyspark.sql import functions as F
+
+    from pipelines.spark_batch import _spark_uri
+
+    spark = trade["impact_candidates"].sparkSession
+    limit, overflow = 1000, False
+
+    def bounded(frame):
+        nonlocal overflow
+        values = [row.asDict() for row in frame.limit(limit + 1).collect()]
+        overflow |= len(values) > limit
+        return values[:limit]
+
+    def read_previous(kind):
+        manifest_path = (previous or {}).get(kind)
+        return json.loads(_read_text(manifest_path)) if manifest_path else None
+
+    previous_trade = read_previous("silver_manifest") if previous else None
+    old_context = (previous or {}).get("held_context", [])
+    if len(old_context) > limit:
+        overflow = True
+    current = trade["impact_candidates"]
+    old = current.limit(0)
+    if previous_trade:
+        old = spark.read.parquet(_spark_uri(previous_trade["outputs"]["impact_candidates"]))
+    if old_context:
+        old = old.unionByName(spark.createDataFrame(old_context[:limit], current.schema))
+    previous_tables = {name: spark.read.parquet(_spark_uri(previous["outputs"][name])) for name in names} if previous else {}
+    holds, affected, context = [], set(), []
+    issues = bounded(trade["quarantined_records"])
+    has_quality_error = bool(issues)
+    if issues:
+        key_frame = spark.createDataFrame([(r["source_dataset"], r.get("record_key")) for r in issues],
+                                          "source_dataset string, issue_key string")
+
+        def matching(frame):
+            candidate = frame.withColumn("issue_key", F.when(F.col("source_dataset") == "orders", F.col("order_id")).when(
+                F.col("source_dataset") == "order_items", F.col("order_item_id")).otherwise(F.col("payment_id")))
+            return candidate.join(key_frame, ["source_dataset", "issue_key"], "left_semi").select("order_id")
+
+        direct = spark.createDataFrame([(r.get("order_id"),) for r in issues], "order_id string")
+        order_ids = direct.union(matching(current)).union(matching(old)).filter("order_id is not null").distinct()
+        current_context = bounded(current.join(order_ids, "order_id", "left_semi"))
+        prior_context = bounded(old.join(order_ids, "order_id", "left_semi"))
+        sessions = sorted({r["session_id"] for r in current_context + prior_context if r.get("session_id")})
+        views, prior_funnels = [], []
+        if click_tables is not None and sessions:
+            selected = click_tables["click_events"].filter(F.col("session_id").isin(sessions) & (F.col("event_type") == "view"))
+            selected = selected.groupBy("session_id", "article_id").agg(F.min("event_time_kst").alias("event_time_kst"))
+            views = bounded(selected.withColumn("event_type", F.lit("view")))
+            if previous:
+                prior_funnels = bounded(previous_tables["funnel_session_product"].filter(F.col("session_id").isin(sessions)))
+        # 후보 수가 작아도 주문상품×결제 후보 조합이 커질 수 있어 영향 분석 전에 제한한다.
+        counts = defaultdict(lambda: {"orders": 0, "payments": 0, "items": set()})
+        for row in current_context + prior_context:
+            item = counts[row["order_id"]]
+            if row["source_dataset"] == "order_items":
+                item["items"].add(row.get("article_id"))
+            elif row["source_dataset"] in item:
+                item[row["source_dataset"]] += 1
+        combinations = sum(c["orders"] + c["payments"] + len(c["items"]) * (c["orders"] + c["payments"])
+                           for c in counts.values()) + len(prior_funnels)
+        if overflow or combinations > limit:
+            overflow = True
+            context = (current_context + prior_context)[:limit]
+            affected = set(counts)
+        else:
+            holds, affected, context = plan_trade_holds(
+                {"quarantined_records": issues, "impact_candidates": current_context}, previous, names, views,
+                previous_candidates=prior_context if previous_trade else None,
+                previous_funnel_rows=prior_funnels, error_refs_limit=32)
+    click_context, pairs = [], []
+    if click_tables is not None:
+        click_issues = bounded(click_tables["quarantined_records"])
+        has_quality_error |= bool(click_issues)
+        if click_issues:
+            current_clicks = click_tables["click_impact_candidates"]
+            prior_manifest = read_previous("silver_clicks_manifest") if previous else None
+            old_clicks = current_clicks.limit(0)
+            if prior_manifest:
+                path = prior_manifest["outputs"].get("click_impact_candidates")
+                if path:
+                    old_clicks = spark.read.parquet(_spark_uri(path))
+                else:
+                    clean = spark.read.parquet(_spark_uri(prior_manifest["outputs"]["click_events"]))
+                    old_clicks = clean.select("event_id", "session_id", "article_id", "event_type", "event_time_kst").withColumn(
+                        "valid", F.lit(True)).withColumn("source_file", F.lit(None).cast("string")).withColumn("source_line", F.lit(None).cast("long"))
+            carried = (previous or {}).get("held_click_context", [])
+            if len(carried) > limit:
+                overflow = True
+            if carried:
+                old_clicks = old_clicks.unionByName(spark.createDataFrame(carried[:limit], current_clicks.schema))
+            keys = [r.get("record_key") for r in click_issues if r.get("record_key")]
+            click_context = bounded(current_clicks.unionByName(old_clicks).filter(F.col("event_id").isin(keys)).dropDuplicates())
+            uncertain = any(not r.get("record_key") for r in click_issues) or any(not r.get("valid") for r in click_context)
+            uncertain |= not click_context or bool(previous and not prior_manifest)
+            pairs = sorted({(r["session_id"], r["article_id"]) for r in click_context if r.get("session_id") and r.get("article_id")})
+            if any(not r.get("session_id") or not r.get("article_id") for r in click_context):
+                uncertain = True
+            pair_frame = spark.createDataFrame(pairs, "session_id string, article_id string")
+            all_views = current_clicks.unionByName(old_clicks).filter("event_type = 'view'").join(pair_frame, ["session_id", "article_id"], "left_semi")
+            # 후보의 모든 날짜를 포함한다. 잘못된 시각을 고르면 전체 보류로 돌아간다.
+            dates = bounded(all_views.select("article_id", F.substring("event_time_kst", 1, 10).alias("funnel_date_kst")).distinct())
+            for session, article in pairs:
+                holds.append({"table": "funnel_session_product", "key": {"session_id": session, "article_id": article}, "reason": "UPSTREAM_CLICK_ERROR"})
+            for row in dates:
+                if not row["funnel_date_kst"]:
+                    uncertain = True
+                holds.append({"table": "funnel_daily", "key": row, "reason": "UPSTREAM_CLICK_ERROR"})
+            if previous and pairs:
+                prior_rows = bounded(previous_tables["funnel_session_product"].join(pair_frame, ["session_id", "article_id"], "left_semi"))
+                for row in prior_rows:
+                    holds.append({"table": "funnel_daily", "key": {"funnel_date_kst": row["first_view_at_kst"][:10], "article_id": row["article_id"]}, "reason": "UPSTREAM_CLICK_ERROR"})
+            if uncertain:
+                holds += [{"table": name, "key": {}, "reason": "UNRESOLVED_CLICK_SCOPE"} for name in names]
+    if has_quality_error and any(not h["key"] for h in (previous or {}).get("held_scopes", [])):
+        holds = [{"table": name, "key": {}, "reason": "PREVIOUS_UNRESOLVED_SCOPE"} for name in names]
+    if overflow or len(holds) > limit:
+        holds = [{"table": name, "key": {}, "reason": "SCOPE_METADATA_LIMIT"} for name in names]
+    deduped = {}
+    for row in holds:
+        deduped[(row["table"], json.dumps(row["key"], sort_keys=True))] = row
+    holds = [row for row in deduped.values() if not row["key"] or not any(
+        other["table"] == row["table"] and not other["key"] for other in deduped.values())]
+    holds.sort(key=lambda row: (row["table"], json.dumps(row["key"], sort_keys=True)))
+    return holds, affected, context[:limit], click_context[:limit], pairs, previous_tables
+
+
+def merge_spark_scopes(fresh: dict, old: dict, holds: list[dict], previous: dict | None):
+    """집계 키를 Spark join으로 병합하고 보류 상태도 같은 실행 묶음에 저장한다."""
+    from pyspark.sql import functions as F
+    from pyspark.sql.types import StructType
+
+    spark = next(iter(fresh.values())).sparkSession
+    grains = {"order_sales_hourly": ["hour_start_kst"], "product_sales_daily": ["sales_date_kst", "article_id"],
+              "funnel_session_product": ["session_id", "article_id"], "funnel_daily": ["funnel_date_kst", "article_id"]}
+    merged = {}
+    for name, frame in fresh.items():
+        scopes = [row for row in holds if row["table"] == name]
+        previous_frame = old.get(name, frame.limit(0))
+        available_keys = set()
+        global_available = False
+        if any(not row["key"] for row in scopes):
+            frozen, updated = previous_frame, frame.limit(0)
+            global_available = bool(previous_frame.limit(1).count())
+        elif scopes:
+            grain = grains[name]
+            if any(set(row["key"]) != set(grain) for row in scopes):
+                raise ValueError("보류 범위 키가 집계 기준과 다릅니다")
+            key_schema = StructType([frame.schema[k] for k in grain])
+            keys = spark.createDataFrame([(json.dumps(row["key"]),) for row in scopes], "key string").select(
+                F.from_json("key", key_schema, {"mode": "FAILFAST"}).alias("r")).select("r.*").distinct()
+            frozen = previous_frame.join(keys, grain, "left_semi")
+            updated = frame.join(keys, grain, "left_anti")
+            available_keys = {json.dumps({k: str(row[k]) for k in grain}, sort_keys=True)
+                              for row in frozen.select(*grain).distinct().limit(len(scopes)).collect()}
+        else:
+            frozen, updated = previous_frame.limit(0), frame
+        merged[name] = updated.unionByName(frozen)
+        if merged[name].groupBy(*grains[name]).count().filter("count > 1").limit(1).count():
+            raise ValueError("범위별 Spark 결과의 고유 키가 중복됩니다")
+        for scope in scopes:
+            available = (json.dumps({k: str(v) for k, v in scope["key"].items()}, sort_keys=True)
+                         in available_keys) if scope["key"] else global_available
+            prior_hold = next((h for h in (previous or {}).get("held_scopes", []) if h["table"] == name and
+                               all(scope["key"].get(k) == v for k, v in h["key"].items())), None)
+            scope["previous_result_available"] = available
+            scope["last_normal_result"] = (prior_hold.get("last_normal_result") if prior_hold else
+                {"run_id": previous["run_id"], "published_at": previous.get("published_at", previous.get("checked_at")),
+                 "outputs": previous["outputs"]} if available and previous and previous["status"] == "PASS" else None)
+    records = [(h["table"], json.dumps(h["key"], sort_keys=True), h["reason"], h["previous_result_available"],
+                json.dumps(h["last_normal_result"], sort_keys=True) if h["last_normal_result"] is not None else None) for h in holds]
+    merged["refresh_holds"] = spark.createDataFrame(records,
+        "table_name string, key_json string, reason string, previous_result_available boolean, last_normal_result_json string")
+    return merged
 
 
 def healthy_trade(trade: dict, affected: set[str]) -> dict:
@@ -420,13 +622,13 @@ def save_scoped_gold(base: str, result: dict, inputs: dict, holds: list[dict],
     try:
         return publish_bundle(base, result, {"status": "PARTIAL" if holds else "PASS", "inputs": inputs,
             "held_scopes": holds, "held_context": context if holds else [],
-            "published_at": datetime.now(UTC).isoformat(), "check_version": "gold-a.scoped.v1"}, _write_text)
+            "published_at": datetime.now(timezone.utc).isoformat(), "check_version": "gold-a.scoped.v1"}, _write_text)
     except Exception as exc:
         # 숫자 공개 실패는 이전 포인터를 유지한다. 오류 메시지/원문 대신 유형만 기록한다.
         from uuid import uuid4
         try:
             _write_text(_uri(base, "failed-runs", "failed-" + uuid4().hex + ".json"), json.dumps({
-                "status": "FAILED", "failed_at": datetime.now(UTC).isoformat(),
+                "status": "FAILED", "failed_at": datetime.now(timezone.utc).isoformat(),
                 "error_type": type(exc).__name__, "previous_run_id": (previous or {}).get("run_id")}, indent=2))
         except OSError:
             pass  # 저장소 자체 장애라면 실패 기록도 불가능할 수 있다. 원래 실패는 다시 전달한다.
