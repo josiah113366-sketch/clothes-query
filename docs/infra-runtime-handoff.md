@@ -1,5 +1,7 @@
 # 팀원에게 전달할 실행 연결 현황
 
+역할별로 바로 전달할 짧은 요청문은 [담당자별 전달문](operations/team-requests-20261024.md)을 사용한다. 아래는 인프라 연결의 상세 참조다. 외부 메시지는 보내지 않았다.
+
 2026-10-24 KST 순차 검증 결과. 아래는 전달용 초안이며 외부 메시지는 보내지 않았다. 최신 main #95의 원장 추가 컬럼·payment_states와 의존 뷰까지 실제 반영했고, [후속 확인 기록](operations/runtime-verification-20261024.md)에 결과와 입력 대기 목록을 정리했다.
 
 현재 총 노드는 API t3a.medium 1대와 공용 t3a.large 1대다. Spark 전용 풀은 활성화됐고 실행이 없으면 노드는 0대다. 실제 적용 후속은 infra/applied-state-sync에 통합했으며 아직 원격 push·PR·머지는 하지 않았다.

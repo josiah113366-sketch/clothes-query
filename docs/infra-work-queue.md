@@ -20,6 +20,8 @@
 
 ## 우선순위와 담당
 
+팀원 정보 없이 가능한 운영 준비 네 가지는 완료했다. [한 명령 전체 점검](../infra/platform/monitoring/READINESS.md), [장애 대응 안내](operations/incident-recovery.md), [Git 공유 초안](operations/infrastructure-share-review.md), [팀원 전달문](operations/team-requests-20261024.md)을 마련했다. 새 상시 서비스·자동 복구·Git 원격 작업은 추가하지 않았다.
+
 1. **로컬 통합·검증 완료 — 인프라: Git과 적용 상태 정리.** 설치된 운영 도구·데이터 실행 기반·노드 축소 후속을 한 브랜치로 취합한다. #73/#74는 이전 공유 초안이며 자동으로 갱신·닫거나 머지하지 않는다. 검증 결과는 [통합 작업 기록](tasks/infra-applied-state-sync.md)에 남긴다.
 2. **완료 — 인프라: Airflow 로그 접근 복구.** 로그 역할·정책·association 6개를 복구하고 API/scheduler를 순차 재시작했다. 과거 로그 42개를 보존했으며 observer 로그 API HTTP 200과 새 scheduler의 S3 로그 쓰기를 확인했다. main 설정은 원래 존재했고 실환경만 누락돼 있었다. 제거 원인은 단정하지 않는다.
 3. **완료 — 인프라: Gold B 조회 뷰 배포.** 기존 세 뷰 배포 후 #95의 원장 컬럼 5개와 payment_states 포함 네 뷰까지 반영했다. 실제 detection-job SA 조회와 뒤이은 00:10 판정 예약 실행 성공을 확인했다. 더미 업무 행은 만들지 않았다.
