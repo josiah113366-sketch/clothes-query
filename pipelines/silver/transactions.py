@@ -84,6 +84,7 @@ def build_silver(
     orders: list[dict], order_items: list[dict], payments: list[dict],
     input_complete: bool = False,
     rules: FormatRules | None = None,
+    *, _initial_errors: dict | None = None, _unlinked_item_error: bool = False,
 ) -> dict[str, list[dict]]:
     """정상 상세 4개와 격리·품질 결과 반환. 입출력 실패는 호출자가 처리한다."""
     inputs = {"orders": orders, "order_items": order_items, "payments": payments}
@@ -138,6 +139,14 @@ def build_silver(
                 reject(name, index, exc.field, exc.code, str(exc))
                 if isinstance(exc, FormatError):
                     errors[name][index]["rule_id"] = exc.rule_id
+
+    # Spark는 전체 입력의 키 충돌을 먼저 분산 검사하고 주문별로 복원한다.
+    # 주문 경계를 넘는 충돌·연결 불명 상품 오류를 전달하되 기본 호출 결과는 유지한다.
+    for name, issues in (_initial_errors or {}).items():
+        for index, issue in issues.items():
+            reject(name, index, issue["field"], issue["error_code"], issue["reason"], issue["category"])
+            if "rule_id" in issue:
+                errors[name][index]["rule_id"] = issue["rule_id"]
 
     groups: dict[str, dict[str, list[int]]] = {}
     for name, rows in inputs.items():
@@ -268,7 +277,7 @@ def build_silver(
             continue
         item_errors = [issue for issue in errors["order_items"].values()
                        if issue["order_id"] in (None, order_id)]
-        if item_errors:
+        if item_errors or _unlinked_item_error:
             code, state, category = "DEPENDENCY_BLOCKED", "ITEM_ERROR", "DEPENDENCY_BLOCKED"
             message = "주문상품 오류 또는 연결 불명으로 합계 검사를 보류합니다"
         elif not items_by_order[order_id]:
