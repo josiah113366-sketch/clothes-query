@@ -1,6 +1,6 @@
 # Silver·Gold A 첫 거래 실행 연결 준비
 
-상태: 코드·로컬 검증 준비, 실환경 미적용
+상태: 코드·로컬 검증 준비, ECR·18번 push 권한만 실환경 적용 완료
 
 브랜치: infra/silver-gold-a-connections
 
@@ -31,4 +31,12 @@
 
 현재 Airflow 실제 Helm values를 읽어 overlay 병합 호환성을 확인했다. 기존 extraEnv 1개와 Git bundle을 보존하며 새 runtime 참조 하나만 추가한다. 실제 digest는 없으므로 placeholder ConfigMap을 저장하거나 적용하지 않았다.
 
-프리뷰와 적용을 분리했다. namespace 공유와 같은 namespace 내 ServiceAccount 선택은 강한 보안 경계가 아니므로 역할 분리만으로 완전한 격리를 주장하지 않는다. Glue 공개·재처리 SILVER 기록 작성·Gold B 상시 Spark 및 agent 권한은 이 변경에 섞지 않는다. 실제 이미지 digest·네트워크/IAM 적용·노드 활성화 이후에 별도 수동 검증한다. 현재 AWS apply·노드 기동·업무 실행·push·PR·머지는 하지 않았다.
+프리뷰와 적용을 분리했다. namespace 공유와 같은 namespace 내 ServiceAccount 선택은 강한 보안 경계가 아니므로 역할 분리만으로 완전한 격리를 주장하지 않는다. Glue 공개·재처리 SILVER 기록 작성·Gold B 상시 Spark 및 agent 권한은 이 변경에 섞지 않는다. 실제 이미지 digest·네트워크/IAM 적용·노드 활성화 이후에 별도 수동 검증한다.
+
+### ECR 단계 적용
+
+이후 사용자가 ECR 생성과 18번 push 권한 적용에 동의했다. origin/main을 다시 fetch해 36835f5가 최신임을 확인했고, fmt·validate 및 최신 실제 plan을 재확인했다. ECR 저장소 2개와 de-ai-18 inline 정책만 create인 저장 계획을 적용했다. 수정·삭제·교체는 0개다.
+
+AWS에서 두 저장소의 IMMUTABLE 태그와 scan_on_push 설정을 확인했다. 실제 사용자 정책은 두 저장소 ARN에 대한 push/pull 작업 및 리소스 제한을 지원하지 않는 GetAuthorizationToken만 포함함을 확인했다. 다른 기존 사용자 권한을 축소하거나 사용자의 전체 권한이 이 정책에만 한정된다고 주장하지 않는다. 적용 후 plan은 변경 없음이었다.
+
+이미지 발행·Spark 실행 계정·network endpoint 변경·노드 활성화·업무 실행은 아직 하지 않았다. Git push·PR·승인·머지는 하지 않았다. 다음 단계는 기본 이미지 발행과 digest 전달이며 그 후 동료가 업무 이미지를 빌드·push한다.

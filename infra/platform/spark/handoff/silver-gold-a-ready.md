@@ -1,12 +1,12 @@
 # Silver·Gold A 첫 거래 검증 연결
 
-main #82(36835f5)를 반영했다. 팀 입력 두 개는 S3에 존재함을 읽기 확인했다. 아래는 **코드·검토용 준비**이며 apply·노드 기동·업무 실행을 수행하지 않는다.
+main #82(36835f5)를 반영했다. 팀 입력 두 개는 S3에 존재함을 읽기 확인했다. 2026-10-23 사용자 승인으로 **ECR 저장소 2개와 de-ai-18 이미지 push 정책만 적용 완료**했다. 나머지는 코드·검토용 준비이며 Spark 실행 권한·노드 기동·업무 실행은 아직 적용하지 않았다.
 
 - namespace: pipelines, SA: silver-gold-a-submitter / silver-gold-a-driver / silver-gold-a-executor
 - runtime ConfigMap: pipelines/silver-gold-a-runtime
 - 업무 설정: airflow/airflow-silver-gold-a-runtime, key config → AIRFLOW_PIPELINE_RUNTIME
 - 기존 main GitDagBundle가 infra/platform/airflow/dags를 읽으므로 새 bundle은 추가하지 않는다. silver_gold_a_batch는 수동/paused로 유지한다.
-- 업무 ECR: clothes-query-dev/silver-gold-a, 기본 ECR: clothes-query-dev/spark-base. 현재 실환경에는 두 저장소가 없으며 기존 후속 ECR 코드로 opt-in 준비만 돼 있다. push 담당 de-ai-18과 Pod 실행 역할은 다르다.
+- 업무 ECR: clothes-query-dev/silver-gold-a, 기본 ECR: clothes-query-dev/spark-base. 두 저장소와 de-ai-18 push 정책은 적용했다. 이미지 발행과 digest 전달은 아직이다. [발행 안내](spark-ecr-publish.md)를 따른다. push 담당 de-ai-18과 Pod 실행 역할은 다르다.
 
 ## 이미지 없이 가능한 렌더
 
