@@ -75,7 +75,7 @@ class Options:
     topics: tuple[str, ...] = DEFAULT_TOPICS
     payments_topic: str = "payments"               # payment_events 줄의 토픽 (원장에 토픽 칸이 없음)
     margin: timedelta = timedelta(minutes=10)      # 폴더 앞뒤로 더 읽는 시간
-    retention: timedelta = timedelta(hours=72)     # Kafka 보관 기간
+    retention: timedelta = timedelta(days=7)       # Kafka 보관 기간 (업무 토픽 retention.ms 7일, 2026-10-23 #86)
 
 
 @dataclass(frozen=True)
