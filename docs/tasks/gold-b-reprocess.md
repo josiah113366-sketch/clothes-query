@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-reprocess
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-reprocess` (최신 `main` `fbc6108` 병합, #78까지) · main 대상 PR 제출 · 남은 일: 실행 입구(형식 검사기와 함께), DAG(재영 님)
+> 상태: 완료 (#84, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-reprocess` (최신 `main` `fbc6108` 병합, #78까지) · 남은 일: DAG(재영 님), Bronze 재처리 (실행 입구는 `pipelines/gold-b-format-check`)
 
 ## 목표
 

@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-format-check
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
 
 ## 목표
 
@@ -86,3 +86,4 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
   - 실행 이미지는 Python 3.11 이상이어야 한다 (지문 함수). 재영 님 Spark 이미지는 Python 3.10이라, 재처리 잡은 Spark 없이 Python 3.11+ 이미지로 돌린다.
   - 모르는 실패 코드를 ①에 넣는 확장안, `rule_id` 칸은 하지 않았다 (위 결정).
 - **팀원 확인 표 정리 (2026-10-23):** 주현 님 PR이 main에 들어간 것을 확인하고 설계 문서 팀원 확인 표를 고쳤다. #71 판정 설정 `format_rule_version` 0.2.0, #72 판정·조사 쿼리의 시간 폴더 조건, #80 `pending_replacements`의 `source IN ('KAFKA', 'BRONZE')`. 판정 잡의 `reprocess_events` 정의(`TABLE_SPECS`)도 DDL과 같아졌다(폴더 없음, `attempt` int). 남은 것은 `_replaced_filter`(R5 순찰)의 같은 `source` 조건이다. 재처리 브랜치는 이미 올라가 있어서 이 정리는 이 브랜치에 넣었다.
+- **#84 머지 정리 (2026-10-23):** 재처리 브랜치가 #84로 머지되어 브랜치 대장의 재처리 줄을 머지됨으로, 재처리 작업 지시서 상태를 바꾸고, 설계 문서 7단계의 실행 입구·PR 항목을 체크했다 (실행 입구 항목은 이 브랜치에서 만들었는데 체크가 빠져 있었다).

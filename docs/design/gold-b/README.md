@@ -841,9 +841,9 @@ pipelines/gold_b/
 - [x]  실제 교체 범위를 결과로 넘기기
 - [x]  `tests/test_reprocess.py` 같은 입력으로 두 번 돌려 결과가 같은지 확인
 - [x]  poller `next_request`: 5분마다 `APPROVED` 중 `source`가 `KAFKA`·`BRONZE`인 요청 하나, 승인 만료 60분, 한 요청 최대 3번
-- [ ]  실행 입구(명령줄): 형식 검사기와 함께 만든다 (`pipelines/gold-b-format-check`)
+- [x]  실행 입구(명령줄) `python -m pipelines.gold_b.jobs.reprocess`: 형식 검사기와 함께 만듦 (`pipelines/gold-b-format-check`)
 - [ ]  `dags/gold_b_reprocess.py` 5분마다 poller 실행, 한 번에 하나 (재영 님. DAG 공급 경로가 `infra/platform/airflow/dags/`). 재판정은 판정 잡이 `LEDGER_REPLACED`를 읽어 시작하므로 DAG로 잇지 않는다
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#84, 2026-10-23)
 
 ### 8단계: Silver 경로와 맞추기
 
