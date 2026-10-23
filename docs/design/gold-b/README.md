@@ -869,7 +869,7 @@ pipelines/gold_b/
 - [x]  이벤트 시각 기준 시간 폴더로 쓰기, `loaded_at` 기록
 - [x]  로컬 또는 개발 Kafka로 샘플을 흘려 원장 확인 (로컬 Kafka 3.7, 가짜 판정)
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.streaming_ingest` (설정이 틀리면 Spark를 띄우기 전에 멈춤)
-- [x]  Gold B 이미지 `pipelines/gold_b/Dockerfile` (`pipelines/gold-b-image`, 2026-10-24): 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지, 넣을 파일 목록 시험. 실제 빌드는 팀 기본 이미지가 ECR에 올라온 뒤
+- [x]  Gold B 이미지 `pipelines/gold_b/Dockerfile` (`pipelines/gold-b-image`, #98, 2026-10-24): 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지, 넣을 파일 목록 시험. 실제 빌드는 팀 기본 이미지가 ECR에 올라온 뒤
 - [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md` 「적재 잡 배포에 필요한 것」)
 - [ ]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인
 - [x]  잡을 재시작해도 빠지거나 두 번 쌓이지 않는지 확인 (체크포인트, 로컬 Docker)

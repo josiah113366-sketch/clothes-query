@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-image
 
-> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-image` (최신 `main` #92에서 만들고, #95 머지 뒤 최신 `main` 위로 옮김) · 다음 작업: PR (사용자), 적재 잡 배포 (재영 님)
+> 상태: 완료 (#98, 2026-10-24 머지) · 브랜치: `pipelines/gold-b-image` (최신 `main` #92에서 만들고, #95 머지 뒤 최신 `main` 위로 옮김) · 남은 일: 팀 기본 Spark 이미지 ECR digest가 나오면 빌드·ECR, 적재 잡·수집기 배포 (재영 님)
 
 ## 목표
 
