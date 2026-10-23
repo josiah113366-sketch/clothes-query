@@ -29,7 +29,7 @@ EXPECTED = {
         ("pg", "STRING"), ("status", "STRING"), ("failure_code", "STRING"),
         ("completed_at", "TIMESTAMP"), ("payment_content_hash", "STRING"),
         ("fingerprint_version", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
-        ("loaded_at", "TIMESTAMP"),
+        ("loaded_at", "TIMESTAMP"), ("cdc_op", "STRING"), ("source_ts_ms", "BIGINT"), ("rule_version", "STRING"),
     ],
     "topic_messages": [
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
@@ -44,6 +44,7 @@ EXPECTED = {
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
         ("kafka_timestamp", "TIMESTAMP"), ("field", "STRING"), ("reason", "STRING"),
         ("raw_sample", "STRING"), ("rule_version", "STRING"), ("loaded_at", "TIMESTAMP"),
+        ("record_key", "STRING"), ("source_ts_ms", "BIGINT"),
     ],
     "reprocess_events": [
         ("request_id", "STRING"), ("step", "STRING"), ("at", "TIMESTAMP"), ("actor", "STRING"),
@@ -56,14 +57,9 @@ LEDGERS = ("payment_events", "topic_messages", "bronze_lag_snapshots", "malforme
 TOPICS = {"payments", "orders", "order-items", "members-events", "clickstream", "reviews.raw"}
 UNCHECKED_TOPICS = {"reviews.raw"}   # Gold B가 형식 검사하지 않는 토픽 (2026-10-23 결정). topic_messages에만 남는다
 REASONS = {"PARSE_ERROR", "MISSING_FIELD", "TYPE_MISMATCH", "INVALID_VALUE"}
-FAILURE_CAUSES = {None, "PG", "CUSTOMER", "UNKNOWN"}
-# 원장에 컬럼으로 있는 결제 업무 필드 (payment_conflicts.conflict_fields에 이름이 나올 수 있는 것)
-STORED_FIELDS = ("order_id", "attempt_no", "pg", "status", "failure_code", "completed_at")
 # 결제 내용 지문에 들어가는 업무 필드 9개. amount·method·requested_at은 지문에만 들어간다
 FINGERPRINT_FIELDS = ("order_id", "attempt_no", "method", "pg", "amount", "status",
                       "failure_code", "requested_at", "completed_at")
-# 저장된 필드는 모두 같고 지문만 다를 때 conflict_fields에 쓰는 이름
-HASH_ONLY = "payment_content_hash"
 
 
 # ---------- DDL 읽기 ----------
@@ -142,6 +138,11 @@ def load_samples() -> list[dict]:
             for item in json.loads((SAMPLES / name).read_text(encoding="utf-8"))]
 
 
+def load_payment_updates() -> list[dict]:
+    """결제 수정 시나리오 (payment_updates.json). 형식 검사·정리 뷰 시험이 쓰고, 적재·재처리 시험의 건수에는 넣지 않는다."""
+    return json.loads((SAMPLES / "payment_updates.json").read_text(encoding="utf-8"))
+
+
 def _utc(text: str) -> datetime:
     parsed = parse_iso_datetime(text)   # 공통 시각 파서 (Python 3.10에서도 Z·소수초를 읽음)
     assert parsed.utcoffset() is not None
@@ -157,7 +158,7 @@ def stand_in_fingerprint(value: dict) -> str:
 
 
 def test_samples_shape():
-    samples = load_samples()
+    samples = load_samples() + load_payment_updates()
     names = [s["name"] for s in samples]
     assert len(names) == len(set(names))
     locations = [(s["kafka"]["topic"], s["kafka"]["partition"], s["kafka"]["offset"]) for s in samples]
@@ -185,41 +186,31 @@ def test_every_topic_has_a_normal_and_a_broken_sample():
     assert broken == TOPICS - UNCHECKED_TOPICS
 
 
-def test_payment_samples_follow_view_rules():
-    payments = [s for s in load_samples() if s["kafka"]["topic"] == "payments"]
+def test_payment_samples_expect_only_ledgers():
+    """결제 샘플의 expected는 원장(①·④) 결과만 적는다. 결제마다의 뷰 결과는 payment_states.json에 있다 (2026-10-23)."""
+    payments = [s for s in load_samples() + load_payment_updates() if s["kafka"]["topic"] == "payments"]
     for s in payments:
-        expected = s["expected"]
-        if expected["payment_events"]:
-            assert s["value"]["__op"] in {"c", "r"}
-        if expected.get("payment_attempts"):
-            assert expected["failure_cause"] in FAILURE_CAUSES
-        if "payment_conflicts" in expected:
-            assert set(expected["payment_conflicts"]) <= set(STORED_FIELDS) | {HASH_ONLY}
-            assert expected["payment_attempts"] is False
-
-    # 충돌 쌍: 같은 payment_id, 지문(업무 필드 9개)이 다름.
-    # conflict_fields는 저장된 필드 중 다른 것, 저장된 필드가 모두 같으면 [payment_content_hash]
-    pairs: dict[str, list[dict]] = {}
-    for s in payments:
-        if "payment_conflicts" in s["expected"]:
-            pairs.setdefault(s["value"]["payment_id"], []).append(s)
-    assert len(pairs) == 2 and all(len(pair) == 2 for pair in pairs.values())
-    for first, second in pairs.values():
-        a, b = first["value"], second["value"]
-        assert stand_in_fingerprint(a) != stand_in_fingerprint(b)
-        differ = sorted(f for f in STORED_FIELDS if a[f] != b[f]) or [HASH_ONLY]
-        assert differ == sorted(first["expected"]["payment_conflicts"])
-        assert first["expected"]["payment_conflicts"] == second["expected"]["payment_conflicts"]
+        assert set(s["expected"]) <= {"payment_events", "malformed", "note"}, s["name"]
+        if s["expected"]["payment_events"]:
+            assert s["value"]["__op"] in {"c", "r", "u"}
 
     # 중복: 지문이 같고 위치만 다름
     by_name = {s["name"]: s for s in payments}
     original, duplicate = by_name["success_pg_a"], by_name["duplicate_of_success_pg_a"]
     assert stand_in_fingerprint(original["value"]) == stand_in_fingerprint(duplicate["value"])
     assert original["kafka"]["offset"] != duplicate["kafka"]["offset"]
+    # 내용이 바뀐 두 쌍: 같은 결제, 같은 파티션에서 지문이 다름 (뷰는 offset이 뒤인 것을 보여준다)
+    for first, second in (("conflict_first", "conflict_second"), ("conflict_amount_first", "conflict_amount_second")):
+        a, b = by_name[first], by_name[second]
+        assert a["value"]["payment_id"] == b["value"]["payment_id"]
+        assert a["kafka"]["partition"] == b["kafka"]["partition"] and a["kafka"]["offset"] < b["kafka"]["offset"]
+        assert stand_in_fingerprint(a["value"]) != stand_in_fingerprint(b["value"])
 
 
 def test_samples_have_no_personal_values():
-    text = "".join((SAMPLES / n).read_text(encoding="utf-8") for n in ("payments.json", "other_topics.json"))
+    files = sorted(SAMPLES.glob("*.json"))
+    assert {f.name for f in files} >= {"payments.json", "other_topics.json", "payment_updates.json", "payment_states.json"}
+    text = "".join(f.read_text(encoding="utf-8") for f in files)
     assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", text), "이메일 모양 값"
     # 하이픈 없는 10자리는 H&M article_id(예: 0108775015)와 겹쳐서 하이픈 있는 꼴만 본다
     assert not re.search(r"01[016789]-\d{3,4}-\d{4}", text), "전화번호 모양 값"
@@ -288,8 +279,8 @@ def test_sample_ledgers_round_trip_through_hour_folders(tmp_path):
         for name, _ in parse_ddl(table)["columns"]:
             assert read.schema.field(name).type == schema.field(name).type
 
-    # 기대 건수: 결제 9줄(중복·충돌 두 쌍 포함, 모르는 실패 코드는 형식 오류), 메시지 31줄, 오류 = 샘플 기대 오류 합
-    assert len(rows["payment_events"]) == 9
+    # 기대 건수: 결제 10줄(중복, 내용이 바뀐 두 쌍, 수정 u 포함. 모르는 실패 코드는 형식 오류), 메시지 31줄, 오류 = 샘플 기대 오류 합
+    assert len(rows["payment_events"]) == 10
     assert len(rows["topic_messages"]) == len(samples) == 31
     assert len(rows["malformed_events"]) == sum(len(s["expected"]["malformed"]) for s in samples)
     per_message = Counter((r["topic"], r["kafka_partition"], r["kafka_offset"]) for r in rows["malformed_events"])

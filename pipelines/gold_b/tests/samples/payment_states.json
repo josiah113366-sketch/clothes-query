@@ -1,0 +1,38 @@
+{
+  "description": "결제 정리 뷰의 기대 결과. 결제 샘플(payments.json, payment_updates.json)을 평소 적재 잡처럼 Kafka 시각 30초 뒤에 쌓고, rechecks의 재검사 줄을 더한 원장을 읽었을 때 결제마다 payment_states 한 줄이다",
+  "rechecks": [
+    {"sample": "upd_normal_c", "rule_version": null, "loaded_at": "2026-10-23T01:00:00Z", "errors": [], "description": "앞선 c만 다시 검사 (06시 폴더 재처리). loaded_at이 u보다 늦어도 마지막 이벤트는 offset이 뒤인 u다"},
+    {"sample": "upd_recovered_u", "rule_version": "0.3.0-test", "loaded_at": "2026-10-23T01:00:00Z", "errors": [], "description": "PG_C를 허용한 새 규칙으로 재처리. 같은 위치에 더 늦은 통과 줄이 쌓여 복구된다"},
+    {"sample": "upd_recheck_fail_c", "rule_version": "0.3.0-test", "loaded_at": "2026-10-23T01:00:00Z", "errors": [{"field": "pg", "reason": "INVALID_VALUE"}], "description": "PG_B를 막은 새 규칙으로 재처리 (예). 같은 위치에 더 늦은 오류 줄이 쌓여 보류된다"},
+    {"sample": "upd_loaded_twice_c", "rule_version": null, "loaded_at": "2026-10-22T06:20:32Z", "errors": [], "description": "지금 규칙(rule_version null)으로 한 번 더 쌓음 (적재 잡 재시작). 이벤트는 1개로 센다"},
+    {"sample": "upd_tie_c", "rule_version": "0.3.0-test", "loaded_at": "2026-10-23T02:00:00Z", "errors": [], "description": "같은 loaded_at의 검사 1/2 (통과)"},
+    {"sample": "upd_tie_c", "rule_version": "0.3.1-test", "loaded_at": "2026-10-23T02:00:00Z", "errors": [{"field": "pg", "reason": "INVALID_VALUE"}], "description": "같은 loaded_at의 검사 2/2 (오류). loaded_at이 같으면 오류를 채택한다"}
+  ],
+  "states": [
+    {"payment_id": "00000000-4000-8000-0000-0000000000a1", "latest": "duplicate_of_success_pg_a", "event_count": 2, "hold_reason": null, "failure_cause": null, "note": "스냅샷이 다시 보낸 r도 offset이 뒤라 마지막 이벤트. 값은 같다"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a2", "latest": "fail_pg_timeout", "event_count": 1, "hold_reason": null, "failure_cause": "PG"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a3", "latest": "update_op", "event_count": 2, "hold_reason": null, "failure_cause": "CUSTOMER", "note": "u가 실패 코드를 INSUFFICIENT_BALANCE로 바로잡음"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a4", "latest": "retry_after_customer_fail", "event_count": 1, "hold_reason": null, "failure_cause": null},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a5", "latest": "conflict_amount_second", "event_count": 2, "hold_reason": null, "failure_cause": null, "note": "예전 뷰는 지문이 달라 충돌로 뺐다. 이제 같은 파티션의 뒤 이벤트를 보여준다 (2026-10-23)"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a7", "latest": "conflict_second", "event_count": 2, "hold_reason": null, "failure_cause": null, "note": "예전 뷰는 충돌로 뺐다. 이제 같은 파티션의 뒤 이벤트(성공)를 보여준다 (2026-10-23)"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a8", "latest": "unknown_failure_code", "event_count": 1, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000a9", "latest": "missing_failure_code", "event_count": 1, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000aa", "latest": "success_with_failure_code", "event_count": 1, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000ab", "latest": "missing_attempt_no", "event_count": 1, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000ad", "latest": "pg_c", "event_count": 1, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-0000000000ae", "latest": "multiple_errors", "event_count": 1, "hold_reason": "INVALID_LATEST", "note": "오류 3줄이 한 번의 검사라 이벤트 1개"},
+    {"payment_id": "00000000-4000-8000-0000-000000000051", "latest": "upd_normal_u", "event_count": 2, "hold_reason": null, "failure_cause": null},
+    {"payment_id": "00000000-4000-8000-0000-000000000052", "latest": "upd_same_ts_u", "event_count": 2, "hold_reason": null, "failure_cause": "PG"},
+    {"payment_id": "00000000-4000-8000-0000-000000000053", "latest": "upd_bad_latest_u", "event_count": 2, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-000000000054", "latest": "upd_recovered_u", "event_count": 2, "hold_reason": null, "failure_cause": null, "rule_version": "0.3.0-test"},
+    {"payment_id": "00000000-4000-8000-0000-000000000055", "latest": "upd_fixed_good_u", "event_count": 3, "hold_reason": null, "failure_cause": null},
+    {"payment_id": "00000000-4000-8000-0000-000000000056", "latest": "upd_order_anomaly_u", "event_count": 2, "hold_reason": "ORDER_ANOMALY"},
+    {"payment_id": "00000000-4000-8000-0000-000000000057", "latest": "upd_two_partitions_u", "event_count": 2, "hold_reason": "MULTI_PARTITION", "note": "파티션이 달라 순서를 정하지 않는다. 보여 주는 줄은 offset이 가장 큰 것"},
+    {"payment_id": "00000000-4000-8000-0000-000000000058", "latest": "upd_hour_move_u", "event_count": 2, "hold_reason": null, "failure_cause": null},
+    {"payment_id": "00000000-4000-8000-0000-000000000059", "latest": "upd_bad_source_ts_u", "event_count": 2, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-00000000005a", "latest": "upd_recheck_fail_c", "event_count": 1, "hold_reason": "INVALID_LATEST"},
+    {"payment_id": "00000000-4000-8000-0000-00000000005b", "latest": "upd_loaded_twice_c", "event_count": 1, "hold_reason": null, "failure_cause": null},
+    {"payment_id": "00000000-4000-8000-0000-00000000005c", "latest": "upd_tie_c", "event_count": 1, "hold_reason": "INVALID_LATEST"}
+  ],
+  "unlinked": ["renamed_payment_id", "parse_error"]
+}

@@ -4,70 +4,70 @@
     "description": "정상 결제 (성공)",
     "kafka": {"topic": "payments", "partition": 0, "offset": 100, "timestamp": "2026-10-21T06:01:02Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a1", "order_id": "00000000-4000-8000-0000-0000000000b1", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 39000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:00:58Z", "completed_at": "2026-10-21T06:01:00Z", "__op": "c", "__source_ts_ms": 1792562460500, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": true, "failure_cause": null}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "fail_pg_timeout",
     "description": "PG 원인 실패",
     "kafka": {"topic": "payments", "partition": 0, "offset": 101, "timestamp": "2026-10-21T06:01:22Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a2", "order_id": "00000000-4000-8000-0000-0000000000b2", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 25900, "status": "FAILED", "failure_code": "PG_TIMEOUT", "requested_at": "2026-10-21T06:01:10Z", "completed_at": "2026-10-21T06:01:20Z", "__op": "c", "__source_ts_ms": 1792562480400, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": true, "failure_cause": "PG"}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "fail_customer_declined",
     "description": "고객 원인 실패",
     "kafka": {"topic": "payments", "partition": 1, "offset": 200, "timestamp": "2026-10-21T06:02:05Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a3", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 12900, "status": "FAILED", "failure_code": "CARD_DECLINED", "requested_at": "2026-10-21T06:02:01Z", "completed_at": "2026-10-21T06:02:03Z", "__op": "c", "__source_ts_ms": 1792562523200, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": true, "failure_cause": "CUSTOMER"}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "retry_after_customer_fail",
     "description": "같은 주문의 재시도 (새 payment_id, attempt_no 2). 중복이 아니라 따로 센다",
     "kafka": {"topic": "payments", "partition": 1, "offset": 201, "timestamp": "2026-10-21T06:02:40Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a4", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 2, "method": "SIMPLE_PAY", "pg": "PG_B", "amount": 12900, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:02:36Z", "completed_at": "2026-10-21T06:02:38Z", "__op": "c", "__source_ts_ms": 1792562558100, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": true, "failure_cause": null}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "duplicate_of_success_pg_a",
-    "description": "같은 결제 중복 (Debezium 재시작으로 스냅샷이 다시 보냄, op r). 원장에는 쌓이고 뷰에서 1건으로 합쳐짐",
+    "description": "같은 결제 중복 (Debezium 재시작으로 스냅샷이 다시 보냄, op r). 원장에는 쌓이고 뷰에서는 결제 1건 (offset이 뒤라 이 줄이 마지막 이벤트, 값은 같음)",
     "kafka": {"topic": "payments", "partition": 0, "offset": 140, "timestamp": "2026-10-21T06:20:00Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a1", "order_id": "00000000-4000-8000-0000-0000000000b1", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 39000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:00:58Z", "completed_at": "2026-10-21T06:01:00Z", "__op": "r", "__source_ts_ms": 1792563600000, "__source_snapshot": "true"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "note": "success_pg_a와 같은 결제. 먼저 쌓인 success_pg_a 줄만 뷰에 남음"}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "conflict_first",
-    "description": "같은 결제 내용 충돌 1/2 (PG 원인 실패로 옴)",
+    "description": "같은 결제가 다른 내용으로 두 번 옴 1/2 (PG 원인 실패). 2026-10-23부터 충돌로 빼지 않고 같은 파티션의 offset 순서로 본다",
     "kafka": {"topic": "payments", "partition": 2, "offset": 300, "timestamp": "2026-10-21T06:03:02Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a7", "order_id": "00000000-4000-8000-0000-0000000000b7", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 59000, "status": "FAILED", "failure_code": "PG_ERROR", "requested_at": "2026-10-21T06:02:58Z", "completed_at": "2026-10-21T06:03:00Z", "__op": "c", "__source_ts_ms": 1792562580300, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["status", "failure_code"]}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "conflict_second",
-    "description": "같은 결제 내용 충돌 2/2 (같은 payment_id가 성공으로 옴). 두 줄 다 payment_attempts에서 빠지고 payment_conflicts에 1줄",
+    "description": "같은 결제가 다른 내용으로 두 번 옴 2/2 (같은 payment_id가 성공으로 옴). offset이 뒤라 마지막 이벤트로 보인다 (예전 뷰는 두 줄 다 빼고 충돌로 보였음)",
     "kafka": {"topic": "payments", "partition": 2, "offset": 305, "timestamp": "2026-10-21T06:05:10Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a7", "order_id": "00000000-4000-8000-0000-0000000000b7", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 59000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:02:58Z", "completed_at": "2026-10-21T06:03:00Z", "__op": "c", "__source_ts_ms": 1792562710000, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["status", "failure_code"]}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "conflict_amount_first",
-    "description": "금액만 다른 내용 충돌 1/2. 원장에 없는 amount만 달라서 지문으로만 잡힘",
+    "description": "금액만 다른 두 이벤트 1/2. 원장에 없는 amount만 달라서 지문만 다름",
     "kafka": {"topic": "payments", "partition": 0, "offset": 105, "timestamp": "2026-10-21T06:09:12Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a5", "order_id": "00000000-4000-8000-0000-0000000000b5", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 29000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:09:05Z", "completed_at": "2026-10-21T06:09:10Z", "__op": "c", "__source_ts_ms": 1792563350200, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["payment_content_hash"]}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "conflict_amount_second",
-    "description": "금액만 다른 내용 충돌 2/2 (같은 payment_id, amount 2900). 원장에 저장된 필드는 모두 같고 지문만 다름",
+    "description": "금액만 다른 두 이벤트 2/2 (같은 payment_id, amount 2900). 원장에 저장된 필드는 모두 같고 지문만 다름. offset이 뒤라 마지막 이벤트",
     "kafka": {"topic": "payments", "partition": 0, "offset": 141, "timestamp": "2026-10-21T06:21:00Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a5", "order_id": "00000000-4000-8000-0000-0000000000b5", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 2900, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:09:05Z", "completed_at": "2026-10-21T06:09:10Z", "__op": "c", "__source_ts_ms": 1792564860000, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": false, "payment_conflicts": ["payment_content_hash"]}
+    "expected": {"payment_events": true, "malformed": []}
   },
   {
     "name": "unknown_failure_code",
     "description": "원천 DDL에 없는 실패 코드. 규칙표 0.2.0은 실패 코드 5개만 허용해서 형식 오류",
     "kafka": {"topic": "payments", "partition": 0, "offset": 102, "timestamp": "2026-10-21T06:04:01Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a8", "order_id": "00000000-4000-8000-0000-0000000000b8", "attempt_no": 1, "method": "BANK_TRANSFER", "pg": "PG_B", "amount": 15900, "status": "FAILED", "failure_code": "PG_MAINTENANCE", "requested_at": "2026-10-21T06:03:55Z", "completed_at": "2026-10-21T06:03:59Z", "__op": "c", "__source_ts_ms": 1792562639800, "__source_snapshot": "false"},
-    "expected": {"payment_events": false, "malformed": [{"field": "failure_code", "reason": "INVALID_VALUE"}], "payment_attempts": false, "note": "규칙표 0.2.0대로 형식 오류로 둔다 (2026-10-23 결정). 결제 원장에 넣고 뷰에서 UNKNOWN으로 나누는 확장안은 보류"}
+    "expected": {"payment_events": false, "malformed": [{"field": "failure_code", "reason": "INVALID_VALUE"}], "note": "규칙표 0.2.0대로 형식 오류로 둔다 (2026-10-23 결정). 결제 원장에 넣고 뷰에서 UNKNOWN으로 나누는 확장안은 보류"}
   },
   {
     "name": "missing_failure_code",
@@ -120,9 +120,9 @@
   },
   {
     "name": "update_op",
-    "description": "op u (결제 수정). 계약상 오면 안 되는 메시지. 설계대로 c·r만 payment_events에 넣고 이 메시지는 topic_messages에만 남음",
+    "description": "op u (결제 수정). fail_customer_declined의 실패 코드를 바로잡음 (CARD_DECLINED → INSUFFICIENT_BALANCE). 2026-10-23부터 u도 payment_events에 쌓는다",
     "kafka": {"topic": "payments", "partition": 1, "offset": 205, "timestamp": "2026-10-21T06:08:30Z"},
-    "value": {"payment_id": "00000000-4000-8000-0000-0000000000a3", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 12900, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:02:01Z", "completed_at": "2026-10-21T06:02:03Z", "__op": "u", "__source_ts_ms": 1792562910000, "__source_snapshot": "false"},
-    "expected": {"payment_events": false, "malformed": [], "note": "u는 형식 오류로 남기지 않는다 (2026-10-23, 설계대로 c·r만 payment_events)"}
+    "value": {"payment_id": "00000000-4000-8000-0000-0000000000a3", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 12900, "status": "FAILED", "failure_code": "INSUFFICIENT_BALANCE", "requested_at": "2026-10-21T06:02:01Z", "completed_at": "2026-10-21T06:02:03Z", "__op": "u", "__source_ts_ms": 1792562910000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": [], "note": "같은 결제(0a3)의 c 뒤 u. 같은 파티션에서 offset이 뒤라 이 줄이 최신 상태 (2026-10-23 결정)"}
   }
 ]

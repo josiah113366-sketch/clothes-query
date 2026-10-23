@@ -7,8 +7,10 @@
 메시지 하나에 하는 일
   1. 토픽으로 규칙 이름을 정한다. 규칙을 쓰지 않는 토픽(reviews.raw 등)은 검사하지 않는다 (② topic_messages에만 남음).
   2. 값을 JSON 객체로 읽는다. 못 읽으면 PARSE_ERROR 한 줄 (field "__message__").
-  3. 공통 검사기 errors()로 오류를 전부 찾는다 (필드마다 하나). 오류마다 ④ 한 줄이고 raw_sample은 첫 줄에만 넣는다.
-  4. 결제이고 오류가 없고 __op가 c·r이면 지문을 붙여 ① 결제 줄을 만든다. 지문을 만들 수 없으면 그 필드의 INVALID_VALUE.
+  3. 공통 검사기 errors()로 오류를 전부 찾는다 (필드마다 하나). __op가 c·r·u인 결제는 __source_ts_ms도 검사한다.
+     오류마다 ④ 한 줄이고 raw_sample은 첫 줄에만 넣는다. 오류 줄마다 메시지의 키(record_key)와 변경 시각(source_ts_ms)을 남긴다.
+  4. 결제이고 오류가 없고 __op가 c·r·u면 지문을 붙여 ① 결제 줄을 만든다. 지문을 만들 수 없으면 그 필드의 INVALID_VALUE.
+     같은 결제의 최신 상태와 보류는 원장이 아니라 정리 뷰(payment_states)가 정한다.
 """
 from __future__ import annotations
 
@@ -24,15 +26,25 @@ from pipelines.timestamps import parse_iso_datetime
 # Kafka 토픽 → 공통 규칙의 데이터셋 이름. 여기 없는 토픽은 형식 검사를 하지 않는다 (reviews.raw: 2026-10-23 결정)
 DATASETS = {"payments": "payments", "orders": "orders", "order-items": "order_items",
             "members-events": "members", "clickstream": "clickstream"}
-PAYMENT_OPS = ("c", "r")      # 결제 원장에 넣는 CDC 변경 종류: 새 결제, Debezium 시작 전부터 있던 결제
+# 결제 원장에 넣는 CDC 변경 종류: 새 결제, Debezium 시작 전부터 있던 결제, 결제 수정 (u는 2026-10-23 추가)
+PAYMENT_OPS = ("c", "r", "u")
 PARSE_FIELD = "__message__"   # 메시지 전체를 읽지 못했을 때의 field
+SOURCE_TS = "__source_ts_ms"  # 원본 DB에서 바뀐 시각 (Debezium, 밀리초)
+# 오류 줄의 record_key: 메시지의 키 (Silver 키와 같음). 회원은 남기지 않는다 (회원 정보를 원장에 두지 않음)
+RECORD_KEYS = {"payments": "payment_id", "orders": "order_id", "order_items": "order_item_id",
+               "clickstream": "event_id"}
+# 오류 줄에 변경 시각을 남기는 데이터셋 (회원 제외. 결제는 잘못된 최신 이벤트의 순서 이상을 볼 때 쓴다)
+SOURCE_TS_DATASETS = frozenset({"payments", "orders", "order_items"})
 
-# raw_sample에 값을 그대로 두는 필드: 개인정보가 아닌 업무 값 (2026-10-23 결정). 나머지 값은 MASK로 가린다
+# raw_sample에 값을 그대로 두는 필드: 개인정보가 아닌 업무 값, 결제·주문 ID, 시각 (2026-10-23 결정).
+# 회원 ID·세션 ID·회원 토픽의 값·상품 번호·클릭 event_id는 MASK로 가린다
 KEEP_VALUES: dict[str, frozenset[str]] = {
-    "payments": frozenset({"method", "pg", "status", "failure_code", "attempt_no", "amount"}),
-    "orders": frozenset({"status", "status_reason", "total_amount"}),
-    "order_items": frozenset({"quantity", "unit_price"}),
-    "clickstream": frozenset({"event_type"}),
+    "payments": frozenset({"payment_id", "order_id", "method", "pg", "status", "failure_code", "attempt_no",
+                           "amount", "requested_at", "completed_at", SOURCE_TS}),
+    "orders": frozenset({"order_id", "status", "status_reason", "total_amount", "ordered_at", "updated_at",
+                         SOURCE_TS}),
+    "order_items": frozenset({"order_item_id", "order_id", "quantity", "unit_price", SOURCE_TS}),
+    "clickstream": frozenset({"event_type", "event_time"}),
     "members": frozenset(),
 }
 CDC_KEEP = frozenset({"__op", "__source_snapshot"})
@@ -72,13 +84,38 @@ def _parse(value: bytes | str | None) -> dict | None:
     return row if isinstance(row, dict) else None
 
 
+def _source_ts_ms(row: Mapping[str, object]) -> int | None:
+    """__source_ts_ms가 0 이상의 정수면 그 값, 아니면 None."""
+    value = row.get(SOURCE_TS)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _source_ts_error(row: Mapping[str, object]) -> tuple[str, str] | None:
+    """결제 CDC 줄의 변경 시각 검사. Silver 거래 검사(common.integer(…, 0))와 같은 오류 코드."""
+    value = row.get(SOURCE_TS)
+    if value is None:
+        return SOURCE_TS, "MISSING_FIELD"
+    if isinstance(value, bool) or not isinstance(value, int):
+        return SOURCE_TS, "TYPE_MISMATCH"
+    return (SOURCE_TS, "INVALID_VALUE") if value < 0 else None
+
+
+def _record_key(dataset: str, row: Mapping[str, object]) -> str | None:
+    field = RECORD_KEYS.get(dataset)
+    value = row.get(field) if field else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
 def _payment_row(row: Mapping[str, object]) -> dict:
     """결제 원장 ①의 업무 칼럼 (ledger.PAYMENT_FIELDS). 지문은 시각을 바꾸기 전의 원문으로 만든다."""
     fingerprint = payment_fingerprint(row)    # 시각 형식도 여기서 확인한다 (소수초 6자리까지, 시간대 필수)
     # 공통 시각 파서: 팀 Spark 이미지의 Python 3.10에서도 Z와 1~6자리 소수초를 읽는다 (지문·형식 규칙과 같은 함수)
     return {"payment_id": row["payment_id"], "order_id": row["order_id"], "attempt_no": row["attempt_no"],
             "pg": row["pg"], "status": row["status"], "failure_code": row.get("failure_code"),
-            "completed_at": parse_iso_datetime(str(row["completed_at"])), **fingerprint}
+            "completed_at": parse_iso_datetime(str(row["completed_at"])), **fingerprint,
+            "cdc_op": row["__op"], "source_ts_ms": row[SOURCE_TS]}
 
 
 class FormatChecker:
@@ -99,16 +136,23 @@ class FormatChecker:
             return Judgement()
         row = _parse(message.value)
         if row is None:
-            return Judgement(errors=[{"field": PARSE_FIELD, "reason": "PARSE_ERROR", "raw_sample": None}])
+            return Judgement(errors=[{"field": PARSE_FIELD, "reason": "PARSE_ERROR", "raw_sample": None,
+                                      "record_key": None, "source_ts_ms": None}])
         found = [(error.field, error.code) for error in self._rules.errors(dataset, row)]
+        payment_event = dataset == "payments" and row.get("__op") in PAYMENT_OPS
+        if payment_event and (source_ts_error := _source_ts_error(row)):
+            found.append(source_ts_error)   # 변경 시각이 있어야 순서 이상을 볼 수 있다
         payment = None
-        if not found and dataset == "payments" and row.get("__op") in PAYMENT_OPS:
+        if not found and payment_event:
             try:
                 payment = _payment_row(row)
             except FingerprintError as exc:
                 found = [(exc.field, "INVALID_VALUE")]
         if found:
             sample = mask_sample(dataset, row)
-            return Judgement(errors=[{"field": field, "reason": reason, "raw_sample": sample if i == 0 else None}
+            key = _record_key(dataset, row)
+            source_ts = _source_ts_ms(row) if dataset in SOURCE_TS_DATASETS else None
+            return Judgement(errors=[{"field": field, "reason": reason, "raw_sample": sample if i == 0 else None,
+                                      "record_key": key, "source_ts_ms": source_ts}
                                      for i, (field, reason) in enumerate(found)])
         return Judgement(payment=payment)

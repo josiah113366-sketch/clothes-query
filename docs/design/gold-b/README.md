@@ -5,11 +5,11 @@
 
 ## 개요
 
-Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**, 결제 원장에는 중복 제거·충돌 분리·실패 원인 분류까지 해둔 **정리 뷰**(`gold_b.payment_attempts`)를 얹는다. 구간을 묶어 세고 이상인지 판단하는 일은 6단계(주현 님) 탐지 규칙이 한다.
+Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**, 결제 원장에는 결제마다 마지막 이벤트 고르기·보류·실패 원인 분류까지 해둔 **정리 뷰**(`gold_b.payment_attempts`)를 얹는다. 구간을 묶어 세고 이상인지 판단하는 일은 6단계(주현 님) 탐지 규칙이 한다.
 
 | 필수 | 내용 | 왜 필수인가 |
 | --- | --- | --- |
-| ① Gold B 지표 표 | 원장 4개, 재처리 기록 1개, 탐지가 읽는 뷰 3개 (「저장」「탐지가 읽는 것」) | 탐지의 입구 |
+| ① Gold B 지표 표 | 원장 4개, 재처리 기록 1개, 탐지가 읽는 뷰 4개 (「저장」「탐지가 읽는 것」) | 탐지의 입구 |
 | ② 잡 재실행 설계 | 같은 입력이면 원장이 같게, 중복 없이 다시 채우기 (「재실행·재처리 설계와 검증」) | 승인·재처리 시연에 필요 |
 | ③ Gold B 재처리 검증 | 재적재 전후 뷰 비교 (「재실행·재처리 설계와 검증」) | 승인·재처리 시연에 필요 |
 
@@ -21,7 +21,7 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 
 - **한 건만 보고 알 수 있는 건 은서, 여러 건을 모아 평소와 비교해야 아는 건 주현 님.** Gold B는 메시지·결제·측정 한 건씩의 사실(형식이 맞나, 실패 원인은 무엇인가, 지금 얼마나 밀렸나)만 기록하고, 구간으로 묶어 세고 판정하는 일은 탐지가 한다.
 - **시나리오의 질문에 꼭 필요한 것만 담는다.** 장애의 여파나 피해 규모는 에이전트가 조사할 때 직접 조회한다.
-- **가져올 때는 저장할 수 있는 모양으로, 해석은 뷰에서.** 메시지 해석·CDC 표시(`__op`) 읽기·형식 검사는 쌓을 때 하고, 중복 제거·충돌 분리·실패 원인 분류는 뷰에서 한다. 분류 규칙이 바뀌어도 뷰만 고치면 과거까지 다시 분류된다.
+- **가져올 때는 저장할 수 있는 모양으로, 해석은 뷰에서.** 메시지 해석·CDC 표시(`__op`) 읽기·형식 검사는 쌓을 때 하고, 결제의 마지막 이벤트 고르기·보류·실패 원인 분류는 뷰에서 한다. 분류 규칙이 바뀌어도 뷰만 고치면 과거까지 다시 분류된다.
 - **원장에는 사실을 그대로.** 중복이나 깨진 메시지를 쌓을 때 지우지 않는다. 읽는 쪽이 뷰로 정리한다.
 - **원본은 건드리지 않는다.** Kafka와 Bronze는 재처리에서 읽기만 한다. 고치는 대상은 데이터가 아니라 규칙과 코드다.
 
@@ -36,10 +36,11 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 | 구간 묶기·판정 | 주현 님 탐지 규칙에서 (몇 분 단위로 묶을지, 기준값). 탐지 주기는 **미정** (제안 5분) |
 | 판정 가능 구간 | 건수 규칙은 바로 판정, 비율 규칙은 끝난 지 3분 지난 구간만 |
 | 저장·조회 | S3 `clothes-query-datalake/gold_b/`, Athena로 조회 (테이블·뷰 정의는 Athena가 Glue 카탈로그 `gold_b`에 저장), 이름에 접두어 없음 |
-| 정리 뷰 중복 제거 | 같은 `payment_id`이고 내용도 같으면 가장 먼저 쌓인 줄(`loaded_at`이 가장 이른 줄) 하나만 남긴다 |
-| 정리 뷰 충돌 처리 | 같은 `payment_id`인데 내용이 다르면 **그 결제의 모든 줄을 `payment_attempts`에서 빼고** `payment_conflicts` 뷰로 보여 준다. Silver(PR #26)와 공통 계약(`docs/contracts/README.md` 「내용 충돌」)에 맞춘 것 (2026-10-21) |
-| 깨진 메시지 뷰의 시간 폴더 | `malformed_messages`도 ④의 시간 폴더(`dt`, `hour`)를 칸으로 내보낸다. 판정·조사 쿼리가 폴더 조건을 같이 주면 그 폴더만 읽어서, 5분마다 ④ 전체를 읽지 않는다. `payment_attempts`·`payment_conflicts`는 예전에 쌓인 같은 결제와도 비교해야 해서 원장 전체를 읽는다 (2026-10-22) |
-| 결제 내용 지문 | 내용이 같은지는 **업무 필드 9개**(`order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, `requested_at`, `completed_at`)를 정규화한 지문 `payment_content_hash`로 판단한다. 원장에는 지문과 `fingerprint_version` 두 칸만 더하고, `amount`·`method`·`requested_at`은 컬럼으로 두지 않고 지문에만 넣는다. Silver와 Gold B가 같은 함수(`pipelines/payment_fingerprint.py`)로 지문을 만든다. Kafka 위치와 적재 시각은 지문에 넣지 않는다 (현지 님 PR #36 리뷰, 2026-10-21) |
+| 결제 수정 (`__op = u`) | 결제 `u`도 ①에 쌓는다. 변경 전후 이벤트를 모두 남기고 덮어쓰지 않는다. ①에 `cdc_op`·`source_ts_ms`·`rule_version`, ④에 `record_key`·`source_ts_ms`를 더한다 (팀 합의, 2026-10-23) |
+| 결제 최신 상태 | 정리 뷰 `payment_states`가 두 단계로 정한다. 1단계: Kafka 위치(파티션, offset)마다 가장 늦게 쌓인 검사 결과(`loaded_at`, 같으면 오류). 2단계: 같은 `payment_id`는 `kafka_offset`이 가장 큰 이벤트가 마지막이다. 같은 메시지를 두 번 쌓아도 위치가 같으면 한 이벤트다 (「처리 규칙」의 결제 최신 상태, 2026-10-23. 예전 결정은 "내용이 같으면 가장 먼저 쌓인 줄", 2026-10-21) |
+| 결제 보류 | 두 파티션 이상(`MULTI_PARTITION`), 마지막 이벤트의 `source_ts_ms`가 앞선 이벤트들의 최댓값보다 작음(`ORDER_ANOMALY`, 같은 값은 정상), 마지막 이벤트가 형식 오류(`INVALID_LATEST`)면 그 결제를 `payment_attempts`에서 빼고 `payment_conflicts`에 사유와 함께 보여 준다. 원장은 고치지 않아 재처리나 새 정상 이벤트로 저절로 풀린다 (2026-10-23. 예전 결정은 "내용이 다르면 그 결제의 모든 줄을 빼고 충돌로 보여 줌", 2026-10-21) |
+| 깨진 메시지 뷰의 시간 폴더 | `malformed_messages`도 ④의 시간 폴더(`dt`, `hour`)를 칸으로 내보낸다. 판정·조사 쿼리가 폴더 조건을 같이 주면 그 폴더만 읽어서, 5분마다 ④ 전체를 읽지 않는다. `payment_states`(와 이것을 읽는 `payment_attempts`·`payment_conflicts`)는 예전에 쌓인 같은 결제와도 비교해야 해서 원장 전체를 읽는다 (2026-10-22) |
+| 결제 내용 지문 | 내용이 같은지는 **업무 필드 9개**(`order_id`, `attempt_no`, `method`, `pg`, `amount`, `status`, `failure_code`, `requested_at`, `completed_at`)를 정규화한 지문 `payment_content_hash`로 판단한다. 원장에는 지문과 `fingerprint_version` 두 칸만 더하고, `amount`·`method`·`requested_at`은 컬럼으로 두지 않고 지문에만 넣는다. Silver와 Gold B가 같은 함수(`pipelines/payment_fingerprint.py`)로 지문을 만든다. Kafka 위치와 적재 시각은 지문에 넣지 않는다 (현지 님 PR #36 리뷰, 2026-10-21). 2026-10-23부터 정리 뷰는 지문으로 중복·충돌을 가리지 않고 Kafka 위치로 순서를 정한다. 지문은 원장에 남겨 수정 전후 비교와 Silver 대조에 쓴다 |
 | 결제 필수 필드 | `order_id`, `attempt_no`도 원장에 넣고 형식 검사 필수로 본다 (원천 DDL에서 NOT NULL, 2026-10-21) |
 | 컬럼 이름 | Kafka 파티션 번호는 모든 표에서 `kafka_partition` (2026-10-21) |
 | 형식 검사 규칙표 | Git의 설정 파일(`format_rules.yaml`)을 Gold B와 Silver가 같이 읽는다 |
@@ -77,7 +78,7 @@ Gold B는 **한 건씩의 사실을 기록**하는 데까지다. 주현 님 탐�
 | --- | --- | --- | --- | --- |
 | 쌓기 | 은서 (Gold B 적재 잡, Spark Structured Streaming) | 1분마다, 상시 | Kafka 6개 토픽을 읽어 정제·형식 검사 후 원장에 추가 | `payment_events`, `topic_messages`, `malformed_events` |
 | 지연 측정 | 은서 (Bronze 지연 수집기) | 1분마다, 상시 | Bronze 적재가 얼마나 밀렸는지 측정 | `bronze_lag_snapshots` |
-| 정리 뷰 | 은서 | 처음에 한 번 정의 | 중복 제거·충돌 분리·실패 원인 분류, 깨진 메시지 단위 정리를 뷰로 정의 | `payment_attempts`, `payment_conflicts`, `malformed_messages` |
+| 정리 뷰 | 은서 | 처음에 한 번 정의 | 결제마다 마지막 이벤트 고르기·보류·실패 원인 분류, 깨진 메시지 단위 정리를 뷰로 정의 | `payment_states`, `payment_attempts`, `payment_conflicts`, `malformed_messages` |
 | 묶어 세기·판정 | 주현 (탐지 잡, 별도) | 정해진 주기마다 (미정, 제안 5분) | 원장·뷰를 구간으로 묶어 세고 기준과 비교 | `gold_b.anomaly` |
 | 조사 | 주현 (에이전트) | 이상이 잡힐 때 | 원장·뷰를 증거로 원인을 추정하고 근거와 함께 리포트 | 원인 리포트 |
 | 수정 | 원인에 따라 다름 (「원인별 고칠 사람」) | 리포트 뒤 | 규칙표·코드·시뮬레이터를 고침 | 새 규칙 버전 등 |
@@ -163,24 +164,27 @@ s3://clothes-query-datalake/gold_b/
 
 ### ① `payment_events` - 결제 시도 한 건 = 한 줄
 
-`payments` 토픽에서 형식 검사를 통과하고 `__op`가 `c`(새 결제) 또는 `r`(Debezium 시작 전부터 있던 결제, 예: 백필)인 메시지만. 같은 결제가 스냅샷으로 다시 와도 정리 뷰에서 `payment_id`로 걸러진다. 성공·고객 원인 실패·PG 원인 실패를 **모두** 쌓는다 (성공이 있어야 시도 수를, 고객 원인 실패가 있어야 비교 기준을 셀 수 있다).
+`payments` 토픽에서 형식 검사를 통과하고 `__op`가 `c`(새 결제), `r`(Debezium 시작 전부터 있던 결제, 예: 백필), `u`(결제 수정, 2026-10-23 추가)인 메시지. 결제가 수정되면 변경 전후 이벤트를 모두 남기고 덮어쓰지 않는다. 최신 상태는 정리 뷰가 고른다 (「처리 규칙」의 결제 최신 상태). 같은 결제가 스냅샷으로 다시 와도 정리 뷰가 하나만 보여준다. 성공·고객 원인 실패·PG 원인 실패를 **모두** 쌓는다 (성공이 있어야 시도 수를, 고객 원인 실패가 있어야 비교 기준을 셀 수 있다).
 
 | 컬럼 | 타입 | 가져오는 곳 | 의미 | 예시 |
 | --- | --- | --- | --- | --- |
-| `payment_id` | STRING | `payment_id` | 결제 시도 한 번의 고유 번호. 시도마다 새로 붙음. 중복 제거 기준 | `p-01` |
+| `payment_id` | STRING | `payment_id` | 결제 시도 한 번의 고유 번호. 시도마다 새로 붙음. 같은 결제의 이벤트를 묶는 기준 (`payments` 토픽의 메시지 키) | `p-01` |
 | `order_id` | STRING | `order_id` (필수) | 이 결제가 어느 주문에 대한 것인지. 재시도해도 같은 값. 에이전트가 최근 장애의 재시도·피해를 바로 볼 때 | `o-5` |
 | `attempt_no` | INT | `attempt_no` (필수) | 그 주문에서 몇 번째 시도인지. 1이 첫 시도, 2 이상이 재시도 | `1` |
 | `pg` | STRING | `pg` | 결제를 처리한 결제대행사. `PG_A`, `PG_B` 중 하나 | `PG_A` |
 | `status` | STRING | `status` | 이 시도 한 번의 결과. `SUCCESS`, `FAILED` 중 하나 | `FAILED` |
 | `failure_code` | STRING, NULL 허용 | `failure_code` | 실패했다면 그 이유. 성공이면 NULL | `PG_TIMEOUT` |
 | `completed_at` | TIMESTAMP | `completed_at` | 결제 결과가 확정된 시각 (UTC). 탐지가 구간을 묶을 때 기준 | 15:01:20 |
-| `payment_content_hash` | STRING | 업무 필드 9개로 계산 | 결제 내용 지문. 같은 `payment_id`인데 지문이 다르면 내용 충돌. `amount`·`method`·`requested_at`은 컬럼 없이 여기에만 들어간다 | `9f2c…` |
+| `payment_content_hash` | STRING | 업무 필드 9개로 계산 | 결제 내용 지문 (Silver와 같은 함수). 수정 전후 내용이 다른지 볼 때 쓴다. `amount`·`method`·`requested_at`은 컬럼 없이 여기에만 들어간다 | `9f2c…` |
 | `fingerprint_version` | STRING | 지문 함수 | 지문 규칙 버전. 버전이 같은 줄끼리만 지문을 비교한다 | (현지 님과 정함) |
-| `kafka_partition` | INT | Kafka 위치 | 이 메시지가 `payments` 토픽의 몇 번 파티션에 있었는지 (추적용) | `0` |
-| `kafka_offset` | BIGINT | Kafka 위치 | 그 파티션 안에서 몇 번째 메시지였는지 (추적용) | `17920` |
-| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 그때 탐지가 본 숫자를 재현할 때 씀 | 15:02:00 |
+| `kafka_partition` | INT | Kafka 위치 | 이 메시지가 `payments` 토픽의 몇 번 파티션에 있었는지. 같은 결제는 한 파티션에 들어간다 | `0` |
+| `kafka_offset` | BIGINT | Kafka 위치 | 그 파티션 안에서 몇 번째 메시지였는지. 같은 결제의 이벤트 순서 기준 | `17920` |
+| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 그때 탐지가 본 숫자를 재현할 때 씀. 같은 메시지를 여러 번 검사했을 때 가장 늦은 결과를 고를 때도 씀 | 15:02:00 |
+| `cdc_op` | STRING | `__op` | CDC 변경 종류. `c` 새 결제, `r` 스냅샷, `u` 수정 (2026-10-23 추가) | `u` |
+| `source_ts_ms` | BIGINT | `__source_ts_ms` | 원본 DB에서 바뀐 시각 (밀리초). 순서는 Kafka 위치로 정하고, 이 값은 순서 이상 확인에 쓴다 (2026-10-23 추가) | `1792562460500` |
+| `rule_version` | STRING | 형식 검사기 | 이 줄을 만든 규칙표 버전. 같은 메시지를 여러 규칙 버전으로 검사한 이력을 ④와 함께 추적한다 (2026-10-23 추가) | `0.2.0` |
 
-실패 원인 분류(PG / 고객 / unknown), 중복 제거, 충돌 분리는 원장에 하지 않고 정리 뷰에서 한다.
+실패 원인 분류(PG / 고객 / unknown), 최신 상태 고르기, 보류는 원장에 하지 않고 정리 뷰에서 한다.
 
 지문은 형식 검사를 통과한 결제를 쌓을 때 계산한다. 지문 규칙(필드 순서, 시각·NULL·숫자 정규화, 직렬화, 해시 알고리즘)은 공통 모듈 `pipelines/payment_fingerprint.py`에서 현지 님과 정한다 (**미정**, 2단계).
 
@@ -224,14 +228,16 @@ s3://clothes-query-datalake/gold_b/
 | `kafka_timestamp` | TIMESTAMP | Kafka 기록 시각 (오염 시작 시점) | 15:03:11 |
 | `field` | STRING | 문제가 난 필드 하나 | `session_id` |
 | `reason` | STRING | **그 필드의** 오류 사유 | `MISSING_FIELD` |
-| `raw_sample` | STRING, NULL 허용 | 마스킹한 원문 일부. 같은 메시지의 첫 줄에만 넣고 나머지는 NULL | `{"payment_id":"***","pg":"PG_X","status":"FAILED",…` |
+| `raw_sample` | STRING, NULL 허용 | 마스킹한 원문 일부. 같은 메시지의 첫 줄에만 넣고 나머지는 NULL | `{"payment_id":"p-08","pg":"PG_X","status":"FAILED",…` |
 | `rule_version` | STRING | 적용한 규칙표 버전 | `v1.0` |
-| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각 | 15:04:00 |
+| `loaded_at` | TIMESTAMP | 원장에 쌓은 시각. 같은 메시지를 여러 번 검사했을 때 결과의 순서 | 15:04:00 |
+| `record_key` | STRING, NULL 허용 | 메시지의 키. 결제 `payment_id`, 주문 `order_id`, 주문상품 `order_item_id`, 클릭 `event_id` (Silver 키와 같음). 회원과 읽지 못한 메시지는 NULL. 잘못된 결제 이벤트를 결제와 연결할 때 쓴다 (2026-10-23 추가) | `p-08` |
+| `source_ts_ms` | BIGINT, NULL 허용 | 원본 DB에서 바뀐 시각 (`__source_ts_ms`). 없거나 0 이상의 정수가 아니면 NULL. 잘못된 결제 이벤트도 순서 이상을 확인할 수 있게 남긴다 (2026-10-23 추가) | `1792562639800` |
 
 - **오류 하나당 한 행**이다. 한 메시지에 `session_id` 누락과 `article_id` 타입 오류가 함께 있으면 2행이다.
 - 같은 Kafka 메시지에 대해 `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같은 오류는 한 번만 적재한다.
 - 규칙 버전 이력을 보존한다. 규칙이 바뀌면 새 `rule_version`의 결과를 추가하고 예전 판정도 남긴다.
-- `raw_sample`은 최소화한다 (2026-10-23 결정). **필드 이름은 모두 남기고, 개인정보가 아닌 업무 값만 그대로 둔다:** 결제의 `method`·`pg`·`status`·`failure_code`·`attempt_no`·`amount`, 주문의 `status`·`status_reason`·`total_amount`, 주문상품의 `quantity`·`unit_price`, 클릭의 `event_type`, CDC 표시 `__op`·`__source_snapshot`. ID·시각·회원 속성·자유 문자열과 40자가 넘는 값은 `***`로 가리고, 비어 있는 값(null)은 그대로 둔다. 길이는 최대 1000자다. 필드 이름이 남아야 이름이 바뀐 건지 값이 빠진 건지 가릴 수 있고, 업무 값이 남아야 무엇이 틀렸는지(예: 모르는 실패 코드, 성공인데 실패 코드가 있음) 안다. 조회 권한은 데이터 부서로 제한한다.
+- `raw_sample`은 최소화한다 (2026-10-23 결정). **필드 이름은 모두 남기고, 개인정보가 아닌 업무 값만 그대로 둔다:** 결제의 `method`·`pg`·`status`·`failure_code`·`attempt_no`·`amount`, 주문의 `status`·`status_reason`·`total_amount`, 주문상품의 `quantity`·`unit_price`, 클릭의 `event_type`, CDC 표시 `__op`·`__source_snapshot`. 결제·주문 ID(`payment_id`, `order_id`, `order_item_id`)와 시각(`requested_at`, `completed_at`, `ordered_at`, `updated_at`, `event_time`, `__source_ts_ms`)도 그대로 둔다 (결제 UPDATE 처리, 2026-10-23 결정: 잘못된 이벤트를 결제·시각과 이어 보려고). 회원 ID·세션 ID·회원 토픽의 값(CDC 표시 빼고)·상품 번호(`article_id`)·클릭 `event_id`·자유 문자열과 40자가 넘는 값은 `***`로 가리고, 비어 있는 값(null)은 그대로 둔다. 길이는 최대 1000자다. 필드 이름이 남아야 이름이 바뀐 건지 값이 빠진 건지 가릴 수 있고, 업무 값이 남아야 무엇이 틀렸는지(예: 모르는 실패 코드, 성공인데 실패 코드가 있음) 안다. 조회 권한은 데이터 부서로 제한한다.
 - 메시지 전체를 해석하지 못한 경우(`PARSE_ERROR`)는 `field`를 `__message__`로 쓴다. 필드를 알 수 없어서 `raw_sample`은 비운다.
 - 오류마다 줄이 생기므로 `COUNT(*)`로 세면 깨진 메시지 수가 부풀어 보인다. 메시지 수는 아래 `malformed_messages` 뷰로 센다.
 
@@ -294,61 +300,98 @@ s3://clothes-query-datalake/gold_b/
 
 탐지는 Athena로 원장과 뷰를 읽는다. 구간으로 묶어 세는 일은 탐지 규칙이 정한다. 뷰는 데이터가 아니라 **원장을 읽을 때마다 정리해서 보여주는 SQL**이다. `CREATE VIEW`를 Athena에서 실행하면 Glue 카탈로그에 저장되고, 같은 SQL을 Git에도 파일로 남긴다 (`pipelines/gold_b/views/`, 3단계). 탐지·에이전트는 뷰 이름으로 조회만 하고, 정리 SQL은 Athena가 조회할 때마다 자동으로 실행한다.
 
-### 정리 뷰 `payment_conflicts` - 내용이 충돌한 결제 하나 = 한 줄 (시나리오 1 보조)
+### 정리 뷰 `payment_states` - 결제 하나 = 한 줄 (마지막 이벤트와 보류 사유, 2026-10-23)
 
-같은 `payment_id`인데 결제 내용 지문(`payment_content_hash`)이 다른 결제를 모은다. 결제 내용은 수정하지 않는다는 데이터 계약을 어긴 것이라 원래 0건이어야 한다. Silver도 같은 지문 함수로 같은 경우를 `CONTENT_CONFLICT`로 격리한다.
+결제가 수정되면(`u`) 원장 ①에 변경 전후 이벤트가 모두 남는다. 이 뷰가 결제마다 **마지막 이벤트**를 고르고 믿을 수 없으면 보류 사유를 붙인다. `payment_attempts`와 `payment_conflicts`는 이 뷰를 나눠 읽는다 (같은 판단을 두 번 계산하지 않게). 규칙은 「처리 규칙」의 결제 최신 상태와 같다.
+
+1. **Kafka 위치마다 검사 결과 확정:** 한 메시지(파티션, offset)의 검사 결과는 ① 줄(통과)이나 ④ 줄(오류, `record_key`로 결제와 연결)로 남는다. 규칙 버전이 바뀐 재처리나 시간 폴더가 다른 ①·④ 때문에 둘이 함께 있을 수 있어서, `loaded_at`이 가장 늦은 결과를 채택한다. 같으면 오류를 채택한다.
+2. **같은 결제의 순서:** 같은 `payment_id`는 같은 파티션에 들어가므로(메시지 키) `kafka_offset`이 가장 큰 이벤트가 마지막이다. 다른 파티션의 offset끼리는 비교하지 않는다.
+3. **보류 사유 (`hold_reason`):** 두 파티션 이상에 있으면 `MULTI_PARTITION`, 마지막 이벤트의 `source_ts_ms`가 앞선 이벤트들의 최댓값보다 작으면 `ORDER_ANOMALY`(같은 값은 정상), 마지막 이벤트가 오류면 `INVALID_LATEST`. 원장은 바꾸지 않으므로 재처리로 통과하거나 뒤에 새 정상 이벤트가 오면 저절로 풀린다.
 
 ```sql
-CREATE OR REPLACE VIEW gold_b.payment_conflicts AS
-WITH grouped AS (
-  SELECT payment_id, fingerprint_version,
-         COUNT(*)                         AS row_count,
-         filter(ARRAY[
-           IF(COUNT(DISTINCT order_id) > 1,                  'order_id'),
-           IF(COUNT(DISTINCT attempt_no) > 1,                'attempt_no'),
-           IF(COUNT(DISTINCT pg) > 1,                        'pg'),
-           IF(COUNT(DISTINCT status) > 1,                    'status'),
-           IF(COUNT(DISTINCT coalesce(failure_code, '')) > 1, 'failure_code'),
-           IF(COUNT(DISTINCT completed_at) > 1,              'completed_at')
-         ], x -> x IS NOT NULL)          AS stored_fields,
-         ARRAY_AGG(DISTINCT pg)           AS pgs,
-         MIN(completed_at)                AS first_completed_at,
-         MIN(loaded_at)                   AS first_loaded_at,
-         MAX(loaded_at)                   AS last_loaded_at,
-         ARRAY_AGG(CAST(ROW(kafka_partition, kafka_offset)
-                   AS ROW(kafka_partition INTEGER, kafka_offset BIGINT))) AS sources
+CREATE OR REPLACE VIEW gold_b.payment_states AS
+WITH checks AS (
+  SELECT kafka_partition, kafka_offset, loaded_at, 1 AS valid, payment_id, source_ts_ms, cdc_op,
+         order_id, attempt_no, pg, status, failure_code, completed_at, rule_version
   FROM gold_b.payment_events
-  GROUP BY payment_id, fingerprint_version          -- 지문 버전이 같은 줄끼리만 비교
-  HAVING COUNT(DISTINCT payment_content_hash) > 1
+  UNION ALL
+  SELECT kafka_partition, kafka_offset, loaded_at, 0 AS valid, record_key, MAX(source_ts_ms), NULL,
+         NULL, NULL, NULL, NULL, NULL, NULL, rule_version
+  FROM gold_b.malformed_events
+  WHERE topic = 'payments' AND record_key IS NOT NULL
+  GROUP BY kafka_partition, kafka_offset, loaded_at, record_key, rule_version
+),
+latest_checks AS (
+  SELECT *
+  FROM (SELECT c.*, ROW_NUMBER() OVER (PARTITION BY kafka_partition, kafka_offset
+                                       ORDER BY loaded_at DESC, valid) AS check_rank
+        FROM checks c)
+  WHERE check_rank = 1
+),
+ordered AS (
+  SELECT l.*,
+         MIN(kafka_partition) OVER (PARTITION BY payment_id) AS first_partition,
+         MAX(kafka_partition) OVER (PARTITION BY payment_id) AS last_partition,
+         COUNT(*) OVER (PARTITION BY payment_id) AS event_count,
+         MAX(source_ts_ms) OVER (PARTITION BY payment_id ORDER BY kafka_offset
+                                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS earlier_max_ts,
+         ROW_NUMBER() OVER (PARTITION BY payment_id ORDER BY kafka_offset DESC) AS from_last
+  FROM latest_checks l
 )
-SELECT payment_id, fingerprint_version, row_count,
-       IF(cardinality(stored_fields) = 0, ARRAY['payment_content_hash'], stored_fields) AS conflict_fields,
-       pgs, first_completed_at, first_loaded_at, last_loaded_at, sources
-FROM grouped;
+SELECT payment_id, order_id, attempt_no, pg, status, failure_code, completed_at, loaded_at,
+       cdc_op, source_ts_ms, rule_version, kafka_partition, kafka_offset, event_count,
+       CASE
+         WHEN first_partition <> last_partition THEN 'MULTI_PARTITION'
+         WHEN source_ts_ms < earlier_max_ts THEN 'ORDER_ANOMALY'
+         WHEN valid = 0 THEN 'INVALID_LATEST'
+       END AS hold_reason
+FROM ordered
+WHERE from_last = 1;
 ```
 
 | 컬럼 | 뜻 | 예시 |
 | --- | --- | --- |
-| `payment_id` | 충돌한 결제 시도 번호 | `p-07` |
-| `fingerprint_version` | 비교한 지문 규칙 버전 | (현지 님과 정함) |
-| `row_count` | 원장에 쌓인 줄 수 | `2` |
-| `conflict_fields` | 원장에 저장된 업무 필드 6개 중 값이 다른 것. 6개가 모두 같은데 지문만 다르면 `[payment_content_hash]` (금액·결제 수단·요청 시각 중 하나 이상이 다르다는 뜻. 무엇이 다른지는 `sources`로 원본을 봐야 안다) | `[status, failure_code]`, `[payment_content_hash]` |
-| `pgs` | 그 결제에 나온 PG (영향 범위 확인용) | `[PG_A]` |
-| `first_completed_at` | 가장 이른 결제 결과 시각 (어느 구간에 영향이 있나) | 15:01:20 |
-| `first_loaded_at`, `last_loaded_at` | 처음·마지막으로 쌓인 시각 | 15:02:00, 15:05:00 |
-| `sources` | 원본 Kafka 위치 목록 (원본 다시 찾기) | `[{0, 17920}, {0, 17988}]` |
+| `payment_id` | 결제 시도 번호 | `p-01` |
+| `order_id` … `completed_at` | 마지막 이벤트의 업무 값. 마지막 이벤트가 오류면 NULL | |
+| `loaded_at` | 마지막 이벤트를 원장에 쌓은 시각 | 15:02:00 |
+| `cdc_op`, `source_ts_ms` | 마지막 이벤트의 변경 종류와 원본 변경 시각 | `u`, `1792562910000` |
+| `rule_version` | 마지막 이벤트를 판정한 규칙표 버전 | `0.2.0` |
+| `kafka_partition`, `kafka_offset` | 마지막 이벤트의 Kafka 위치 (원본 다시 찾기) | `1`, `205` |
+| `event_count` | 그 결제의 이벤트 수 (Kafka 위치 기준) | `2` |
+| `hold_reason` | 보류 사유. 보류가 아니면 NULL | `INVALID_LATEST` |
 
-- 원문 값은 넣지 않고 결제 키·원본 위치·충돌 필드명만 남긴다 (공통 계약과 같음).
-- 이번에 들어온 줄끼리만 비교하지 않는다. 뷰는 원장 전체를 읽으므로 **예전에 쌓인 같은 `payment_id` 줄과도 비교**한다. 같은 결제가 나중에 다른 내용으로 다시 들어와도 충돌로 잡는다 (현지 님 PR #36 리뷰).
-- 지문 버전이 다른 줄끼리는 비교하지 않는다. 규칙이 다르면 같은 내용도 지문이 달라져 가짜 충돌이 생기기 때문이다. 지문 규칙을 바꾸면 지난 시간 폴더를 재처리해 지문을 다시 만든다 (같은 결제의 중복은 `completed_at`이 같아 같은 시간 폴더에 있으므로 함께 다시 계산된다).
-- 탐지는 이 뷰에 줄이 있는 구간을 "확인 필요"로 볼 수 있다. 충돌한 결제는 `payment_attempts`에서 빠지므로 그 구간의 결제 수가 실제보다 적을 수 있다.
+- 결제 이벤트로 보는 것은 ① 줄과, `record_key`가 있는 `payments` 토픽의 ④ 줄이다. 메시지를 읽지 못해 키를 모르는 오류(`PARSE_ERROR`)는 결제와 연결하지 못한다.
+- 뷰는 원장 전체를 읽는다. 예전에 쌓인 같은 결제의 이벤트와도 순서를 비교해야 하기 때문이다.
+
+### 정리 뷰 `payment_conflicts` - 보류된 결제 하나 = 한 줄 (시나리오 1 보조)
+
+`payment_states`에서 보류 사유가 있는 결제만 모은다. 보류된 결제는 `payment_attempts`에서 빠진다. 이름은 그대로 두고 뜻을 바꿨다 (2026-10-23). 예전에는 "같은 `payment_id`에 지문이 다름"을 충돌로 보았지만, 결제 수정(`u`)을 받으면서 내용이 다른 것은 정상 수정이 되었다. Silver의 격리 기록(`quarantined_records`)처럼 보류한 결제를 사유와 함께 남기는 역할이다.
+
+```sql
+CREATE OR REPLACE VIEW gold_b.payment_conflicts AS
+SELECT payment_id, hold_reason, event_count, pg, status, completed_at,
+       cdc_op, source_ts_ms, rule_version, kafka_partition, kafka_offset, loaded_at
+FROM gold_b.payment_states
+WHERE hold_reason IS NOT NULL;
+```
+
+| 컬럼 | 뜻 | 예시 |
+| --- | --- | --- |
+| `payment_id` | 보류된 결제 시도 번호 | `p-08` |
+| `hold_reason` | `MULTI_PARTITION`: 같은 결제가 두 파티션 이상에 있음 (순서를 정할 수 없음) / `ORDER_ANOMALY`: 마지막 이벤트의 원본 변경 시각이 앞선 이벤트보다 이름 / `INVALID_LATEST`: 마지막 이벤트가 형식 오류 | `INVALID_LATEST` |
+| `event_count` | 그 결제의 이벤트 수 | `2` |
+| `pg`, `status`, `completed_at` | 마지막 이벤트의 값 (영향 범위 확인용). 마지막 이벤트가 오류면 NULL | `PG_A`, `FAILED`, 15:01:20 |
+| `cdc_op`, `source_ts_ms`, `rule_version` | 마지막 이벤트의 변경 종류, 원본 변경 시각, 판정 규칙 버전 | `u`, `1792562910000`, `0.2.0` |
+| `kafka_partition`, `kafka_offset` | 마지막 이벤트의 Kafka 위치 (원본·④ 오류 줄 찾기) | `0`, `102` |
+| `loaded_at` | 마지막 이벤트를 쌓은 시각 | 15:05:00 |
+
+- 원문 값은 넣지 않고 결제 키·원본 위치·보류 사유만 남긴다. 오류 내용은 같은 Kafka 위치의 ④ `malformed_events`(`field`, `reason`, `raw_sample`)에서 본다.
+- 탐지는 이 뷰에 줄이 있는 구간을 "확인 필요"로 볼 수 있다. 보류된 결제는 `payment_attempts`에서 빠지므로 그 구간의 결제 수가 실제보다 적을 수 있다. 잘못된 최신 이벤트는 R4(깨진 메시지)로도 세어진다.
 
 ### 정리 뷰 `payment_attempts` - 결제 시도 한 건 = 한 줄 (시나리오 1)
 
-① `payment_events`에서 이렇게 정리한다.
+`payment_states`에서 보류되지 않은 결제의 **마지막 이벤트**를 보여준다 (2026-10-23 바뀜. 예전에는 가장 먼저 쌓인 줄). 결제가 수정되었으면 수정된 값이 보인다. 같은 결제가 Debezium 재시작·스냅샷으로 여러 번 와도 결제마다 한 줄이다. 실제 재시도는 `payment_id`가 달라서 그대로 남는다. 칸은 예전과 같아서 판정 SQL은 바꾸지 않아도 된다.
 
-- `payment_conflicts`에 있는 `payment_id`는 **모든 줄을 뺀다.** 어느 줄이 맞는지 판단할 수 없는 결제를 정상으로 세지 않는다.
-- 남은 결제 중 `payment_id`가 같은 줄은 **가장 먼저 쌓인 줄**(`loaded_at`이 가장 이른 줄) 하나만 남긴다 (Debezium 재시작·전송 재시도로 생긴 중복). 내용이 같으므로 값은 같고, 처음 쌓인 시각이 남는다. 실제 재시도는 `payment_id`가 달라서 그대로 남는다.
 - `failure_code`로 실패 원인을 붙인다: `PG_TIMEOUT`, `PG_ERROR` → `PG` / `INSUFFICIENT_BALANCE`, `CARD_LIMIT_EXCEEDED`, `CARD_DECLINED` → `CUSTOMER` / 그 외이거나 코드가 비어 있는 실패 → `UNKNOWN`.
 
 ```sql
@@ -360,13 +403,8 @@ SELECT payment_id, order_id, attempt_no, pg, status, failure_code,
          WHEN status = 'FAILED' THEN 'UNKNOWN'
        END AS failure_cause,
        completed_at, loaded_at
-FROM (
-  SELECT e.*, ROW_NUMBER() OVER (PARTITION BY payment_id
-                                 ORDER BY loaded_at, kafka_partition, kafka_offset) AS rn
-  FROM gold_b.payment_events e
-  WHERE NOT EXISTS (SELECT 1 FROM gold_b.payment_conflicts c WHERE c.payment_id = e.payment_id)
-)
-WHERE rn = 1;
+FROM gold_b.payment_states
+WHERE hold_reason IS NULL;
 ```
 
 | 컬럼 | 뜻 | 예시 |
@@ -377,8 +415,8 @@ WHERE rn = 1;
 | `status` | `SUCCESS` / `FAILED` | `FAILED` |
 | `failure_code` | 원래 실패 코드 (원인을 더 좁힐 때) | `PG_TIMEOUT` |
 | `failure_cause` | 실패 원인 분류 | `PG` |
-| `completed_at` | 결제 결과 시각 | 15:01:20 |
-| `loaded_at` | 원장에 처음 쌓인 시각 (중복이면 이른 쪽) | 15:02:00 |
+| `completed_at` | 결제 결과 시각 (마지막 이벤트) | 15:01:20 |
+| `loaded_at` | 마지막 이벤트를 원장에 쌓은 시각 | 15:02:00 |
 
 ### 정리 뷰 `malformed_messages` - 깨진 메시지 하나 = 한 줄 (시나리오 3)
 
@@ -442,9 +480,9 @@ GROUP BY 1, 2;
 
 ### 판정 시점과 상태 확인
 
-- 늦게 도착한 데이터는 건수를 **늘리기만** 한다. 그래서 "PG 원인 실패가 3건 이상" 같은 **건수 규칙은 쌓이는 대로 바로 판정해도** 잘못 잡히지 않고, 늦은 데이터 때문에 조금 늦게 잡힐 뿐이다. 예외는 충돌이다. 나중에 충돌하는 줄이 오면 그 결제가 `payment_attempts`에서 빠져 건수가 줄 수 있다 (원래 0건이어야 함).
+- 늦게 도착한 데이터는 건수를 **늘리기만** 한다. 그래서 "PG 원인 실패가 3건 이상" 같은 **건수 규칙은 쌓이는 대로 바로 판정해도** 잘못 잡히지 않고, 늦은 데이터 때문에 조금 늦게 잡힐 뿐이다. 예외는 결제 수정과 보류다. 나중에 결제 수정(`u`)이 오면 그 결제의 값(예: 실패 원인)이 바뀌고, 마지막 이벤트가 잘못됐거나 순서를 믿을 수 없으면 그 결제가 `payment_attempts`에서 빠져 건수가 줄 수 있다.
 - **실패율 같은 비율 규칙**은 늦은 데이터로 값이 내려갈 수 있으므로, 끝난 지 3분 지난 구간만 판정한다.
-- 그때 탐지가 본 숫자는 `loaded_at` ≤ 판정 시각인 줄만 세면 재현된다. 뷰는 판정 뒤에 쌓인 충돌 줄도 반영하므로, 정확히 재현할 때는 `payment_events`를 `loaded_at` ≤ 판정 시각으로 거른 뒤 같은 정리 규칙을 적용한다.
+- 그때 탐지가 본 숫자는 `loaded_at` ≤ 판정 시각인 줄만 세면 재현된다. 뷰는 판정 뒤에 쌓인 수정·재검사 줄도 반영하므로, 정확히 재현할 때는 `payment_events`와 `malformed_events`를 `loaded_at` ≤ 판정 시각으로 거른 뒤 같은 정리 규칙을 적용한다.
 
 **신뢰성 점검 (주현 님 쿼리 3종)**
 
@@ -466,17 +504,29 @@ GROUP BY 1, 2;
 
 | 대상 | 세는 것 | 중복 제거 | 누가 |
 | --- | --- | --- | --- |
-| 결제 (`payment_attempts`) | 결제 시도 (업무 사실) | `payment_id`와 지문이 같으면 가장 먼저 쌓인 줄 하나. 지문이 다르면 충돌로 보고 모든 줄을 제외 | 정리 뷰 (은서) |
-| 결제 충돌 (`payment_conflicts`) | 계약을 어긴 결제 | `payment_id` 하나에 한 줄, 다른 필드 이름 목록 | 정리 뷰 (은서) |
+| 결제 (`payment_attempts`) | 결제 시도 (업무 사실) | `payment_id` 하나에 한 줄. 같은 Kafka 위치는 한 이벤트로 보고, 마지막 이벤트(가장 큰 `kafka_offset`)의 값을 보여 준다. 보류된 결제는 뺀다 (아래 「결제 최신 상태」) | 정리 뷰 (은서) |
+| 결제 보류 (`payment_conflicts`) | 마지막 상태를 믿을 수 없는 결제 | `payment_id` 하나에 한 줄, 보류 사유(`hold_reason`) | 정리 뷰 (은서) |
 | 유입량 (`topic_messages`) | Kafka에 들어온 메시지 (관측 사실) | 하지 않음. 중복 전송도 파이프라인 상태의 일부 | - |
 | 깨진 메시지 (`malformed_events`) | 깨진 필드 하나 | `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같으면 한 번만 | 쌓을 때 (은서) |
 | 깨진 메시지 수 (`malformed_messages`) | 깨진 메시지 한 개 | 위치(토픽·파티션·offset)가 같으면 1개, 현재 `rule_version`만 | 뷰 (은서) |
 
 같은 메시지가 두 번 오는 경우는 주로 Debezium 재시작(마지막 저장 위치부터 다시 읽음)과 Kafka 전송 재시도다. 이때 두 메시지는 Kafka 위치(offset)가 다르다. 고객이 실제로 두 번 결제한 것은 `payment_id`가 달라서 따로 센다.
 
-**결제 데이터 계약 (전제, 성철 님 확인):** 결제 시도 1번의 결과가 확정되면 `payments`에 1행을 INSERT하고 수정하지 않는다. 재시도는 같은 `order_id`에 새 `payment_id`와 1 증가한 `attempt_no`를 가진 새 행이다. `(order_id, attempt_no)`는 고유하다. 실패 코드는 시뮬레이터가 붙이고, Gold B는 그대로 가져와 뷰에서 묶는다.
+**결제 데이터 계약 (전제):** 결제 시도 1번의 결과가 확정되면 `payments`에 1행을 INSERT한다. 재시도는 같은 `order_id`에 새 `payment_id`와 1 증가한 `attempt_no`를 가진 새 행이다. `(order_id, attempt_no)`는 고유하다. 실패 코드는 시뮬레이터가 붙이고, Gold B는 그대로 가져와 뷰에서 묶는다. 결과를 바로잡는 UPDATE(`__op = u`)도 받는다 (팀 합의, 2026-10-23). 팀 계약서(`docs/contracts/README.md`)는 아직 "결과 확정 후 INSERT만"이라 현지·성철 님과 함께 고친다 (「팀원과 확인할 것」).
 
-**Silver와 다른 점 (알고 두는 것):** Silver는 같은 `payment_id`의 복사본 하나가 형식 오류이면 정상 복사본도 보류한다(`UNTRUSTED_GROUP`). Gold B는 깨진 복사본을 ④에, 정상 복사본을 ①에 따로 쌓으므로 정상 복사본이 뷰에 남는다. 형식 오류 메시지에서는 `payment_id`를 못 읽을 수도 있어 똑같이 맞추지 않는다.
+**Silver와 다른 점 (맞추는 중):** 지금 Silver는 결제 `u`를 `UNSUPPORTED_CDC`로 격리하고, 같은 키에 오류 행이 하나라도 있으면 그 결제를 보류하며(`DEPENDENCY_BLOCKED`), 같은 `payment_id`의 내용이 다르면 `CONTENT_CONFLICT`로 보류한다. Gold B는 마지막 이벤트만 보고 순서는 Kafka offset으로 정한다. 같은 결제의 현재 상태가 두 곳에서 같게 나오도록, Silver도 결제 `u`를 받고 Bronze v2의 `kafka_partition`·`kafka_offset`으로 순서를 정하자고 현지 님께 제안한다 (작업 지시서 `docs/tasks/gold-b-payment-update.md` 「Silver와 맞출 것」). 형식 오류 메시지에서 `payment_id`를 못 읽으면(`PARSE_ERROR`, 키 필드 이름 변경) 어느 쪽도 그 결제와 잇지 못한다.
+
+### 결제 최신 상태 (결제 수정 `u`, 2026-10-23)
+
+결제가 수정되면(`u`) 같은 `payment_id`에 이벤트가 여러 개 쌓인다. 원장은 바꾸지 않고, 정리 뷰 `payment_states`가 읽을 때마다 두 단계로 정한다 (SQL은 「탐지가 읽는 것」).
+
+1. **Kafka 위치마다 검사 결과 확정 (검사 이력):** 한 메시지(파티션, offset)의 검사 결과는 ① 줄(통과)이나 ④ 줄(오류)로 남는다. 규칙 버전이 바뀐 재처리는 ④의 옛 오류 줄을 이력으로 남기고, ①은 결제 시각·④는 Kafka 시각으로 시간 폴더를 나눠 재처리가 한쪽 폴더만 다시 쓸 수 있다. 그래서 한 위치에 통과와 오류가 함께 있을 수 있어 `loaded_at`이 가장 늦은 결과를 채택한다. 서로 다른 검사의 `loaded_at`이 같으면 오류를 채택한다. `loaded_at`은 이 단계에만 쓰고 이벤트 순서에는 쓰지 않는다 (재처리하면 바뀐다).
+2. **같은 결제의 순서:** `payments` 메시지 키가 `payment_id`라 같은 결제는 같은 파티션에 들어가고, 한 파티션 안의 offset은 DB 변경 순서다. 그래서 `kafka_offset`이 가장 큰 이벤트가 마지막이다. `__source_ts_ms`는 밀리초 단위 커밋 시각이라 한 트랜잭션 안에서 같을 수 있어, 순서가 아니라 이상 확인에만 쓴다.
+3. **보류:** 같은 결제가 두 파티션 이상에 있으면 순서를 정하지 않는다 (`MULTI_PARTITION`, 토픽 파티션 수를 바꾸면 생길 수 있다). 마지막 이벤트의 `source_ts_ms`가 앞선 이벤트들(오류 이벤트 포함)의 최댓값보다 작으면 `ORDER_ANOMALY`다. 같은 값은 정상이다. 마지막 이벤트가 오류면 `INVALID_LATEST`다. 앞선 이벤트의 오류는 뒤의 정상 이벤트로 덮였으면 상관없다.
+4. **복구:** 보류는 뷰에서만 한다. 규칙을 고쳐 재처리하면 같은 위치에 더 늦은 통과 줄이 쌓여 풀리고, 재처리해도 여전히 오류면 보류가 유지된다. 뒤에 새 정상 이벤트가 오면 재처리 없이 풀린다.
+5. **오류 이벤트와 결제 잇기:** ④의 `record_key`(결제는 `payment_id`)로 잇는다. 키를 읽지 못한 오류(`PARSE_ERROR`, `payment_id` 이름 변경)는 결제와 잇지 못한다.
+
+**한계 (2026-10-23 확인):** 재처리 잡은 통과한 ① 줄을 결제 시각(`completed_at`) 시간 폴더에만 쓰고, 그 폴더를 재처리할 때는 Kafka 시각이 폴더 앞뒤 10분 안인 메시지만 다시 읽는다. 그래서 결제 시각보다 1시간 넘게 늦게 온 잘못된 `u`(예: 다음 날 들어온 정정)는 규칙을 고쳐 재처리해도 ① 줄이 다시 쓰이지 않아 `INVALID_LATEST` 보류가 유지된다. 틀린 값을 보이지는 않고, 새 정상 이벤트가 오면 풀린다. 재처리로도 풀리게 하려면 재처리 잡이 다시 읽은 메시지의 ① 줄을 결제 시각 폴더에도 써야 한다 (**미정**, 따로 정함. 지금 동작은 `tests/test_payment_states.py`가 확인한다).
 
 ### 결제 실패 원인 분류
 
@@ -501,7 +551,8 @@ GROUP BY 1, 2;
 - `reviews.raw`는 형식 검사하지 않는다 (2026-10-23 결정). 운영에서 비어 있을 수 있고 판정도 보지 않으며, 리뷰 이상은 내용 이상이라 리뷰 분석이 본다. ②에만 남는다.
 - 값이 없거나, UTF-8·JSON이 아니거나, JSON 객체가 아니면 `PARSE_ERROR` 한 줄이다.
 - 공통 검사기의 `errors()`로 오류를 전부 찾는다 (필드마다 하나). Silver는 같은 규칙으로 첫 오류만 본다.
-- 결제는 오류가 없고 `__op`가 `c`·`r`일 때만 지문을 붙여 ①에 쌓는다. 그 밖의 `__op`(`u` 등)나 `__op`가 없는 결제는 ②에만 남고 오류로 남기지 않는다. 지문을 만들 수 없으면 그 필드의 `INVALID_VALUE`다 (Silver와 같음).
+- 결제는 오류가 없고 `__op`가 `c`·`r`·`u`일 때 지문을 붙여 ①에 쌓는다 (`u`는 2026-10-23 추가). 이 결제 CDC 줄은 `__source_ts_ms`도 검사한다: 없으면 `MISSING_FIELD`, 정수가 아니면 `TYPE_MISMATCH`, 0보다 작으면 `INVALID_VALUE` (Silver 거래 검사와 같은 코드). 그 밖의 `__op`나 `__op`가 없는 결제는 ②에만 남고 오류로 남기지 않는다. 지문을 만들 수 없으면 그 필드의 `INVALID_VALUE`다 (Silver와 같음).
+- 오류 줄마다 메시지 키(`record_key`)와 변경 시각(`source_ts_ms`)을 남긴다 (2026-10-23).
 - 규칙표에 Gold B가 쓰는 규칙이 하나라도 없으면 검사기를 만들 때 실패한다.
 
 - `FAILED`인데 `failure_code`가 없거나 비어 있으면 `MISSING_FIELD`로 ④에 쌓고 ①에는 넣지 않는다.
@@ -574,7 +625,7 @@ GROUP BY 1, 2;
 | `TYPE_MISMATCH` | Debezium 설정 변경 | 성철 | CDC 토픽 여러 개가 같은 시점에 바뀜 |
 | `PARSE_ERROR` | 보내는 쪽이 JSON을 잘못 만듦 | 성철 | 한 토픽에서만 |
 | `PARSE_ERROR` | Gold B 파싱 코드 버그 | 은서 | 여러 토픽이 함께 깨지고 Silver는 정상 |
-| (`payment_conflicts`) | 시뮬레이터가 결제를 수정함, ID 겹침 | 성철 | 같은 `payment_id`에 다른 값 |
+| (`payment_conflicts`의 `ORDER_ANOMALY`·`MULTI_PARTITION`) | Debezium·토픽 설정 변경(파티션 수, 메시지 키), 원본 변경 시각 이상 | 성철 | 같은 결제의 offset 순서와 변경 시각이 어긋남, 한 결제가 두 파티션에 있음 |
 
 에이전트는 "무엇이, 언제부터, 어떻게 바뀌었나"까지 찾을 수 있지만 "왜 바꿨나"(누가 배포했나)는 Gold B 데이터에 없다. 그래서 리포트는 추정 원인과 근거까지이고, 확정은 사람이 한다.
 
@@ -610,7 +661,7 @@ GROUP BY 1, 2;
 
 - **교체 단위는 1시간 폴더다.** 15:10~15:30을 승인해도 15시대(15:00~15:59) 폴더 전체를 다시 채운다. 1분마다 쌓은 파일에는 늦게 온 데이터가 섞여 있고 하루 1회 합치기도 해서 특정 줄만 골라 바꾸면 복잡하고 위험하기 때문이다. 같은 입력으로 다시 계산하므로 문제없던 구간의 결과는 원래와 같다.
 - **재처리 대상:** `payment_events`, `topic_messages`, `malformed_events`. `bronze_lag_snapshots`는 그 시점에만 잴 수 있는 측정값이라 다시 만들지 않는다. `malformed_events`는 이번 재처리의 `rule_version` 줄만 지우고 다시 만들고, 다른 버전 줄은 그대로 남긴다 (예전 판정 이력 보존).
-- **읽기 범위 여유:** 폴더는 이벤트 시각 기준이라, 원본은 앞뒤로 몇 분 여유 있게 읽고 이벤트 시각으로 걸러서 쓴다. 결제는 결과 시각보다 늦게 Kafka에 들어올 수 있다.
+- **읽기 범위 여유:** 폴더는 이벤트 시각 기준이라, 원본은 앞뒤로 몇 분 여유 있게 읽고 이벤트 시각으로 걸러서 쓴다. 결제는 결과 시각보다 늦게 Kafka에 들어올 수 있다. 결제 수정(`u`)은 결과 시각보다 훨씬 늦게 올 수 있어 이 여유로 덮이지 않는다 (「처리 규칙」 결제 최신 상태의 한계).
 - **Kafka 보관 기간:** 7일이다 (2026-10-23 #86으로 3일에서 늘어남, 업무 토픽 `retention.ms` 604800000). 7일 안에 잡아서 고친 구간은 Kafka를 다시 읽고, 그보다 오래된 구간(늦게 발견, 백필)은 Bronze로 다시 채운다.
 - **Bronze에 필요한 것:** 보관 기간(7일)이 지난 구간을 Bronze로 같은 결과로 다시 만들려면 Bronze에 Kafka 위치·시각(`topic`, `partition`, `offset`, `timestamp`)과 깨진 메시지 원본이 있어야 한다. 현재 Bronze 파일에는 메시지 값만 있고(파일 이름에 파티션·시작 offset), S3 Sink에 오류 토픽 설정이 없다. Silver·Gold A를 고칠 때도 이 원본이 필요하다.
 - **교체 후 재판정:** 재처리 잡은 시간 폴더 교체가 끝날 때마다 `reprocess_events`에 `LEDGER_REPLACED`와 실제 교체 범위를 남기고, 마지막에 전체 교체 범위를 결과로 넘긴다. 재처리 DAG는 판정을 직접 부르지 않고, 주현 님 판정 잡이 정해진 주기(미정, 제안 5분)마다 이 줄을 읽어 재판정한다. 교체가 끝나지 않은 폴더는 `LEDGER_REPLACED`가 없으므로 재판정되지 않는다.
@@ -677,10 +728,12 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 주현 | 승인 메시지에 재처리 범위·규칙 버전 넣기 | 재처리 잡의 입력값 | 필요 |
 | 주현 | 신뢰성 쿼리는 `topic_messages` 기준, 3분 대기는 비율 규칙에만 | 정상인데 문제처럼 보이는 것을 막기 | 필요 |
 | 주현 | `payment_conflicts` 추가, `bronze_lag_snapshots.kafka_partition` 이름 | 탐지 SQL에서 쓰는 이름 | 필요 |
+| 주현 | 결제 UPDATE 처리 (2026-10-23): `payment_attempts`는 칸이 같고 뜻이 "보류되지 않은 결제의 마지막 이벤트"로 바뀜 (R1·R5가 수정된 값으로 판정). `payment_conflicts`는 보류 목록(`hold_reason`)으로 바뀜. 에이전트 허용 표(`agent/tools/guard.py`)에 `payment_conflicts`·`payment_states`를 넣을지 | 판정·조사 SQL을 바꾸지 않아도 되는지 | 필요 |
 | 주현 | 조사 에이전트 리포트·실행 기록 표를 둘 곳 (`gold_b` 밖 권장: 에이전트는 `gold_b/`를 읽기만 함) | 에이전트 권한, 정답 노출 방지 | 필요 |
 | 주현 | 허용 지연 (시연 모드별 재측정 후) | 정답표 채점 기준 | 팀 회의 |
 | 주현 | 판정 잡이 `LEDGER_REPLACED`를 읽는 두 곳(`pending_replacements`, `_replaced_filter`)에 `source IN ('KAFKA', 'BRONZE')` | Silver 줄을 Gold B 재처리로 읽지 않기 | 일부 완료: #80이 `pending_replacements`에 넣음. `_replaced_filter`(R5 순찰)는 아직이라, Silver 교체 기록이 있으면 그 시간대에 방금 쌓인 성공 결제 줄을 R5가 뺄 수 있음 |
 | 현지 | Silver 재처리 줄 쓰는 법(실패는 `FAILED`, 범위, `detail`)과 `gold_b/reprocess_events/` 쓰기 권한 | 같은 표를 두 경로가 함께 쓰기 | 필요 |
+| 현지 | 결제 `u` 처리와 같은 순서 규칙(Bronze v2의 `kafka_partition`·`kafka_offset`, 마지막 이벤트만 보류), 계약서 「같은 변경 시각 충돌」과 결제 INSERT만 문구 고치기 (성철 님과) | 같은 결제의 현재 상태를 Silver와 Gold B가 같게 | 필요 (제안: `docs/tasks/gold-b-payment-update.md` 「Silver와 맞출 것」) |
 | 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 완료 (#72) |
 | 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 완료 (#71) |
 | 주현 | 승인 화면 `kafka_retention_days`(지금 3)를 Kafka 보관 7일(#86)에 맞추기 | 3~7일 전 구간에 "보관 기간 밖" 경고가 잘못 붙음 (재처리 잡은 7일 기준) | 필요 |
@@ -690,7 +743,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 성철 | Kafka Connect REST 주소 | 커넥터 상태 조회 | 필요 |
 | 성철 | 오류 토픽(DLQ) 이름과 S3 저장 여부 | 깨진 원본이 있어야 오래된 구간과 Silver를 고칠 수 있음 | 저장소상 설정 없음. 필요 |
 | 성철 | Bronze에 Kafka 위치·시각 저장 여부, 저장 형식(JSON/Parquet) | 보관 기간(7일) 넘은 구간을 Bronze로 재처리할 때 필요 | 저장소상 값만 JSON으로 저장. 필요 |
-| 성철 | 결제 데이터 계약, 결과 시각을 정하면 바로 저장 | 중복 제거와 재시도 구분, 늦은 데이터 방지 | 필요 |
+| 성철 | 결제 데이터 계약(결과를 바로잡는 UPDATE 허용, 2026-10-23 팀 합의), 결과 시각을 정하면 바로 저장, `payments` 메시지 키(`payment_id`)와 파티션 수 유지 | 재시도 구분, 늦은 데이터 방지, offset 순서의 전제 | 필요 |
 | 성철 | 시나리오별 시연 모드(3배·10배), 평소 변동 | 탐지 기준과 허용 지연 | 필요 |
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
 | 현지 | 공통 형식 검사 코드(`pipelines/format_rules.py`)를 Gold B도 쓰는 방법: 규칙표의 `gold_b` 사용 승인, 한 메시지의 오류를 전부 돌려주는 함수, 클릭·회원·리뷰 규칙에 필요한 종류(10자리 문자열, true/false 값, 최댓값, 개인정보 컬럼 금지) | Gold B와 Silver가 같은 규칙으로 판단 | 완료 (#63, 규칙표 0.2.0) |
@@ -707,8 +760,9 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 재영 | Athena 접근 경로(NAT 또는 VPC 엔드포인트)와 권한 (주현 님, 대시보드 포함) | 탐지·에이전트·대시보드가 조회하려면 필요 | 필요 |
 | 재영 | 규칙 파일 배포 방식 (이미지 포함 / S3) | 규칙 변경을 적재 잡에 반영 | 필요 |
 | 재영 | Airflow DAG 위치, 재시도 2번, 같은 시간대 한 번에 하나씩 (재판정은 DAG로 잇지 않음, `team-inputs.md`와 같음) | 재처리 흐름 | 필요 |
+| 재영 | 결제 UPDATE 처리 배포 (2026-10-23): Glue `gold_b.payment_events`·`malformed_events` 칸 추가(`ALTER TABLE`), 뷰를 `payment_states` → `payment_conflicts`·`payment_attempts` 순서로 다시 만들기 (`views/README.md`) | Athena 표·뷰를 코드와 맞추기 | 머지 뒤 |
 | 민혁 | `reviews.raw` 리뷰 컬럼, 운영에서 이 토픽을 쓰는지 | 형식 검사 규칙, 대상 토픽 목록 | 필요 |
-| 민혁 | 대시보드(#31)의 Gold B 컬럼: `bronze_lag_snapshots`는 `kafka_partition`, `payment_attempts`에는 `copies`가 없음, `payment_conflicts` 표시 | 실데이터 연결 때 화면이 깨지지 않게 | 필요 |
+| 민혁 | 대시보드(#31)의 Gold B 컬럼: `bronze_lag_snapshots`는 `kafka_partition`, `payment_attempts`에는 `copies`가 없음, `payment_conflicts` 표시 (2026-10-23부터 보류 목록: `conflict_fields` 대신 `hold_reason`) | 실데이터 연결 때 화면이 깨지지 않게 | 필요 |
 | 팀 전체 | "consumer lag 수집기 없음" → 수집기 추가, Gold B는 Kafka 직접, 구조도 수정 | 주문 설계·구조도와 맞추기 | 공유 필요 |
 
 ## 해야 할 일 워크플로우
@@ -783,13 +837,13 @@ pipelines/gold_b/
 (현지 님과 공용 모듈 위치·분담 먼저 확정)
 
 - [x]  규칙표에 토픽 규칙 추가: 공통 `docs/contracts/format_rules.yaml`에 회원·클릭·리뷰 추가 (#63). 회원·클릭은 #65로 Silver와 공동 규칙. `reviews.raw`를 검사할지는 형식 검사 때 정함
-- [x]  CDC 표시 읽기 (`__op = c` 또는 `r`만 ①, 그 밖은 ②에만. 2026-10-23)
+- [x]  CDC 표시 읽기 (`__op = c`·`r`·`u`만 ①, 그 밖은 ②에만. `u`는 결제 UPDATE 처리에서 추가, 2026-10-23)
 - [x]  결제 내용 지문 `pipelines/payment_fingerprint.py` (Silver와 같은 함수, #55)
 - [x]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록): `format_check.py`
-- [x]  `raw_sample` 마스킹 (필드 이름 유지, 개인정보가 아닌 업무 값만 남김)
+- [x]  `raw_sample` 마스킹 (필드 이름 유지, 개인정보가 아닌 업무 값과 결제·주문 ID·시각만 남김. ID·시각은 2026-10-23부터)
 - [x]  `tests/test_format_check.py` 샘플로 검사 결과 확인
 - [ ]  샘플로 원장 ①②④를 S3에 쌓아 보기
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#91, 2026-10-23)
 
 ### 3단계: 정리 뷰
 
@@ -799,6 +853,8 @@ pipelines/gold_b/
 - [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
 - [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
 - [x]  PR 올리고 합치기 (#70, 2026-10-23)
+- [x]  결제 UPDATE 처리 (`pipelines/gold-b-payment-update`, 2026-10-23): 새 기반 뷰 `payment_states`, `payment_conflicts`는 보류 목록, `payment_attempts`는 보류 없는 결제의 마지막 이벤트. 시나리오 샘플로 SQLite 시험(`tests/test_payment_states.py`)과 로컬 Trino 484 확인
+- [ ]  Athena에서 Glue 표 칸 추가(`ALTER TABLE`)와 뷰 다시 만들기 (`payment_states` → `payment_conflicts`·`payment_attempts`, `views/README.md`)
 
 ### 4단계: 적재 잡
 
@@ -811,7 +867,7 @@ pipelines/gold_b/
 - [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md`. 이미지는 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지를 더함)
 - [ ]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인
 - [x]  잡을 재시작해도 빠지거나 두 번 쌓이지 않는지 확인 (체크포인트, 로컬 Docker)
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#92, 2026-10-23)
 
 ### 5단계: Bronze 지연 수집기
 
@@ -828,7 +884,7 @@ pipelines/gold_b/
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.compact` (날짜를 주지 않으면 어제 UTC)
 - [ ]  `dags/gold_b_compact.py` 하루 1회, 재처리와 같은 폴더를 동시에 건드리지 않게 (재영 님. DAG 공급 경로가 `infra/platform/airflow/dags/`)
 - [x]  합친 뒤 조회 결과가 같은지 확인 (합치기 전후 줄이 `loaded_at`까지 같음, 시험)
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#88, 2026-10-23)
 
 ### 7단계: 재처리 잡 (필수 ②)
 
