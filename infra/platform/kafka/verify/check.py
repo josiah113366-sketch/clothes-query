@@ -228,7 +228,8 @@ def main():
         assert compact_pool["replicas"] == compact_connect["replicas"] == 1
         assert "topologySpreadConstraints" not in compact_pool["template"]["pod"]
         assert compact_pool["storage"]["volumes"][0]["size"] == "20Gi"
-        assert compact_kafka["kafka"]["config"]["log.retention.hours"] == 72
+        assert "log.retention.hours" not in compact_kafka["kafka"]["config"]
+        assert compact_kafka["kafka"]["config"]["log.retention.ms"] == 604800000
         assert compact_pool["storage"]["volumes"][0]["deleteClaim"] is False
         for key in ("default.replication.factor", "min.insync.replicas", "offsets.topic.replication.factor",
                     "transaction.state.log.replication.factor", "transaction.state.log.min.isr"):
@@ -255,7 +256,8 @@ def main():
         assert not any(d["kind"] == "KafkaConnect" for d in measurement_docs)
         measurement_kafka = next(d["spec"] for d in measurement_docs if d["kind"] == "Kafka")
         measurement_pool = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaNodePool")
-        assert measurement_kafka["kafka"]["config"]["log.retention.hours"] == 72
+        assert "log.retention.hours" not in measurement_kafka["kafka"]["config"]
+        assert measurement_kafka["kafka"]["config"]["log.retention.ms"] == 604800000
         assert measurement_pool["replicas"] == 1 and measurement_pool["storage"]["volumes"][0]["size"] == "20Gi"
         assert measurement_pool["resources"]["requests"]["memory"] == "1536Mi"
         measurement_topic = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaTopic")
@@ -295,7 +297,7 @@ def main():
         assert "infra-smoke" not in business_topics
         for name in BUSINESS_TOPICS:
             assert business_topics[name]["partitions"] == 3 and business_topics[name]["replicas"] == 1
-            assert business_topics[name]["config"]["retention.ms"] == 259200000
+            assert business_topics[name]["config"]["retention.ms"] == 604800000
         assert not any(d["kind"] == "KafkaUser" and d["metadata"]["name"] == "infra-smoke-client" for d in business_docs)
         business_pool = next(d["spec"] for d in business_docs if d["kind"] == "KafkaNodePool")
         measurement_pool_doc = next(d for d in measurement_docs if d["kind"] == "KafkaNodePool")
