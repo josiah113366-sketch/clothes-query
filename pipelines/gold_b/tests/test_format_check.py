@@ -18,10 +18,10 @@ from pipelines.gold_b.format_check import DATASETS, MASK, FormatChecker, mask_sa
 from pipelines.gold_b.ledger import PAYMENT_FIELDS, KafkaMessage, message_rows  # noqa: E402
 from pipelines.payment_fingerprint import payment_fingerprint  # noqa: E402
 from pipelines.timestamps import parse_iso_datetime  # noqa: E402
-from test_ddl import _utc, load_samples  # noqa: E402
+from test_ddl import _utc, load_payment_updates, load_samples  # noqa: E402
 
 UTC = timezone.utc
-SAMPLES = {s["name"]: s for s in load_samples()}
+SAMPLES = {s["name"]: s for s in load_samples() + load_payment_updates()}
 
 
 @pytest.fixture(scope="module")
@@ -156,6 +156,8 @@ def test_error_rows_keep_record_key_and_source_ts(checker):
         value = value if isinstance(value, dict) else {}
         key = value.get(keys[topic]) if topic in keys else None
         source_ts = value.get("__source_ts_ms") if topic in with_source_ts else None
+        if type(source_ts) is not int or source_ts < 0:   # 0 이상의 정수가 아니면 비운다
+            source_ts = None
         for error in checker(message(sample)).errors:
             assert (error["record_key"], error["source_ts_ms"]) == (key, source_ts), sample["name"]
         checked += 1

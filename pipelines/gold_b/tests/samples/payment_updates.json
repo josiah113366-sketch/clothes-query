@@ -1,0 +1,156 @@
+[
+  {
+    "name": "upd_normal_c",
+    "description": "정상 c → u 1/2. 처음 결제 (금액 29000)",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1000, "timestamp": "2026-10-22T06:10:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000051", "order_id": "00000000-4000-8000-0000-000000000061", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 29000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:09:55Z", "completed_at": "2026-10-22T06:10:00Z", "__op": "c", "__source_ts_ms": 1792649401000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_normal_u",
+    "description": "정상 c → u 2/2. 금액을 39000으로 수정. 예전 뷰에서는 지문이 달라 충돌이었지만 이제 마지막 이벤트로 보인다",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1001, "timestamp": "2026-10-22T06:30:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000051", "order_id": "00000000-4000-8000-0000-000000000061", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 39000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:09:55Z", "completed_at": "2026-10-22T06:10:00Z", "__op": "u", "__source_ts_ms": 1792650601000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_same_ts_c",
+    "description": "같은 변경 시각의 c → u 1/2. PG 시간 초과로 실패",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1100, "timestamp": "2026-10-22T06:11:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000052", "order_id": "00000000-4000-8000-0000-000000000062", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 15000, "status": "FAILED", "failure_code": "PG_TIMEOUT", "requested_at": "2026-10-22T06:10:50Z", "completed_at": "2026-10-22T06:11:00Z", "__op": "c", "__source_ts_ms": 1792649461500, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_same_ts_u",
+    "description": "같은 변경 시각의 c → u 2/2. 같은 트랜잭션에서 실패 코드를 PG_ERROR로 수정 (__source_ts_ms가 c와 같음). 같은 시각은 정상이라 보류하지 않는다",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1101, "timestamp": "2026-10-22T06:11:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000052", "order_id": "00000000-4000-8000-0000-000000000062", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 15000, "status": "FAILED", "failure_code": "PG_ERROR", "requested_at": "2026-10-22T06:10:50Z", "completed_at": "2026-10-22T06:11:00Z", "__op": "u", "__source_ts_ms": 1792649461500, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_bad_latest_c",
+    "description": "잘못된 최신 u 1/2. 정상 결제",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1200, "timestamp": "2026-10-22T06:12:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000053", "order_id": "00000000-4000-8000-0000-000000000063", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 45000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:11:55Z", "completed_at": "2026-10-22T06:12:00Z", "__op": "c", "__source_ts_ms": 1792649521000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_bad_latest_u",
+    "description": "잘못된 최신 u 2/2. 규칙이 모르는 PG_C로 수정. ④에 record_key와 함께 남고 결제는 INVALID_LATEST로 보류",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1201, "timestamp": "2026-10-22T06:40:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000053", "order_id": "00000000-4000-8000-0000-000000000063", "attempt_no": 1, "method": "CARD", "pg": "PG_C", "amount": 45000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:11:55Z", "completed_at": "2026-10-22T06:12:00Z", "__op": "u", "__source_ts_ms": 1792651201000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "pg", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "upd_recovered_c",
+    "description": "재처리로 복구 1/2. 정상 결제",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1002, "timestamp": "2026-10-22T06:13:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000054", "order_id": "00000000-4000-8000-0000-000000000064", "attempt_no": 1, "method": "SIMPLE_PAY", "pg": "PG_B", "amount": 52000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:12:55Z", "completed_at": "2026-10-22T06:13:00Z", "__op": "c", "__source_ts_ms": 1792649581000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_recovered_u",
+    "description": "재처리로 복구 2/2. PG_C로 수정되어 처음에는 오류. PG_C를 허용한 새 규칙으로 재처리하면 같은 위치에 통과 줄이 더 늦게 쌓여 다시 보인다 (payment_states.json의 rechecks)",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1003, "timestamp": "2026-10-22T06:41:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000054", "order_id": "00000000-4000-8000-0000-000000000064", "attempt_no": 1, "method": "SIMPLE_PAY", "pg": "PG_C", "amount": 52000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:12:55Z", "completed_at": "2026-10-22T06:13:00Z", "__op": "u", "__source_ts_ms": 1792651261000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "pg", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "upd_fixed_c",
+    "description": "잘못된 u 뒤 새 정상 u 1/3. 고객 원인 실패",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1102, "timestamp": "2026-10-22T06:14:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000055", "order_id": "00000000-4000-8000-0000-000000000065", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 31000, "status": "FAILED", "failure_code": "CARD_DECLINED", "requested_at": "2026-10-22T06:13:55Z", "completed_at": "2026-10-22T06:14:00Z", "__op": "c", "__source_ts_ms": 1792649641000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_fixed_bad_u",
+    "description": "잘못된 u 뒤 새 정상 u 2/3. 성공으로 바꾸면서 실패 코드를 남김 (형식 오류)",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1103, "timestamp": "2026-10-22T06:42:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000055", "order_id": "00000000-4000-8000-0000-000000000065", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 31000, "status": "SUCCESS", "failure_code": "CARD_DECLINED", "requested_at": "2026-10-22T06:13:55Z", "completed_at": "2026-10-22T06:14:00Z", "__op": "u", "__source_ts_ms": 1792651321000, "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "failure_code", "reason": "INVALID_VALUE"}]}
+  },
+  {
+    "name": "upd_fixed_good_u",
+    "description": "잘못된 u 뒤 새 정상 u 3/3. 실패 코드를 지운 정상 수정. 재처리 없이 마지막 이벤트로 다시 보인다",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1104, "timestamp": "2026-10-22T06:43:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000055", "order_id": "00000000-4000-8000-0000-000000000065", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 31000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:13:55Z", "completed_at": "2026-10-22T06:14:00Z", "__op": "u", "__source_ts_ms": 1792651381000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_order_anomaly_c",
+    "description": "순서 이상 1/2. 정상 결제",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1202, "timestamp": "2026-10-22T06:15:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000056", "order_id": "00000000-4000-8000-0000-000000000066", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 27000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:14:55Z", "completed_at": "2026-10-22T06:15:00Z", "__op": "c", "__source_ts_ms": 1792649701000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_order_anomaly_u",
+    "description": "순서 이상 2/2. offset은 뒤인데 __source_ts_ms가 앞선 c보다 2초 작음. ORDER_ANOMALY로 보류",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1203, "timestamp": "2026-10-22T06:44:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000056", "order_id": "00000000-4000-8000-0000-000000000066", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 27000, "status": "FAILED", "failure_code": "PG_ERROR", "requested_at": "2026-10-22T06:14:55Z", "completed_at": "2026-10-22T06:15:00Z", "__op": "u", "__source_ts_ms": 1792649699000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_two_partitions_c",
+    "description": "두 파티션 1/2. 파티션 0에 들어온 결제",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1004, "timestamp": "2026-10-22T06:16:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000057", "order_id": "00000000-4000-8000-0000-000000000067", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 18000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:15:55Z", "completed_at": "2026-10-22T06:16:00Z", "__op": "c", "__source_ts_ms": 1792649761000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_two_partitions_u",
+    "description": "두 파티션 2/2. 같은 결제의 수정이 파티션 1에 들어옴 (토픽 파티션 수를 바꾸면 생길 수 있음). 순서를 정하지 않고 MULTI_PARTITION으로 보류",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1105, "timestamp": "2026-10-22T06:45:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000057", "order_id": "00000000-4000-8000-0000-000000000067", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 18000, "status": "FAILED", "failure_code": "PG_TIMEOUT", "requested_at": "2026-10-22T06:15:55Z", "completed_at": "2026-10-22T06:16:00Z", "__op": "u", "__source_ts_ms": 1792651501000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_hour_move_c",
+    "description": "completed_at 시간 폴더가 바뀌는 u 1/2. 결제 시각 06:59:50 (① 06시 폴더)",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1204, "timestamp": "2026-10-22T06:59:55Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000058", "order_id": "00000000-4000-8000-0000-000000000068", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 66000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:59:45Z", "completed_at": "2026-10-22T06:59:50Z", "__op": "c", "__source_ts_ms": 1792652394000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_hour_move_u",
+    "description": "completed_at 시간 폴더가 바뀌는 u 2/2. 결제 시각을 07:00:10으로 수정 (① 07시 폴더). 06시 폴더의 c 줄은 이력으로 남고 뷰는 이 줄을 보여준다",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1205, "timestamp": "2026-10-22T07:05:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000058", "order_id": "00000000-4000-8000-0000-000000000068", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 66000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:59:45Z", "completed_at": "2026-10-22T07:00:10Z", "__op": "u", "__source_ts_ms": 1792652701000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_bad_source_ts_c",
+    "description": "변경 시각이 잘못된 u 1/2. 정상 결제",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1005, "timestamp": "2026-10-22T06:17:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000059", "order_id": "00000000-4000-8000-0000-000000000069", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 21000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:16:55Z", "completed_at": "2026-10-22T06:17:00Z", "__op": "c", "__source_ts_ms": 1792649821000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_bad_source_ts_u",
+    "description": "변경 시각이 잘못된 u 2/2. __source_ts_ms가 문자열. ④의 source_ts_ms는 비고(NULL) 결제는 INVALID_LATEST로 보류",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1006, "timestamp": "2026-10-22T06:46:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-000000000059", "order_id": "00000000-4000-8000-0000-000000000069", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 22000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:16:55Z", "completed_at": "2026-10-22T06:17:00Z", "__op": "u", "__source_ts_ms": "1792651561000", "__source_snapshot": "false"},
+    "expected": {"payment_events": false, "malformed": [{"field": "__source_ts_ms", "reason": "TYPE_MISMATCH"}]}
+  },
+  {
+    "name": "upd_recheck_fail_c",
+    "description": "통과했다가 새 규칙에서 오류. 처음에는 정상이고, 새 규칙 버전으로 재처리한 오류 줄이 더 늦게 쌓여 INVALID_LATEST로 보류 (payment_states.json의 rechecks)",
+    "kafka": {"topic": "payments", "partition": 1, "offset": 1106, "timestamp": "2026-10-22T06:18:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-00000000005a", "order_id": "00000000-4000-8000-0000-00000000006a", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 33000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:17:55Z", "completed_at": "2026-10-22T06:18:00Z", "__op": "c", "__source_ts_ms": 1792649881000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_loaded_twice_c",
+    "description": "같은 메시지를 두 번 쌓음 (적재 잡 재시작). 같은 위치라 이벤트 1개로 센다 (payment_states.json의 rechecks)",
+    "kafka": {"topic": "payments", "partition": 2, "offset": 1206, "timestamp": "2026-10-22T06:19:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-00000000005b", "order_id": "00000000-4000-8000-0000-00000000006b", "attempt_no": 1, "method": "CARD", "pg": "PG_A", "amount": 12000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:18:55Z", "completed_at": "2026-10-22T06:19:00Z", "__op": "c", "__source_ts_ms": 1792649941000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  },
+  {
+    "name": "upd_tie_c",
+    "description": "같은 loaded_at의 검사 결과 두 개 (통과와 오류). 오류를 채택해 INVALID_LATEST로 보류 (payment_states.json의 rechecks)",
+    "kafka": {"topic": "payments", "partition": 0, "offset": 1007, "timestamp": "2026-10-22T06:20:02Z"},
+    "value": {"payment_id": "00000000-4000-8000-0000-00000000005c", "order_id": "00000000-4000-8000-0000-00000000006c", "attempt_no": 1, "method": "SIMPLE_PAY", "pg": "PG_A", "amount": 14000, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-22T06:19:55Z", "completed_at": "2026-10-22T06:20:00Z", "__op": "c", "__source_ts_ms": 1792650001000, "__source_snapshot": "false"},
+    "expected": {"payment_events": true, "malformed": []}
+  }
+]
