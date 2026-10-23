@@ -60,6 +60,7 @@ Gold B 잡 4개(적재 잡, 재처리 잡, 파일 합치기, Bronze 지연 수�
 - `pipelines/gold_b/Dockerfile.dockerignore`: 넣는 파일 17개 (공통 모듈 `pipelines/*.py` 5개, Gold B 코드 10개, `config/gold_b.yaml`, `requirements.txt`, 형식 규칙표). 시험·문서·Athena SQL·Silver·Gold A 코드·로컬 파일은 뺀다.
 - `pipelines/gold_b/tests/test_image.py`: Docker의 `.dockerignore` 규칙으로 저장소 파일을 걸러, 잡 4개의 import를 따라간 모듈이 모두 들어가고 정해 둔 파일만 들어가는지, 로컬 가상환경·캐시·`.env`·작업 폴더가 빠지는지, Dockerfile의 약속(출발 이미지, jar 확인, 코드 위치, 사용자, 진입점)을 본다.
 - 문서: Gold B README 「이미지」(빌드 명령, 잡마다 실행 명령), `jobs/README.md` 「적재 잡 배포에 필요한 것」(제출 명령, 상시 실행, 자원 제안, S3 권한과 체크포인트 위치 제안, Kafka 사용자·ACL·인증서), 설계 문서 파일 구조·4단계 체크리스트·팀원 확인 표.
+- 수집기 기본 커넥터를 `bronze-s3-sink-v2`로 바꿈 (2026-10-24 주현 님 요청, 성철 님 확인: S3 Sink 정지 사건이 v2를 멈춤). 배포 때 `GOLD_B_SINK_CONNECTOR`를 따로 넣지 않아도 된다. 소비자 그룹은 `connect-bronze-s3-sink-v2`로 따라간다. 배포 준비라 이 브랜치에 같이 넣었다.
 
 ### 왜
 
@@ -75,5 +76,5 @@ Gold B 잡 4개(적재 잡, 재처리 잡, 파일 합치기, Bronze 지연 수�
 
 - 재영 님: 팀 기본 Spark 이미지 ECR digest, Gold B 이미지 ECR 저장소, 적재 잡 배포(namespace·Pod Identity·S3 권한·체크포인트, Kafka `KafkaUser`·ACL·인증서·클라이언트 리스너 허용, 늘 켜 둔 Spark 스트리밍). 필요한 값은 `pipelines/gold_b/jobs/README.md` 「적재 잡 배포에 필요한 것」.
 - 머지 뒤 main 커밋으로 빌드해 ECR에 올리고, 원장 세 표에 줄이 쌓이는지 Athena로 확인한다 (시뮬레이터 메시지가 1~2분 안에 보이는지).
-- 수집기 커넥터 기본값(`bronze-s3-sink-v2`)과 수집기 배포는 따로 한다.
+- 수집기 배포는 따로 한다 (CronJob `--once` 또는 상시 `--interval 60`, 재영 님과).
 - `pipelines/gold-b-reprocess-by-message`와 브랜치 대장 gold-b 표 끝에서 충돌한다. 나중에 올리는 PR 전에 먼저 머지된 쪽을 받아 정리한다.
