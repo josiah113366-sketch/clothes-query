@@ -114,6 +114,7 @@ gitGraph
 | `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 플러그인 자동 갱신 중단, 실환경 복구·조회 검증 완료, 미게시 | |
 | `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | ECR·기본 이미지·S3/실행 계정/RBAC 적용 완료. 업무 이미지 대기·Spark 노드 미기동 | |
 | `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | JP Haiku·#53 표/뷰·첫 쓰기 및 agent ConfigMap/DAG 등록 완료, paused·미게시 | |
+| `infra/bronze-v2-lag-collector` | [infra-bronze-v2-lag-collector.md](tasks/infra-bronze-v2-lag-collector.md) | AWS·EKS 적용, v2 60초 수집·S3/Athena 최신성 검증 완료 | 2026-10-23 |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |

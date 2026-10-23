@@ -1,5 +1,7 @@
 # 배포 스택
 
+- [bronze-lag-collector](bronze-lag-collector/README.md): eks/storage 이후, v2 지연 수집기 독립 AWS 기반. 별도 key를 사용하며 기존 workload-access를 덮어쓰지 않음
+
 기존 bootstrap은 보존한다. 이번 구현은 dev 환경이며 backend key와 리소스 이름이 dev로 고정되어 있다. 다른 환경에는 새 key/이름 설계를 먼저 검토한다.
 
 - [network](network/README.md)
