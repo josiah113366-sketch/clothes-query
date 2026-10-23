@@ -209,6 +209,12 @@ s3://clothes-query-datalake/gold_b/
 
 수집기는 Gold B 적재 잡과 따로 돈다 (EKS에서 1분마다). 데이터가 없어도 돌아야 Bronze 멈춤을 잡을 수 있기 때문이다. 토픽별·파티션별로 쌓고, 전체 값이 필요하면 밀린 개수는 합, 밀린 시간은 최댓값으로 본다. 과거 측정값이라 재처리해도 다시 만들지 않는다.
 
+수집 규칙 (2026-10-21, 코드는 `pipelines/gold_b/collector/`):
+- 처리 기록이 없으면 `committed_offset`, `lag_msgs`, `lag_sec`는 NULL이다. 밀린 게 없으면 `lag_sec`는 0이다.
+- 처리할 메시지가 보관 기간으로 지워졌으면 `lag_sec`는 남아 있는 가장 오래된 메시지 기준이다 (실제보다 작음).
+- `connector_state`는 커넥터 상태다. 태스크가 RUNNING이 아니면 그 태스크 상태, Connect에 접속하지 못하면 `UNREACHABLE`, 커넥터가 없으면 `NOT_FOUND`다.
+- Kafka에 접속하지 못하면 그 회차는 줄을 쓰지 않는다. 탐지가 "측정 줄 없음"으로 잡는다.
+
 ### ④ `malformed_events` - 오류 하나 = 한 줄 (한 메시지에 오류가 여러 개면 여러 줄)
 
 | 컬럼 | 타입 | 뜻 | 예시 |
@@ -641,7 +647,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 주현 | `payment_conflicts` 추가, `bronze_lag_snapshots.kafka_partition` 이름 | 탐지 SQL에서 쓰는 이름 | 필요 |
 | 주현 | 조사 에이전트 리포트·실행 기록 표를 둘 곳 (`gold_b` 밖 권장: 에이전트는 `gold_b/`를 읽기만 함) | 에이전트 권한, 정답 노출 방지 | 필요 |
 | 주현 | 허용 지연 (시연 모드별 재측정 후) | 정답표 채점 기준 | 팀 회의 |
-| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 필요 |
+| 주현 | 판정·조사 쿼리에 시간 폴더 조건(`dt`, `hour`): `topic_messages`, `malformed_events`, `malformed_messages`, `bronze_lag_snapshots` | 조회할 때마다 원장 전체를 읽지 않게 | 진행 중 (#72) |
 | 주현 | 판정 설정 `format_rule_version`을 규칙표 버전(`0.2.0`)과 같게 | 다르면 R4가 깨진 메시지를 0건으로 셈 | 필요 |
 | 성철 | Bronze 적재 방식 | 지연 측정 방식 결정 | 완료 (S3 Sink) |
 | 성철 | S3 Sink 커넥터 이름, 소비자 그룹 이름 | 수집기가 처리 위치를 물어볼 대상 | 저장소상 `bronze-s3-sink`. 소비자 그룹 확인 필요 |
@@ -757,7 +763,7 @@ pipelines/gold_b/
 - [x]  `views/malformed_messages.sql` (필드·사유 쌍 배열, 시간 폴더 `dt`·`hour`)
 - [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
 - [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
-- [ ]  PR 올리고 합치기
+- [x]  PR 올리고 합치기 (#70, 2026-10-23)
 
 ### 4단계: 적재 잡
 
@@ -773,8 +779,8 @@ pipelines/gold_b/
 
 ### 5단계: Bronze 지연 수집기
 
-- [ ]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
-- [ ]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기
+- [x]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
+- [x]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기 (로컬 Kafka로 확인, 실제 S3 쓰기는 배포 때)
 - [ ]  `deploy/gold_b_collector.yaml` (CronJob 또는 상시 파드)
 - [ ]  정상일 때 값이 파일 전환 주기 기준선과 맞는지 확인
 - [ ]  S3 Sink를 잠깐 멈춰서 밀림·멈춤이 잡히는지 확인
