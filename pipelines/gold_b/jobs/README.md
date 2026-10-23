@@ -106,12 +106,14 @@ poller로 요청을 고르고, 형식 검사기(`pipelines/gold_b/format_check.p
 | `KAFKA_ADDRESS_FAMILY` | 로컬에서 IPv6로 먼저 붙는 문제가 있을 때만 `v4` |
 | `GOLD_B_RULES_PATH` | 형식 규칙표 경로 (생략하면 저장소의 `docs/contracts/format_rules.yaml`) |
 
-### Airflow DAG 명세 (재영 님께)
+### Airflow DAG (재영 님께)
 
-DAG 파일은 Airflow 공급 경로(`infra/platform/airflow/dags/`)에 둔다.
+DAG는 `infra/platform/airflow/dags/gold_b.py`의 `gold_b_reprocess`다 (2026-10-24, 꺼진 채로 올라감). 실행 설정(`AIRFLOW_GOLD_B_RUNTIME`)과 켜기 전에 준비할 것은 [DAG 설명](../../../infra/platform/airflow/dags/README.md) 「Gold B 재처리·파일 합치기 DAG」에 있다.
 
-- DAG `gold_b_reprocess`: 5분마다(`*/5 * * * *`), `max_active_runs` 1, 밀린 실행을 몰아서 돌리지 않음(`catchup` 끔)
-- 작업 하나: 위 명령을 Pod로 실행한다. 다시 돌린 횟수는 poller가 세므로 Airflow 재시도는 0으로 둔다 (두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감).
+- 5분마다(`*/5 * * * *`), `max_active_runs` 1, 밀린 실행을 몰아서 돌리지 않음(`catchup` 끔), 실행 상한 2시간
+- 설정 확인 태스크 뒤에 위 명령을 Pod로 실행한다. 다시 돌린 횟수는 poller가 세므로 Airflow 재시도는 0이다 (두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감).
+- Kafka 인증서 Secret을 `/opt/kafka-tls`에 붙이고 `KAFKA_SECURITY_PROTOCOL=SSL`과 `KAFKA_SSL_*` 경로를 준다.
+- 파일 합치기 DAG와 같은 pool에 넣어 같은 시간에 돌지 않는다.
 - Pod 권한: S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. Kafka 6개 토픽 읽기 (임시 그룹 `gold-b-reprocess-*`, 커밋 없음)
 - 이미지: Python 3.10 이상 (팀 기본 Spark 이미지의 3.10.12에서 돈다), `pipelines/gold_b/requirements.txt`, 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`, `docs/contracts/format_rules.yaml`
 
@@ -169,9 +171,9 @@ python -m pipelines.gold_b.jobs.compact --day 2026-10-21   # 그 날(UTC)을 합
 
 환경변수는 `GOLD_B_LEDGER_ROOT`(원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더) 하나다. 성공하면 0, 실패하면 1로 끝난다. 그 날이 끝나고 10분이 지나지 않았으면 거부한다.
 
-DAG 명세 (재영 님께, DAG 파일은 `infra/platform/airflow/dags/`):
-- DAG `gold_b_compact`: 하루 1번, UTC 00:30 이후 (그 날 끝 + 10분 여유 뒤), `max_active_runs` 1, `catchup` 끔
-- 제안: 재처리 DAG(`gold_b_reprocess`)와 같은 Airflow pool(슬롯 1개)에 넣어 두 작업이 겹치지 않게 한다. 지금 Airflow는 전체 동시 작업이 1개라 겹치지 않지만, 그 설정이 바뀌어도 막히게 한다.
+DAG (재영 님께): `infra/platform/airflow/dags/gold_b.py`의 `gold_b_compact` (2026-10-24, 꺼진 채로 올라감)
+- 매일 UTC 00:30 (그 날 끝 + 10분 여유 뒤). 날짜를 주지 않아 어제(UTC)를 합친다. `max_active_runs` 1, `catchup` 끔, Airflow 재시도 2번(10분 간격, 다시 돌려도 결과가 같음)
+- 재처리 DAG(`gold_b_reprocess`)와 같은 Airflow pool(실행 설정 `pool`, 슬롯 1개)에 넣어 두 작업이 겹치지 않게 한다. 지금 Airflow는 전체 동시 작업이 1개라 겹치지 않지만, 그 설정이 바뀌어도 막히게 한다.
 - Pod 권한: S3 원장 4개 폴더(`payment_events`, `topic_messages`, `bronze_lag_snapshots`, `malformed_events`) 읽기·쓰기·지우기
 
 코드에서 부를 때는 이렇게 한다.

@@ -33,6 +33,7 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `Dockerfile` | Gold B 이미지: 적재 잡·재처리 잡·파일 합치기·Bronze 지연 수집기를 한 이미지로. 팀 기본 Spark 이미지에서 출발 (아래 「이미지」) |
 | `Dockerfile.dockerignore` | 이미지에 넣는 파일 목록 (잡이 쓰는 코드·설정·형식 규칙표만) |
 | `tests/test_image.py` | 이미지에 넣는 파일이 잡 4개가 부르는 모듈을 모두 담고 시험·문서·로컬 파일은 빼는지, Dockerfile의 약속 (빌드 없이) |
+| `tests/test_dags.py` | Airflow DAG(`infra/platform/airflow/dags/gold_b.py`): 재처리·파일 합치기의 주기·재시도·꺼진 채로 생성, Pod 명령·환경변수·Kafka 인증서, 같은 pool, 실행 설정 확인 (가짜 Airflow 모듈) |
 
 정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena에서 만드는 것은 권한이 생긴 뒤에 한다.
 
@@ -75,11 +76,11 @@ docker build -f pipelines/gold_b/Dockerfile --build-arg SPARK_IMAGE=<팀 기본 
 | 잡 | 실행 명령 |
 |---|---|
 | 적재 잡 (상시) | `spark-submit local:///opt/gold_b/pipelines/gold_b/jobs/streaming_ingest.py` |
-| 재처리 잡 (Airflow, 5분마다) | `python3 -m pipelines.gold_b.jobs.reprocess` |
-| 파일 합치기 (Airflow, 하루 1번) | `python3 -m pipelines.gold_b.jobs.compact` |
+| 재처리 잡 (Airflow `gold_b_reprocess`, 5분마다) | `python3 -m pipelines.gold_b.jobs.reprocess` |
+| 파일 합치기 (Airflow `gold_b_compact`, 매일 00:30 UTC) | `python3 -m pipelines.gold_b.jobs.compact` |
 | Bronze 지연 수집기 (상시 또는 1분마다) | `python3 -m pipelines.gold_b.collector.bronze_lag_collector --interval 60` 또는 `--once` |
 
-환경변수와 배포에 필요한 것은 [jobs/README.md](jobs/README.md), [collector/README.md](collector/README.md)에 있다. 이미지를 ECR에 올리고 배포하는 것은 재영 님과 한다. 팀 기본 이미지가 ECR에 올라오기 전에는 실제 빌드를 하지 않는다.
+환경변수와 배포에 필요한 것은 [jobs/README.md](jobs/README.md), [collector/README.md](collector/README.md)에 있다. Airflow DAG는 `infra/platform/airflow/dags/gold_b.py`이고 실행 설정은 [DAG 설명](../../infra/platform/airflow/dags/README.md)에 있다. 이미지를 ECR에 올리고 배포하는 것은 재영 님과 한다. 팀 기본 이미지가 ECR에 올라오기 전에는 실제 빌드를 하지 않는다.
 
 ## 의존하는 것
 
