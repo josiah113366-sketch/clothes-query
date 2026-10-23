@@ -1,6 +1,6 @@
-# 대시보드 컨테이너 이미지. 빌드 컨텍스트는 앱 소스 폴더(dashboard/)다. repo 루트에서 실행:
-#   docker build -f infra/platform/dashboard/Dockerfile -t dashboard:dev dashboard/
-# 제외 목록은 이 파일 옆의 Dockerfile.dockerignore (BuildKit)가 적용된다.
+# 대시보드 컨테이너 이미지. 빌드 컨텍스트는 저장소 루트다(재처리 승인 화면이 agent/ 코드 두 파일을 쓰기 때문). repo 루트에서 실행:
+#   docker build -f infra/platform/dashboard/Dockerfile -t dashboard:dev .
+# 제외 목록은 이 파일 옆의 Dockerfile.dockerignore (BuildKit)가 적용된다. 필요한 파일만 허용하는 방식이다.
 FROM python:3.12-slim
 
 # .pyc 파일을 만들지 않고, 로그를 바로 출력하게 한다.
@@ -9,10 +9,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # 의존성을 먼저 설치해야 코드만 바뀔 때 빌드 캐시가 재사용된다.
-COPY requirements.txt .
+COPY dashboard/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY dashboard/ .
+# 재처리 승인 화면(approval_io.py)이 불러오는 승인 규칙과 Athena 연결 코드. 나머지 agent/ 는 넣지 않는다.
+COPY agent/approval/approval.py agent/approval/approval.py
+COPY agent/detect/athena_io.py agent/detect/athena_io.py
+ENV AGENT_CODE_DIR=/app/agent
 
 # root가 아닌 고정 UID로 실행 (k8s runAsNonRoot 는 숫자 UID가 필요하다)
 RUN useradd -m -u 10001 app && chown -R app /app
