@@ -20,6 +20,7 @@
 import functools
 import logging
 import os
+import zlib
 
 import numpy as np
 import pandas as pd
@@ -695,4 +696,214 @@ def get_rca_reports() -> pd.DataFrame:
                 "action_at": end - pd.Timedelta(minutes=30),
             },
         ]
+    )
+
+
+# =====================================================================
+# 감성분석 모델 관리 (데이터 관리 > '감성분석 모델' 화면)
+#   실데이터 연결 시 읽을 곳 (athena-review-score 스택, Glue DB):
+#     review_aspect_scores   점수 테이블 (review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date)
+#     review_score_log       후기별 점수 로그 (속성이 0개인 후기도 n_aspects = 0 으로 한 줄)
+#     review_aspect_scores_latest 뷰   Gold 가 읽는 값 (후기마다 model_version_no 가 가장 큰 결과)
+#   점수는 -2 ~ +2, '미언급'은 행이 없다. 시각 컬럼(analyzed_at)은 UTC 로 가정하고 화면에서 KST 로 바꾼다.
+#   ※ 아래 모델 이름·숫자는 모두 더미다. 후기 원문은 이 데이터에 없다 (review_id 만).
+# =====================================================================
+# (모델 이름, model_version_no). 번호 규칙: 평가 모델/로직이 바뀌면 메이저, 작은 수정이면 마이너를 올린다.
+_MODELS = [("2.3_score_s2c", 0.0), ("2.4b_score_s2c", 1.0)]
+SCORES = [-2, -1, 0, 1, 2]  # 속성별 점수 값
+
+
+@dataset(_TTL_A)
+def get_model_registry() -> pd.DataFrame:
+    """모델 버전 1줄. 컬럼: model_version, model_version_no, gold_read(Gold 가 읽는 버전인지), deployed_at(UTC),
+    change_type(최초/메이저/마이너), summary(한 줄 요약), rescore_required(기존 후기 재점수화 대상인지),
+    last_analyzed_at(UTC), analyzed_reviews, unscored_reviews(현재 버전만. 옛 버전은 NaN),
+    eval_set, eval_n, f1, mae, qwk(오프라인 평가 지표. 저장 위치 미정)."""
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None).floor("60min")
+    return pd.DataFrame(
+        {
+            "model_version": [m for m, _ in _MODELS],
+            "model_version_no": [n for _, n in _MODELS],
+            "gold_read": [False, True],
+            "change_type": ["최초", "메이저"],
+            "summary": [
+                "점수 모델 첫 배포",
+                "LoRA 병합 배포, 극단 점수 학습 보강, 출력 형식 정리, 평가 세트 교체",
+            ],
+            "rescore_required": [False, True],
+            "deployed_at": [now - pd.Timedelta(days=40), now - pd.Timedelta(days=12)],
+            "last_analyzed_at": [now - pd.Timedelta(days=12), now - pd.Timedelta(hours=7)],
+            "analyzed_reviews": [7_940, 3_410],
+            "unscored_reviews": [np.nan, 281.0],
+            "eval_set": ["사람 평가 세트 v1", "사람 평가 세트 v2"],
+            "eval_n": [99, 99],
+            "f1": [0.842, 0.868],
+            "mae": [0.301, 0.263],
+            "qwk": [0.891, 0.915],
+        }
+    )
+
+
+@dataset(_TTL_A)
+def get_model_changelog() -> pd.DataFrame:
+    """버전별 패치노트 항목. 컬럼: model_version, category, item, detail.
+    category: 모델 / 학습 데이터 / 프롬프트·후처리 / 속성 목록 / 평가 / 배포.
+    사람이 쓰는 기록이다. 실제로는 어디에 적어 둘지(모델 레지스트리 표, 문서 등)를 정해야 한다.
+    ※ 아래 내용은 화면 구성을 보기 위한 예시다."""
+    rows = [
+        ("2.3_score_s2c", "모델", "초판", "속성별 점수(-2~+2)를 직접 내는 점수 모델 첫 배포"),
+        (
+            "2.3_score_s2c",
+            "속성 목록",
+            "속성 11개",
+            "사이즈·핏 ~ 활용성·사용감 11개 속성을 대상으로 함",
+        ),
+        ("2.3_score_s2c", "평가", "사람 평가 세트 v1", "99건 기준 F1 0.842, MAE 0.301, QWK 0.891"),
+        (
+            "2.4b_score_s2c",
+            "모델",
+            "LoRA 병합 배포",
+            "어댑터를 기본 모델에 병합해 배포 형태를 바꿈",
+        ),
+        (
+            "2.4b_score_s2c",
+            "학습 데이터",
+            "극단 점수 보강",
+            "-2, +2 예시를 더 넣어 약한 부정·강한 긍정 구분을 개선",
+        ),
+        (
+            "2.4b_score_s2c",
+            "프롬프트·후처리",
+            "출력 형식",
+            "속성별 한 줄 출력. 파싱 실패 후기는 다음 실행에서 다시 시도",
+        ),
+        (
+            "2.4b_score_s2c",
+            "평가",
+            "평가 세트 교체",
+            "사람 평가 세트 v2로 바뀜. 이전 버전 수치와 직접 비교할 수 없음",
+        ),
+        (
+            "2.4b_score_s2c",
+            "배포",
+            "전체 재점수화",
+            "메이저 번호가 올라 기존 후기가 모두 재점수화 대상이 됨",
+        ),
+    ]
+    return pd.DataFrame(rows, columns=["model_version", "category", "item", "detail"])
+
+
+@dataset(_TTL_A)
+def get_model_review_daily(days: int = 30) -> pd.DataFrame:
+    """작성일(KST) × 모델 버전별 분석한 후기 수. 컬럼: review_date, model_version, analyzed_review_count,
+    zero_aspect_review_count(속성이 0개 나온 후기 수)."""
+    rng = np.random.default_rng(_SEED + 20)
+    dates = pd.date_range(end=_today_kst(), periods=days)
+    rows = []
+    for m, _ in _MODELS:
+        for d in dates:
+            n = int(rng.integers(240, 320))
+            rows.append((d, m, n, int(n * rng.uniform(0.04, 0.09))))
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "review_date",
+            "model_version",
+            "analyzed_review_count",
+            "zero_aspect_review_count",
+        ],
+    )
+
+
+@dataset(_TTL_A)
+def get_model_score_daily(days: int = 30) -> pd.DataFrame:
+    """작성일(KST) × 모델 버전 × 속성 × 점수별 후기 수. 컬럼: review_date, model_version, aspect, score,
+    review_count. 한 후기는 속성마다 점수가 하나이므로 review_count 의 속성별 합 = 그 속성을 언급한 후기 수.
+    속성끼리 더하면 후기 하나가 여러 번 세어지므로 전체 후기 수로 쓰지 않는다."""
+    rng = np.random.default_rng(_SEED + 21)
+    dates = pd.date_range(end=_today_kst(), periods=days)
+    rows = []
+    for vi, (m, _) in enumerate(_MODELS):
+        for ai, aspect in enumerate(ASPECTS):
+            # 속성마다 점수 분포가 다르다 (뒤쪽 속성일수록 부정이 조금 많게). 새 버전은 극단 점수를 더 낸다.
+            base = np.array([0.04 + 0.01 * ai, 0.10, 0.20, 0.36 - 0.01 * ai, 0.30 - 0.03 * vi])
+            base = base + np.array([0.02 * vi, 0, 0, 0, 0.02 * vi])
+            base = base / base.sum()
+            for d in dates:
+                mentioned = int(rng.integers(20, 90))
+                counts = rng.multinomial(mentioned, base)
+                rows.extend((d, m, aspect, s, int(c)) for s, c in zip(SCORES, counts))
+    return pd.DataFrame(
+        rows, columns=["review_date", "model_version", "aspect", "score", "review_count"]
+    )
+
+
+@dataset(_TTL_A)
+def get_model_score_diff(model_a: str, model_b: str) -> pd.DataFrame:
+    """같은 후기·속성에 대한 두 버전의 점수 비교. 컬럼: review_id, aspect, score_a, score_b.
+    두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 있다. 후기 원문은 없다."""
+    rng = np.random.default_rng(_SEED + 22 + zlib.crc32(f"{model_a}|{model_b}".encode()) % 1000)
+    n = 900
+    a = rng.choice(SCORES, n, p=[0.06, 0.14, 0.2, 0.36, 0.24])
+    change = rng.random(n) < 0.18
+    step = rng.choice([-2, -1, 1, 2], n, p=[0.1, 0.4, 0.4, 0.1])
+    b = np.clip(np.where(change, a + step, a), -2, 2)
+    return pd.DataFrame(
+        {
+            "review_id": [f"R-{i // 3 + 1:05d}" for i in range(n)],
+            "aspect": rng.choice(ASPECTS, n),
+            "score_a": a,
+            "score_b": b,
+        }
+    )
+
+
+@dataset(_TTL_B)
+def get_model_runs(days: int = 14) -> pd.DataFrame:
+    """일별 분석 Job 실행 기록. 컬럼: run_date(작성일 KST), model_version, status(SUCCEEDED/FAILED/
+    SKIPPED_NO_INPUT), input_reviews(미점수로 고른 후기), scored_reviews(점수가 한 개 이상 나온 후기),
+    zero_aspect_reviews, parse_failed(파싱 실패. 다음 실행에서 다시 시도), unscored_left(실행 뒤 남은 미점수),
+    duration_min, finished_at(UTC). 실제로는 Airflow 실행 기록과 오류 prefix 에서 가져온다."""
+    rng = np.random.default_rng(_SEED + 23)
+    dates = pd.date_range(end=_today_kst(), periods=days)
+    cur = _MODELS[-1][0]
+    rows = []
+    for i, d in enumerate(dates):
+        inp = int(rng.integers(240, 320))
+        status, failed, scored = "SUCCEEDED", int(rng.integers(0, 3)), 0
+        if i == days - 6:
+            status, inp = "SKIPPED_NO_INPUT", 0  # 미점수 후기가 없으면 Job 을 띄우지 않는다
+        elif i == days - 3:
+            status = "FAILED"
+        zero = int(inp * rng.uniform(0.04, 0.09))
+        if status == "SUCCEEDED":
+            scored = inp - zero - failed
+        rows.append(
+            (
+                d,
+                cur,
+                status,
+                inp,
+                scored,
+                zero if status == "SUCCEEDED" else 0,
+                failed if status == "SUCCEEDED" else 0,
+                inp if status == "FAILED" else failed if status == "SUCCEEDED" else 0,
+                float(rng.uniform(9, 16)) if status != "SKIPPED_NO_INPUT" else 0.0,
+                d + pd.Timedelta(hours=16, minutes=int(rng.integers(0, 40))),
+            )
+        )
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "run_date",
+            "model_version",
+            "status",
+            "input_reviews",
+            "scored_reviews",
+            "zero_aspect_reviews",
+            "parse_failed",
+            "unscored_left",
+            "duration_min",
+            "finished_at",
+        ],
     )

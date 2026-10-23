@@ -38,6 +38,8 @@
 | B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | | 대기 | |
 | B4 | 파이프라인 상태의 "평소 범위" 기준(`NORMAL_MAX_SEC`, 현재 1,020초)과 경고 규칙 확정 | 실측 지연 분포 | `gold-b` / `agent` | | 대기 | 15분 파일 주기 톱니 |
 | B5 | 형식 오류 화면의 현재 `rule_version` 선택 방식 확정 | 공통 규칙 YAML 버전 운영 방식 | `gold-b` | | 대기 | |
+| B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `review_aspect_scores_latest` 조회를 `_REAL`에 등록 (`get_model_registry`, `get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_runs`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 대기 | 지금은 더미 |
+| B7 | 감성분석 모델 화면의 파싱 실패 건수와 Job 결과를 읽을 곳 확정 (오류 prefix, Airflow 기록), 오프라인 평가 지표와 버전별 패치노트(바뀐 내용) 기록·저장 위치 확정 | Airflow 연동, 평가 결과 정리 | `review-model` / `gold-b` | | 대기 | |
 
 ## 3. 원인 리포트 / 승인
 
