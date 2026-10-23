@@ -52,7 +52,7 @@ Gold B 재처리 잡과 파일 합치기를 Airflow로 돌릴 DAG 2개를 만든
   - 공통: 꺼진 채로 생성, catchup 끔, 한 번에 하나, 두 Pod가 같은 pool(`pool` 키, 없으면 기본 pool), automount 끔, EC2 메타데이터 끔, 요청 0.25 CPU·512Mi / 상한 1 CPU·2Gi, 끝나면 Pod 지움. Pod 이름은 `gold-b-reprocess`, `gold-b-compact`.
   - 실행 설정 `AIRFLOW_GOLD_B_RUNTIME`: digest 이미지·namespace·실행 신원·`s3://` 원장 위치가 없으면 두 DAG 모두, Kafka 주소·인증서 Secret이 없으면 재처리만 확인 태스크에서 멈춘다. `agent`·`kafka`·`kube-system` namespace는 거부한다. 설정이 없어도 DAG 파일은 읽혀 Airflow 화면에 보인다.
 - `pipelines/gold_b/tests/test_dags.py` (18개): 가짜 Airflow·Kubernetes 모듈로 DAG 파일을 읽는다. DAG 설정, Pod 명령·환경변수·인증서, 같은 pool(없으면 기본 pool), 노드 배치, 설정 확인 규칙을 본다. 잡과 맞물리는지도 본다: 재처리 잡이 Pod 환경변수로 만든 Kafka 설정이 붙인 인증서 파일을 가리키는지, 00:30에 날짜 없이 부르면 파일 합치기 잡이 어제를 거부하지 않는지.
-- 문서: DAG 설명(`infra/platform/airflow/dags/README.md` 「Gold B 재처리·파일 합치기 DAG」: 실행 설정 예와 켜기 전에 준비할 것), 잡 설명의 DAG 절(`pipelines/gold_b/jobs/README.md`), Gold B README 표, 설계 문서(6·7단계 체크리스트, 파일 구조, 재영 님 확인 표, poller 절).
+- 문서: DAG 설명(`infra/platform/airflow/dags/README.md` 「Gold B 재처리·파일 합치기 DAG」: 실행 설정 예와 켜기 전에 준비할 것), 잡 설명의 DAG 절(`pipelines/gold_b/jobs/README.md`), Gold B README 표, 설계 문서(6·7단계 체크리스트, 파일 구조, 재영 님 확인 표, poller 절). 설계 문서의 「자동 재시도」 줄이 "Airflow가 2번 다시 시도"로 남아 있어 poller가 다시 고르는 방식(Airflow 재시도 0)으로 고쳤다.
 
 ### 왜
 
