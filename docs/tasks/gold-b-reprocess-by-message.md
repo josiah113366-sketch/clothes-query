@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-reprocess-by-message
 
-> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-reprocess-by-message` (결제 UPDATE 처리 #95 머지 뒤 최신 `main` `4d80c76`에서, 2026-10-24 #98 머지 뒤 최신 `main` 병합) · 다음 작업: PR (사용자)
+> 상태: 완료 (#99, 2026-10-24 머지) · 브랜치: `pipelines/gold-b-reprocess-by-message` (결제 UPDATE 처리 #95 머지 뒤 최신 `main` `4d80c76`에서, 2026-10-24 #98 머지 뒤 최신 `main` 병합) · 남은 일: 판정 잡 재판정 한 번에 하나(주현 님 #97), 재처리·합치기 DAG 같은 pool, Bronze 재처리
 
 ## 목표
 

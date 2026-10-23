@@ -899,7 +899,7 @@ pipelines/gold_b/
 - [ ]  원본 선택: 보관 기간(7일) 안은 Kafka(해당 offset부터), 넘으면 Bronze (Kafka는 완료. Bronze는 Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정한 뒤)
 - [x]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
 - [x]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
-- [x]  메시지 단위 재처리 (`pipelines/gold-b-reprocess-by-message`, 2026-10-23): 승인 범위 메시지만 다시 읽어 옛 결과를 새 결과로, 범위 밖 결제 시각 폴더도 고치고 `LEDGER_REPLACED`(`outside_window`), 새 결과를 먼저 더하고 정리
+- [x]  메시지 단위 재처리 (`pipelines/gold-b-reprocess-by-message`, #99, 2026-10-24): 승인 범위 메시지만 다시 읽어 옛 결과를 새 결과로, 범위 밖 결제 시각 폴더도 고치고 `LEDGER_REPLACED`(`outside_window`), 새 결과를 먼저 더하고 정리
 - [x]  `reprocess_events`에 `STARTED`, 폴더마다 `LEDGER_REPLACED`, 실패 시 `FAILED`(+`detail`) 기록
 - [x]  원본이 없는 구간은 재시도 없이 바로 `FAILED`
 - [x]  실제 교체 범위를 결과로 넘기기
