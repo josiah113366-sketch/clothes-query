@@ -29,7 +29,7 @@ class ApprovalConfig:
     ttl_minutes: int = 60                 # 요청 후 승인, 승인 후 시작까지 허용하는 시간 (제안 값, 팀 이의 기한 중)
     max_attempts: int = 2                 # 재시도 최대 횟수 (은서 님 동의)
     rule_version: str = "0.2.0"           # 공통 형식 검사 규칙 버전 (docs/contracts/format_rules.yaml의 version과 같게)
-    kafka_retention_days: int = 3         # Gold B 재처리는 Kafka 보관 기간(3일) 안의 구간을 우선한다(은서 님 워크플로우)
+    kafka_retention_days: int = 7         # Gold B 재처리는 Kafka 보관 기간(7일, 은서 님 2026-10-23: 3일에서 변경) 안의 구간을 우선한다(은서 님 워크플로우)
     dialect: str = "athena"               # 시험에서만 "sqlite"
     # 규칙 -> (호출할 DAG ID, source). DAG ID가 POLLER면 호출하지 않고(재처리 DAG가 APPROVED 줄을 5분마다 읽음), None이면 아직 정해지지 않은 것.
     # R3는 재처리가 값을 바꾸지 않아 대상이 아니다
