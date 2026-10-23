@@ -27,6 +27,8 @@ SUBMIT_REPORT_SPEC = {"toolSpec": {
 # 문장에 (주제 낱말)과 (부정·정상 낱말)이 같이 있으면 걸린다. 낱말 규칙이라 완벽하지 않다: 놓치는 문장도, 필요 없이 걸리는 문장도 있을 수 있다.
 # 걸리면 되돌려 보내서 도구를 먼저 부르거나 "확인하지 못했다"로 고치게 한다.
 DENIAL_WORDS = ("없", "정상", "아닙니다", "아니다")
+# "확인할 수 없습니다", "확인하지 못했습니다"는 불확실성을 밝힌 올바른 문장이다. '없'이 들어 있어도 단정으로 보지 않도록 문장에서 먼저 뺀다
+UNCERTAIN = re.compile(r"\S*\s*수\s*없\S*|\S*\s*못(?:했|합|한)\S*|불확실\S*|확인되지\s*않\S*")
 DENIAL_RULES = (
     (("오염", "중복"), ("duplicate_success_orders",), "데이터 오염·중복"),
     (("형식", "깨진", "스키마"), ("malformed_summary", "malformed_fields"), "형식 오류"),
@@ -39,7 +41,8 @@ def unsupported_denials(text: str, called_tools: set) -> list:
     """text 안에서, 확인하는 도구를 부르지 않고 "없다/정상"이라고 쓴 문장 -> [(문장, 필요한 도구 목록, 주제)]"""
     found = []
     for sentence in re.split(r"[.。!?\n]", str(text or "")):
-        if not any(w in sentence for w in DENIAL_WORDS):
+        claim = UNCERTAIN.sub(" ", sentence)
+        if not any(w in claim for w in DENIAL_WORDS):
             continue
         for topics, tools, label in DENIAL_RULES:
             if any(t in sentence for t in topics) and not (set(tools) & called_tools):
@@ -89,6 +92,10 @@ def build_report(anomaly_id, raw: dict, problems=None) -> dict:
     report = {"report_id": "rep-" + uuid.uuid4().hex[:8], "anomaly_id": anomaly_id, "cause_layer": raw.get("cause_layer"),
               "conclusion": raw.get("conclusion"), "claims": raw.get("claims", [])}
     if problems:
+        # 되돌림 한도까지 고치지 못한 리포트: 검증을 통과하지 못한 결론을 원인으로 내세우지 않는다.
+        # 원인 층은 UNKNOWN으로 하고, 모델이 낸 결론과 원인 층은 사람이 볼 수 있게 앞에 표시해 남긴다.
+        report["conclusion"] = f"[검증 미통과 · 모델이 낸 원인 층: {raw.get('cause_layer')}] {raw.get('conclusion') or ''}".strip()
+        report["cause_layer"] = "UNKNOWN"
         report["problems"] = problems
     return report
 

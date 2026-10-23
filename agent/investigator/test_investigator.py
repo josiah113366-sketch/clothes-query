@@ -76,6 +76,7 @@ worse = dict(REPORT, claims=[{"text": "근거 없음", "kind": "FACT", "evidence
 conv, _ = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **worse)], [use(3, "submit_report", **worse)], [use(4, "submit_report", **worse)])
 r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("계속 고치지 못하면 2번 거절한 뒤 받되 problems를 남김(채점에서 근거 없는 주장으로 셈)", (len([t for t in r["trace"] if t["status"] == "rejected"]), len(r["problems"])), (2, 1))
+check("한도까지 못 고친 리포트는 원인 층 UNKNOWN, 결론 앞에 검증 미통과와 모델이 낸 층을 표시", (r["cause_layer"], r["conclusion"].startswith("[검증 미통과 · 모델이 낸 원인 층: PAYMENT]")), ("UNKNOWN", True))
 conv, _ = script([use(1, "payment_summary", **W)], [use(2, "submit_report", **dict(REPORT, cause_layer="STORAGE"))], [use(3, "submit_report", **REPORT)])
 r = investigate(PG_ANOMALY, conv, execute, dialect="sqlite", now=NOW)
 check("모르는 원인 층은 거절", (r["trace"][1]["status"], r["cause_layer"]), ("rejected", "PAYMENT"))
@@ -161,6 +162,9 @@ check("단정 검사: 중복 확인 도구 없이 '오염이 없다'고 쓰면 �
 check("단정 검사: 도구를 부른 뒤에는 통과", unsupported_denials("원본 데이터에 오염이 없습니다.", {"duplicate_success_orders"}), [])
 check("단정 검사: 형식 오류는 malformed_summary나 malformed_fields 중 하나면 통과", (len(unsupported_denials("형식 오류도 없습니다.", set())), len(unsupported_denials("형식 오류도 없습니다.", {"malformed_fields"}))), (1, 0))
 check("단정 검사: 원장이 정상이라는 말은 ledger_reliability가 필요", (len(unsupported_denials("원장 적재는 정상입니다.", {"payment_summary"})), len(unsupported_denials("원장 적재는 정상입니다.", {"ledger_reliability"}))), (1, 0))
+check("단정 검사: 불확실성을 밝힌 문장('확인할 수 없습니다', '확인하지 못했습니다')은 걸리지 않음",
+      [unsupported_denials(t, set()) for t in ("중복 여부를 확인할 수 없습니다.", "형식 오류는 확인하지 못했습니다.", "지연은 알 수 없고 불확실합니다.")], [[], [], []])
+check("단정 검사: 불확실 문장이 섞여도 단정 부분(오염 없음)은 걸림", "데이터 오염·중복" in [x[2] for x in unsupported_denials("원장은 확인할 수 없지만 오염은 없습니다.", set())], True)
 check("단정 검사: '있다'는 문장(중복 3건이 있음)은 걸리지 않음", unsupported_denials("성공 결제가 중복된 주문이 3개 있습니다.", set()), [])
 check("단정 검사: 낱말이 없는 문장(PG 원인 실패 0건)은 걸리지 않음", unsupported_denials("PG_B의 PG 원인 실패는 0건입니다.", set()), [])
 problems = check_report(dict(REPORT, conclusion="PG_A 장애입니다. 데이터 오염은 없습니다."), {"payment_summary"})
