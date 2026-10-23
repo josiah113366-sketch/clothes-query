@@ -383,6 +383,8 @@ def configure_storage(spark, output):
         spark.conf.set("spark.sql.parquet.output.committer.class", "org.apache.spark.internal.io.cloud.BindingParquetOutputCommitter")
         spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.name", "magic")
         spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.magic.enabled", "true")
+        # 실행별 고유 출력 경로에만 쓴다. 같은 경로의 다른 작업 MPU를 중단할 수 있다.
+        spark.sparkContext._jsc.hadoopConfiguration().set("fs.s3a.committer.abort.pending.uploads", "true")
         spark.sparkContext._jsc.hadoopConfiguration().set("mapreduce.outputcommitter.factory.scheme.s3a", "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory")
 
 

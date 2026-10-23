@@ -1,16 +1,15 @@
-상태: 기존 구현 908c252 원격 공유 완료 · 상품 Parquet 입력 검수·커밋 승인(2026-10-23) · 운영 연결 전 · 브랜치: `pipelines/runtime`
+상태: 구현·로컬 검증 완료 · main 대상 리뷰 준비 · 운영 연결 전 · 브랜치: `pipelines/runtime`
 
 # Silver·Gold A 운영 실행 연결
 
-## 승인 범위
+## 작업 범위
 
-- 사용자 승인(2026-10-23): 실제 상품 기준정보를 Parquet 그대로 읽도록 상품 입력을 확장한다. 거래·퍼널·리뷰 공통 reader와 입력 고정 목록에 적용하며 계산 규칙은 바꾸지 않는다. 구현·검증 후 사용자가 검수 및 커밋을 승인했다. 이번 추가 변경의 push·배포는 별도 확인 후 진행한다.
-- 최신 사용자 승인(2026-10-23): 검토한 클릭 Silver·퍼널 Spark 및 거래 부분 공개 보완, Athena 공개 연결 고려사항을 커밋한다. push·PR·배포는 별도 확인 후 진행한다.
-
-- 사용자 승인: 기존 계산 코드를 호출하는 처리 이미지·S3 실행기·수동 Airflow DAG 구현.
-- 최신 main에서 브랜치를 만들고 선행 Gold A #67 코드를 로컬에 포함했다. #67 main 반영 후 이 브랜치도 main과 동기화한다.
-- 공통 입력 규약·계산 규칙은 변경하지 않는다. 처음 일반 Python 시제품으로 구현했으나 사용자가 Spark 실행 엔진을 정정하고 PySpark 전환부터 진행하도록 승인했다. Spark 전환은 현재 승인 범위다. Kafka 소비·인프라 apply·이미지 push·운영 실행은 포함하지 않는다.
-- namespace·ServiceAccount·ECR 이미지 digest·노드 배치는 인프라가 공급한다. 기존 agent 신원을 재사용하지 않는다.
+- 거래·클릭·리뷰 정제와 Gold A 판매·퍼널·리뷰 집계를 Spark 실행으로 연결한다.
+- 상품 기준정보는 JSONL과 Parquet 입력을 지원하며 기존 계산·품질 기준을 유지한다.
+- 처리 이미지·고정 S3 입력·실행별 결과 및 완료 기록·수동 Airflow DAG를 제공한다.
+- S3A magic committer의 정상·실패 저장 경로와 정리 권한을 로컬에서 검증한다.
+- namespace·ServiceAccount·ECR 기본 이미지·노드 배치는 인프라 명세에 맞춘다.
+- 실제 EKS 실행, 최종 ECR 발행, Glue·Athena 공개, 정기 실행·재처리 DAG는 후속 작업이다.
 
 ## 구현 파일 · 현재 구조
 
@@ -39,6 +38,42 @@
 - 커밋 전 변경 5개 파일의 전체 diff·호출 경로를 검수했고 Ruff Python 3.10·git diff --check를 다시 통과했다. 기존 Spark 6개 시험 및 실제 상품 시드 검증 이후 계산 코드는 바뀌지 않았다. 원격 908c252에는 이번 Parquet 보완이 아직 없으며 추가 push·새 배포 이미지 발행은 별도다.
 
 ## 작업 결과
+
+### 고정 입력·기대 결과 S3 업로드 (2026-10-23) · 로컬 검증 기록
+
+- pipelines/input-manifests/와 pipelines/requests/에 검증 자료를 신규 업로드했다. 정상 원문 복사본 3개, 두 사례 manifest/expected/validation, 실행 요청 2개로 총 11객체/14,408바이트다. 상품 Parquet·참조 대기 Bronze는 원본을 참조하고 복사·덮어쓰지 않았다.
+- IfNoneMatch=*로 기존 객체 덮어쓰기를 방지하고, 각 객체를 GET해 SHA-256·크기를 대조했다. 모든 입력 참조는 HEAD로 존재 확인했고 원본 6객체의 ETag·크기를 준비 시 값과 재확인했다. S3 manifest에서 로컬 사용자 경로는 제거했다.
+- 정상 요청: s3://clothes-query-datalake/pipelines/requests/trade-fixed-normal-20261023.json. 정상 manifest/expected/validation은 pipelines/input-manifests/trade-fixed-normal-20261023/에 있다. 참조 대기 요청은 pipelines/requests/trade-fixed-reference-wait-20261023.json, 해당 자료는 pipelines/input-manifests/trade-fixed-reference-wait-20261023/에 있다.
+- 준비·검증용 업로드일 뿐 실제 Spark 실행·Airflow Trigger·운영 current 변경은 하지 않았다. 출력_root 초안은 기존 거래 런타임 경로를 사용하므로 실행 권한·이전 결과·동시성 확인은 여전히 필요하다. 외부 manifest의 준비 ETag 자동 소비·VersionId 고정·Kafka 완전성은 아직 별도다.
+- 업로드 기록 및 실제 전달 초안은 Git 제외 .local/trade-fixed-20261023/upload_receipt.json 및 message-to-infra.md에 있다. 커미터 true 명시와 관련 명세를 이번 변경에 포함한다.
+
+### 커미터 true·정리 권한 검증 (2026-10-23) · 로컬 검증 기록
+
+- configure_storage에 fs.s3a.committer.abort.pending.uploads=true를 명시했다. 고유 run_id·동일 데이터셋 단일 작성자 전제를 코드/README에 남겼다.
+- 외부 통신 없는 Docker 내부망과 Moto 5.1.15 감사 WSGI를 사용했다. 실제 Java S3A 요청의 메서드·키·prefix·상태 코드만 기록했고, 정상 저장·UploadPart 403·첫 파일 완료 후 다음 CompleteMultipartUpload 403을 검증했다. 권한/장애 주입은 로컬 서버에만 적용했다.
+- 정상 업무 잡은 Silver/Gold PASS·승인 금액 30,000원이었다. 별도 저장 세 사례의 미완료 업로드는 0개, 다른 실행의 파일·미완료 업로드는 보존됐다. 실제 업무 잡의 Gold 업로드 실패에서는 이전 Gold current 보존·완료 Silver 유지도 확인했다.
+- 중요 보완: 부분 커밋 실패 시 magic 밖의 현재 실행 최종 part-*.parquet를 롤백 삭제한다. 따라서 magic 하위 전용 DeleteObject 안을 수정했다. ListMultipartUploads는 실행 데이터셋 prefix로 실제 호출됐고 AbortMultipartUpload도 관측됐다. Java ListParts는 이번 세 경로에 없으므로 ListMultipartUploadParts를 무조건 필수로 요청하지 않는다.
+- 실제 호출 기록은 .local/s3-committer-20261023/results/{baseline,success,upload-failure,commit-failure,failed-business}-events.json 및 report.json에 있다. 시험용 스레드 수 1로 커밋을 직렬화해 부분 커밋을 재현했으며 운영 CPU/자원 값으로 확정한 것은 아니다. 임시 컨테이너·내부망은 정리했다.
+- 로컬 검증 소스는 427afdf에 true 명시를 더한 미커밋 상태다. 실제 AWS IAM·Pod Identity·EKS 검증과 구분한다. 기존 이미지에는 명시 설정이 아직 없으며 최종 커밋으로 재빌드해야 한다.
+- 개념 설명을 SK database의 'Spark 커미터·S3 멀티파트·삭제 권한 — 지금 왜 필요한가'에 저장했다. 정상/실패 실측과 필요한 권한·담당 구분을 추가하며, 재영님 전달 초안에도 반영한다. Ruff Python 3.10·git diff --check 통과. 실제 AWS 변경·추가 커밋/push는 하지 않았다.
+
+### 최신 업무 이미지 재빌드 (2026-10-23) · 로컬 검증 기록
+
+- 427afdf 전체 커밋을 CODE_REF로 지정해 clothes-query-pipelines:runtime-427afdf를 로컬 빌드했다. 기본 apache/spark digest는 fc64959c04bd87b0ac686be9aaa9008b69cdb1afc695400528279c8b01f43d89로 고정했다. 팀 기본 ECR 이미지는 현재 목록에 없어 해당 이미지 기반 최종 빌드와 ECR 발행은 아직이다.
+- Python 3.10.12/Spark 4.2.0/PyArrow 25.0.1/boto3 1.43.71/PyYAML 6.0.3, UID 185, 소스 SHA-256 일치 및 .local·원본 자료·캐시 미포함을 확인했다.
+- 새 이미지에 별도 업무 소스 마운트 없이 실제 원본 기반 정상 입력을 처리했다. Silver/Gold PASS, 금액 검사 PASS 1건, 시간별/상품별 집계 각각 1행, refresh_holds 0행이며 주문 1건/7,900원/판매 수량 1개의 독립 기대값과 일치했다. 상세는 .local/trade-fixed-20261023/image-427-result/에 있다.
+- 로컬 이미지 ID는 sha256:f1d7810a82b50f7ed77395bf5b6b7a50c0bfa892702cb30250b50d6f554dacb9이며 ECR 배포 digest가 아니다. 최신 검증의 manifest code_ref도 실제 427afdf로 확인한다. 앞선 908c252 마운트 시험은 이력으로 보존한다.
+- 재영님 전달 초안을 .local/trade-fixed-20261023/message-to-infra.md에 준비했다. namespace 공유·세 ServiceAccount·요청 prefix·원격 코드·이미지·실제 입력 기대값·상품 버킷 권한 및 미완료 커미터/Glue 항목을 구분했다. 외부 메시지·ECR push·S3 업로드·EKS 실행·추가 커밋은 하지 않았다.
+
+### 실제 거래 고정 입력·독립 기대값 준비 (2026-10-23) · 로컬 검증 기록
+
+- 실제 S3 읽기·로컬 입력 고정·독립 기대 결과·Spark 검증을 수행했다. 정상/상품 없는 주문이 같은 파일에 섞여 있어 정상 주문 원문만 복사한 검증 묶음을 구성했다. S3 원본·업무 값은 수정하지 않았다.
+- 정상 사례: 주문 이력 3줄·주문상품 1줄·결제 1줄·상품 Parquet 2개, 5파일/2,560,522바이트. 독립 계산 기대는 주문/성공 주문 각 1건·승인 금액 7,900원, KST 2026-10-20 17시, 상품 판매 수량 1개·금액 7,900원이다. Spark에서 Silver/Gold PASS·격리 0건·refresh_holds 0건 및 전체 집계 일치를 확인했다.
+- 전체 UTC 10/20 원본은 6파일/2,560,889바이트, 주문 변경 4줄(주문 2건)·상품 1줄·결제 1줄이다. 독립 기대 PASS 1건/PENDING_REFERENCE 1건과 Spark 검사가 일치했다. Silver INCOMPLETE, Gold PARTIAL, 판매 범위 2개 전체 보류·이전 결과 없음도 확인했다. 정상 매출 0으로 해석하지 않는다.
+- 실제 디자인 44,623행/상품 101,452행을 사용했고 원본 6객체 ETag·크기를 HEAD로 재확인했다. 기대값은 원본 CDC 순서·Python 정수·독립 SQLite로 계산했으며 공통 허용 기준만 FormatRules 0.2.0을 사용했다.
+- 자료는 Git 제외 pipelines/gold_a/.local/trade-fixed-20261023/HANDOFF.md, 원본/파생 manifest, 요청 초안, expected/validation JSON에 있다. 준비 당시에는 미업로드였으며 이후 업로드 완료 내용은 위 S3 업로드 절을 따른다. 데이터·주문 ID가 있는 로컬 자료는 공개 저장소에 올리지 않는다.
+- runtime-908c252 이미지에 427afdf spark_batch.py를 읽기 전용 마운트해 검증했다. 기반 이미지 환경의 code_ref와 검증 소스를 HANDOFF에 구분했다. 운영 이미지는 최종 코드로 빌드해야 한다. 실제 EKS/S3A/Pod Identity 검증이 아니다.
+- 별도 상품 버킷 읽기, 고정 입력/요청 업로드와 실제 출력 승인, 커미터 상세·Glue 공개는 후속이다. input_complete 선언·시작 시 ETag 고정은 외부 준비 manifest/VersionId/Kafka 범위 완전성 증명이 아니다.
 
 ### Spark 거래 전환 · 사용자 정정 후 현재 작업
 
@@ -86,7 +121,7 @@
 - 인프라 추가 권한: bronze/clickstream/ 읽기, silver/runtime/clicks/·gold_a/runtime/funnels/ 읽기·쓰기 및 해당 magic 작업 키 정리/멀티파트 처리. 기존 거래 권한에 포함된 것으로 가정하지 않는다.
 - 당시 수정 파일 7개와 아래 부분 공개 보완까지 전체 사용자 검수 후에만 커밋한다. 회원 Spark 전환은 이번 범위에 포함하지 않는다.
 
-### 사용자 요청: 거래·퍼널 Spark 부분 공개 보완 · 검수 전
+### 사용자 요청: 거래·퍼널 Spark 부분 공개 보완 · 로컬 검증 기록
 
 - 기존 plan_trade_holds에 이전 후보/이전 퍼널 상세를 직접 받는 선택 인자를 추가해 기존 Python/JSONL 실행은 유지하고 Spark/Parquet에서도 같은 영향 규칙을 재사용한다.
 - gold_a/__init__.py에 이전 Spark 공개 manifest 조회, 관련 오류·후보만 제한해 분석, Spark join 병합을 추가했다. 새 코드 파일은 만들지 않았다. 현재·이전 충돌 후보와 held_context를 함께 사용해 과거 시간대·주문 변경도 보류한다.

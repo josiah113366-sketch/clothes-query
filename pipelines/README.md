@@ -201,7 +201,45 @@ UTC 업무 시각과 R6 checked_at은 Parquet TIMESTAMP_MICROS(세션 UTC), KST 
 
 모든 데이터셋 저장 후 해당 계층 완료 기록을 공개한다. 실패 시 이전 공개 참조를 유지한다. 재실행은 새 run_id로 수행하고 기존 run_id 폴더를 덮어쓰지 않는다. R6는 미처리 Silver completed를 순서대로 읽어 order_amount_checks를 소비한다. 행 부재·검사 대기는 해소로 보지 않는다. 동일 작업을 DAG 외부에서 병렬 실행하지 않는다.
 
-S3 저장은 Hadoop S3A magic committer를 사용한다. Parquet·커미터 작업 객체를 위한 Put/Get/List, 미완료 업로드 Abort·multipart 관련 작업과 Spark 작업용 객체 정리 권한이 필요하다. Bronze는 읽기 전용이며 기존 정상 결과의 일괄 삭제를 구현하지 않는다. 로컬 S3 에뮬레이터 검증에서는 각 데이터셋 폴더 아래 __magic_job-*/ 작업 키가 생성되고 완료 후 정리됐다. DeleteObject는 silver/runtime/trade/runs/*/__magic_job-*/* 및 gold_a/runtime/trade/runs/*/__magic_job-*/* 작업 키로 제한하는 안을 인프라와 검증한다. 상품 하위 데이터셋도 이 실행 prefix 안에 포함된다. AbortMultipartUpload·ListMultipartUploadParts는 최종 Parquet 객체의 업로드에도 필요하므로 magic 임시 키에만 제한하면 안 된다. ListBucketMultipartUploads는 버킷 수준 권한이며 prefix 제한 지원 여부를 확인해 연결한다. 이 검증은 실제 AWS IAM 검증을 대신하지 않는다. 로컬 shuffle은 Pod 임시 디스크이며 S3 tmp 폴더가 아니다.
+S3 저장은 Hadoop S3A magic committer를 사용한다. Bronze는 읽기 전용이며 기존 정상 결과의 일괄 삭제를 구현하지 않는다. 로컬 shuffle은 Pod 임시 디스크이며 별도 S3 tmp 폴더가 아니다.
+
+#### 실제 커미터 설정·작업 객체 (2026-10-23 로컬 검증)
+
+configure_storage에서 아래 값을 설정한다. spark-submit의 --conf로 전달할 때 Hadoop 설정에는 spark.hadoop. 접두사를 붙인다.
+
+```text
+spark.sql.sources.commitProtocolClass=org.apache.spark.internal.io.cloud.PathOutputCommitProtocol
+spark.sql.parquet.output.committer.class=org.apache.spark.internal.io.cloud.BindingParquetOutputCommitter
+fs.s3a.committer.name=magic
+fs.s3a.committer.magic.enabled=true
+fs.s3a.committer.abort.pending.uploads=true
+mapreduce.outputcommitter.factory.scheme.s3a=org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory
+```
+
+true는 해당 데이터셋 출력 경로 아래의 미완료 업로드를 목록 조회·중단한다. 고유 run_id 출력 폴더와 동일 경로 단일 작성자가 전제다. 같은 데이터셋 경로에 다른 작업을 동시에 쓰지 않는다. magic 작업 폴더가 잡별로 달라도 이 정리의 범위는 출력 경로이므로 타 작업의 업로드를 중단할 수 있다.
+
+관측한 작업 객체 구조 예시는 다음과 같다. job/task UUID는 실행마다 바뀐다.
+
+```text
+silver/runtime/trade/runs/<run_id>/<dataset>/__magic_job-job_<id>/job-job_<id>/00/task_<id>.pendingset
+silver/runtime/trade/runs/<run_id>/<dataset>/__magic_job-job_<id>/job-job_<id>/00/tasks/attempt_<id>/__base/part-....parquet.pending
+gold_a/runtime/trade/runs/<run_id>/<dataset>/__magic_job-job_<id>/...
+silver/runtime/trade/runs/<run_id>/products/<dataset>/__magic_job-job_<id>/...
+```
+
+**삭제를 magic 하위에만 허용하면 부족하다.** 두 Parquet 중 첫 파일이 커밋된 뒤 다음 파일의 커밋을 403으로 실패시키면, 롤백이 현재 실행 데이터셋의 최종 part-*.parquet를 DeleteObject로 삭제하는 것을 확인했다. 이는 새로 일부 저장한 실패 결과를 되돌리는 것이며 기존 정상 실행을 청소하는 기능이 아니다.
+
+권한 연결 기준:
+
+- GetObject/PutObject 및 ListBucket: 승인한 입력·출력·요청 prefix. 상품 입력은 별도 버킷이며 읽기 전용이다.
+- ListBucketMultipartUploads: 실제 호출됨. 버킷 수준 권한이 필요하며 Java 요청의 prefix는 해당 실행 데이터셋 출력 폴더였다. 요청 prefix와 IAM 강제 제한을 동일시하지 않고 AWS 정책 지원 조건을 인프라에서 확인한다.
+- AbortMultipartUpload: 실제 호출됨. 최종 Parquet 키의 미완료 업로드에도 필요하므로 magic 임시 키만 허용하면 부족하다.
+- DeleteObject: magic 작업 객체(폴더 표식 포함) 및 실패 롤백용 최종 part-*.parquet가 필요하다. 거래 Silver·상품 하위 출력·Gold 출력 등 소유한 runs 경로로 한정하는 안을 인프라와 검증한다. 정적 runs/* 권한이 과거 실행 삭제를 기술적으로 막는다고 주장하지 않는다. 실제 코드는 새 실행 경로만 사용해야 한다.
+- ListMultipartUploadParts: 이번 정상·UploadPart 실패·부분 CompleteMultipartUpload 실패에서 Java ListParts 호출은 관측하지 않았다. 기본 필수 권한으로 단정하지 않으며 복구/추가 실행 경로에서 필요하면 근거와 함께 추가한다.
+
+Moto 5.1.15 내부망 시험에서 정상 업무 실행, 업로드 도중 실패, 일부 파일 커밋 후 실패를 검증했다. 조작한 세 출력 범위의 미완료 업로드는 모두 0개였고 다른 실행의 파일·미완료 업로드는 보존됐다. Gold 저장 실패 시 이전 Gold current가 유지되고 완료된 Silver는 남는 것도 확인했다. 강제 종료·권한 거부·S3 장애에서 정리가 항상 성공한다는 보장은 아니며 실제 AWS IAM·Pod Identity 검증은 별도다.
+
+근거: [Hadoop 3.5 커미터 옵션·동시 쓰기](https://hadoop.apache.org/docs/r3.5.0/hadoop-aws/tools/hadoop-aws/committers.html), [AWS 멀티파트 API·권한](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html).
 
 ### 배포·조회 연결에서 남은 사항
 
