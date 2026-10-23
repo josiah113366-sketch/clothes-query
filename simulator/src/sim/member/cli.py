@@ -9,6 +9,7 @@ from sim.common.config import ConfigError, load_config
 from sim.common.control import DEFAULT_CONTROL_FILE, MODES, FileControlSource
 from sim.common.db import SafeDatabaseError, connect, describe_target, target_host
 from sim.common.regions import RegionFileError, load_regions
+from sim.common.stats import StatsFile, stats_path
 from sim.member import params
 from sim.member.api_store import ApiStore
 from sim.member.baseline import TableNotEmptyError, run_baseline, write_summary
@@ -163,6 +164,9 @@ def live(
         duration=duration,
         max_signups=max_signups,
         out=typer.echo,
+        stats=StatsFile(
+            stats_path(control_file, "member"), warn=lambda m: typer.echo(f"경고: {m}", err=True)
+        ).write,
     )
     try:
         with stop_on_signals(runner):

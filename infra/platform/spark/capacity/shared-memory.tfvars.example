@@ -1,0 +1,7 @@
+# Review-only alternative: REPLACES the existing common worker type.
+# RAM-only replacement does not fix CPU requests. Review cpu-sizing-candidates.yaml too.
+# Kafka/Airflow node replacement can interrupt service: not approved for apply.
+instance_types             = ["r6a.large"]
+node_pool_cpu_limit         = 4
+node_pool_memory_limit_gib = 32
+spark_node_pool             = { enabled = false }
