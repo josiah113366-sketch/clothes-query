@@ -29,22 +29,24 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
 - 형식 검사기(`pipelines/gold_b/format_check.py`, 공통 규칙의 `gold_b`)를 끼워 스트리밍을 시작하고 멈출 때까지 기다린다. 재처리 잡과 같은 검사기라 같은 메시지는 같은 원장 줄이 된다.
 - 설정 파일·환경변수·형식 규칙표가 잘못됐으면 Spark를 띄우기 전에 1로 끝난다. 스트리밍 중 실패는 오류로 끝나고, 다시 띄우면 체크포인트에서 이어 읽는다.
 - 로그에는 묶음 번호와 메시지·파일 수만 남긴다 (주소·메시지 내용은 남기지 않음).
-- Spark 연결(`build_query`)은 Docker의 Spark 4.1.3으로 로컬 Kafka를 읽어 확인했다 (같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않음). 형식 검사기를 끼운 Spark 실행은 아직 못 했다 (Gold B 이미지가 아직 없음).
+- Spark 연결(`build_query`)은 Docker의 Spark 4.1.3으로 로컬 Kafka를 읽어 확인했다 (같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않음). 형식 검사기를 끼운 Spark 실행은 아직 못 했다 (Gold B 이미지는 팀 기본 Spark 이미지가 ECR에 올라온 뒤 빌드).
 
 ### 적재 잡 배포에 필요한 것 (재영 님께)
 
 - 늘 켜 두는 Spark 스트리밍 잡 하나. 같은 체크포인트로 두 개를 동시에 띄우지 않는다.
-- 이미지: 팀 기본 Spark 이미지(`infra/platform/spark/image`: Spark 4.2.0, Python 3.10.12, `spark-sql-kafka`·S3A(`hadoop-aws`) 포함)에서 출발한다. Gold B 코드는 Python 3.10에서 돈다 (2026-10-23 맞춤, Python 3.10.12 컨테이너에서 Gold B 시험 통과). 그 위에 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`(설정 `config/gold_b.yaml` 포함), `docs/contracts/format_rules.yaml`, `pipelines/gold_b/requirements.txt` 패키지(3.10은 pyarrow 25.0.1)를 넣는다. Gold B 이미지의 Dockerfile은 따로 만든다.
-- 제출: `spark-submit local:///<이미지 안 저장소 위치>/pipelines/gold_b/jobs/streaming_ingest.py`. `PYTHONPATH`에 저장소 루트를 더한다.
-- 묶음(최대 20,000건)은 Driver로 모아 파이썬으로 처리한다. Executor는 Kafka만 읽는다.
-- 권한: S3 `gold_b/topic_messages/`·`gold_b/payment_events/`·`gold_b/malformed_events/` 쓰기 (같은 이름 덮어쓰기 포함), 체크포인트 위치 읽기·쓰기·지우기. Kafka 6개 토픽 읽기 (consumer group은 Spark 기본 이름 `spark-kafka-source-…`, Kafka에 커밋 안 함).
-- 환경변수는 위 표. Kafka SSL 파일은 Secret으로 붙인다.
+- 이미지: Gold B 이미지 `pipelines/gold_b/Dockerfile` (팀 기본 Spark 이미지 digest에서 출발, 빌드 방법은 [pipelines/gold_b/README.md](../README.md) 「이미지」). Driver와 Executor가 같은 이미지 digest를 쓴다.
+- 제출: `spark-submit local:///opt/gold_b/pipelines/gold_b/jobs/streaming_ingest.py` (인자 없음, 설정은 이미지 안 `config/gold_b.yaml`). `PYTHONPATH=/opt/gold_b`는 이미지에 들어 있다.
+- 늘 켜 둔다. 멈추면 다시 띄운다 (같은 체크포인트로 이어 읽어 빠지거나 두 번 쌓이지 않음). 같은 체크포인트로 두 개를 동시에 띄우지 않는다.
+- 자원(제안): Driver 1개가 묶음(최대 20,000건)을 파이썬으로 처리하므로 1 CPU·2GiB, Executor 1개는 Kafka만 읽어 1 CPU·1GiB.
+- S3 권한: `gold_b/topic_messages/`·`gold_b/payment_events/`·`gold_b/malformed_events/` 읽기·쓰기 (같은 이름 덮어쓰기 포함), 체크포인트 위치 읽기·쓰기·지우기. 체크포인트 위치 제안: `s3a://clothes-query-datalake/gold_b/_checkpoints/streaming_ingest/` (원장 표 위치와 겹치지 않음, 재영 님과 정함).
+- Kafka: Strimzi `KafkaUser`(예: `gold-b-ingest`, TLS)에 6개 토픽 `Read`·`Describe`. 이 잡의 namespace를 Kafka 클라이언트 리스너에 허용한다. Spark는 파티션을 직접 지정해서 읽고 Kafka에 처리 위치를 커밋하지 않아 소비자 그룹 권한은 필요 없을 것으로 본다 (실제 접속 때 확인. 그룹 권한 오류가 나면 고정 그룹 이름을 쓰도록 바꾼다). 사용자 인증서 Secret(CA·인증서·키)을 붙이고 `KAFKA_SSL_*` 환경변수로 경로를 준다.
+- 환경변수는 위 표 (`KAFKA_SECURITY_PROTOCOL=SSL`).
 
 확인: `python -m pytest -q pipelines/gold_b/tests/test_ingest.py` (설정 파일·형식 검사기 시험은 `PyYAML`이 있어야 돈다).
 
 ## 재처리 잡이 하는 일
 
-규칙이나 코드를 고친 뒤 사람이 승인하면, 그 시간대의 원장 ①`payment_events` ②`topic_messages` ④`malformed_events`를 Kafka에서 다시 읽어 **1시간 폴더 단위로 교체**한다. ③`bronze_lag_snapshots`는 그 시점에만 잴 수 있는 값이라 건드리지 않는다. 설계는 [docs/design/gold-b/README.md](../../../docs/design/gold-b/README.md) 「재실행·재처리 설계와 검증」이다.
+규칙이나 코드를 고친 뒤 사람이 승인하면, 그 시간대에 Kafka에 들어온 메시지(대상 메시지)를 다시 검사해 **그 메시지들의 옛 결과만 새 결과로 바꾼다** (메시지 단위, 2026-10-23). 평소에는 적재 잡이 원장에 계속 쌓고, 재처리는 기존 결과를 고치기만 한다. 고치는 원장은 ①`payment_events` ②`topic_messages` ④`malformed_events`이고, ③`bronze_lag_snapshots`는 그 시점에만 잴 수 있는 값이라 건드리지 않는다. 설계는 [docs/design/gold-b/README.md](../../../docs/design/gold-b/README.md) 「재실행·재처리 설계와 검증」이다.
 
 1. 승인 범위를 UTC 1시간 폴더로 넓힌다. 끝은 포함하지 않는다 (14:40~16:20 → 14·15·16시).
 2. 시작 전에 확인하고, 걸리면 `FAILED`로 끝낸다 (다시 돌려도 소용없어서 재시도하지 않음).
@@ -52,15 +54,17 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
    - 아직 안 끝난 폴더가 있음 (폴더 끝 + 10분이 지나지 않음)
    - Kafka 보관 기간(7일, 2026-10-23 #86으로 72시간에서 늘어남) 밖 → 원본 없음. Bronze에서 다시 읽기는 아직 없다
 3. `reprocess_events`에 `STARTED`를 쓴다.
-4. 폴더마다 차례로:
-   - 폴더 앞뒤로 10분씩 더 Kafka에서 읽는다 (시각으로 위치를 찾음). 결제는 결제 시각보다 늦게 Kafka에 들어올 수 있어서다.
-   - 메시지마다 형식 검사를 하고 원장 줄을 만든 뒤, 이벤트 시각(결제 `completed_at`, 나머지 `kafka_timestamp`)이 그 폴더인 줄만 고른다.
-   - 원장 3개를 교체한다. **이번에 다시 읽은 메시지의 줄만** 새 줄로 바뀐다. 다시 읽지 못한 메시지(10분보다 늦게 온 결제, 대상이 아닌 토픽, 그 사이 지워진 메시지)의 옛 줄과 `malformed_events`의 다른 `rule_version` 줄은 그대로 남는다.
-   - 새 파일을 먼저 쓰고 옛 파일을 지운다. 중간에 멈추면 잠깐 같은 줄이 두 번 있을 수 있지만(뷰가 거름) 줄이 사라지지는 않는다. 다시 돌리면 정리된다.
-   - 원장 3개가 다 끝나면 `LEDGER_REPLACED`를 쓴다. 판정 잡이 이 줄을 보고 그 폴더를 재판정한다.
-5. 도중에 실패하면 `FAILED`를 쓰고 예외를 다시 올린다. 끝난 폴더의 `LEDGER_REPLACED`는 남는다.
+4. 승인 폴더 시간대에 Kafka에 들어온 메시지를 한 번에 다시 읽는다 (시각으로 위치를 찾음). 앞뒤 여유 시간은 더 읽지 않는다.
+5. 메시지마다 형식 검사를 하고 새 줄을 만든다. 옛 결과와 새 결과가 있는 시간 폴더는 메시지로 정한다: ②④는 Kafka 시각 폴더, ①은 결제 시각(`completed_at`) 폴더. 결제 시각 폴더는 승인 범위 밖일 수 있다 (예: 다음 날 들어온 결제 수정).
+6. 승인 범위 밖 결제 시각 폴더는 결과가 바뀌는 결제가 있을 때만 고친다 (같은 통과 줄이 이미 있으면 건드리지 않음). 그 시간대도 재판정되므로 꼭 필요한 만큼만이다.
+7. (가) 검사 결과(①·④)의 새 줄을 폴더마다 파일로 먼저 더한다. 이 뒤에 멈춰도 결과가 사라지지 않는다 (같은 위치에 옛·새 결과가 함께 있으면 뷰가 더 늦게 쌓인 새 결과를 고름). ②는 먼저 더하지 않는다 (유입량이 정리 전까지 늘어 보이지 않게).
+8. (나) 시간 순서로 폴더마다 대상 메시지의 옛 줄을 지우고 파일 하나로 정리한 뒤 `LEDGER_REPLACED`를 쓴다.
+   - 승인 범위 폴더는 원장 3개를 모두 정리한다. 범위 밖 폴더는 대상 메시지가 있는 원장만 정리하고, detail에 `outside_window`를 넣는다. 판정 잡이 이 줄을 보고 그 시간대를 재판정한다.
+   - 지우는 옛 줄: 대상 메시지 위치의 ①·② 줄, ④는 이번 `rule_version` 줄만. 다른 `rule_version`의 ④ 줄과 대상이 아닌 메시지(다시 읽지 못한 메시지 포함)의 줄은 그대로 남는다.
+   - 정리한 파일을 먼저 쓰고 옛 파일을 지운다. 그 사이 적재 잡이 새로 쓴 파일은 목록에 없어서 남는다.
+9. 도중에 실패하면 `FAILED`를 쓰고 예외를 다시 올린다. 끝난 폴더의 `LEDGER_REPLACED`는 남는다. 다시 돌리면 정리된다.
 
-같은 입력과 같은 규칙으로 다시 돌리면 원장이 같다 (`loaded_at`만 다름).
+같은 입력과 같은 규칙으로 다시 돌리면 원장이 같다 (`loaded_at`만 다름). 재처리는 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서 **파일 합치기와 같은 시간에 돌리지 않는다** (DAG에서 하나씩).
 
 ## 다음에 돌릴 요청 고르기 (poller)
 
@@ -78,8 +82,8 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
 
 | `step` | `window_start` ~ `window_end` | `source` | `detail` (JSON) |
 |---|---|---|---|
-| `STARTED` | 승인 범위 | `KAFKA` | 교체할 폴더 목록, 여유 시간(분), 몇 번째 실행인지(`run`) |
-| `LEDGER_REPLACED` | 교체한 시간 폴더 (예: 15:00 ~ 16:00) | `KAFKA` | 읽은 메시지 수, 표별 새 줄 수·남긴 옛 줄 수, Kafka에 없는 토픽 |
+| `STARTED` | 승인 범위 | `KAFKA` | 승인 폴더 목록, 몇 번째 실행인지(`run`) |
+| `LEDGER_REPLACED` | 정리한 시간 폴더 (예: 15:00 ~ 16:00). 승인 범위 밖 결제 시각 폴더도 | `KAFKA` | 그 폴더의 대상 메시지 수(`messages`), 표별 새 줄 수·남긴 옛 줄 수, 범위 밖이면 `outside_window`, Kafka에 없는 토픽 |
 | `FAILED` | 시작 전이면 승인 범위, 도중이면 남은 폴더 범위 | 시작 전이면 비움, 도중이면 `KAFKA` | 실패 이유, 재시도해도 되는지(`retryable`), 끝낸 폴더 수 |
 
 실패 이유에는 이 잡이 만든 문장만 쓰고, Kafka·S3 오류는 종류만 쓴다 (오류 문장에 주소·버킷 이름이 들어 있을 수 있음).
@@ -156,7 +160,7 @@ python -m pytest -q pipelines/gold_b/tests/test_reprocess.py
 4. 합친 파일(`part-compact-…`)을 먼저 쓰고 줄 수를 확인한 뒤 원래 파일을 지운다. 합친 파일에는 원래 파일 이름 목록을 적어 둔다. 지우다가 멈춘 뒤 다시 돌리면, 남은 원래 파일은 다시 합치지 않고 지운다 (줄이 두 번 들어가지 않음).
 5. 적재 잡이 그 사이 새로 쓴 파일은 목록에 없어서 지워지지 않고, 다음에 합친다.
 
-**재처리 잡과 같은 폴더를 동시에 건드리면 안 된다.** DAG(재영 님과 만듦)에서 둘을 한 번에 하나씩 돌린다.
+**재처리 잡과 같은 시간에 돌리면 안 된다.** 재처리는 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서, 폴더와 상관없이 DAG에서 둘을 한 번에 하나씩 돌린다.
 
 ```bash
 python -m pipelines.gold_b.jobs.compact                    # 어제(UTC)를 합친다

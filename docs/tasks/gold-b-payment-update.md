@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-payment-update
 
-> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-payment-update` (최신 `main` #92 위의 머지 정리 커밋 `8ca6a10`에서, `pipelines/gold-b-image`와 같은 출발점) · 다음 작업: PR 리뷰·머지 (사용자), 현지 님께 Silver 제안 전달, 머지 뒤 Glue 칸 추가와 뷰 다시 만들기
+> 상태: 완료 (#95, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-payment-update` (최신 `main` #92 위의 머지 정리 커밋 `8ca6a10`에서) · 남은 일: Glue 칸 추가와 뷰 다시 만들기(권한 있는 사람), 팀 공유(주현·현지·성철·민혁), 늦게 온 `u` 재처리는 `pipelines/gold-b-reprocess-by-message`
 
 ## 목표
 
@@ -182,5 +182,5 @@ RDS에서 결제가 수정되면(`__op = u`) Gold B가 수정된 최신 상태�
 - 주현 님: `payment_attempts` 뜻 바뀜(칸은 같음), `payment_conflicts` 칸 바뀜, 에이전트 허용 표(`agent/tools/guard.py`)에 `payment_conflicts`·`payment_states`를 넣을지.
 - 현지 님: 「Silver와 맞출 것」 제안 전달. 성철 님과 계약서 문구(결제 UPDATE 허용, 같은 변경 시각 충돌).
 - 민혁 님: 대시보드가 `payment_conflicts`를 쓰면 `conflict_fields` 대신 `hold_reason`.
-- 늦게 온 `u`를 재처리로 복구할지 (위 한계).
+- 늦게 온 `u`를 재처리로 복구할지 (위 한계). → 다음 브랜치 `pipelines/gold-b-reprocess-by-message`에서 재처리를 메시지 단위로 바꿔 고친다 (2026-10-23 사용자 결정).
 - `pipelines/gold-b-image`와 같은 출발점이라, 둘 중 나중에 올리는 PR은 브랜치 대장의 Gold B 줄에서 충돌한다. 먼저 머지된 쪽을 받아 정리한 뒤 올린다.

@@ -325,7 +325,8 @@ def test_failure_midway_then_retry(tmp_path):
                      ("LEDGER_REPLACED", H05, H06), ("FAILED", H06, H07)]
     failed = json.loads(events(store)[-1]["detail"])
     assert (failed["error"], failed["retryable"], failed["replaced_folders"]) == ("OSError", True, 1)
-    assert len(store.files(hour_folder("payment_events", H06))) == 2   # 새 파일은 썼고 옛 파일은 못 지움
+    # 옛 파일, (가)에서 먼저 더한 새 줄 파일, (나)에서 정리한 파일. 정리한 파일을 쓴 뒤 옛 파일을 못 지움
+    assert len(store.files(hour_folder("payment_events", H06))) == 3
 
     run(request(start=(5, 30), end=(6, 30), attempt=2), source=kafka, store=store, checker=checker, now=clock,
         log=lambda _: None)
@@ -365,6 +366,7 @@ def test_poller_takes_gold_b_approvals_oldest_first():
 
 
 RETRYABLE, FINAL = {"error": "KafkaException", "retryable": True}, {"error": "보관 기간 밖", "retryable": False}
+OUTSIDE = {"outside_window": True, "messages": 1, "written": {"payment_events": 1}, "kept": {"payment_events": 0}}
 
 
 @pytest.mark.parametrize("rows,minutes,expected", [
@@ -380,6 +382,11 @@ RETRYABLE, FINAL = {"error": "KafkaException", "retryable": True}, {"error": "�
       ev("rq-1", "FAILED", 2, detail=RETRYABLE)], 120, ("rq-1", 2)),                           # 시작한 뒤에는 승인 만료 없음
     ([ev("rq-1", "APPROVED", 0, window=((5, 10), (6, 30))), ev("rq-1", "STARTED", 1, window=((5, 10), (6, 30))),
       ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05)], 10, ("rq-1", 2)),                   # 06시 폴더 전에 멈춤
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05, detail=OUTSIDE)], 10, ("rq-1", 2)),   # 범위 밖 결제 시각 폴더만 끝내고 멈춤
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05, detail=OUTSIDE),
+      ev("rq-1", "LEDGER_REPLACED", 3, window=FOLDER_06)], 10, None),                         # 범위 밖 폴더가 있어도 승인 폴더가 다 끝나면 끝남
     ([ev("rq-1", "APPROVED", 0)] + [ev("rq-1", step, n, detail=RETRYABLE if step == "FAILED" else None)
                                     for n, step in enumerate(["STARTED", "FAILED"] * 3, 1)], 10, None),   # 세 번 다 돌림
 ])

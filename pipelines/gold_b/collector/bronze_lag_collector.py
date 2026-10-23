@@ -38,7 +38,8 @@ COLUMNS = ("collected_at", "topic", "kafka_partition", "end_offset", "committed_
 
 DEFAULT_BOOTSTRAP = "localhost:29092"          # 시뮬레이터 로컬 Kafka
 DEFAULT_CONNECT_URL = "http://localhost:8083"  # 시뮬레이터 로컬 Connect
-DEFAULT_CONNECTOR = "bronze-s3-sink"
+# 잴 S3 Sink: Bronze v2 (2026-10-24 주현·성철 님. S3 Sink 정지 사건이 v2를 멈추고, 옛 bronze-s3-sink는 읽는 쪽이 옮긴 뒤 지운다)
+DEFAULT_CONNECTOR = "bronze-s3-sink-v2"
 SECURITY_PROTOCOLS = ("PLAINTEXT", "SSL")
 ADDRESS_FAMILIES = ("any", "v4", "v6")         # librdkafka broker.address.family
 TIMEOUT_SEC = 10.0

@@ -1,5 +1,6 @@
-"""Gold B 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체한다.
+"""Gold B 재처리 잡: 승인된 시간대에 Kafka에 들어온 메시지를 다시 검사해, 그 메시지들의 옛 결과만 새 결과로 바꾼다.
 
+평소에는 적재 잡이 원장에 계속 쌓고, 재처리는 기존 결과를 고치기만 한다 (원장을 새로 만들지 않음, 2026-10-23).
 설계는 docs/design/gold-b/README.md 「재실행·재처리 설계와 검증」, 「⑤ reprocess_events」.
 기본값과 부르는 방법은 같은 폴더의 README.md에 있다.
 
@@ -7,9 +8,13 @@ run() 한 번에 하는 일
   1. 승인 범위를 UTC 1시간 폴더로 넓힌다 (끝은 포함하지 않음).
   2. 시작 전 확인: 형식 검사 규칙 버전, 안 끝난 폴더, Kafka 보관 기간. 걸리면 FAILED (다시 돌려도 소용없음).
   3. reprocess_events에 STARTED를 쓴다.
-  4. 폴더마다: 앞뒤 여유 시간까지 Kafka에서 다시 읽고, 메시지마다 원장 줄을 만들어 이벤트 시각이 그 폴더인 줄만 고른다.
-     원장 3개를 교체하고(새 파일을 먼저 쓰고 옛 파일을 지움) LEDGER_REPLACED를 쓴다.
-  5. 도중에 실패하면 FAILED를 쓰고 예외를 다시 올린다. 끝난 폴더의 LEDGER_REPLACED는 남는다.
+  4. 그 시간대에 Kafka에 들어온 메시지(대상 메시지)를 한 번에 다시 읽고 검사한다. 앞뒤 여유 시간은 더 읽지 않는다.
+     대상 메시지마다 새 줄과, 옛 결과·새 결과가 있는 시간 폴더를 메시지로 정한다 (②④는 Kafka 시각, ①은 결제 시각).
+     결제 시각 폴더는 승인 범위 밖일 수 있다 (예: 다음 날 들어온 결제 수정). 범위 밖 폴더는 결과가 바뀌는 결제가 있을 때만 고친다.
+  5. (가) 검사 결과(①·④) 새 줄을 모든 폴더에 먼저 더한다. (나) 폴더마다 대상 메시지의 옛 결과를 지우고 파일 하나로 정리한 뒤
+     LEDGER_REPLACED를 쓴다 (승인 범위 밖 폴더는 detail에 outside_window). ②는 (나)에서 바로 바꾼다.
+     대상이 아닌 메시지의 줄은 건드리지 않는다.
+  6. 도중에 실패하면 FAILED를 쓰고 예외를 다시 올린다. 끝난 폴더의 LEDGER_REPLACED는 남는다.
 
 next_request()는 poller다. reprocess_events를 읽어 지금 돌릴 승인 요청 하나를 고른다 (source가 KAFKA·BRONZE인 것만,
 승인이 가장 이른 것부터). Airflow DAG가 5분마다 부른다.
@@ -19,7 +24,7 @@ Kafka는 읽기만 한다 (임시 그룹으로 assign만 하고 처리 위치를
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -29,11 +34,15 @@ import uuid
 
 from pipelines.gold_b.ledger import (EVENT_TIME, HOUR, SCHEMAS, Checker, KafkaMessage, Store,
                                      hour_folder, hour_of, message_rows, open_store, utc_naive)
+from pipelines.timestamps import parse_iso_datetime
 
 ACTOR = "reprocess_job"   # reprocess_events.actor (판정 잡은 detect_job)
 SOURCE_KAFKA = "KAFKA"
 # 다시 만드는 원장. bronze_lag_snapshots는 그 시점에만 잴 수 있는 값이라 건드리지 않는다
 REPLACED_TABLES = ("payment_events", "topic_messages", "malformed_events")
+# (가)에서 먼저 더하는 원장: 검사 결과만. topic_messages는 옛 줄과 같은 폴더라 (나)에서 바로 바꾼다
+# (먼저 더하면 판정이 세는 유입량·R4 분모와 신뢰성 점검의 "같은 위치 두 번"이 정리 전까지 늘어 보인다, 2026-10-24 주현 님)
+PREADDED_TABLES = ("payment_events", "malformed_events")
 DEFAULT_TOPICS = ("payments", "orders", "order-items", "members-events", "clickstream", "reviews.raw")
 TIMEOUT_SEC = 30.0
 
@@ -74,15 +83,16 @@ class Request:
 class Options:
     topics: tuple[str, ...] = DEFAULT_TOPICS
     payments_topic: str = "payments"               # payment_events 줄의 토픽 (원장에 토픽 칸이 없음)
-    margin: timedelta = timedelta(minutes=10)      # 폴더 앞뒤로 더 읽는 시간
+    margin: timedelta = timedelta(minutes=10)      # 안 끝난 폴더·보관 기간 확인의 여유 (읽는 범위는 넓히지 않음)
     retention: timedelta = timedelta(days=7)       # Kafka 보관 기간 (업무 토픽 retention.ms 7일, 2026-10-23 #86)
 
 
 @dataclass(frozen=True)
 class Result:
     request_id: str
-    replaced: list[tuple[datetime, datetime]]      # 실제로 교체한 시간 폴더 [시작, 끝)
-    details: list[dict]                            # 폴더마다 LEDGER_REPLACED의 detail
+    replaced: list[tuple[datetime, datetime]]      # 승인 범위에서 고친 시간 폴더 [시작, 끝)
+    details: list[dict]                            # 고친 폴더마다(범위 밖 포함, 고친 순서) LEDGER_REPLACED의 detail
+    outside: list[tuple[datetime, datetime]] = field(default_factory=list)   # 승인 범위 밖에서 고친 결제 시각 폴더
 
 
 class KafkaSource(Protocol):
@@ -121,7 +131,7 @@ def check_request(request: Request, checker: Checker, options: Options, now: dat
     return hours
 
 
-# ---------- 폴더 하나 교체 ----------
+# ---------- 다시 읽기와 고칠 곳 ----------
 
 def read_ranges(source: KafkaSource, topics: Sequence[str], read_from: datetime,
                 read_to: datetime) -> tuple[dict[tuple[str, int], tuple[int, int]], list[str]]:
@@ -141,14 +151,103 @@ def read_ranges(source: KafkaSource, topics: Sequence[str], read_from: datetime,
     return ranges, missing
 
 
-def _rebuilt(table: str, row: Mapping, reread: set[tuple[str, int, int]], rule_version: str,
+@dataclass
+class Plan:
+    """재처리 한 번이 고칠 것: 대상 메시지 위치, 새 줄, 옛 결과·새 결과가 있는 시간 폴더."""
+
+    targets: set[tuple[str, int, int]] = field(default_factory=set)        # (토픽, 파티션, offset)
+    new_rows: dict[tuple[str, datetime], list[dict]] = field(default_factory=lambda: defaultdict(list))
+    tables: dict[datetime, set[str]] = field(default_factory=lambda: defaultdict(set))   # 시간 폴더 → 고칠 원장
+    messages: dict[datetime, int] = field(default_factory=lambda: defaultdict(int))      # 시간 폴더 → 대상 메시지 수
+    missing_topics: list[str] = field(default_factory=list)
+    paid: dict[datetime, set[tuple[str, int, int]]] = field(default_factory=lambda: defaultdict(set))
+    """결제 시각 폴더 → 그 폴더에 ① 줄이 있거나 생길 대상 결제 위치"""
+    outside_targets: dict[datetime, set[tuple[str, int, int]]] = field(default_factory=dict)
+    """승인 범위 밖 결제 시각 폴더 → 결과가 바뀌어서 고칠 결제 위치 (narrow_outside가 정함)"""
+
+
+def _completed_hour(message: KafkaMessage) -> datetime | None:
+    """결제 메시지 값의 completed_at 시간 폴더 (그 메시지의 옛 ① 줄이 있을 곳). 읽을 수 없으면 None."""
+    try:
+        value = json.loads(message.value)
+        return hour_of(parse_iso_datetime(str(value["completed_at"])))
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def plan_replacement(messages: Sequence[KafkaMessage], checker: Checker, rule_version: str, loaded_at: datetime,
+                     payments_topic: str, missing_topics: Sequence[str] = ()) -> Plan:
+    """대상 메시지마다 새 줄을 만들고, 옛 결과와 새 결과가 있는 시간 폴더를 모은다.
+    원장을 뒤지지 않고 메시지로 정한다: ②④는 Kafka 시각 폴더, ①은 결제 시각(completed_at) 폴더.
+    새 결과가 오류여도 옛 ① 줄은 결제 시각 폴더에서 지운다 (통과했던 결제가 새 규칙에서 오류가 된 경우)."""
+    plan = Plan(missing_topics=list(missing_topics))
+    for message in messages:
+        plan.targets.add(message.position)
+        kafka_hour = hour_of(message.timestamp)
+        folders = {("topic_messages", kafka_hour), ("malformed_events", kafka_hour)}
+        if message.topic == payments_topic and (paid_hour := _completed_hour(message)) is not None:
+            folders.add(("payment_events", paid_hour))
+            plan.paid[paid_hour].add(message.position)
+        for table, rows in message_rows(message, checker(message), rule_version, loaded_at).items():
+            for row in rows:
+                hour = hour_of(row[EVENT_TIME[table]])
+                plan.new_rows[(table, hour)].append(row)
+                folders.add((table, hour))
+        for table, hour in folders:
+            plan.tables[hour].add(table)
+        for hour in {hour for _, hour in folders}:
+            plan.messages[hour] += 1
+    return plan
+
+
+def _same_result(old: Mapping, new: Mapping) -> bool:
+    """같은 검사 결과의 ① 줄인가 (쌓은 시각과 규칙 버전만 다를 수 있다)."""
+    return all(old[name] == new[name] for name in SCHEMAS["payment_events"].names
+               if name not in ("loaded_at", "rule_version"))
+
+
+def narrow_outside(plan: Plan, store: Store, window: set[datetime], payments_topic: str) -> None:
+    """승인 범위 밖 결제 시각 폴더는 결과가 바뀌는 결제가 있을 때만 고친다 (2026-10-24, 주현 님).
+    그 폴더도 재판정되므로 꼭 필요한 만큼만 고친다. 바뀌는 결제는 두 가지다:
+    새 결과가 통과인데 같은 ① 줄이 그 폴더에 없음 (복구), 새 결과가 오류인데 옛 ① 줄이 있음 (보류로 바뀜).
+    같은 통과 줄이 이미 있으면(예: 시간 경계에 걸린 결제를 같은 결과로 다시 검사) 그 결제의 줄을 그대로 둔다."""
+    for hour in sorted(h for h in plan.paid if h not in window):
+        positions = plan.paid[hour]
+        new = {(payments_topic, row["kafka_partition"], row["kafka_offset"]): row
+               for row in plan.new_rows.get(("payment_events", hour), [])}
+        old: dict[tuple[str, int, int], list[dict]] = defaultdict(list)
+        for path in store.files(hour_folder("payment_events", hour)):
+            for row in store.read(path, "payment_events"):
+                position = (payments_topic, row["kafka_partition"], row["kafka_offset"])
+                if position in positions:
+                    old[position].append(row)
+        changed = {position for position in positions
+                   if (position in new and not any(_same_result(row, new[position]) for row in old[position]))
+                   or (position not in new and old[position])}
+        plan.outside_targets[hour] = changed
+        plan.messages[hour] -= len(positions - changed)
+        rows = [new[position] for position in sorted(changed) if position in new]
+        if rows:
+            plan.new_rows[("payment_events", hour)] = rows
+        else:
+            plan.new_rows.pop(("payment_events", hour), None)
+        if not changed:
+            plan.tables[hour].discard("payment_events")
+            if not plan.tables[hour]:
+                del plan.tables[hour]
+                plan.messages.pop(hour, None)
+
+
+# ---------- 폴더 하나 정리 ----------
+
+def _rebuilt(table: str, row: Mapping, targets: set[tuple[str, int, int]], rule_version: str,
              payments_topic: str) -> bool:
-    """새로 만든 줄로 바뀌는 옛 줄인가. 이번에 다시 읽은 메시지의 줄만 바뀐다.
+    """새 결과로 바뀌는 대상 메시지의 옛 줄인가. 대상이 아닌 메시지의 줄은 그대로 둔다.
     malformed_events는 다른 규칙 버전의 줄을 남긴다 (예전 판정 이력)."""
     if table == "malformed_events" and row["rule_version"] != rule_version:
         return False
     topic = payments_topic if table == "payment_events" else row["topic"]
-    return (topic, row["kafka_partition"], row["kafka_offset"]) in reread
+    return (topic, row["kafka_partition"], row["kafka_offset"]) in targets
 
 
 _SORT_COLUMNS = {
@@ -164,15 +263,16 @@ def _sort_key(table: str) -> Callable[[Mapping], tuple]:
 
 
 def replace_table(store: Store, table: str, hour: datetime, new_rows: Sequence[dict],
-                  reread: set[tuple[str, int, int]], rule_version: str, payments_topic: str,
+                  targets: set[tuple[str, int, int]], rule_version: str, payments_topic: str,
                   stamp: str) -> tuple[int, int]:
-    """시간 폴더 하나의 원장 하나를 교체한다. (새로 만든 줄 수, 남긴 옛 줄 수)"""
+    """시간 폴더 하나의 원장 하나에서 대상 메시지의 옛 줄을 새 줄로 바꾸고 파일 하나로 정리한다.
+    (새 줄 수, 남긴 옛 줄 수). (가)에서 먼저 더한 새 줄 파일도 대상 메시지의 줄이라 여기서 다시 정리된다."""
     folder = hour_folder(table, hour)
     old_files = store.files(folder)
     kept, seen = [], set()
     for path in old_files:
         for row in store.read(path, table):
-            if _rebuilt(table, row, reread, rule_version, payments_topic):
+            if _rebuilt(table, row, targets, rule_version, payments_topic):
                 continue
             key = tuple(row[name] for name in SCHEMAS[table].names)
             if key in seen:   # 앞선 시도가 새 파일을 쓰고 옛 파일을 못 지웠으면 같은 줄이 두 파일에 있다
@@ -187,26 +287,33 @@ def replace_table(store: Store, table: str, hour: datetime, new_rows: Sequence[d
     return len(new_rows), len(kept)
 
 
-def replace_hour(hour: datetime, request: Request, source: KafkaSource, store: Store, checker: Checker,
-                 options: Options, loaded_at: datetime) -> dict:
-    """시간 폴더 하나의 원장 3개를 교체하고 LEDGER_REPLACED의 detail을 돌려준다."""
-    ranges, missing = read_ranges(source, options.topics, hour - options.margin, hour + HOUR + options.margin)
-    messages = source.read(ranges)
-    reread = {message.position for message in messages}
-    new_rows: dict[str, list[dict]] = {table: [] for table in REPLACED_TABLES}
-    for message in messages:
-        rows = message_rows(message, checker(message), request.rule_version, loaded_at)
-        for table in REPLACED_TABLES:
-            new_rows[table].extend(row for row in rows[table] if hour_of(row[EVENT_TIME[table]]) == hour)
-    detail: dict = {"messages_read": len(messages), "written": {}, "kept": {}}
-    if missing:
-        detail["missing_topics"] = missing
-    stamp = f"{loaded_at:%Y%m%dT%H%M%SZ}"
-    for table in REPLACED_TABLES:
-        written, kept = replace_table(store, table, hour, new_rows[table], reread, request.rule_version,
-                                      options.payments_topic, stamp)
+def add_new_rows(store: Store, plan: Plan, stamp: str) -> None:
+    """(가) 검사 결과(①·④)의 새 줄을 폴더마다 파일로 먼저 더한다. 이 뒤에 멈춰도 결과가 사라지지 않는다
+    (같은 위치에 옛 결과와 새 결과가 함께 있으면 뷰 payment_states가 더 늦게 쌓인 새 결과를 고른다)."""
+    for (table, hour), rows in sorted(plan.new_rows.items(), key=lambda item: (item[0][1], item[0][0])):
+        if rows and table in PREADDED_TABLES:
+            store.write(f"{hour_folder(table, hour)}/part-reprocess-{stamp}-new-{uuid.uuid4().hex[:8]}.parquet",
+                        table, rows)
+
+
+def tidy_hour(store: Store, plan: Plan, hour: datetime, inside: bool, rule_version: str, payments_topic: str,
+              stamp: str) -> dict:
+    """(나) 시간 폴더 하나에서 대상 메시지의 옛 결과를 지우고 정리한다. LEDGER_REPLACED의 detail을 돌려준다.
+    승인 범위 폴더는 원장 3개를 모두 정리하고, 범위 밖 폴더는 대상 메시지가 있는 원장만 정리한다."""
+    tables = REPLACED_TABLES if inside else tuple(t for t in REPLACED_TABLES if t in plan.tables.get(hour, set()))
+    detail: dict = {"messages": plan.messages.get(hour, 0), "written": {}, "kept": {}}
+    for table in tables:
+        # 범위 밖 결제 시각 폴더의 ①은 결과가 바뀌는 결제만 고친다 (narrow_outside)
+        targets = plan.outside_targets.get(hour, plan.targets) if table == "payment_events" and not inside \
+            else plan.targets
+        written, kept = replace_table(store, table, hour, plan.new_rows.get((table, hour), []), targets,
+                                      rule_version, payments_topic, stamp)
         detail["written"][table] = written
         detail["kept"][table] = kept
+    if inside and plan.missing_topics:
+        detail["missing_topics"] = plan.missing_topics
+    if not inside:
+        detail["outside_window"] = True
     return detail
 
 
@@ -275,29 +382,41 @@ def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker
         fail(approved, None, exc, 0)
         raise
 
+    window = set(hours)
+    folders = list(hours)                          # 고칠 시간 폴더 (계획을 세운 뒤 범위 밖 결제 시각 폴더가 더해짐)
     replaced: list[tuple[datetime, datetime]] = []
+    outside: list[tuple[datetime, datetime]] = []
     details: list[dict] = []
     current = hours[0]
     try:
         events.write("STARTED", approved, SOURCE_KAFKA,
-                     {"folders": [f"{h:%Y-%m-%dT%H:00}" for h in hours],
-                      "margin_minutes": int(options.margin.total_seconds() // 60), "run": run_number})
+                     {"folders": [f"{h:%Y-%m-%dT%H:00}" for h in hours], "run": run_number})
         log(f"재처리 {request.request_id} 시작: 시간 폴더 {len(hours)}개")
-        for hour in hours:
+        loaded_at = utc_naive(now())
+        ranges, missing = read_ranges(source, options.topics, hours[0], hours[-1] + HOUR)
+        plan = plan_replacement(source.read(ranges), checker, request.rule_version, loaded_at,
+                                options.payments_topic, missing)
+        narrow_outside(plan, store, window, options.payments_topic)
+        folders = sorted(window | set(plan.tables))
+        current = folders[0]
+        stamp = f"{loaded_at:%Y%m%dT%H%M%SZ}"
+        add_new_rows(store, plan, stamp)
+        for hour in folders:   # 시간 순서. 결제 시각 폴더는 보통 Kafka 시각 폴더보다 앞이다
             current = hour
-            detail = replace_hour(hour, request, source, store, checker, options, utc_naive(now()))
-            # 폴더 교체가 다 끝난 뒤에 쓴다. 판정 잡은 이 줄을 보고 그 폴더를 재판정한다
+            inside = hour in window
+            detail = tidy_hour(store, plan, hour, inside, request.rule_version, options.payments_topic, stamp)
+            # 폴더 정리가 다 끝난 뒤에 쓴다. 판정 잡은 이 줄을 보고 그 시간대를 재판정한다 (범위 밖 결제 시각 폴더도)
             events.write("LEDGER_REPLACED", (hour, hour + HOUR), SOURCE_KAFKA, detail)
-            replaced.append((hour, hour + HOUR))
+            (replaced if inside else outside).append((hour, hour + HOUR))
             details.append(detail)
-            log(f"재처리 {request.request_id}: {hour:%Y-%m-%d %H}시 폴더 교체 "
-                f"(메시지 {detail['messages_read']}, 새 줄 {sum(detail['written'].values())}, "
+            log(f"재처리 {request.request_id}: {hour:%Y-%m-%d %H}시 폴더 정리{'' if inside else ' (승인 범위 밖)'} "
+                f"(대상 메시지 {detail['messages']}, 새 줄 {sum(detail['written'].values())}, "
                 f"남긴 줄 {sum(detail['kept'].values())})")
     except Exception as exc:
         # 남은 폴더 범위를 FAILED에 적는다. 끝난 폴더는 LEDGER_REPLACED가 있어 재판정된다
-        fail((current, hours[-1] + HOUR), SOURCE_KAFKA, exc, len(replaced))
+        fail((current, folders[-1] + HOUR), SOURCE_KAFKA, exc, len(replaced) + len(outside))
         raise
-    return Result(request.request_id, replaced, details)
+    return Result(request.request_id, replaced, details, outside)
 
 
 # ---------- 다음에 돌릴 요청 고르기 (poller) ----------
