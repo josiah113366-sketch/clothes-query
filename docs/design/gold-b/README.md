@@ -299,61 +299,98 @@ s3://clothes-query-datalake/gold_b/
 
 탐지는 Athena로 원장과 뷰를 읽는다. 구간으로 묶어 세는 일은 탐지 규칙이 정한다. 뷰는 데이터가 아니라 **원장을 읽을 때마다 정리해서 보여주는 SQL**이다. `CREATE VIEW`를 Athena에서 실행하면 Glue 카탈로그에 저장되고, 같은 SQL을 Git에도 파일로 남긴다 (`pipelines/gold_b/views/`, 3단계). 탐지·에이전트는 뷰 이름으로 조회만 하고, 정리 SQL은 Athena가 조회할 때마다 자동으로 실행한다.
 
-### 정리 뷰 `payment_conflicts` - 내용이 충돌한 결제 하나 = 한 줄 (시나리오 1 보조)
+### 정리 뷰 `payment_states` - 결제 하나 = 한 줄 (마지막 이벤트와 보류 사유, 2026-10-23)
 
-같은 `payment_id`인데 결제 내용 지문(`payment_content_hash`)이 다른 결제를 모은다. 결제 내용은 수정하지 않는다는 데이터 계약을 어긴 것이라 원래 0건이어야 한다. Silver도 같은 지문 함수로 같은 경우를 `CONTENT_CONFLICT`로 격리한다.
+결제가 수정되면(`u`) 원장 ①에 변경 전후 이벤트가 모두 남는다. 이 뷰가 결제마다 **마지막 이벤트**를 고르고 믿을 수 없으면 보류 사유를 붙인다. `payment_attempts`와 `payment_conflicts`는 이 뷰를 나눠 읽는다 (같은 판단을 두 번 계산하지 않게). 규칙은 「처리 규칙」의 결제 최신 상태와 같다.
+
+1. **Kafka 위치마다 검사 결과 확정:** 한 메시지(파티션, offset)의 검사 결과는 ① 줄(통과)이나 ④ 줄(오류, `record_key`로 결제와 연결)로 남는다. 규칙 버전이 바뀐 재처리나 시간 폴더가 다른 ①·④ 때문에 둘이 함께 있을 수 있어서, `loaded_at`이 가장 늦은 결과를 채택한다. 같으면 오류를 채택한다.
+2. **같은 결제의 순서:** 같은 `payment_id`는 같은 파티션에 들어가므로(메시지 키) `kafka_offset`이 가장 큰 이벤트가 마지막이다. 다른 파티션의 offset끼리는 비교하지 않는다.
+3. **보류 사유 (`hold_reason`):** 두 파티션 이상에 있으면 `MULTI_PARTITION`, 마지막 이벤트의 `source_ts_ms`가 앞선 이벤트들의 최댓값보다 작으면 `ORDER_ANOMALY`(같은 값은 정상), 마지막 이벤트가 오류면 `INVALID_LATEST`. 원장은 바꾸지 않으므로 재처리로 통과하거나 뒤에 새 정상 이벤트가 오면 저절로 풀린다.
 
 ```sql
-CREATE OR REPLACE VIEW gold_b.payment_conflicts AS
-WITH grouped AS (
-  SELECT payment_id, fingerprint_version,
-         COUNT(*)                         AS row_count,
-         filter(ARRAY[
-           IF(COUNT(DISTINCT order_id) > 1,                  'order_id'),
-           IF(COUNT(DISTINCT attempt_no) > 1,                'attempt_no'),
-           IF(COUNT(DISTINCT pg) > 1,                        'pg'),
-           IF(COUNT(DISTINCT status) > 1,                    'status'),
-           IF(COUNT(DISTINCT coalesce(failure_code, '')) > 1, 'failure_code'),
-           IF(COUNT(DISTINCT completed_at) > 1,              'completed_at')
-         ], x -> x IS NOT NULL)          AS stored_fields,
-         ARRAY_AGG(DISTINCT pg)           AS pgs,
-         MIN(completed_at)                AS first_completed_at,
-         MIN(loaded_at)                   AS first_loaded_at,
-         MAX(loaded_at)                   AS last_loaded_at,
-         ARRAY_AGG(CAST(ROW(kafka_partition, kafka_offset)
-                   AS ROW(kafka_partition INTEGER, kafka_offset BIGINT))) AS sources
+CREATE OR REPLACE VIEW gold_b.payment_states AS
+WITH checks AS (
+  SELECT kafka_partition, kafka_offset, loaded_at, 1 AS valid, payment_id, source_ts_ms, cdc_op,
+         order_id, attempt_no, pg, status, failure_code, completed_at, rule_version
   FROM gold_b.payment_events
-  GROUP BY payment_id, fingerprint_version          -- 지문 버전이 같은 줄끼리만 비교
-  HAVING COUNT(DISTINCT payment_content_hash) > 1
+  UNION ALL
+  SELECT kafka_partition, kafka_offset, loaded_at, 0 AS valid, record_key, MAX(source_ts_ms), NULL,
+         NULL, NULL, NULL, NULL, NULL, NULL, rule_version
+  FROM gold_b.malformed_events
+  WHERE topic = 'payments' AND record_key IS NOT NULL
+  GROUP BY kafka_partition, kafka_offset, loaded_at, record_key, rule_version
+),
+latest_checks AS (
+  SELECT *
+  FROM (SELECT c.*, ROW_NUMBER() OVER (PARTITION BY kafka_partition, kafka_offset
+                                       ORDER BY loaded_at DESC, valid) AS check_rank
+        FROM checks c)
+  WHERE check_rank = 1
+),
+ordered AS (
+  SELECT l.*,
+         MIN(kafka_partition) OVER (PARTITION BY payment_id) AS first_partition,
+         MAX(kafka_partition) OVER (PARTITION BY payment_id) AS last_partition,
+         COUNT(*) OVER (PARTITION BY payment_id) AS event_count,
+         MAX(source_ts_ms) OVER (PARTITION BY payment_id ORDER BY kafka_offset
+                                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS earlier_max_ts,
+         ROW_NUMBER() OVER (PARTITION BY payment_id ORDER BY kafka_offset DESC) AS from_last
+  FROM latest_checks l
 )
-SELECT payment_id, fingerprint_version, row_count,
-       IF(cardinality(stored_fields) = 0, ARRAY['payment_content_hash'], stored_fields) AS conflict_fields,
-       pgs, first_completed_at, first_loaded_at, last_loaded_at, sources
-FROM grouped;
+SELECT payment_id, order_id, attempt_no, pg, status, failure_code, completed_at, loaded_at,
+       cdc_op, source_ts_ms, rule_version, kafka_partition, kafka_offset, event_count,
+       CASE
+         WHEN first_partition <> last_partition THEN 'MULTI_PARTITION'
+         WHEN source_ts_ms < earlier_max_ts THEN 'ORDER_ANOMALY'
+         WHEN valid = 0 THEN 'INVALID_LATEST'
+       END AS hold_reason
+FROM ordered
+WHERE from_last = 1;
 ```
 
 | 컬럼 | 뜻 | 예시 |
 | --- | --- | --- |
-| `payment_id` | 충돌한 결제 시도 번호 | `p-07` |
-| `fingerprint_version` | 비교한 지문 규칙 버전 | (현지 님과 정함) |
-| `row_count` | 원장에 쌓인 줄 수 | `2` |
-| `conflict_fields` | 원장에 저장된 업무 필드 6개 중 값이 다른 것. 6개가 모두 같은데 지문만 다르면 `[payment_content_hash]` (금액·결제 수단·요청 시각 중 하나 이상이 다르다는 뜻. 무엇이 다른지는 `sources`로 원본을 봐야 안다) | `[status, failure_code]`, `[payment_content_hash]` |
-| `pgs` | 그 결제에 나온 PG (영향 범위 확인용) | `[PG_A]` |
-| `first_completed_at` | 가장 이른 결제 결과 시각 (어느 구간에 영향이 있나) | 15:01:20 |
-| `first_loaded_at`, `last_loaded_at` | 처음·마지막으로 쌓인 시각 | 15:02:00, 15:05:00 |
-| `sources` | 원본 Kafka 위치 목록 (원본 다시 찾기) | `[{0, 17920}, {0, 17988}]` |
+| `payment_id` | 결제 시도 번호 | `p-01` |
+| `order_id` … `completed_at` | 마지막 이벤트의 업무 값. 마지막 이벤트가 오류면 NULL | |
+| `loaded_at` | 마지막 이벤트를 원장에 쌓은 시각 | 15:02:00 |
+| `cdc_op`, `source_ts_ms` | 마지막 이벤트의 변경 종류와 원본 변경 시각 | `u`, `1792562910000` |
+| `rule_version` | 마지막 이벤트를 판정한 규칙표 버전 | `0.2.0` |
+| `kafka_partition`, `kafka_offset` | 마지막 이벤트의 Kafka 위치 (원본 다시 찾기) | `1`, `205` |
+| `event_count` | 그 결제의 이벤트 수 (Kafka 위치 기준) | `2` |
+| `hold_reason` | 보류 사유. 보류가 아니면 NULL | `INVALID_LATEST` |
 
-- 원문 값은 넣지 않고 결제 키·원본 위치·충돌 필드명만 남긴다 (공통 계약과 같음).
-- 이번에 들어온 줄끼리만 비교하지 않는다. 뷰는 원장 전체를 읽으므로 **예전에 쌓인 같은 `payment_id` 줄과도 비교**한다. 같은 결제가 나중에 다른 내용으로 다시 들어와도 충돌로 잡는다 (현지 님 PR #36 리뷰).
-- 지문 버전이 다른 줄끼리는 비교하지 않는다. 규칙이 다르면 같은 내용도 지문이 달라져 가짜 충돌이 생기기 때문이다. 지문 규칙을 바꾸면 지난 시간 폴더를 재처리해 지문을 다시 만든다 (같은 결제의 중복은 `completed_at`이 같아 같은 시간 폴더에 있으므로 함께 다시 계산된다).
-- 탐지는 이 뷰에 줄이 있는 구간을 "확인 필요"로 볼 수 있다. 충돌한 결제는 `payment_attempts`에서 빠지므로 그 구간의 결제 수가 실제보다 적을 수 있다.
+- 결제 이벤트로 보는 것은 ① 줄과, `record_key`가 있는 `payments` 토픽의 ④ 줄이다. 메시지를 읽지 못해 키를 모르는 오류(`PARSE_ERROR`)는 결제와 연결하지 못한다.
+- 뷰는 원장 전체를 읽는다. 예전에 쌓인 같은 결제의 이벤트와도 순서를 비교해야 하기 때문이다.
+
+### 정리 뷰 `payment_conflicts` - 보류된 결제 하나 = 한 줄 (시나리오 1 보조)
+
+`payment_states`에서 보류 사유가 있는 결제만 모은다. 보류된 결제는 `payment_attempts`에서 빠진다. 이름은 그대로 두고 뜻을 바꿨다 (2026-10-23). 예전에는 "같은 `payment_id`에 지문이 다름"을 충돌로 보았지만, 결제 수정(`u`)을 받으면서 내용이 다른 것은 정상 수정이 되었다. Silver의 격리 기록(`quarantined_records`)처럼 보류한 결제를 사유와 함께 남기는 역할이다.
+
+```sql
+CREATE OR REPLACE VIEW gold_b.payment_conflicts AS
+SELECT payment_id, hold_reason, event_count, pg, status, completed_at,
+       cdc_op, source_ts_ms, rule_version, kafka_partition, kafka_offset, loaded_at
+FROM gold_b.payment_states
+WHERE hold_reason IS NOT NULL;
+```
+
+| 컬럼 | 뜻 | 예시 |
+| --- | --- | --- |
+| `payment_id` | 보류된 결제 시도 번호 | `p-08` |
+| `hold_reason` | `MULTI_PARTITION`: 같은 결제가 두 파티션 이상에 있음 (순서를 정할 수 없음) / `ORDER_ANOMALY`: 마지막 이벤트의 원본 변경 시각이 앞선 이벤트보다 이름 / `INVALID_LATEST`: 마지막 이벤트가 형식 오류 | `INVALID_LATEST` |
+| `event_count` | 그 결제의 이벤트 수 | `2` |
+| `pg`, `status`, `completed_at` | 마지막 이벤트의 값 (영향 범위 확인용). 마지막 이벤트가 오류면 NULL | `PG_A`, `FAILED`, 15:01:20 |
+| `cdc_op`, `source_ts_ms`, `rule_version` | 마지막 이벤트의 변경 종류, 원본 변경 시각, 판정 규칙 버전 | `u`, `1792562910000`, `0.2.0` |
+| `kafka_partition`, `kafka_offset` | 마지막 이벤트의 Kafka 위치 (원본·④ 오류 줄 찾기) | `0`, `102` |
+| `loaded_at` | 마지막 이벤트를 쌓은 시각 | 15:05:00 |
+
+- 원문 값은 넣지 않고 결제 키·원본 위치·보류 사유만 남긴다. 오류 내용은 같은 Kafka 위치의 ④ `malformed_events`(`field`, `reason`, `raw_sample`)에서 본다.
+- 탐지는 이 뷰에 줄이 있는 구간을 "확인 필요"로 볼 수 있다. 보류된 결제는 `payment_attempts`에서 빠지므로 그 구간의 결제 수가 실제보다 적을 수 있다. 잘못된 최신 이벤트는 R4(깨진 메시지)로도 세어진다.
 
 ### 정리 뷰 `payment_attempts` - 결제 시도 한 건 = 한 줄 (시나리오 1)
 
-① `payment_events`에서 이렇게 정리한다.
+`payment_states`에서 보류되지 않은 결제의 **마지막 이벤트**를 보여준다 (2026-10-23 바뀜. 예전에는 가장 먼저 쌓인 줄). 결제가 수정되었으면 수정된 값이 보인다. 같은 결제가 Debezium 재시작·스냅샷으로 여러 번 와도 결제마다 한 줄이다. 실제 재시도는 `payment_id`가 달라서 그대로 남는다. 칸은 예전과 같아서 판정 SQL은 바꾸지 않아도 된다.
 
-- `payment_conflicts`에 있는 `payment_id`는 **모든 줄을 뺀다.** 어느 줄이 맞는지 판단할 수 없는 결제를 정상으로 세지 않는다.
-- 남은 결제 중 `payment_id`가 같은 줄은 **가장 먼저 쌓인 줄**(`loaded_at`이 가장 이른 줄) 하나만 남긴다 (Debezium 재시작·전송 재시도로 생긴 중복). 내용이 같으므로 값은 같고, 처음 쌓인 시각이 남는다. 실제 재시도는 `payment_id`가 달라서 그대로 남는다.
 - `failure_code`로 실패 원인을 붙인다: `PG_TIMEOUT`, `PG_ERROR` → `PG` / `INSUFFICIENT_BALANCE`, `CARD_LIMIT_EXCEEDED`, `CARD_DECLINED` → `CUSTOMER` / 그 외이거나 코드가 비어 있는 실패 → `UNKNOWN`.
 
 ```sql
@@ -365,13 +402,8 @@ SELECT payment_id, order_id, attempt_no, pg, status, failure_code,
          WHEN status = 'FAILED' THEN 'UNKNOWN'
        END AS failure_cause,
        completed_at, loaded_at
-FROM (
-  SELECT e.*, ROW_NUMBER() OVER (PARTITION BY payment_id
-                                 ORDER BY loaded_at, kafka_partition, kafka_offset) AS rn
-  FROM gold_b.payment_events e
-  WHERE NOT EXISTS (SELECT 1 FROM gold_b.payment_conflicts c WHERE c.payment_id = e.payment_id)
-)
-WHERE rn = 1;
+FROM gold_b.payment_states
+WHERE hold_reason IS NULL;
 ```
 
 | 컬럼 | 뜻 | 예시 |
@@ -382,8 +414,8 @@ WHERE rn = 1;
 | `status` | `SUCCESS` / `FAILED` | `FAILED` |
 | `failure_code` | 원래 실패 코드 (원인을 더 좁힐 때) | `PG_TIMEOUT` |
 | `failure_cause` | 실패 원인 분류 | `PG` |
-| `completed_at` | 결제 결과 시각 | 15:01:20 |
-| `loaded_at` | 원장에 처음 쌓인 시각 (중복이면 이른 쪽) | 15:02:00 |
+| `completed_at` | 결제 결과 시각 (마지막 이벤트) | 15:01:20 |
+| `loaded_at` | 마지막 이벤트를 원장에 쌓은 시각 | 15:02:00 |
 
 ### 정리 뷰 `malformed_messages` - 깨진 메시지 하나 = 한 줄 (시나리오 3)
 
