@@ -1,6 +1,6 @@
 # 작업 지시서: sim/console
 
-> 상태: 진행 중 · 브랜치: `sim/console` (최신 `main`) · 설계: `docs/design/api.md` 12절 범위 메모(2026-10-20)
+> 상태: 완료 · 브랜치: `sim/console` (최신 `main`) · 설계: `docs/design/api.md` 12절 범위 메모(2026-10-20)
 
 ## 목표
 

@@ -1,6 +1,6 @@
 # 작업 지시서: sim/normal-scale
 
-> 상태: 진행 중 · 브랜치: `sim/normal-scale` (최신 `main`) · 다음 작업: `sim/console`
+> 상태: 완료 · 브랜치: `sim/normal-scale` (최신 `main`) · 다음 작업: `sim/console`
 
 ## 목표
 
