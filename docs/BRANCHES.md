@@ -153,7 +153,13 @@ gitGraph
 | `agent/ddl` | [agent-ddl.md](tasks/agent-ddl.md) | 머지됨 (PR #53) | 2026-10-22 |
 | `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
 | `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
-| `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
+| `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 머지됨 (PR #64) | 2026-10-23 |
+| `agent/approval` | [agent-approval.md](tasks/agent-approval.md) | 머지됨 (PR #66) | 2026-10-23 |
+| `agent/followups` | [agent-followups.md](tasks/agent-followups.md) | 머지됨 (PR #71) | 2026-10-23 |
+| `agent/folder-filter` | `agent-folder-filter.md` 없음(작은 변경, PR #72 본문 참고) | 머지됨 (PR #72) | 2026-10-23 |
+| `agent/conclusion-check` | [agent-conclusion-check.md](tasks/agent-conclusion-check.md) | 머지됨 (PR #76) | 2026-10-23 |
+| `agent/silver-source` | `agent-silver-source.md` 없음(작은 변경, PR #80 본문 참고) | 머지됨 (PR #80) | 2026-10-23 |
+| `agent/rules-doc` | [agent-rules-doc.md](tasks/agent-rules-doc.md) | 검토 대기 | |
 
 
 ### dashboard
