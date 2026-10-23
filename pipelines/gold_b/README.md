@@ -7,15 +7,16 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | 경로 | 내용 |
 |---|---|
 | `ddl/database.sql` | Glue 데이터베이스 `gold_b` |
-| `ddl/payment_events.sql` | ① 결제 시도 원장 (`completed_at` 시간 폴더). 결제 내용 지문(`payment_content_hash`, `fingerprint_version`) 포함 |
+| `ddl/payment_events.sql` | ① 결제 이벤트 원장 (`completed_at` 시간 폴더). 결제 내용 지문(`payment_content_hash`, `fingerprint_version`) 포함. 결제 수정(`u`)도 쌓고 변경 종류·원본 변경 시각·규칙 버전을 남김 (2026-10-23) |
 | `ddl/topic_messages.sql` | ② 메시지 원장, 6개 토픽 전부 (`kafka_timestamp` 시간 폴더) |
 | `ddl/bronze_lag_snapshots.sql` | ③ Bronze 지연 측정 (`collected_at` 시간 폴더) |
 | `ddl/malformed_events.sql` | ④ 형식 오류, 오류 하나 = 한 줄 (`kafka_timestamp` 시간 폴더) |
 | `ddl/reprocess_events.sql` | ⑤ 재처리 단계 기록 (시간 폴더 없음) |
 | `tests/samples/` | 형식 검사·뷰·적재 잡 확인용 샘플 메시지와 기대 결과 ([설명](tests/samples/README.md)) |
 | `tests/test_ddl.py` | DDL이 설계 표와 같은지, 샘플이 규칙에 맞는지, 샘플 원장을 시간 폴더 Parquet으로 쓰고 읽을 수 있는지 |
-| `views/` | 정리 뷰 SQL 3개 (`payment_conflicts`, `payment_attempts`, `malformed_messages`), Athena에서 만드는 순서 ([설명](views/README.md)) |
+| `views/` | 정리 뷰 SQL 4개 (`payment_states`, `payment_conflicts`, `payment_attempts`, `malformed_messages`), Athena에서 만드는 순서와 표 칸 추가 ([설명](views/README.md)) |
 | `tests/test_views.py` | 뷰 SQL 파일이 설계 문서의 SQL과 같은지 |
+| `tests/test_payment_states.py` | 결제 정리 뷰: 샘플을 실제 형식 검사기로 원장에 넣고 뷰 SQL을 SQLite로 돌려 결제마다 마지막 이벤트·보류 사유가 기대 결과와 같은지, 재처리 뒤 결제 상태 (복구, 보류 유지, 늦게 온 수정의 한계) |
 | `collector/` | Bronze 지연 수집기: ③ `bronze_lag_snapshots`를 1분마다 쌓음 ([설명](collector/README.md)) |
 | `tests/test_lag_collector.py` | 수집기 계산·상태·파일 쓰기 (가짜 Kafka·Connect) |
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
