@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-reprocess-by-message
 
-> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-reprocess-by-message` (결제 UPDATE 처리 #95 머지 뒤 최신 `main` `4d80c76`에서) · 다음 작업: PR (사용자), 주현 님 확인
+> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-reprocess-by-message` (결제 UPDATE 처리 #95 머지 뒤 최신 `main` `4d80c76`에서, 2026-10-24 #98 머지 뒤 최신 `main` 병합) · 다음 작업: PR (사용자)
 
 ## 목표
 
@@ -96,7 +96,7 @@
 
 ## 완료 확인
 
-- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (191개, 로컬 Python 3.12)
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (208개, 최신 `main` 병합 뒤, 로컬 Python 3.12)
 - [x] 위 「확인할 것」 (시험, 아래 작업 결과)
 - [x] `git diff --check`
 
@@ -146,4 +146,4 @@
 - 주현 님: 승인 범위 밖 시간대의 `LEDGER_REPLACED`(detail `outside_window`)로 재판정하는 것과 승인 화면 표시는 확인됨 (2026-10-24). 판정 잡이 한 번에 폴더 하나씩 재판정하도록 바꾸는 것은 주현 님 쪽.
 - DAG: 재처리와 파일 합치기를 같은 Airflow pool(슬롯 1개)에 넣어 같은 시간에 돌지 않게 (`jobs/README.md` DAG 명세).
 - Bronze 재처리 브랜치는 이 방식을 그대로 쓴다 (Bronze v2 줄로 만든 메시지를 `plan_replacement`에 넣음).
-- `pipelines/gold-b-image`와 브랜치 대장 gold-b 표 끝에서 충돌한다. 나중에 올리는 PR 전에 먼저 머지된 쪽을 받아 정리한다.
+- (끝남) `pipelines/gold-b-image`(#98)가 먼저 머지되어 최신 `main`을 병합했다 (`0769534`, 브랜치 대장 gold-b 표 끝만 충돌, 줄 셋을 모두 남김). #98 머지 정리는 `5703995`. 병합 뒤 Gold B 시험 208개 통과 (#98의 이미지 시험 17개 포함).
