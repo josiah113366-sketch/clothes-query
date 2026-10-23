@@ -112,7 +112,7 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | 조사 JP Haiku 권한·#53 표/뷰 배포 및 실제 판정 첫 쓰기 시험 완료, 미게시 | |
+| `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | JP Haiku·#53 표/뷰·첫 쓰기 및 agent ConfigMap/DAG 등록 완료, paused·미게시 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |

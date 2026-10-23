@@ -1,5 +1,7 @@
 # Airflow 개발 실행 기반
 
+판정·조사 이미지 digest와 업무 ConfigMap/GitDagBundle 연결 절차는 [AGENT_RUNTIME.md](AGENT_RUNTIME.md)를 따른다. 실행 설정 연결과 업무 DAG 수동 실행·5분 주기 활성화는 별개다.
+
 기존 EKS의 `airflow` namespace에 공식 Helm 1.22.0 / Airflow 3.3.2 Python 3.12 이미지를 사용한다. 기존 RDS 안의 전용 `airflow_meta` DB·계정을 사용하며 개발 인증은 Simple Auth Manager다. 실제 배포·검증 상태는 [작업 기록](../../../docs/tasks/infra-airflow-runtime.md)에 남긴다. 업무용 재처리·판정 DAG는 각 담당자가 구현한다.
 
 ## 구성과 의존성
