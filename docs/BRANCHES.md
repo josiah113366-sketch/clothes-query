@@ -93,6 +93,7 @@ gitGraph
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 | `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 머지됨 | 2026-10-22 |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
+| `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
