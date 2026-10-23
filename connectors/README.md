@@ -116,7 +116,7 @@ Debezium(Kafka Connect) 커넥터 설정이다. 로컬 구성(`simulator/docker-
 | `order-items` | `order_items` CDC | `order_item_id` | 기본 키. 주문 단위 조립은 Silver에서 한다 |
 | `payments` | `payments` CDC | `payment_id` | 기본 키. 시도 순서는 `attempt_no`·`requested_at`으로 맞춘다 |
 
-모두 파티션 3, 복제 1(브로커 1대), 보관 72시간이다. 토픽은 Helm values(`infra/platform/kafka/cdc-orders-values.yaml`)가 미리 만든다. Connect는 토픽을 자동으로 만들지 않는다(`topic.creation.enable: false`). CDC 메시지 키는 `{"order_id":"..."}`처럼 기본 키 하나짜리 JSON이다.
+모두 파티션 3, 복제 1(브로커 1대), 보관 7일이다(2026-10-23, 처음 72시간). 토픽은 Helm values(`infra/platform/kafka/cdc-orders-values.yaml`)가 미리 만든다. Connect는 토픽을 자동으로 만들지 않는다(`topic.creation.enable: false`). CDC 메시지 키는 `{"order_id":"..."}`처럼 기본 키 하나짜리 JSON이다.
 
 ### 로컬 `member-*.json`과 다른 점
 

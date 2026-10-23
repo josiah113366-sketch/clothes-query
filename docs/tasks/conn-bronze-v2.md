@@ -25,7 +25,7 @@ Bronze 줄마다 Kafka 위치(토픽·파티션·offset)와 Kafka 시각을 남�
 ## 만들지 않는 것
 
 - 옛 Sink 삭제, 읽는 쪽(Silver, Gold B, Athena, Spark handoff 예시)의 경로 변경. 각 담당이 v2를 확인한 뒤 옮긴다
-- Kafka 보관 기간 변경(values는 72시간 그대로. 적용 전 클러스터 값을 확인한다)
+- Kafka 보관 기간 변경. 7일 보관은 `infra/kafka-retention-only`(#86)가 했고 이 브랜치는 그 위에서 그룹 ACL만 바꾼다. 첫 Helm diff(2026-10-23)에서 클러스터는 7일·repo는 72시간이라 upgrade를 멈췄고, #86 머지 후 main을 병합했다
 
 ## 완료 확인
 

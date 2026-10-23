@@ -132,11 +132,11 @@ kubectl get kafkaconnector -n kafka
 
 `bronze-s3-sink-v2`가 Kafka에 남은 메시지를 처음부터 `bronze_v2/`에 다시 쓴다. 이유와 값은 `connectors/README.md`의 "Bronze v2". 시뮬레이터는 멈추지 않는다.
 
-1. **보관 기간 확인 (Helm 전 필수).** 이 values의 업무 토픽은 72시간(`retentionMs: 259200000`)이다. 클러스터에서 직접 늘렸다면 Helm upgrade가 72시간으로 되돌려, 그보다 오래된 메시지가 지워진다.
+1. **보관 기간 확인 (Helm 전 필수).** 이 values는 브로커와 업무 토픽 모두 7일(`retentionMs: 604800000`, `infra/kafka-retention-only` #86)이다. 클러스터 값과 다르면 Helm upgrade가 클러스터를 values 값으로 바꿔, 줄어드는 경우 그보다 오래된 메시지가 지워진다.
    ```powershell
    kubectl get kafkatopic -n kafka -o custom-columns="NAME:.spec.topicName,RETENTION_MS:.spec.config.retention\.ms"
    ```
-   값이 `259200000`이 아니면 멈추고, values를 클러스터 값에 맞춘 뒤 진행한다.
+   값이 `604800000`이 아니면 멈추고 확인한다. 3단계 diff에도 `retention`·`log.retention` 줄이 없어야 한다.
 2. **workload-access**: Connect 역할에 `bronze_v2/` 쓰기를 더한다. 1절 명령으로 plan한다. 기대 변경은 정책 1개 수정(update in-place)뿐이다. 비공개 `deployment.local.tfvars.json`의 `bronze-s3-sink`에도 `bronze_v2/`가 있어야 한다(공개 파일과 같게).
 3. **Helm upgrade**: 4절 명령. 바뀌는 것은 Connect KafkaUser의 그룹 ACL(`connect-bronze-s3-sink-v2` 읽기), Kafka UI 사용자의 같은 그룹 읽기, lag exporter 그룹 정규식뿐이어야 한다. 토픽·`KafkaNodePool`이 바뀌면 멈춘다.
 4. **커넥터 등록**
