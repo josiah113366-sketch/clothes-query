@@ -169,6 +169,11 @@ gitGraph
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
 
+### conn
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `conn/bronze-v2` | [conn-bronze-v2.md](tasks/conn-bronze-v2.md) | 머지됨 (infra 포함, 사용자 예외 승인) | |
+
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
