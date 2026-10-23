@@ -33,3 +33,5 @@ ECR 모듈은 opt-in Spark 저장소 2개와 같은 계정 개발자 IAM 사용�
 아직 필요한 정보는 namespace 공유 최종 확인, 원격 업무 코드, 고정 요청/입력/상품 기준정보/기대값, 실제 커미터 설정·작업 객체 예시, completed_at과 Glue 공개 DDL이다. handoff/email-to-pipelines.md에 메일 문안을 작성했으며 외부로 전송하지 않았다. Spark 노드·업무 Pod·테스트 S3 데이터·Glue 표를 생성하지 않았다.
 
 최종 확인: Python 회귀 21개, shared namespace 소유권을 건드리지 않는 10개 객체 렌더, Terraform fmt·ecr/spark-access/test root 격리 validate, 기존 compute·ECR 회귀를 포함한 mock plan 18개 통과. 최종 고정 패키지 이미지 빌드·pip check·실제 import·Parquet/KST·로컬 Spark/커넥터 실행 통과. 로컬 시험 컨테이너는 --rm으로 종료했다. ECR 실제 plan은 create 3개뿐이며 apply하지 않았다. plan과 이미지 발행이 필요한 마지막 단계는 별도로 구분한다.
+
+후속 원격 push는 자동 승인 검토가 이 변경에 대한 구체적 사용자 확인 부족으로 차단했다. 기존 PR #75는 열려 있지만 이 후속 코드·메일은 로컬 커밋에만 있다. 차단을 우회하지 않았으며 실제 AWS 적용·이미지 발행도 미완료다.
