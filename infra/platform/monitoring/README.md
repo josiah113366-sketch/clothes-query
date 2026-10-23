@@ -19,7 +19,7 @@
 
 Kafka/Connect JMX, Kafka consumer lag, WAS `/metrics`, Prometheus 자체를 60초마다 수집한다. Grafana Infrastructure 폴더의 `Clothes Query - Infrastructure`에서 연결 상태·lag·CDC 지연·WAS 요청/오류·DB 연결 대기를 본다. 대상이 사라지는 경우도 경보로 표시한다. 지표가 없는 화면은 건강하다는 뜻이 아니다.
 
-Metrics Server는 `kubectl top`을 제공한다. 현재 Grafana에는 노드/Pod CPU·메모리 이력 수집을 연결하지 않았다. RDS/WAL/PVC 여유와 S3 파일 도착은 상시 수집 대신 [읽기 전용 점검](READINESS.md)에서 확인한다. Airflow 업무 성공 감시는 미연결이다. 경보는 Prometheus 화면에서 확인할 수 있지만 메일·Discord·Alertmanager 수신 채널은 연결하지 않았다.
+Metrics Server는 `kubectl top`을 제공한다. 현재 Grafana에는 노드/Pod CPU·메모리 이력 수집을 연결하지 않았다. RDS/WAL/PVC 여유와 S3 파일 도착은 상시 수집 대신 [읽기 전용 점검](READINESS.md)에서 확인한다. --pipeline 옵션은 노드 예약/실사용·커넥터·v2 수집기·Gold B 원장·Airflow 작업 이력도 한 번에 읽는다. Airflow 업무 성공의 상시 경보는 아직 없다. 2026-10-23 승인 후 Alertmanager→SNS 이메일 경보를 연결했고 실제 배포 overlay에서 활성화한다. Discord는 연결하지 않았다. 수신 주소·인증값은 Git에 두지 않는다.
 
 ## 검사
 
@@ -60,6 +60,6 @@ Prometheus는 필요할 때 `kubectl -n monitoring port-forward svc/monitoring-p
 
 `new-node-values.yaml`은 미적용 대안이다. 사용하면 전용 `t3a.medium` On-Demand NodePool을 만들고 모니터링을 이동시킨다. 기존 NodeClass의 OS 4GiB+데이터 80GiB와 PVC 6GiB, 월 730시간 기준 총 추가 예상은 약 **$48.70/월**이다. EC2 $0.049/h, Auto Mode $0.00588/h, gp3 $0.096/GB-month로 계산했다. 이미 존재하는 PVC의 AZ와 새 노드 가용성을 확인하고 계획된 이동으로 진행한다. NodePool 한도는 순간적인 비용 상한을 보장하지 않는다.
 
-Argo CD는 이번에 설치하지 않았다. WAS와 모니터링의 실제 사용량·API 배포 시 추가 Pod 여유를 확인한 뒤 배치를 정한다. 지금의 낮은 사용량만으로 부하 증가나 무중단 배포 여유까지 보장하지 않는다.
+Argo CD는 후속 작업으로 기존 API 노드에 설치됐다. 앱별 자동 배포 규칙은 아직 연결하지 않았다. 지금의 낮은 사용량만으로 부하 증가나 무중단 배포 여유까지 보장하지 않는다.
 
 공식 근거: [Prometheus 저장](https://prometheus.io/docs/prometheus/latest/storage/), [Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/), [EKS Metrics Server](https://docs.aws.amazon.com/eks/latest/userguide/metrics-server.html), [도쿄 EC2/gp3 가격](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/ap-northeast-1/index.json), [도쿄 EKS 가격](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEKS/current/ap-northeast-1/index.json).

@@ -64,12 +64,24 @@ def main():
     parser.add_argument("--wal-budget-mib", type=int, default=256)
     parser.add_argument("--s3-max-age-minutes", type=int, default=30)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--pipeline", action="store_true", help="Also inspect runtime resources, v2 collector, Gold B objects and Airflow run metadata")
+    parser.add_argument("--format", choices=["json", "summary"], default="json")
+    parser.add_argument("--node-memory-warn-percent", type=float, default=85)
+    parser.add_argument("--node-cpu-warn-percent", type=float, default=90)
+    parser.add_argument("--ledger-max-age-minutes", type=int, default=3)
+    parser.add_argument("--dag-max-age-minutes", type=int, default=15)
+    parser.add_argument("--gold-b-ingest-prefix", default="gold-b-ingest")
+    parser.add_argument("--reprocess-dags", nargs="+", default=["gold_b_reprocess", "silver_gold_a_reprocess"])
     args = parser.parse_args()
     CONTEXT = args.kube_context
     if not args.live:
         parser.error("Specify --live to perform read-only checks")
     if args.wal_budget_mib <= 0 or args.s3_max_age_minutes <= 0:
         parser.error("Thresholds must be positive")
+    if not (0 < args.node_memory_warn_percent <= 100 and 0 < args.node_cpu_warn_percent <= 100) or args.ledger_max_age_minutes <= 0 or args.dag_max_age_minutes <= 0:
+        parser.error("Runtime thresholds must be positive; percentages cannot exceed 100")
+    if not args.gold_b_ingest_prefix:
+        parser.error("Gold B Pod name prefix cannot be empty")
     now = datetime.now(timezone.utc)
     rows = []
     cluster_verified = False
@@ -180,13 +192,24 @@ def main():
             add("S3/" + prefix, status, {"last_observed_age_seconds": age, "scan_complete": complete,
                 "input_expected": args.expect_ingestion, "scope": "object arrival within two UTC days, not business correctness"})
     attempt("S3", check_s3)
-    add("AirflowBusinessRuns", "UNKNOWN", "Pod readiness does not verify DAG success; inspect task history separately")
+    if args.pipeline and cluster_verified:
+        import runtime_checks
+        rows.extend(runtime_checks.collect(kube, aws, datetime.now(timezone.utc), args, object_status))
+    else:
+        add("AirflowBusinessRuns", "UNKNOWN", "Pipeline checks disabled or cluster identity unverified")
     report = {"checked_at_utc": now.isoformat(), "read_only": True, "region": "ap-northeast-1", "checks": rows}
     text = json.dumps(report, indent=2, ensure_ascii=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
-    print(text)
+    if args.format == "summary":
+        import runtime_checks
+        print(runtime_checks.summary(report))
+    else:
+        print(text)
+    if args.pipeline:
+        import runtime_checks
+        return runtime_checks.exit_code(rows)
     return 1 if any(r["status"] == "WARN" for r in rows) else 2 if any(r["status"] == "UNKNOWN" for r in rows) else 0
 
 
