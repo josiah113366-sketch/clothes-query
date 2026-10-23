@@ -63,9 +63,9 @@ variable "review_input_prefix" {
 
 variable "work_prefix" {
   description = <<-EOT
-    모델·코드를 두는 작업 영역 prefix. 아래 두 곳을 쓴다(둘 다 역할은 읽기만).
-      <work_prefix>/model/ : 합친 모델(upload_model.py 로 올림)
-      <work_prefix>/code/  : score_batch.py
+    모델과 릴리스 묶음을 두는 작업 영역 prefix. 아래 두 곳을 쓴다(둘 다 Job 역할은 읽기만).
+      <work_prefix>/model/<버전>/                      : 합친 모델 가중치(upload_model.py 로 올림)
+      <work_prefix>/model-registry/releases/<버전>/    : manifest.json + code/(score_batch.py, requirements.txt), 패치노트 JSON
   EOT
   type        = string
   default     = "review-score"
@@ -88,18 +88,17 @@ variable "error_prefix" {
   default     = "silver/review_aspect_scores_error"
 }
 
-variable "model_version_no" {
+variable "release" {
   description = <<-EOT
-    모델 번호 "x.y" 형식 문자열(Athena 에서는 decimal(4,1)). model_version(이름)과 1:1 이다.
-    Gold 는 후기마다 이 값이 가장 큰 결과를 읽는다(문자열 이름은 크기 비교가 안 되므로 번호를 따로 둔다).
-    규칙: 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1).
-    마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 2.4b_score_s2c = 1.0. model_version 을 바꾸면 이 값도 같이 바꾼다.
+    지금 점수화에 쓸 모델 버전 이름(릴리스 묶음 이름). run_processing_job.py 가 이 이름으로
+    <work_prefix>/model-registry/releases/<release>/manifest.json 을 읽어 가중치·코드·라이브러리·이미지·번호를 정한다.
+    버전을 바꾸거나 되돌릴 때(roll-forward) 이 값 하나만 바꾼다. 묶음(manifest)이 S3 에 있는 버전만 넣는다(없으면 실행이 멈춘다).
   EOT
   type        = string
-  default     = "1.0"
+  default     = "2.4b_score_s2c"
   validation {
-    condition     = can(regex("^[0-9]{1,2}\\.[0-9]$", var.model_version_no))
-    error_message = "model_version_no 는 x.y 형식이어야 한다(예: 1.0, 1.3, 12.5). 마이너는 0~9 한 자리."
+    condition     = can(regex("^[A-Za-z0-9._-]+$", var.release))
+    error_message = "release 는 영문·숫자·점·밑줄·하이픈만 쓸 수 있다."
   }
 }
 
@@ -122,16 +121,6 @@ variable "unscored_input_prefix" {
   default     = "staging/review-score-input"
 }
 
-variable "model_version" {
-  description = "출력 열 model_version 과 파일명에 쓰는 모델 버전 이름(영문·숫자·._-). SSM 설정에 담겨 스크립트가 기본값으로 쓴다. 모델을 바꾸면 이 값도 바꾼다."
-  type        = string
-  default     = "2.4b_score_s2c"
-  validation {
-    condition     = can(regex("^[A-Za-z0-9._-]+$", var.model_version))
-    error_message = "model_version 은 영문·숫자·점·밑줄·하이픈만 쓸 수 있다."
-  }
-}
-
 # ------------------------------------------------------------------ 컨테이너 이미지 (AWS 공개 Deep Learning Container)
 
 variable "dlc_registry_account_id" {
@@ -147,7 +136,7 @@ variable "dlc_repository" {
 }
 
 variable "dlc_image_tag" {
-  description = "DLC 이미지 태그. 개인 계정 실측(1,000건 약 27분)에 쓴 것과 같다. 바꾸면 transformers 호환을 다시 확인한다."
+  description = "DLC 이미지 태그. 개인 계정 실측(1,000건 약 27분)에 쓴 것과 같다. 새 릴리스 묶음의 기본 이미지(SSM image_uri)와 Job 역할의 ECR 읽기 범위에 쓰인다. 바꾸면 runtime-requirements.txt 호환을 다시 확인한다."
   type        = string
   default     = "2.5.1-gpu-py311-cu124-ubuntu22.04-sagemaker"
 }

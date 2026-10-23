@@ -9,7 +9,7 @@ apply 는 인프라 담당(재영)이 plan 을 확인한 뒤 실행한다. 모�
 - 만드는 것(9개): Job 실행 IAM 역할 + 정책 4개(S3, CloudWatch, ECR(AWS 공개 이미지), VPC ENI), 보안 그룹(나가는 443 만) + 규칙,
   스크립트용 SSM 파라미터, Airflow 가 붙일 `launcher` IAM 정책(어떤 역할에도 자동으로 붙지 않음).
 - 만들지 않는 것: Processing Job(Airflow 태스크가 호출마다 생성), 스케줄(실행은 Airflow silver DAG 종료 신호 기반), 이메일 알림·월 예산(2026-10-21 요청으로 제외), 버킷·VPC, 모델/코드 업로드.
-- 권한 요약(Job 역할): 읽기 `silver/reviews/*`(Silver 리뷰, Bronze 아님)·`staging/review-score-input/*`(미점수 입력)·`review-score/model/*`·`review-score/code/*`, 쓰기 `staging/review-score/*`(점수)·`staging/review-score-log/*`(점수 로그)·`silver/review_aspect_scores_error/*`(오류) 뿐.
+- 권한 요약(Job 역할): 읽기 `silver/reviews/*`(Silver 리뷰, Bronze 아님)·`staging/review-score-input/*`(미점수 입력)·`review-score/model/*`(가중치)·`review-score/model-registry/releases/*/code/*`(릴리스 묶음의 실행 코드), 쓰기 `staging/review-score/*`(점수)·`staging/review-score-log/*`(점수 로그)·`silver/review_aspect_scores_error/*`(오류) 뿐.
 - `launcher` 정책(Airflow/실행자)에는 Job 생성·PassRole·SSM 읽기에 더해 `select_unscored` 용 S3 권한이 있다: Silver 후기 읽기, 미점수 입력 쓰기. 점수 로그를 조회하는 Athena 권한은 athena 스택의 `runner` 정책을 **함께** 붙여서 받는다.
 - 결과 위치(결정, 2026-10-22): 점수는 최종 테이블이 아니라 **staging** 에 쌓는다 — `s3://<버킷>/staging/review-score/year=YYYY/month=MM/day=DD/scores_<model_version>_<실행시각>.parquet`.
   [athena-review-score](../athena-review-score/README.md) 스택의 staging 테이블이 이 경로를 읽고, Athena `MERGE` 가 Iceberg 테이블(`review_aspect_scores`)에 반영한다. 두 스택의 `staging_prefix`/`output_prefix` 는 같아야 한다.
@@ -67,9 +67,9 @@ aws service-quotas list-requested-service-quota-change-history-by-quota --servic
 
 ## apply 후 사용 순서
 
-1. 모델 업로드: `upload_model.py --uri s3://<버킷>/review-score/model/2.4b_score_s2c/` (`--dry-run` 먼저). `score_batch.py` 는 `review-score/code/` 에 올린다.
+1. 모델 업로드: `upload_model.py` 가 가중치(`review-score/model/<버전>/`)와 릴리스 묶음(`review-score/model-registry/releases/<버전>/`: manifest, 실행 코드 사본, 고정 라이브러리 목록)을 같이 올린다(`--dry-run` 먼저, 사용법은 `review-analysis/deploy/README.md` 3번). 그 버전을 쓰려면 `release` 를 바꿔 apply 한다.
 2. Airflow 역할에 `launcher_policy_arn` 정책을 붙인다(이 스택 밖 작업: workload-access 또는 Airflow 담당).
-3. silver DAG 종료 후 실행하는 Airflow 태스크가 SSM 파라미터(`config_parameter_name` output)를 읽어 `role_arn`, `image_uri`, `network`, `tags`, `output_prefix`, `error_prefix` 로 Job 을 만든다.
+3. silver DAG 종료 후 실행하는 Airflow 태스크가 SSM 파라미터(`config_parameter_name` output)를 읽어 `release` 의 manifest(가중치·코드·이미지·번호)와 `role_arn`, `network`, `tags`, `output_prefix`, `error_prefix` 로 Job 을 만든다. launcher 정책에는 manifest 읽기와 가중치 목록 조회 권한이 들어 있다.
    `run_processing_job.py` 를 팀 계정용(SSM 설정 읽기, `tags`·`network` 적용)으로 바꿔 두었다. Airflow 태스크는 이 스크립트의 `build_request` 를 재사용하거나 같은 방식으로 만든다.
 4. 오류 기록: Processing Job 의 S3 출력은 `output/` 하나만 설정할 수 있다. `error/` 로 보내려면 `score_batch.py` 가 오류 목록을 `error_prefix` 로 직접 PutObject 하거나, Airflow 가 실패 시 summary 를 `error/` 로 복사한다(역할에 쓰기 권한은 있음).
 
@@ -80,10 +80,10 @@ Job 은 Terraform 이 아니라 API 호출로 만든다. 정식 하루 1회 실�
 
 ### 흐름
 
-1. `run_processing_job.py` 가 SSM 파라미터(`config_parameter_name` output)에서 역할·이미지·서브넷·SG·태그·S3 경로를 읽는다.
+1. `run_processing_job.py` 가 SSM 파라미터(`config_parameter_name` output)에서 `release`·역할·서브넷·SG·태그·S3 경로를 읽고, `review-score/model-registry/releases/<release>/manifest.json` 에서 가중치·코드·이미지·번호를 읽는다. S3 가중치가 manifest 와 다르면(이름·크기) 여기서 멈춘다.
 2. `CreateProcessingJob` 으로 Job `review-score-<날짜-시각>` 을 요청한다.
-3. SageMaker 가 GPU 인스턴스를 띄우고 S3 의 모델(`review-score/model/2.4b_score_s2c/`)·코드(`review-score/code/score_batch.py`)·입력 파일을 내려받는다.
-4. 컨테이너에서 `pip install transformers==4.53.3 accelerate` 후 `score_batch.py` 를 실행한다.
+3. SageMaker 가 GPU 인스턴스를 띄우고 manifest 가 가리키는 가중치(`review-score/model/<버전>/`)·묶음의 코드(`review-score/model-registry/releases/<release>/code/`)·입력 파일을 내려받는다.
+4. 컨테이너에서 묶음의 `requirements.txt`(버전 고정 목록)로 `pip install` 한 뒤 `score_batch.py` 를 실행한다.
 5. 끝나면 결과를 `staging/review-score/year=/month=/day=/` 에, 오류를 `silver/review_aspect_scores_error/` 의 같은 날짜 경로에 올리고 인스턴스가 사라진다(실행 시간만큼만 과금).
 
 ### 사전 조건 (모두 확인 후 실행)
@@ -92,7 +92,7 @@ Job 은 Terraform 이 아니라 API 호출로 만든다. 정식 하루 1회 실�
 |---|---|
 | 팀 계정 자격증명 | `aws sts get-caller-identity` 가 팀 계정인지 (키는 직접 설정, 채팅·파일에 적지 않는다) |
 | 스택 apply 완료 | `terraform plan` 이 변경 없음, SSM 파라미터가 읽힘 (아래 참고) |
-| 모델·코드가 S3 에 있음 | `upload_model.py`(모델), `aws s3 cp deploy/score_batch.py s3://<버킷>/review-score/code/score_batch.py`(코드) |
+| 릴리스 묶음이 S3 에 있음 | `upload_model.py` 로 올린 `review-score/model-registry/releases/<release>/manifest.json` (코드는 묶음에 들어 있어 따로 올리지 않는다) |
 | GPU 쿼터 1 이상 | 위 "GPU 할당량 확인". 0 이면 Job 이 `ResourceLimitExceeded` 로 시작하지 못한다 |
 | 권한 | `launcher_policy_arn` 과 같은 권한: Job 생성/조회/중지(`review-score-*`), 실행 역할 `iam:PassRole`, SSM 읽기 |
 | 입력 파일 | `score_batch.py` 는 **파일 하나**(Silver 리뷰 `part-00000.jsonl` 등, `review_id`·`text` 필드)만 읽는다. S3 키로 지정 |
