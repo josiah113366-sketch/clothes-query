@@ -1,14 +1,19 @@
-"""주문(결제) 기반 리뷰 발생: 주문 읽기 → 리뷰 쓸 주문 고르기 → 1~14일 뒤 리뷰 시각 정하기.
+"""주문(결제) 기반 리뷰 발생: 주문 읽기 → 리뷰 쓸 주문 고르기 → 0~7일 뒤 리뷰 시각 정하기.
 
 확정한 구상 (2026-10-14, lemin)
 --------------------------------
-결제 정보를 읽어서 결제 후 1~14일 뒤에 리뷰를 단다(하루 약 1,000건).
+결제 정보를 읽어서 결제 후 0~7일 뒤(결제 당일 포함)에 리뷰를 단다(하루 약 1,000건). 2026-10-21 에 1~14일 → 1~7일 → 0~7일(lemin: 당일 리뷰도 있어야 함).
 리뷰는 **S3 에 날짜(dt)별로 바로 쓴다.** RDS 에는 넣지 않는다(07:11 lemin 결정).
 상품·회원·결제 정보가 모두 S3 에 있으므로, 조인은 S3(레이크)에서 한다.
 
-지금(로컬 단계)은 결제 데이터가 아직 없어서 주문을 **로컬 JSONL 파일**에서 읽는다.
-읽는 부분은 OrderSource 하나로 모아 두었으므로, 나중에 S3 결제 데이터를 읽을 때는
-같은 모양(load() → list[Order])의 클래스를 하나 만들어 run.py 에서 바꿔 끼우면 된다.
+주문을 읽는 곳 (OrderSource, load() → list[Order])
+-------------------------------------------------
+1) JsonlOrderSource (--source orders) : 로컬 JSONL 파일. `rsim orders-fake` 가짜 주문 (예전 방식, 배관 시험용)
+2) RdsOrderSource   (--source rds)    : RDS orders 테이블 (2026-10-21 lemin 결정).
+   업무 API 가 RDS 에 저장한 실제(시뮬레이션) 주문을 읽어서, **주문 항목(order_items) 하나에 리뷰 하나**를 단다.
+   상품 정보(product_variant·product_design)와 회원 연령대(members.age_band)를 같이 읽어 프롬프트를 만든다.
+   그래서 리뷰의 order_id·member_id·product_id 가 RDS 값(uuid, H&M article_id)과 그대로 조인된다.
+   상품 목록(data/products.csv)에 없는 상품이어도 RDS 에서 읽은 상품 정보를 쓰므로 건너뛰지 않는다.
 
 주문 파일 형식 (.local/orders.jsonl, 한 줄에 주문 하나)
 ------------------------------------------------------
@@ -38,7 +43,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..common.rng import derive_seed, make_rng, seeded_uuid
-from .catalog import Catalog
+from .catalog import MAX_INFO_CHARS, Catalog, Product
 
 log = logging.getLogger(__name__)
 
@@ -58,10 +63,27 @@ def catalog_rng() -> random.Random:
 
 @dataclass(frozen=True)
 class Order:
+    """리뷰를 달 주문 한 건. RDS 에서 읽으면 주문 항목(order_items) 한 줄이 Order 하나다."""
+
     order_id: str
     member_id: str
     product_id: str
     paid_at: datetime  # 결제 시각 (시간대 있음)
+    # 아래 3개는 RDS 에서 읽을 때만 값이 있다 (JSONL 주문은 None → 예전과 같은 동작)
+    # 주문 항목 ID. 한 주문에 상품이 여러 개면 상품마다 리뷰가 하나씩 달리므로, 리뷰를 구분하는 키로 쓴다
+    order_item_id: str | None = None
+    # RDS 상품 테이블에서 같이 읽은 상품(상품명·종류·색상·무늬). 있으면 상품 목록(catalog) 대신 이걸 프롬프트에 쓴다
+    product: Product | None = None
+    # 회원 연령대(리뷰 표기, 예: "20대"). members.age_band 를 바꾼 값. 없으면 명세에서 무작위로 뽑는다
+    age_group: str | None = None
+
+    @property
+    def key(self) -> str:
+        """리뷰 1건을 정하는 키. 주문 항목이 있으면 그 ID, 없으면 order_id (JSONL 주문은 주문당 리뷰 1건).
+
+        작성 여부·텀·review_id·옵션 난수를 모두 이 키로 만든다. 같은 키면 언제 돌려도 같은 값이다.
+        """
+        return self.order_item_id or self.order_id
 
 
 class OrderSource(Protocol):
@@ -101,23 +123,186 @@ class JsonlOrderSource:
         return orders
 
 
+# ---------------------------------------------------------------- RDS orders 테이블 (--source rds)
+# 리뷰를 다는 주문 상태. 결제가 끝난 주문만 리뷰를 쓴다.
+#  - PAID·SHIPPED·DELIVERED : 리뷰 대상
+#  - PLACED(결제 전)·PAYMENT_FAILED·CANCELLED·REFUNDED : 제외 (환불 주문 리뷰를 넣고 싶으면 여기에 추가)
+# 주문 상태는 db/schema/004_orders.sql 의 CHECK 값과 같아야 한다.
+RDS_REVIEW_STATUSES = ("PAID", "SHIPPED", "DELIVERED")
+
+# members.age_band → 리뷰 명세의 연령대 표기 (scenario.AGE_GROUP_WEIGHTS 의 키와 같아야 한다)
+AGE_BAND_TO_GROUP = {
+    "~19": "10대",
+    "20s": "20대",
+    "30s": "30대",
+    "40s": "40대",
+    "50s": "50대",
+    "60s": "60대 이상",
+    "70+": "60대 이상",
+}
+
+# 주문 항목 + 결제 성공 시각 + 상품 정보 + 회원 연령대를 한 번에 읽는 쿼리.
+# - 결제 시각 = 그 주문의 SUCCESS 결제 중 가장 늦은 completed_at (재시도 끝에 성공한 시각)
+# - 회원 이름·이메일·전화 같은 개인정보 컬럼은 읽지 않는다 (age_band 만)
+# - 탈퇴 회원도 주문 당시 회원이므로 LEFT JOIN 으로 읽는다 (연령대가 없으면 무작위)
+# - 결제 시각 범위 [%(since)s, %(until)s) 만 읽는다. 날짜 D 를 돌릴 때 D-최대일수-1 ~ D 사이만 필요하다
+RDS_ORDERS_SQL = """
+SELECT o.order_id::text      AS order_id,
+       o.member_id::text     AS member_id,
+       oi.order_item_id::text AS order_item_id,
+       oi.article_id         AS article_id,
+       p.paid_at             AS paid_at,
+       m.age_band            AS age_band,
+       v.prod_name           AS prod_name,
+       v.colour_group_name   AS colour_group_name,
+       v.graphical_appearance_name AS graphical_appearance_name,
+       d.product_type_name   AS product_type_name
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+JOIN (
+    SELECT order_id, max(completed_at) AS paid_at
+    FROM payments
+    WHERE status = 'SUCCESS'
+    GROUP BY order_id
+) p ON p.order_id = o.order_id
+JOIN product_variant v ON v.article_id = oi.article_id
+JOIN product_design d ON d.product_code = v.product_code
+LEFT JOIN members m ON m.member_id = o.member_id
+WHERE o.status = ANY(%(statuses)s)
+  AND p.paid_at >= %(since)s
+  AND p.paid_at < %(until)s
+ORDER BY p.paid_at, oi.order_item_id
+"""
+
+
+def _product_quality_bias(article_id: str) -> float:
+    """RDS 상품의 기본 만족도 편차. 상품 ID 로만 정해서 날짜·실행이 달라도 같은 상품이면 같은 값이다.
+
+    표준편차 0.5 는 catalog.Catalog.build 와 같다(대부분 평균 근처, 일부만 확실히 좋거나 나쁨).
+    """
+    return make_rng(derive_seed(ORDER_HASH_SALT, "product-bias", article_id)).gauss(0, 0.5)
+
+
+def order_from_row(row: dict) -> Order:
+    """RDS_ORDERS_SQL 결과 한 줄 → Order. (DB 없이 테스트할 수 있게 따로 뺐다)
+
+    상품 정보는 catalog.PRODUCT_INFO_FIELDS 이름으로 넣는다 → 프롬프트 product_info 에 그대로 들어간다(p5.7).
+      product_type_name → 상품 종류, colour_group_name → 색상(리뷰 option_color 로도 씀), graphical_appearance_name → 무늬
+    category 는 RDS 에 4개 카테고리 값이 없으므로 None (2026-10-16 lemin: 상품 정보만 있으면 됨).
+    """
+    paid_at = row["paid_at"]
+    if isinstance(paid_at, str):
+        paid_at = datetime.fromisoformat(paid_at)
+    if paid_at.tzinfo is None:
+        # timestamptz 는 시간대가 붙어 나온다. 없으면 잘못 읽은 것이므로 멈춘다(날짜 경계가 틀어짐)
+        raise SystemExit("RDS 결제 시각(completed_at)에 시간대가 없습니다")
+    article_id = str(row["article_id"])
+    info = {
+        key: " ".join(str(row[col]).split())[:MAX_INFO_CHARS]
+        for key, col in (
+            ("product_type", "product_type_name"),
+            ("color", "colour_group_name"),
+            ("pattern", "graphical_appearance_name"),
+        )
+        if row.get(col)
+    }
+    product = Product(
+        product_id=article_id,
+        product_name=str(row["prod_name"]),
+        category=None,
+        quality_bias=_product_quality_bias(article_id),
+        info=info,
+    )
+    return Order(
+        order_id=str(row["order_id"]),
+        member_id=str(row["member_id"]),
+        product_id=article_id,
+        paid_at=paid_at.replace(microsecond=0),
+        order_item_id=str(row["order_item_id"]),
+        product=product,
+        age_group=AGE_BAND_TO_GROUP.get(row.get("age_band") or ""),
+    )
+
+
+class RdsOrderSource:
+    """RDS orders 테이블에서 결제가 끝난 주문 항목을 읽는다 (rsim run --source rds).
+
+    database_url : ORDERS_DATABASE_URL (postgresql://사용자:비밀번호@호스트:포트/DB). .env·ECS Secret 에만 둔다.
+    since, until : 읽을 결제 시각 범위 [since, until). run.py 가 날짜 D 와 리뷰 텀으로 계산해서 넘긴다.
+    connect      : 테스트용. DB 연결을 돌려주는 함수(기본 psycopg.connect)를 바꿔 끼운다.
+
+    읽기만 한다(연결을 read_only 로 연다). 오류 메시지에는 행 내용이 들어갈 수 있어서
+    예외 종류·sqlstate 만 남긴다(simulator/common/db.py 와 같은 방식).
+    """
+
+    def __init__(self, database_url: str, since: datetime, until: datetime, connect=None):
+        if not database_url:
+            raise SystemExit(
+                "ORDERS_DATABASE_URL 이 비어 있습니다. .env 에 RDS 접속 주소를 적어 주세요 (.env.example 참고)."
+            )
+        self.database_url = database_url
+        self.since = since
+        self.until = until
+        self._connect = connect
+
+    def load(self) -> list[Order]:
+        connect = self._connect
+        if connect is None:
+            import psycopg  # DB 를 쓸 때만 필요하다 (--source orders·random 은 psycopg 없이 돈다)
+            from psycopg.rows import dict_row
+
+            def connect(url):
+                return psycopg.connect(url, row_factory=dict_row)
+
+            db_error: type[Exception] = psycopg.Error
+        else:
+            db_error = Exception
+        try:
+            with connect(self.database_url) as conn:
+                conn.read_only = True
+                with conn.cursor() as cur:
+                    cur.execute(
+                        RDS_ORDERS_SQL,
+                        {
+                            "statuses": list(RDS_REVIEW_STATUSES),
+                            "since": self.since,
+                            "until": self.until,
+                        },
+                    )
+                    rows = cur.fetchall()
+        except db_error as e:
+            # str(e) 에는 행 값이 섞일 수 있어서 쓰지 않는다
+            raise SystemExit(
+                f"RDS 주문 읽기 실패: {type(e).__name__} sqlstate={getattr(e, 'sqlstate', None)}"
+            ) from None
+        orders = [order_from_row(r) for r in rows]
+        log.info(
+            "RDS 주문 항목 %d건 읽음 (결제 %s ~ %s, 상태 %s)",
+            len(orders),
+            self.since.isoformat(),
+            self.until.isoformat(),
+            "/".join(RDS_REVIEW_STATUSES),
+        )
+        return orders
+
+
 # ---------------------------------------------------------------- 리뷰 발생 규칙
 @dataclass(frozen=True)
 class ReviewTiming:
     """주문 → 리뷰 발생 규칙. 값은 config.py(환경변수)에서 받는다.
 
     rate     : 주문 중 리뷰를 쓰는 비율 (0~1). 1.0 이면 모든 주문에 리뷰가 달린다.
-    min_days : 결제 후 리뷰까지 최소 일수 (기본 1)
-    max_days : 결제 후 리뷰까지 최대 일수 (기본 14)
+    min_days : 결제 후 리뷰까지 최소 일수 (기본 0 = 결제 당일에도 리뷰 가능, 2026-10-21 에 1 → 0)
+    max_days : 결제 후 리뷰까지 최대 일수 (기본 7, 2026-10-21 에 14 → 7)
     """
 
     rate: float = 1.0
-    min_days: float = 1.0
-    max_days: float = 14.0
+    min_days: float = 0.0
+    max_days: float = 7.0
 
-    def _rng(self, order_id: str) -> random.Random:
-        # 주문마다 따로 만드는 난수열. 같은 order_id 면 항상 같은 값이 나온다.
-        return make_rng(derive_seed(ORDER_HASH_SALT, "review-timing", order_id))
+    def _rng(self, key: str) -> random.Random:
+        # 주문(항목)마다 따로 만드는 난수열. 같은 키(Order.key)면 항상 같은 값이 나온다.
+        return make_rng(derive_seed(ORDER_HASH_SALT, "review-timing", key))
 
     def due_at(self, order: Order) -> datetime | None:
         """이 주문의 리뷰 작성 시각. 리뷰를 쓰지 않는 주문이면 None.
@@ -125,7 +310,7 @@ class ReviewTiming:
         난수를 뽑는 순서(작성 여부 → 텀)는 고정이다. 순서를 바꾸면 기존 주문의 리뷰 날짜가 바뀐다.
         텀은 [min_days, max_days] 사이에서 초 단위로 고르게 뽑는다(하루 중 시각도 함께 섞인다).
         """
-        rng = self._rng(order.order_id)
+        rng = self._rng(order.key)
         if rng.random() >= self.rate:
             return None
         delay_sec = rng.uniform(self.min_days * 86400, self.max_days * 86400)
@@ -142,20 +327,20 @@ def due_orders(
     """리뷰 시각이 [start, end) 안에 떨어지는 주문을 (주문, 리뷰 시각) 으로, 리뷰 시각 순서로 돌려준다.
 
     날짜 하나(D)를 돌릴 때 start = D 00:00 UTC, end = 다음 날 00:00 UTC 다.
-    결제가 D-14 ~ D-1 일에 있었던 주문만 해당될 수 있으므로, 나중에 S3 결제 데이터를 읽을 때는
-    그 15일치 파티션만 읽으면 된다.
+    결제가 D-7 ~ D 일에 있었던 주문만 해당될 수 있으므로(텀 0~7일), RDS·S3 결제 데이터를 읽을 때는
+    그 8일치(D-7 ~ D) 범위만 읽으면 된다 (RdsOrderSource 는 run.make_order_source 가 이 범위를 계산한다).
     """
     picked = []
     for order in orders:
         due = timing.due_at(order)
         if due is not None and start <= due < end:
             picked.append((order, due))
-    picked.sort(key=lambda x: (x[1], x[0].order_id))
+    picked.sort(key=lambda x: (x[1], x[0].key))
     return picked
 
 
 def order_id_rng(order_id: str, purpose: str = "review-ids") -> random.Random:
-    """주문 모드에서 쓰는 주문별 난수 (order_id 로만 결정).
+    """주문 모드에서 쓰는 주문별 난수 (주문 키로만 결정). order_id 자리에는 Order.key 를 넘긴다.
 
     purpose="review-ids"   : review_id·event_id
     purpose="review-attrs" : 구매 옵션·포토 여부 (options.py)
