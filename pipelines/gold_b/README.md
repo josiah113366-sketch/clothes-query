@@ -16,6 +16,8 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `tests/test_ddl.py` | DDL이 설계 표와 같은지, 샘플이 규칙에 맞는지, 샘플 원장을 시간 폴더 Parquet으로 쓰고 읽을 수 있는지 |
 | `views/` | 정리 뷰 SQL 3개 (`payment_conflicts`, `payment_attempts`, `malformed_messages`), Athena에서 만드는 순서 ([설명](views/README.md)) |
 | `tests/test_views.py` | 뷰 SQL 파일이 설계 문서의 SQL과 같은지 |
+| `collector/` | Bronze 지연 수집기: ③ `bronze_lag_snapshots`를 1분마다 쌓음 ([설명](collector/README.md)) |
+| `tests/test_lag_collector.py` | 수집기 계산·상태·파일 쓰기 (가짜 Kafka·Connect) |
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
 | `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체 ([설명](jobs/README.md)) |
 | `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패 (가짜 Kafka, 샘플 메시지) |
@@ -42,7 +44,7 @@ s3://clothes-query-datalake/gold_b/reprocess_events/*.parquet
 python -m pytest -q pipelines/gold_b/tests
 ```
 
-필요한 패키지: `pytest`, `pyarrow` (Parquet 확인. 없으면 그 테스트만 건너뜀).
+필요한 패키지는 `requirements.txt`와 `pytest`다. Gold B 가상환경(`pipelines/gold_b/.venv`)을 만드는 방법은 [collector/README.md](collector/README.md)의 「실행」에 있다.
 
 Athena에 만들기 (권한 준비 후): `ddl/database.sql` → 나머지 5개 순서로 Athena 쿼리 편집기에서 하나씩 실행한다. 파일 맨 위의 `--` 설명 줄과 끝의 `;`는 Athena API로 실행할 때 문제가 될 수 있으니, 콘솔이 아닌 스크립트로 돌릴 때는 빼고 보낸다.
 
