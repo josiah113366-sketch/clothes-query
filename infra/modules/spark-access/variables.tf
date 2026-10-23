@@ -57,3 +57,24 @@ variable "s3_endpoint_actions" {
   type    = set(string)
   default = []
 }
+variable "reference_object_arns" {
+  description = "Confirmed read-only product snapshot objects; no wildcard/bucket write grant."
+  type        = set(string)
+  default     = []
+  validation {
+    condition = alltrue([for arn in var.reference_object_arns : contains([
+      "arn:aws:s3:::hm-ecommerce-data/seed_v2/product_design/product_design.parquet",
+      "arn:aws:s3:::hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"
+    ], arn)])
+    error_message = "Use only the two confirmed product snapshot objects."
+  }
+}
+variable "rollback_run_ids" {
+  description = "Explicit approved run IDs whose final Parquet parts may be cleaned after a failed commit."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for id in var.rollback_run_ids : can(regex("^[A-Za-z0-9_-]{1,100}$", id))])
+    error_message = "Use literal run IDs without wildcard or path separators."
+  }
+}

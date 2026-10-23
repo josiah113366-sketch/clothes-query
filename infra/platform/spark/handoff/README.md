@@ -1,5 +1,7 @@
 # Silver·Gold A 연결 준비
 
+**최신 상태(2026-10-23, #82 머지 후)는 [연결 준비 결과](silver-gold-a-ready.md)를 따른다.** 아래는 경로 확정 전 준비 이력이다. namespace·고정 입력·상품 기준정보 중 확인된 항목과 현재 검토용 권한은 최신 문서에 정리했다. 준비 완료와 실제 AWS 적용은 구분한다.
+
 동료의 상세 명세를 [계약 예시](silver-gold-a.example.yaml)에 반영했고, [전달 문안](message-to-pipelines.md)을 준비했다. 출력을 제안 경로로 코드에 준비했으며 실제 권한 적용은 하지 않았다. 실행 요청 JSON prefix와 namespace·계정은 아직 미정이다.
 
 ## 경로별 권한 준비 도구

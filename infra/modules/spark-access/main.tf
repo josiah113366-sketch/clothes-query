@@ -1,10 +1,16 @@
+data "aws_caller_identity" "current" {}
+
 locals {
   actors         = var.enabled ? toset(["driver", "executor"]) : toset([])
   object_actions = ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
   required_actions = concat(local.object_actions, ["s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation"],
   var.allow_bucket_multipart_listing ? ["s3:ListBucketMultipartUploads"] : [])
-  # Only job working objects under a run's dataset; never finished Parquet/manifests.
+  # Temporary objects plus explicitly approved validation runs; never whole output roots.
   magic_patterns = [for p in sort(tolist(var.output_prefixes)) : "${p}runs/*/*/__magic_job-*/*"]
+  rollback_patterns = flatten([for p in sort(tolist(var.output_prefixes)) : [
+    for run_id in sort(tolist(var.rollback_run_ids)) : "${p}runs/${run_id}/*/part-*.parquet"
+  ]])
+  reference_keys = [for arn in sort(tolist(var.reference_object_arns)) : trimprefix(arn, "arn:aws:s3:::hm-ecommerce-data/")]
 }
 resource "aws_iam_role" "this" {
   for_each = local.actors
@@ -14,6 +20,7 @@ resource "aws_iam_role" "this" {
     Statement = [{
       Effect = "Allow", Principal = { Service = "pods.eks.amazonaws.com" }, Action = ["sts:AssumeRole", "sts:TagSession"]
       Condition = { StringEquals = {
+        "aws:RequestTag/eks-cluster-arn"            = "arn:aws:eks:ap-northeast-1:${data.aws_caller_identity.current.account_id}:cluster/${var.cluster_name}"
         "aws:RequestTag/kubernetes-namespace"       = var.namespace
         "aws:RequestTag/kubernetes-service-account" = "${var.service_account_prefix}-${each.key}"
       } }
@@ -40,7 +47,13 @@ resource "aws_iam_role_policy" "s3" {
       { Sid = "BucketLocation", Effect = "Allow", Action = ["s3:GetBucketLocation"], Resource = [var.bucket_arn] }
       ], var.allow_bucket_multipart_listing ? [
       { Sid = "OptionalMultipartMetadataListing", Effect = "Allow", Action = ["s3:ListBucketMultipartUploads"], Resource = [var.bucket_arn] }
-    ] : [])
+      ] : [], length(var.rollback_run_ids) > 0 ? [
+      { Sid = "ApprovedRunParquetRollback", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in local.rollback_patterns : "${var.bucket_arn}/${p}"] }
+      ] : [], [for statement in [
+        { Sid = "ProductReferenceObjectsReadOnly", Effect = "Allow", Action = ["s3:GetObject"], Resource = sort(tolist(var.reference_object_arns)) },
+        { Sid = "ProductReferenceMetadata", Effect = "Allow", Action = ["s3:GetBucketLocation"], Resource = ["arn:aws:s3:::hm-ecommerce-data"] },
+        { Sid = "ProductReferenceListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = ["arn:aws:s3:::hm-ecommerce-data"], Condition = { StringLike = { "s3:prefix" = flatten([for p in local.reference_keys : [p, "${p}/*"]]) } } }
+    ] : statement if length(var.reference_object_arns) > 0])
   })
 }
 resource "aws_eks_pod_identity_association" "this" {

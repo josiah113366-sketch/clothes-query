@@ -15,10 +15,10 @@ variables {
 run "explicit_optional_transport_actions" {
   command = plan
   module { source = "../modules/network" }
-  variables { additional_s3_endpoint_actions = ["s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"] }
+  variables { additional_s3_endpoint_actions = ["s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:DeleteObject"] }
   assert {
     condition = (
-      output.s3_endpoint_actions == toset(["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]) &&
+      output.s3_endpoint_actions == toset(["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads", "s3:DeleteObject"]) &&
       toset(jsondecode(aws_vpc_endpoint.s3.policy).Statement[0].Action) == output.s3_endpoint_actions
     )
     error_message = "The network output and endpoint policy must agree on explicit optional transport actions."

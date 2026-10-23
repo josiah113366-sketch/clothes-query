@@ -19,4 +19,6 @@ module "spark_access" {
   bucket_arn                     = data.terraform_remote_state.storage.outputs.bucket_arn
   s3_endpoint_actions            = data.terraform_remote_state.network.outputs.s3_endpoint_actions
   allow_bucket_multipart_listing = var.allow_bucket_multipart_listing
+  reference_object_arns          = var.reference_object_arns
+  rollback_run_ids               = var.rollback_run_ids
 }

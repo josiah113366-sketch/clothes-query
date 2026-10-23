@@ -63,3 +63,35 @@ run "reject_missing_endpoint_transport" {
   }
   expect_failures = [aws_iam_role.this]
 }
+run "reference_snapshots_and_approved_rollback_runs_only" {
+  command = plan
+  module { source = "../modules/spark-access" }
+  variables {
+    enabled                        = true
+    namespace                      = "pipelines"
+    allow_bucket_multipart_listing = true
+    rollback_run_ids               = ["trade-fixed-normal-20261023"]
+    reference_object_arns          = ["arn:aws:s3:::hm-ecommerce-data/seed_v2/product_design/product_design.parquet"]
+    s3_endpoint_actions = [
+      "s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation", "s3:DeleteObject",
+      "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads"
+    ]
+  }
+  assert {
+    condition = (
+      [for s in jsondecode(aws_iam_role_policy.s3["driver"].policy).Statement : s if s.Sid == "ProductReferenceObjectsReadOnly"][0].Action == ["s3:GetObject"] &&
+      alltrue([for p in [for s in jsondecode(aws_iam_role_policy.s3["driver"].policy).Statement : s if s.Sid == "ApprovedRunParquetRollback"][0].Resource : strcontains(p, "/runs/trade-fixed-normal-20261023/") && endswith(p, "/part-*.parquet")]) &&
+      [for s in jsondecode(aws_iam_role_policy.s3["driver"].policy).Statement : s if s.Sid == "OptionalMultipartMetadataListing"][0].Action == ["s3:ListBucketMultipartUploads"]
+    )
+    error_message = "Read only named reference objects and permit rollback only for approved runs' Parquet parts."
+  }
+}
+run "reject_wildcard_rollback_and_unconfirmed_reference" {
+  command = plan
+  module { source = "../modules/spark-access" }
+  variables {
+    rollback_run_ids      = ["*"]
+    reference_object_arns = ["arn:aws:s3:::hm-ecommerce-data/*"]
+  }
+  expect_failures = [var.rollback_run_ids, var.reference_object_arns]
+}

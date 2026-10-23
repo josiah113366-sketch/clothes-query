@@ -27,3 +27,11 @@ variable "allow_bucket_multipart_listing" {
   type    = bool
   default = false
 }
+variable "reference_object_arns" {
+  type    = set(string)
+  default = []
+}
+variable "rollback_run_ids" {
+  type    = set(string)
+  default = []
+}
