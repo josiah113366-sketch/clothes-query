@@ -1,5 +1,7 @@
 # 배포 스택
 
+- [spark-access](spark-access/README.md): eks/storage/network 이후 독립 state. namespace 확정 전 enabled=false로 유지한다.
+
 기존 bootstrap은 보존한다. 이번 구현은 dev 환경이며 backend key와 리소스 이름이 dev로 고정되어 있다. 다른 환경에는 새 key/이름 설계를 먼저 검토한다.
 
 - [network](network/README.md)
