@@ -31,23 +31,69 @@
 ```
 - `cause_layer`: `PAYMENT` / `INGEST` / `DATA_QUALITY` / `UNKNOWN`(증거가 부족하면 억지로 고르지 않음)
 - `trace`: 어떤 도구를 어떤 인자로 불렀고 성공·오류·거절이었는지 (조사 과정 기록)
-- `problems`: 2번 되돌려도 검사를 못 통과한 경우에만 붙는다. 채점에서 근거 없는 주장으로 센다.
+- `problems`: 2번 되돌려도 검사를 못 통과한 경우에만 붙는다. 채점에서 근거 없는 주장으로 센다. 이때 리포트는 `cause_layer`를 `UNKNOWN`으로 바꾸고, 결론 앞에 `[검증 미통과 · 모델이 낸 원인 층: …]`를 붙여 남긴다(검증 못 한 결론을 원인으로 내세우지 않기 위해). 실행 기록 상태는 `INCOMPLETE`다.
+- 불확실성을 밝힌 문장("확인할 수 없습니다", "확인하지 못했습니다")은 '없다' 단정으로 보지 않는다.
 - `claims[].kind`: `FACT`(확인된 사실: 도구 결과로 확인했고 **근거 필수**) / `ASSUMPTION`(추정: 도구로 확인 못 한 해석, 근거는 있으면 적음). 같은 시기에 변한 지표는 조사 단서일 뿐 원인으로 단정하지 않고 추정으로 적는다. 대시보드(PR #31)의 "확인된 사실 / 추정" 구분과 맞춘 것이다.
 - **조회와 제출을 한 응답에 같이 요청하면 제출은 받지 않는다**(재영 님 리뷰). 모델이 이번 조회 결과를 보기 전에 낸 리포트이기 때문이다. 조회 결과를 전달한 **다음 응답**부터 제출할 수 있다. 되돌림 한도에 걸려도 받지 않는다.
 - 사실이 하나도 없이 원인 층을 고르면 되돌려 보낸다(증거가 부족하면 `UNKNOWN`으로 낸다).
+- **확인하지 않은 것을 "없다/정상이다"라고 단정하면 되돌려 보낸다**(결론과 사실(FACT) 문장). 예: `duplicate_success_orders`를 부르지 않고 "오염이 없다", `malformed_summary` 없이 "형식 오류가 없다", `bronze_lag` 없이 "지연이 없다", `ledger_reliability` 없이 "원장이 정상"이라고 쓰는 경우. 낱말 규칙이라 놓치거나 필요 없이 걸리는 문장이 있을 수 있다(`report.py`의 `DENIAL_RULES`). 추정(ASSUMPTION) 문장은 보지 않는다. 실제 모델 시험에서 Haiku가 `mixed` 시나리오에 근거 없이 "원본 데이터에 오염이 없다"고 쓴 것이 계기다.
 - `agent/eval`의 `score_reports()`가 같은 형식을 읽는다 (`anomaly_id`, `cause_layer`, `claims[].evidence`). 근거 연결 점수는 **확인된 사실(`FACT`)만** 센다(추정은 근거가 없어도 감점하지 않는다).
+
+## 실제 모델 연결 (이 브랜치에서 추가)
+
+| 파일 | 하는 일 |
+|---|---|
+| `bedrock_io.py` | Bedrock Converse 호출(`converse` 함수). 서비스 계정 권한(boto3) 또는 API 키(내 컴퓨터 시험용)로 부름. 429·5xx는 3번까지 재시도. 모델이 지원하지 않으면 `toolResult.status`를 뺌 |
+| `run_investigation.py` | Airflow가 5분마다 한 번 실행. 아직 조사 안 한 OPEN 이상을 찾아 조사하고 `agent.investigation_reports`, `agent.investigation_runs`에 새 줄로 쌓음 |
+| `try_model.py` | 진짜 모델 시험대. 가짜 원장(sqlite)에 만든 시나리오 4개(결제·적재·데이터 품질·정상)로 돌려 층 판별·호출 수·거절 수·토큰을 출력 |
+| `Dockerfile` | 이미지 제안. 빌드 위치는 `agent` 폴더 |
+
+환경 변수(비밀값 없음): `ATHENA_WORKGROUP`, `BEDROCK_MODEL_ID`, `AWS_REGION`(기본 ap-northeast-1), `INVESTIGATE_MAX`(기본 3), `INVESTIGATE_LOOKBACK_HOURS`(기본 24), `INVESTIGATE_MARK_EXPIRED`(기본 1). `AWS_BEARER_TOKEN_BEDROCK`은 내 컴퓨터 시험에서만 쓴다.
+
+### 모델 고르기 전에 확인할 것
+
+| 확인 | 이유 |
+|---|---|
+| 모델 ID 또는 추론 프로필 ID가 맞는가 (예: `jp.`, `apac.` 접두) | 도쿄에서 모델 ID만으로는 안 불리는 모델이 있다 |
+| 도구 호출(tool use)을 지원하는가 | 지원하지 않으면 조사 루프가 돌지 않는다 |
+| 도쿄 가격을 확인했는가 | 가격표는 지역마다 다르다 |
+| `toolResult.status`를 지원하는가 | 지원하지 않는 모델은 코드가 자동으로 뺀다 |
+
+모델 후보 비교는 한국어 글 생성 벤치마크가 아니라 **도구 호출 시험**으로 해야 한다: `try_model.py --scenario all --repeat 3`.
+
+### 어떤 이상을 조사하나 (선택 규칙)
+
+- 조사 대상: `gold_b.anomaly_current`에서 **상태가 OPEN이고 최근 24시간 안**인 이상 중 아직 조사하지 않은 것. **오래된 것부터** 한 번에 최대 3건(비용 상한).
+- 조사를 마친 이상(REPORTED·INCOMPLETE·UNKNOWN)은 다시 조사하지 않는다. 오류로 끝난 이상은 2번까지 다시 한다. 조사를 마친 이상도 상태는 OPEN으로 남으므로 **쿼리에서 id로 빼서**(NOT IN) 이미 조사한 이상이 앞을 채워 새 이상이 밀리지 않게 한다.
+- **조사 DAG가 오래 멈췄다가 살아난 경우:** 24시간(조사 기간)을 넘긴 미조사 OPEN 이상에는 실행 기록 `EXPIRED`(이유 포함)를 한 줄 남겨 조용히 사라지지 않게 한다(최근 7일까지). `EXPIRED`는 조사한 것이 아니라서, `INVESTIGATE_LOOKBACK_HOURS`를 늘려 한 번 돌리면 다시 조사할 수 있다.
+- **같은 이상을 두 번 조사하지 않는 보장:** DAG는 `max_active_runs=1`이라 동시에 두 번 돌지 않고, 이미 조사한 이상은 위 규칙으로 빠진다. **한계:** 리포트를 쓴 뒤 실행 기록을 쓰기 전에 Pod가 죽으면 다음 실행이 같은 이상을 한 번 더 조사한다(리포트가 두 개 생길 수 있고 데이터는 상하지 않는다. 드문 경우로 보고 두었다).
+
+### 종료 코드 (작업 성공·실패 기준)
+| 상황 | 종료 코드 | 이유 |
+|---|---|---|
+| 조사 대상 없음 | 0 (성공) | 할 일이 없는 것이 정상 |
+| 대상이 있고 일부만 ERROR | 0 (성공) | 성공한 리포트는 이미 저장됨. ERROR 이상은 실행 기록에 남아 다음 5분 순찰에서 다시 조사(최대 `MAX_ERROR_RETRIES`회). 작업 전체를 실패로 돌려 재시도하면 같은 일을 또 한다. 건수는 요약의 `errors`로 본다 |
+| 대상이 있는데 전부 ERROR | 1 (실패) | 모델·Athena·권한 같은 공통 원인일 가능성이 커서 Airflow가 실패로 보여 줘야 한다 |
 
 ## 실행
 
 ```
 cd agent/investigator
 python3 test_investigator.py     # 가짜 모델·가짜 원장 시험 (표준 라이브러리만 사용)
+python3 test_bedrock_io.py && python3 test_run_investigation.py && python3 test_try_model.py
+
+# 내 컴퓨터에서 진짜 모델 시험 (키는 환경 변수로만. 파일이나 채팅에 적지 않는다)
+# 환경 변수 AWS_BEARER_TOKEN_BEDROCK, BEDROCK_MODEL_ID를 정한 뒤:
+python3 try_model.py --scenario all --repeat 3
+# 시나리오: basic(pg·lag·dup) / hard(falsealarm·nodata·mixed) / all(여섯 개). hard의 정답은 시험대 제작자의 판단이다
+# 모델이 쓴 결론과 주장(사실/추정)을 눈으로 보려면 --show
+python3 try_model.py --scenario hard --repeat 3 --show
 ```
 
 ## 알아야 할 것 (한계)
 
-- **진짜 모델로는 아직 돌려 보지 않았다.** 시험은 정해 둔 순서대로 도구를 부르는 가짜 모델이라 **배관(도구 호출·결과 전달·리포트 검사)만 확인**한다. 모델이 도구를 잘 고르고 원인을 잘 맞히는지는 Bedrock을 연결한 뒤 정답표로 채점해야 안다.
-- **`converse` 연결은 비어 있다.** Bedrock Converse API의 메시지 모양(`toolUse`, `toolResult`)을 따라 만들었지만, 실제 호출 코드, 모델 ID, 권한은 아직 없다.
+- **진짜 모델로는 아직 돌려 보지 않았다**(`bedrock_io.py`도 가짜 클라이언트로만 시험함). 시험은 정해 둔 순서대로 도구를 부르는 가짜 모델이라 **배관(도구 호출·결과 전달·리포트 검사)만 확인**한다. 모델이 도구를 잘 고르고 원인을 잘 맞히는지는 Bedrock을 연결한 뒤 정답표로 채점해야 안다.
+- **모델 ID, Athena 권한은 정해지지 않았다.** 실제 Athena에도 아직 돌려 보지 않았다(`agent` 표 DDL이 PR로 올라가 있고 생성 전).
 - 지시문(`prompt.py`)은 **제안**이다. 실제 모델의 답을 보고 고쳐야 한다.
 - 반복 한도(10회), 되돌리는 횟수(2번)는 임의 값이다.
 - 이 폴더는 **조사까지만** 한다. 재처리 요청, 승인 화면, Airflow 호출은 없다(에이전트는 읽기 전용).

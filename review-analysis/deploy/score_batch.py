@@ -1,6 +1,15 @@
 """후기 점수화 배치 (score 모델 s2c, 합친 모델 전용). 로컬과 SageMaker Processing Job에서 같은 코드로 돈다.
 입력: CSV(review_id,text) 또는 JSONL({"review_id","text"}). 로컬 경로 또는 s3://버킷/키.
-출력: CSV(review_id,aspect,score) — 속성별 한 행, 3분류 열 없음. 같은 위치에 <출력>.summary.json(건수·실패 목록)도 쓴다.
+출력: 확장자가 .parquet 이면 Parquet(팀 Silver 형식), 아니면 CSV. 열은 review_id,aspect,score,model_version,model_version_no,analyzed_at,review_date — 속성별 한 행, 3분류 열 없음.
+      review_date 는 후기 작성일(KST, date)로 Iceberg 테이블의 파티션 열이다. 실행한 날이 아니다.
+      model_version_no 는 "x.y" 형식의 모델 번호(decimal(4,1))로 Gold 가 "가장 높은 버전"을 고르는 기준이다. model_version 은 사람이 읽는 이름이다.
+      번호 규칙: 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다.
+      Parquet 은 score int32, model_version_no decimal(4,1), analyzed_at timestamp(UTC), review_date date, 나머지 string. 건수·실패 목록 요약은 같은 폴더에 쓴다(Parquet 이면 _summary_*.json — Spark/Athena 는 _ 로 시작하는 파일을 데이터로 읽지 않는다. CSV 면 <출력>.summary.json).
+      --output-root 모드(작업 환경): <root>/year=/month=/day=/scores_<model_version>_<실행시각>.parquet 로 후기 작성일별 폴더에 쓴다. 파일명에 실행시각이 들어가 같은 날짜를 다시 실행해도 파일이 겹치지 않는다(staging 은 쌓이는 방식 — 중복은 MERGE 쪽에서 제거).
+      파싱 실패 후기는 실패가 있을 때만 errors_<model_version>_<실행시각>.jsonl 로 쓴다.
+      --log-root 를 주면 점수를 매긴 후기마다 한 행의 점수 로그(review_id, model_version, model_version_no, analyzed_at, review_date, n_aspects)를
+      <root>/year=/month=/day=/scorelog_<model_version>_<실행시각>.parquet 로 쓴다. 속성이 0개인 후기(n_aspects=0)도 기록해서 다음 날 다시 고르지 않게 한다.
+      파싱에 실패한 후기는 로그에 넣지 않는다(다음 실행에서 다시 시도).
 실행: python score_batch.py --model-dir private/merged/2.4b_score_s2c --input in.csv --output out.csv
 """
 import argparse
@@ -9,7 +18,9 @@ import io
 import json
 import os
 import re
+from decimal import Decimal
 import time
+from datetime import date, datetime, timedelta, timezone
 
 ASPECTS = ['재질·촉감', '사이즈·핏', '색상·디자인', '품질·내구성', '가격·가성비', '냄새', '세탁·관리', '활용성·사용감', '배송', '포장', '교환·환불·CS']
 # 학습·평가에 쓴 프롬프트(review_analysis/score.py SHORT_SCORE)와 같아야 한다. 같은지는 deploy/check_prompt.py가 검사한다
@@ -58,8 +69,36 @@ def read_reviews(path):
     for r in rows:
         rid, text = str(r.get('review_id', '')).strip(), str(r.get('text', '')).strip()
         if rid and text:
-            out.append((rid, text))
+            out.append((rid, text, review_date(r)))
     return out
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def review_date(r):
+    """후기의 작성일(KST, YYYY-MM-DD). Silver 의 review_date_kst → created_at_kst → created_at(ISO) 순으로 찾고, 없으면 ''."""
+    d = str(r.get('review_date_kst') or '').strip()
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', d):
+        return d
+    for key in ('created_at_kst', 'created_at'):
+        v = str(r.get(key) or '').strip()
+        if not v:
+            continue
+        try:
+            t = datetime.fromisoformat(v.replace('Z', '+00:00'))
+        except ValueError:
+            continue
+        if t.tzinfo is None:   # 시간대가 없으면 KST 로 본다
+            t = t.replace(tzinfo=KST)
+        return t.astimezone(KST).strftime('%Y-%m-%d')
+    return ''
+
+
+def part_dir(root, day):
+    """<root>/year=YYYY/month=MM/day=DD (root 는 로컬 폴더 또는 s3://버킷/접두사)."""
+    y, m, d = day.split('-')
+    return f'{str(root).rstrip("/")}/year={y}/month={m}/day={d}'
 
 
 def parse(text):
@@ -77,6 +116,74 @@ def parse(text):
                 continue
             d[a['aspect']] = max(-2, min(2, s))
     return d
+
+
+VERSION_NO_RE = re.compile(r'\d{1,2}\.\d')   # "x.y": 메이저 0~99, 마이너 0~9
+
+
+def parse_version_no(v):
+    """모델 번호 문자열("1.0")을 Decimal 로 바꾼다. 형식이 맞지 않으면 argparse 오류."""
+    if not VERSION_NO_RE.fullmatch(str(v)):
+        raise argparse.ArgumentTypeError(f'model_version_no 형식은 x.y (예: 1.0, 1.3, 12.5) 입니다: {v!r}')
+    return Decimal(str(v))
+
+
+COLUMNS = ['review_id', 'aspect', 'score', 'model_version', 'model_version_no', 'analyzed_at', 'review_date']
+
+
+def to_bytes(path, rows, model_version, analyzed_at, model_version_no):
+    """출력 확장자에 따라 Parquet 또는 CSV 바이트를 만든다. rows = [(review_id, aspect, score, review_date 'YYYY-MM-DD' 또는 '')]."""
+    if str(path).lower().endswith('.parquet'):
+        import pyarrow as pa   # Parquet 을 쓸 때만 필요하다(컨테이너는 pip install pyarrow)
+        import pyarrow.parquet as pq
+        ts = datetime.fromisoformat(analyzed_at)
+        schema = pa.schema([('review_id', pa.string()), ('aspect', pa.string()), ('score', pa.int32()),
+                            ('model_version', pa.string()), ('model_version_no', pa.decimal128(4, 1)),
+                            ('analyzed_at', pa.timestamp('us', tz='UTC')),
+                            ('review_date', pa.date32())])
+        table = pa.table({'review_id': [r[0] for r in rows], 'aspect': [r[1] for r in rows], 'score': [r[2] for r in rows],
+                          'model_version': [model_version] * len(rows), 'model_version_no': [model_version_no] * len(rows),
+                          'analyzed_at': [ts] * len(rows),
+                          'review_date': [date.fromisoformat(r[3]) if r[3] else None for r in rows]}, schema=schema)
+        buf = io.BytesIO()
+        pq.write_table(table, buf, compression='snappy')
+        return buf.getvalue()
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator='\n')
+    w.writerow(COLUMNS)
+    for rid, asp, sc, day in rows:
+        w.writerow([rid, asp, sc, model_version, model_version_no, analyzed_at, day])
+    return buf.getvalue().encode('utf-8-sig')
+
+
+def log_bytes(entries, model_version, model_version_no, analyzed_at):
+    """후기별 점수 로그 Parquet 바이트. entries = [(review_id, n_aspects, review_date 'YYYY-MM-DD')]."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    ts = datetime.fromisoformat(analyzed_at)
+    schema = pa.schema([('review_id', pa.string()), ('model_version', pa.string()), ('model_version_no', pa.decimal128(4, 1)),
+                        ('analyzed_at', pa.timestamp('us', tz='UTC')), ('review_date', pa.date32()), ('n_aspects', pa.int32())])
+    table = pa.table({'review_id': [e[0] for e in entries], 'model_version': [model_version] * len(entries),
+                      'model_version_no': [model_version_no] * len(entries), 'analyzed_at': [ts] * len(entries),
+                      'review_date': [date.fromisoformat(e[2]) for e in entries], 'n_aspects': [e[1] for e in entries]}, schema=schema)
+    buf = io.BytesIO()
+    pq.write_table(table, buf, compression='snappy')
+    return buf.getvalue()
+
+
+def errors_bytes(review_ids, model_version, analyzed_at, error='PARSE_FAILED'):
+    """오류 후기 목록을 JSON Lines 바이트로 만든다(비어 있으면 빈 파일)."""
+    return ''.join(json.dumps(dict(review_id=rid, model_version=model_version, analyzed_at=analyzed_at, error=error),
+                              ensure_ascii=False) + '\n' for rid in review_ids).encode('utf-8')
+
+
+def summary_path(output):
+    """요약 파일 위치. Parquet 은 데이터 폴더에 섞여도 읽는 쪽이 무시하도록 _ 로 시작하는 이름을 쓴다."""
+    out = str(output)
+    if out.lower().endswith('.parquet'):
+        head, _, name = out.rpartition('/')
+        return (head + '/' if head else '') + '_summary_' + name[:-len('.parquet')] + '.json'
+    return out + '.summary.json'
 
 
 def load_model(model_dir):
@@ -107,14 +214,38 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--model-dir', default=os.environ.get('MODEL_DIR', '/opt/ml/processing/model'))
     ap.add_argument('--input', required=True)
-    ap.add_argument('--output', required=True)
+    ap.add_argument('--output', default=None, help='결과 파일 하나(.parquet 또는 .csv), 날짜를 나누지 않는다. --output-root 와 둘 중 하나만 지정')
+    ap.add_argument('--output-root', default=None, help='후기 작성일(KST)별로 <root>/year=/month=/day=/scores_<model_version>_<실행시각>.parquet 를 나눠 쓴다(로컬/S3)')
+    ap.add_argument('--error-root', default=None, help='--output-root 와 같은 방식으로 <root>/year=/month=/day=/errors_<model_version>_<실행시각>.jsonl 에 파싱 실패 후기를 쓴다(실패가 있을 때만)')
+    ap.add_argument('--default-date', default=None, help='작성일을 알 수 없는 후기에 쓸 날짜(YYYY-MM-DD). 없으면 그런 후기는 점수를 매기지 않고 오류(no_review_date)로 남긴다')
     ap.add_argument('--bs', type=int, default=16)
+    ap.add_argument('--model-version', default=os.environ.get('MODEL_VERSION', 'unknown'), help='출력 열 model_version 에 넣는 값(파일명 규칙 [A-Za-z0-9._-])')
+    ap.add_argument('--model-version-no', type=parse_version_no, default=(parse_version_no(os.environ['MODEL_VERSION_NO']) if os.environ.get('MODEL_VERSION_NO') else None),
+                    help='모델 번호 "x.y"(예: 1.0). 필수. model_version_no 열(decimal(4,1))에 들어가며 Gold 는 이 값이 가장 큰 결과를 읽는다. 평가 모델/로직 변경은 메이저, 작은 수정은 마이너를 올린다')
+    ap.add_argument('--log-root', default=None, help='--output-root 모드에서 후기별 점수 로그를 <root>/year=/month=/day=/scorelog_<버전>_<실행시각>.parquet 로 쓴다(속성 0개 후기도 기록, 파싱 실패는 제외)')
+    ap.add_argument('--error-dir', default=None, help='(--output 모드) 파싱 실패 후기를 errors_<model_version>_<실행시각>.jsonl 로 쓸 폴더(실패가 있을 때만)')
     a = ap.parse_args()
+    if not re.fullmatch(r'[A-Za-z0-9._-]+', a.model_version):
+        raise SystemExit(f'model_version 형식 오류: {a.model_version!r}')
+    if a.model_version_no is None:
+        raise SystemExit('--model-version-no (x.y 형식, 예: 1.0)가 필요합니다')
+    if a.log_root and not a.output_root:
+        raise SystemExit('--log-root 는 --output-root 와 함께 써야 합니다')
+    if bool(a.output) == bool(a.output_root):
+        raise SystemExit('--output 과 --output-root 중 하나만 지정하세요')
+    if a.default_date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', a.default_date):
+        raise SystemExit('--default-date 형식은 YYYY-MM-DD')
     t0 = time.time()
+    analyzed_at = datetime.now(timezone.utc).isoformat(timespec='seconds')   # 이번 실행의 분석 시각(UTC), 모든 행이 같은 값
+    stamp = analyzed_at.replace('-', '').replace(':', '').replace('+0000', 'Z').replace('+00:00', 'Z')   # 파일명용 실행시각 (예: 20261022T005806Z)
     reviews = read_reviews(a.input)
+    if a.output_root:
+        reviews = [(rid, text, day or a.default_date or '') for rid, text, day in reviews]
     print(f'입력 후기 {len(reviews)}건', flush=True)
+    nodate = [rid for rid, _, day in reviews if a.output_root and not day]   # 작성일을 몰라 파티션을 정할 수 없는 후기
+    todo = [i for i, r in enumerate(reviews) if not (a.output_root and not r[2])]
     tok, model = load_model(a.model_dir)
-    order = sorted(range(len(reviews)), key=lambda i: len(reviews[i][1]))   # 길이가 비슷한 후기끼리 묶어 패딩을 줄인다
+    order = sorted(todo, key=lambda i: len(reviews[i][1]))   # 길이가 비슷한 후기끼리 묶어 패딩을 줄인다
     res, failed = {}, []
     for s in range(0, len(order), a.bs):
         idx = order[s:s + a.bs]
@@ -123,19 +254,50 @@ def main():
             if p is None:
                 failed.append(reviews[i][0])
             res[i] = p or {}
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator='\n')
-    w.writerow(['review_id', 'aspect', 'score'])
-    n_rows = no_aspect = 0
-    for i, (rid, _) in enumerate(reviews):
+    rows_by_day, failed_by_day, no_aspect = {}, {}, 0
+    log_by_day = {}   # 날짜 -> [(review_id, 속성 수)]  (파싱 실패한 후기는 제외)
+    failed_set = set(failed)
+    for i in todo:
+        rid, _, day = reviews[i]
         if not res[i]:
             no_aspect += 1
         for asp, sc in res[i].items():
-            w.writerow([rid, asp, sc]); n_rows += 1
-    write_bytes(a.output, buf.getvalue().encode('utf-8-sig'))
-    summary = dict(입력후기=len(reviews), 출력행=n_rows, 속성없음후기=no_aspect, 파싱실패=len(failed), 파싱실패_review_id=failed,
+            rows_by_day.setdefault(day, []).append((rid, asp, sc, day))
+        if rid in failed_set:
+            failed_by_day.setdefault(day, []).append(rid)
+        else:
+            log_by_day.setdefault(day, []).append((rid, len(res[i]), day))
+    n_rows = sum(len(v) for v in rows_by_day.values())
+    if a.output:   # 단일 파일 모드(로컬 시험용): 날짜를 나누지 않는다
+        rows = [r for v in rows_by_day.values() for r in v]
+        write_bytes(a.output, to_bytes(a.output, rows, a.model_version, analyzed_at, a.model_version_no))
+        if a.error_dir and failed:
+            write_bytes(a.error_dir.rstrip('/') + f'/errors_{a.model_version}_{stamp}.jsonl', errors_bytes(failed, a.model_version, analyzed_at))
+        summary_file = summary_path(a.output)
+    else:          # 작성일별 파티션 모드: 각 후기를 자기 작성일 폴더에 쓴다
+        days = sorted(rows_by_day)
+        for day in days:
+            write_bytes(f'{part_dir(a.output_root, day)}/scores_{a.model_version}_{stamp}.parquet',
+                        to_bytes('x.parquet', rows_by_day[day], a.model_version, analyzed_at, a.model_version_no))
+        if a.log_root:
+            for day in sorted(d for d in log_by_day if d):
+                write_bytes(f'{part_dir(a.log_root, day)}/scorelog_{a.model_version}_{stamp}.parquet',
+                            log_bytes(log_by_day[day], a.model_version, a.model_version_no, analyzed_at))
+        if a.error_root:
+            # 실패가 있는 날짜에만 오류 파일을 쓴다. 파일명에 실행시각이 있어 이전 실행의 기록을 덮어쓰지 않는다
+            for day in sorted(d for d in failed_by_day if d):
+                write_bytes(f'{part_dir(a.error_root, day)}/errors_{a.model_version}_{stamp}.jsonl',
+                            errors_bytes(failed_by_day[day], a.model_version, analyzed_at))
+            if nodate:
+                write_bytes(f'{a.error_root.rstrip("/")}/no_review_date/errors_{a.model_version}_{stamp}.jsonl',
+                            errors_bytes(nodate, a.model_version, analyzed_at, 'NO_REVIEW_DATE'))
+        summary_file = f'{a.output_root.rstrip("/")}/_summary_scores_{a.model_version}_{stamp}.json'
+    summary = dict(모델버전=a.model_version, 모델번호=str(a.model_version_no), 분석시각=analyzed_at, 입력후기=len(reviews), 출력행=n_rows, 속성없음후기=no_aspect,
+                   파싱실패=len(failed), 파싱실패_review_id=failed, 작성일없음_review_id=nodate,
+                   작성일별_출력행={d: len(v) for d, v in sorted(rows_by_day.items())},
+                   점수로그_후기수=sum(len(v) for v in log_by_day.values()),
                    초=round(time.time() - t0), 초당=round(len(reviews) / max(time.time() - t0, 1e-6), 2))
-    write_bytes(a.output + '.summary.json', json.dumps(summary, ensure_ascii=False, indent=1).encode('utf-8'))
+    write_bytes(summary_file, json.dumps(summary, ensure_ascii=False, indent=1).encode('utf-8'))
     print(json.dumps(summary, ensure_ascii=False), flush=True)
 
 

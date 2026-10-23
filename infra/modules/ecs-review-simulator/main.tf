@@ -274,9 +274,9 @@ resource "aws_iam_role_policy" "scheduler" {
 # 스크립트가 바꾸는 두 값(state, 태스크 정의 ARN)은 Terraform 이 되돌리지 않게 ignore_changes 로 둔다.
 resource "aws_scheduler_schedule" "daily" {
   name                         = "${var.name}-daily"
-  description                  = "review-simulator: yesterday(UTC) reviews to S3 bronze"
+  description                  = "review-simulator: yesterday reviews to S3 bronze (runs 00:00 KST)"
   schedule_expression          = var.schedule_expression
-  schedule_expression_timezone = "UTC"
+  schedule_expression_timezone = var.schedule_timezone
   state                        = "DISABLED"
 
   flexible_time_window { mode = "OFF" }

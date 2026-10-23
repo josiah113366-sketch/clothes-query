@@ -21,6 +21,7 @@ from sim.common.config import ConfigError, load_config
 from sim.common.control import DEFAULT_CONTROL_FILE, MODES, FileControlSource
 from sim.common.db import DatabaseTargetError, SafeDatabaseError, check_db_target, describe_target
 from sim.common.kafka import CLICK_TOPIC, load_kafka_settings
+from sim.common.stats import StatsFile, stats_path
 
 app = typer.Typer(help="쇼핑 행동: 방문, 주문, 결제, 상태 전이", no_args_is_help=True)
 
@@ -131,6 +132,9 @@ def live(
         duration=duration,
         max_visits=max_visits,
         out=typer.echo,
+        stats=StatsFile(
+            stats_path(control_file, "behavior"), warn=lambda m: typer.echo(f"경고: {m}", err=True)
+        ).write,
     )
     try:
         with stop_on_signals(runner):

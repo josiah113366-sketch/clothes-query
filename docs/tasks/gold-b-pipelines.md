@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b
 
-> 상태: 진행 중 · 브랜치: `pipelines/gold-b` · 다음 작업: 2단계 정제·형식 검사 (브랜치는 1단계 머지 때 정함)
+> 상태: 완료 (#36, 2026-10-22 머지) · 브랜치: `pipelines/gold-b` · 다음 작업: 2단계부터는 단계별 브랜치(`pipelines/gold-b-views`, `pipelines/gold-b-format-check` 등)에서 한다
 
 ## 목표
 

@@ -296,5 +296,12 @@ check("재판정 재시도: VERIFIED가 한 줄만", len(q4("SELECT * FROM gold_
 fa, fb = datetime(2026, 10, 21, 23, 55), datetime(2026, 10, 22, 0, 5)
 check("폴더 조건: Athena는 시작·끝 날짜", job._folder(fa, fb, Config(dialect="athena")), " AND dt BETWEEN '2026-10-21' AND '2026-10-22'")
 check("폴더 조건: sqlite는 없음", job._folder(fa, fb, CFG), "")
+# 공통 형식 규칙 YAML의 버전과 R4 기본값이 같은지 (어긋나면 R4가 0건이 되어 조용히 안 잡힌다)
+import re
+from pathlib import Path
+yaml = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "format_rules.yaml"
+if yaml.exists():
+    m = re.search(r'^version:\s*"?([0-9][^"\s]*)"?', yaml.read_text(encoding="utf-8"), re.M)
+    check("R4 기본 규칙 버전이 공통 형식 규칙 YAML의 version과 같음", (m.group(1) if m else None, Config().format_rule_version), (Config().format_rule_version, Config().format_rule_version))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
