@@ -45,6 +45,7 @@ bootstrap → network → eks → compute → apps
 | `ecs-simulator` | [stacks/ecs-simulator/](stacks/ecs-simulator/README.md) | 거래·회원 시뮬레이터 ECS Fargate: ECR·클러스터·IAM·SG·오염용 DB Secret·로그, 이미지 digest가 있으면 태스크 정의(컨테이너 3개)·서비스 1개 (담당자 apply) | network, storage, 업무 API(내부 ALB) | 적용 완료(태스크 1개 Running, 컨테이너 3개) |
 | `athena-review-score` | `stacks/athena-review-score/` | 점수 결과 Iceberg 테이블 기반: Glue DB·Iceberg/staging 테이블·Athena 워크그룹·Airflow용 IAM 정책·SSM 설정, SQL 템플릿 ([안내](stacks/athena-review-score/README.md)) | storage (연동: sagemaker-review-score) | 초안·validate·plan(6 create), 미배포 |
 | `workload-access` | `stacks/workload-access/` | 명시된 데이터 서비스의 S3 prefix별 IAM/Pod Identity | network, eks, storage, 서비스 입력 | 코드·mock 검증, 기본 binding 없음 |
+| `infrastructure-alerts` | [stacks/infrastructure-alerts/](stacks/infrastructure-alerts/README.md) | SNS 이메일·RDS 경보 5개·Alertmanager publish 역할/Pod Identity | 기존 EKS/RDS | 2026-10-23 이메일 연결 승인, 예산 알림과 분리 |
 | `team-access` | [stacks/team-access/](stacks/team-access/README.md) | 동료 WAS 배포·클러스터 운영 조회 | 기존 EKS, 비공개 동료 신원 | 2026-10-19 실제 연결·RBAC16개 통과·후속 plan 변경 없음; 동료 본인 접속 확인 후속 |
 | Kafka platform | [platform/kafka/](platform/kafka/README.md) | Strimzi 운영자·영구 저장소·Kafka/선택적 Connect Helm 구성 | eks, compute, 실제 입력·Secret·이미지 | 코드·로컬 검증, 기본 비활성 |
 | Spark | 미구현 | 정제 runtime | 실행 방식·서비스 입력 | 예정 |

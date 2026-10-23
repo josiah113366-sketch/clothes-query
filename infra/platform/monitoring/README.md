@@ -1,5 +1,7 @@
 # 개발용 모니터링
 
+선택적 외부 통보는 [NOTIFICATIONS.md](NOTIFICATIONS.md)를 따른다. 기본 chart는 전달기 비활성이며 실제 배포 overlay로 활성화한다. 기본 자원량과 알림 활성 시 추가 자원량을 구분한다.
+
 장애 감지 범위·일회성 읽기 점검은 [READINESS.md](READINESS.md), Kafka/CDC/RDS 복구 순서는 [장애 대응 안내](../../../docs/operations/incident-recovery.md)를 따른다. 화면 경보와 외부 통보, 백업 설정과 실제 복원 검증을 구분한다.
 
 기존 WAS 노드에 Prometheus·Grafana·Metrics Server를 배치한다. Kafka/Airflow 공용 노드와 API Deployment·NodePool 설정은 변경하지 않는다. WAS 전용 taint를 허용하는 monitoring Pod만 추가하며, 새 EC2·ALB·NodeClass는 기본 구성에서 생성하지 않는다.

@@ -29,6 +29,14 @@ grafana:
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
+alertmanager:
+  enabled: false
+  # Official v0.34.1; SNS uses the Pod Identity default AWS credential chain.
+  image: docker.io/prom/alertmanager@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+  topicArn: ""
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
 metricsServer:
   enabled: true
   # Official v0.9.0, compatible with Kubernetes 1.36.

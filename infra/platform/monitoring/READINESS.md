@@ -1,6 +1,6 @@
 # 현재 장애 감지 범위와 읽기 전용 점검
 
-기존 Prometheus 경보 7개에 CDC/task 지표 부재와 Prometheus config reload 실패 3개를 추가한다. 지표가 없으면 정상으로 보이지 않게 한다. 새 exporter·CloudWatch Logs·노드·알림 수신자를 생성하지 않는다.
+기존 Prometheus 경보 7개에 CDC/task 지표 부재와 Prometheus config reload 실패 3개를 추가했다. 지표가 없으면 정상으로 보이지 않게 한다. 이 읽기 점검 도구는 새 exporter·CloudWatch Logs·노드·알림 수신자를 만들지 않는다. 별도 승인된 자동 통보와 RDS CloudWatch 감시는 [NOTIFICATIONS.md](NOTIFICATIONS.md)를 따른다.
 
 | 항목 | 계속 감시하는 기존 Prometheus | readiness.py 실행 시 |
 |---|---|---|
@@ -9,7 +9,7 @@
 | RDS 백업·남은 공간·WAL | 수집 미연결 | 기존 RDS/CloudWatch 읽기: 2GiB 미만·WAL 예산 75% 이상 경고 |
 | S3 도착 | 수집 미연결 | 주문/주문상품/결제 Bronze의 오늘·어제 UTC prefix만 제한 조회 |
 | Airflow 업무 성공 | 수집 미연결 | UNKNOWN으로 표시. Pod Ready와 업무 성공을 구분 |
-| 외부 통보 | 보류 | 전송 없음 |
+| 외부 통보 | 선택적 Alertmanager→SNS 연결, 이메일 구독 확인 필요 | 전송 없음 |
 
 ## 실행
 

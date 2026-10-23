@@ -11,6 +11,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--helm", default="helm")
     parser.add_argument("--prometheus-config", type=Path)
+    parser.add_argument("--alertmanager-config", type=Path)
     args = parser.parse_args()
     chart = Path(__file__).resolve().parent / "chart"
     command = [args.helm, "template", "cq-monitoring", str(chart)]
@@ -63,6 +64,22 @@ def main():
     alternate_objects = [x for x in yaml.safe_load_all(alternate.stdout) if x]
     pools = [x for x in alternate_objects if x["kind"] == "NodePool"]
     assert len(pools) == 1 and pools[0]["metadata"]["name"] == "clothes-query-dev-monitoring"
+    alert_flags = ["-n", "monitoring", "--set", "alertmanager.enabled=true"]
+    assert subprocess.run(command + alert_flags, capture_output=True).returncode != 0
+    alert_flags += ["--set", "alertmanager.topicArn=arn:aws:sns:ap-northeast-1:000000000000:clothes-query-dev-infra-alerts"]
+    enabled = subprocess.run(command + alert_flags, capture_output=True, check=True)
+    enabled_objects = [x for x in yaml.safe_load_all(enabled.stdout) if x]
+    enabled_configs = {x["metadata"]["name"]: x["data"] for x in enabled_objects if x["kind"] == "ConfigMap"}
+    if args.alertmanager_config:
+        args.alertmanager_config.parent.mkdir(parents=True, exist_ok=True)
+        args.alertmanager_config.write_text(enabled_configs["monitoring-alertmanager"]["alertmanager.yml"], encoding="utf-8")
+    enabled_prom = yaml.safe_load(enabled_configs["monitoring-prometheus"]["prometheus.yml"])
+    assert enabled_prom["alerting"]["alertmanagers"][0]["static_configs"][0]["targets"] == ["monitoring-alertmanager:9093"]
+    assert len(enabled_objects) == len(objects) + 4
+    delivery = next(x for x in enabled_objects if x["kind"] == "Deployment" and x["metadata"]["name"] == "monitoring-alertmanager")
+    assert delivery["spec"]["template"]["spec"]["automountServiceAccountToken"] is False
+    assert delivery["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"] == {"cpu": "25m", "memory": "64Mi"}
+    assert not any(x["kind"] in {"Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding", "PersistentVolumeClaim"} for x in enabled_objects if x["metadata"]["name"] == "monitoring-alertmanager")
     print(f"PASS: {len(objects)} resources, existing WAS pool, 300m/896Mi, 5 jobs, 10 panels; namespace/image guards; optional new pool")
 
 

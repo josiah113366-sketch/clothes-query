@@ -9,6 +9,12 @@ data:
       scrape_interval: 60s
       evaluation_interval: 60s
     rule_files: [/etc/prometheus/rules.yml]
+    {{- if .Values.alertmanager.enabled }}
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: [monitoring-alertmanager:9093]
+    {{- end }}
     scrape_configs:
 {{ .Files.Get "files/scrape-jobs.yaml" | indent 6 }}
   rules.yml: |
