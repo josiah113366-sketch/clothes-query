@@ -1,0 +1,14 @@
+# 클러스터 안 고정 주소. 외부 접속은 infra/platform/ingress 의 공유 ALB가 이 Service(8501)로 보낸다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: dashboard
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dashboard
+  ports:
+    - name: http
+      port: 8501
+      targetPort: http

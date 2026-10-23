@@ -1,0 +1,63 @@
+# 대시보드 Deployment. 이미지 주소와 Secret 은 apply 전에 채운다 (README 참고).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app.kubernetes.io/name: dashboard
+spec:
+  # Streamlit 은 세션을 파드 메모리에 두고 로그인 실패 잠금도 파드별이라 1개로 시작한다.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dashboard
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      # Athena/S3 읽기가 필요해지면 Pod Identity 를 연결한 ServiceAccount 를 만든 뒤 주석을 푼다.
+      # serviceAccountName: dashboard
+      containers:
+        - name: dashboard
+          # 태그보다 digest(@sha256:...)로 고정한다.
+          image: 827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/dashboard@sha256:4dc73ac3a9660dd12095e0475c464659469742b542d9ef8632470ab741a2e01d
+          ports:
+            - name: http
+              containerPort: 8501
+          env:
+            # 고정 계정 3개 로그인. 계정 파일(해시만 들어 있음)은 Secret 으로 마운트한다.
+            - {name: AUTH_MODE, value: "local"}
+            - {name: LOCAL_ACCOUNTS_FILE, value: /etc/dashboard/accounts.json}
+            # auto: 등록된 실데이터 조회를 먼저 쓰고, 없거나 실패하면 더미로 대체한다(화면에 '더미 사용 중' 표시).
+            # 지금 실데이터는 모델 패치노트(S3)뿐이고 나머지 화면은 더미다. 항상 더미로 보려면 dummy.
+            - {name: DATA_SOURCE, value: "auto"}
+            # 모델 버전·패치노트(S3, 팀 데이터 버킷). Pod Identity 에 이 경로 읽기 권한이 있어야 실제로 읽힌다.
+            # 권한이 없거나 읽기에 실패하면 더미로 대체한다.
+            - {name: MODEL_REGISTRY_URI, value: "s3://clothes-query-datalake/review-score/model-registry/releases/"}
+          volumeMounts:
+            - {name: accounts, mountPath: /etc/dashboard, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          # 노드가 1대(24GiB 한도)라 작게 잡았다. 실제 사용량을 보고 조정한다.
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: accounts
+          secret:
+            secretName: dashboard-accounts

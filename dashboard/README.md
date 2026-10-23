@@ -5,7 +5,8 @@
 | Role | 화면 | 데이터(노션 설계 기준) |
 |---|---|---|
 | product (상품 관리) | 통합 조회, 주문·매출, 상품 판매, 구매 퍼널, 리뷰·속성 분석 | Gold A: order_sales_hourly, product_sales_daily, funnel_daily/funnel_session_product, review_product_daily, review_aspect_daily |
-| data (데이터 관리) | 파이프라인 상태, 결제 관제, 형식 오류, 이상탐지, 원인 리포트(임시), 재처리 승인, 재처리 이력 | Gold B: bronze_lag_snapshots, payment_attempts, malformed_events/messages, anomaly(탐지 담당 정의), reprocess_events |
+| data (데이터 관리) | 파이프라인 상태, 결제 관제, 형식 오류, 이상탐지, 원인 리포트(임시), 감성분석 모델, 재처리 이력 | Gold B: bronze_lag_snapshots, payment_attempts, malformed_events/messages, anomaly(탐지 담당 정의), reprocess_events, 감성분석 모델 화면은 버전·패치노트를 S3 `review-score/model-registry/releases/`(`MODEL_REGISTRY_URI`)에서, 점수 현황은 athena-review-score 의 review_aspect_scores / review_score_log (아직 더미) 에서 읽는다 |
+
 
 두 Role을 모두 가진 사용자는 전체 화면을 본다.
 
@@ -90,12 +91,12 @@ streamlit run app.py
 - 로그인 로직(이메일 -> Role) 자체는 로그인 없이도 `AUTH_MODE=dev`(Role 직접 선택)로 화면별 접근 제어를 먼저 확인할 수 있다.
 - 구글 대신 사내 공급자(Cognito 등)를 쓸 때는 `[auth]`의 `client_id`, `client_secret`, `server_metadata_url`만 바꾼다.
 
-## 배포할 때 정할 것 (EKS 담당자와, `infra/platform/dashboard/` 에서)
-1. 이미지 빌드/저장소(ECR), 네임스페이스
-2. 로그인(OIDC 공급자, 예: Cognito) -> `[auth]` 항목을 Secret으로 주입, `AUTH_MODE=oidc`
-3. 이메일 -> Role 표(`ROLES_JSON`)를 Secret으로 주입
-4. ALB 허용 IP, 도메인/HTTPS
-5. Athena/S3 읽기 권한(Pod Identity 역할). 연결 후 `data.py`의 `_REAL`에 조회 함수 등록
+## 배포 (EKS, `infra/platform/dashboard/`)
+배포 파일과 순서는 [`infra/platform/dashboard/README.md`](../infra/platform/dashboard/README.md), 외부 접속(ALB)은 [`infra/platform/ingress/README.md`](../infra/platform/ingress/README.md)에 있다. 이 앱 쪽에서 알아둘 것만 적는다.
+1. 로그인은 `AUTH_MODE=local`이다. 계정 파일(`accounts.json`)을 `python make_test_accounts.py --force`(필요하면 `--same-as-id`)로 만들어 Secret으로 마운트하고 `LOCAL_ACCOUNTS_FILE`로 가리킨다. 이미지에는 넣지 않는다.
+2. ALB는 HTTP이고 허용 IP만 접속한다. 운영 전에 도메인과 HTTPS로 바꾼다(위 "실서비스에서 local 로그인 쓸 때" 참고).
+3. Athena/S3 읽기 권한(Pod Identity 역할)을 붙인 뒤 `data.py`의 `_REAL`에 조회 함수를 등록하고 `DATA_SOURCE=auto`로 바꾼다. 그 전에는 `dummy`.
+4. 모델 버전·패치노트(감성분석 모델 화면): `MODEL_REGISTRY_URI=s3://<버킷>/review-score/model-registry/releases/`와 그 경로 읽기 권한을 주고 `DATA_SOURCE=auto`면 S3의 `index.json`·`<버전>.json`을 읽는다. 값이 없거나 읽기에 실패하면 더미로 대체한다. 로컬에서 확인하려면 AWS 자격증명이 있는 셸에서 `MODEL_REGISTRY_URI=... streamlit run app.py`.
 
 ## 추후 할 일
 baseline 이후 영역별 할 일(담당자·상태 기록용)은 [`TODO.md`](TODO.md)에 정리한다. 아래는 그중 핵심.
@@ -105,4 +106,4 @@ baseline 이후 영역별 할 일(담당자·상태 기록용)은 [`TODO.md`](TO
 ## 주의
 - 운영에서 `AUTH_MODE=dev` 금지 (누구나 Role 선택 가능).
 - 리뷰 원문은 내부용. 외부 서비스/Git에 올리지 않는다.
-- 비밀값(이메일 표, OIDC 키)은 Git에 넣지 않는다.
+- 비밀값(계정 파일, OIDC를 쓸 때의 이메일 표·키)은 Git에 넣지 않는다.

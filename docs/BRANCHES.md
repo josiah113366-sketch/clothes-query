@@ -128,6 +128,7 @@ gitGraph
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
 | `infra/review-order` | [infra-review-order.md](tasks/infra-review-order.md) (리뷰 시뮬레이터 RDS 주문 읽기) | 검토 대기 | |
 | `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
+| `infra/sagemaker-model-release` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (점수화 SSM 을 릴리스 묶음 기준으로. `dashboard/model-benchmark`에 머지해 함께 올림) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
 | `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 비활성 Spark 기반 통합 공유, 업무 명세·배포 대기 | |
@@ -161,6 +162,8 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `dashboard/baseline` | [dashboard-baseline.md](tasks/dashboard-baseline.md) | 진행 중 | |
+| `dashboard/deploy` | [dashboard-deploy.md](tasks/dashboard-deploy.md) (대시보드 EKS 배포 파일, ECR 스택, 공유 ALB 템플릿) | 진행 중 | |
+| `dashboard/model-benchmark` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (감성분석 모델 화면, 패치노트, 릴리스 묶음·되돌림, 점수화 SSM. `review-model/release`·`infra/sagemaker-model-release` 포함, 세 영역 통합 예외) | 진행 중 | |
 | `dashboard/approval-page` | [dashboard-approval-page.md](tasks/dashboard-approval-page.md) | 검토 대기 | |
 
 ### 그 밖의 영역

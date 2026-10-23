@@ -56,16 +56,10 @@ variable "error_prefix" {
   default     = "silver/review_aspect_scores_error"
 }
 
-variable "model_version" {
-  description = "출력 열·파일명의 model_version(SSM 설정 기본값). 모델을 바꾸면 같이 바꾼다."
+variable "release" {
+  description = "지금 점수화에 쓸 모델 버전 이름(릴리스 묶음). review-score/model-registry/releases/<release>/manifest.json 이 S3 에 있어야 한다. 버전 변경·되돌림(roll-forward)은 이 값만 바꾼다."
   type        = string
   default     = "2.4b_score_s2c"
-}
-
-variable "model_version_no" {
-  description = "모델 번호 \"x.y\" 형식 문자열(model_version 이름과 1:1). 평가 모델/로직 변경은 메이저(0.0→1.0), 작은 수정은 마이너(0.0→0.1), 마이너는 0~9(x.9 다음은 메이저). Gold 는 가장 큰 번호를 읽는다. 현재 2.4b_score_s2c = 1.0."
-  type        = string
-  default     = "1.0"
 }
 
 variable "score_log_prefix" {
