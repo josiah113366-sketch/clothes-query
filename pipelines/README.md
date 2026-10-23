@@ -185,7 +185,7 @@ current.json은 Spark 후속 처리의 공개 참조다. 이것을 교체해도 
   "executor_service_account": "<Executor-SA>",
   "runtime_configmap": "silver-gold-a-runtime",
   "node_selector": {"karpenter.sh/nodepool": "clothes-query-dev-compute-spark"},
-  "spark_conf": {"spark.sql.shuffle.partitions": "8"}
+  "spark_conf": {"spark.sql.shuffle.partitions": "4"}
 }
 ```
 
