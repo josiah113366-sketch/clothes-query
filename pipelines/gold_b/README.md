@@ -2,7 +2,7 @@
 
 Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓고, 탐지·에이전트는 Athena에서 원장과 **정리 뷰**를 읽는다. 설계 전체는 [docs/design/gold-b/README.md](../../docs/design/gold-b/README.md), 작업 기록은 [docs/tasks/gold-b-pipelines.md](../../docs/tasks/gold-b-pipelines.md).
 
-## 지금 있는 것 (1단계)
+## 지금 있는 것
 
 | 경로 | 내용 |
 |---|---|
@@ -14,8 +14,10 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `ddl/reprocess_events.sql` | ⑤ 재처리 단계 기록 (시간 폴더 없음) |
 | `tests/samples/` | 형식 검사·뷰·적재 잡 확인용 샘플 메시지와 기대 결과 ([설명](tests/samples/README.md)) |
 | `tests/test_ddl.py` | DDL이 설계 표와 같은지, 샘플이 규칙에 맞는지, 샘플 원장을 시간 폴더 Parquet으로 쓰고 읽을 수 있는지 |
+| `views/` | 정리 뷰 SQL 3개 (`payment_conflicts`, `payment_attempts`, `malformed_messages`), Athena에서 만드는 순서 ([설명](views/README.md)) |
+| `tests/test_views.py` | 뷰 SQL 파일이 설계 문서의 SQL과 같은지 |
 
-정리 뷰(`payment_conflicts`, `payment_attempts`, `malformed_messages`) SQL은 설계 문서에 있고, 파일은 3단계에서 `views/`에 만든다.
+정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena에서 만드는 것은 권한이 생긴 뒤에 한다.
 
 ## 저장 위치와 시간 폴더
 

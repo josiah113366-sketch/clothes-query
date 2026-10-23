@@ -125,6 +125,7 @@ gitGraph
 | `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
+| `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -156,8 +157,16 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
+| `pipelines/format-rules-silver` | [pipelines-format-rules-silver.md](tasks/pipelines-format-rules-silver.md) | main 대상 PR 검토 대기 | |
+| `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 검토 대기 | |
+
+
+| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 검토 대기 | |
+| `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 머지됨 (#35) | 2026-10-22 |
+| `pipelines/format-rules-gold-b` | [pipelines-format-rules-gold-b.md](tasks/pipelines-format-rules-gold-b.md) | 머지됨 (#63) | 2026-10-22 |
 
 ### gold-b
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 진행 중 | |
+| `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
+| `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 검토 대기 | |
