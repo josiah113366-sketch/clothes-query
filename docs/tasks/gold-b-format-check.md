@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-format-check
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
 
 ## 목표
 
@@ -55,6 +55,7 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
 
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (100개)
 - [x] `python -m pytest -q pipelines` 통과 (185개)
+- [x] 재처리 브랜치(최신 `main` #78 포함)를 다시 병합한 뒤 `pipelines/gold_b/tests` 123개, `pipelines` 208개 통과 (수집기 시험 23개 포함)
 - [x] 샘플 31개가 모두 기대 결과와 같은지 (형식 검사기 + `message_rows`)
 - [x] `raw_sample`에 개인정보 값·ID·시각이 남지 않는지
 - [x] 코드·README에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)

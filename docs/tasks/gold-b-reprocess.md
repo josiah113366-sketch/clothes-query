@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-reprocess
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-reprocess` (최신 `main` `05d4771` 병합) · main 대상 PR 제출 · 남은 일: 실행 입구(형식 검사기와 함께), DAG(재영 님)
+> 상태: 완료 · 브랜치: `pipelines/gold-b-reprocess` (최신 `main` `fbc6108` 병합, #78까지) · main 대상 PR 제출 · 남은 일: 실행 입구(형식 검사기와 함께), DAG(재영 님)
 
 ## 목표
 
@@ -65,6 +65,7 @@
 
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (Gold B 가상환경, 37개)
 - [x] 최신 `main` 병합 뒤 `pipelines/gold_b/tests` 54개, `pipelines` 139개 통과 (poller 시험 포함)
+- [x] #78(수집기)까지 다시 병합한 뒤 `pipelines/gold_b/tests` 77개, `pipelines` 162개 통과 (수집기 시험 23개 포함)
 - [x] 같은 입력으로 두 번 돌려 원장이 같은지 (`loaded_at` 제외), 폴더 밖 줄이 그대로인지
 - [x] 로컬 Kafka에서 시간으로 위치를 찾아 다시 읽고 폴더가 교체되는지
 - [x] 코드·README에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)
@@ -106,6 +107,8 @@
 - **보완 (2026-10-21):** 한 메시지에서 같은 필드의 오류는 한 줄만 남긴다 (설계 「중복 제거」: `(topic, kafka_partition, kafka_offset, rule_version, field)`가 같으면 한 번). `ledger.message_rows`에서 하므로 적재 잡도 같다. 시험 1개를 더했다.
 - **보완 (2026-10-23): main 병합과 poller**
   - 최신 `main`(#81까지)을 병합했다. 충돌은 `pipelines/gold_b/README.md`, `docs/BRANCHES.md`의 표 줄뿐이었다.
+  - 같은 날 #78(수집기)이 머지되어 다시 병합했다. 충돌은 `docs/BRANCHES.md`, `pipelines/gold_b/README.md`, 설계 문서 팀원 확인 표의 줄뿐이었고 양쪽 줄을 모두 남겼다. 머지된 #78의 브랜치 대장 상태, 작업 지시서 상태, 설계 문서 5단계 진행 표시도 정리했다.
+  - #78에 main을 합치며 GitHub에서 충돌을 풀 때 브랜치 대장의 `### gold-a` 구역이 지워지고 gold-b 표 중간에 빈 줄이 생겼다. 빈 줄을 빼고, gold-a 구역은 #81 때 내용 그대로 되살렸다 (상태 칸은 Gold A 담당이 고친다).
   - poller(`read_events`, `next_request`)를 더했다. 규칙은 「정한 기본값」 9번이다. 승인 화면(#66)이 Gold B 요청을 `source = KAFKA`로 쓰고 승인 만료를 60분으로 보는 것에 맞췄다.
   - 승인 화면·판정 잡은 Athena `INSERT INTO`로 `reprocess_events`에 줄을 써서, 파일 이름에 `.parquet`이 없을 수 있다. 원장 저장소의 `files()`가 `.parquet`만 돌려줘서 그대로면 poller가 `APPROVED` 줄을 못 본다. `files(any_name=True)`를 더해 숨김·임시 파일이 아니면 다 읽게 했다 (원장 3개를 교체할 때는 지금처럼 `.parquet`만).
   - `run()`에 `run_number`를 더해 `STARTED`의 `detail.run`에 남긴다. `attempt`는 승인 화면이 정한 요청 단위 번호 그대로다.
