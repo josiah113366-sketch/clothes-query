@@ -22,7 +22,7 @@ AIRFLOW_API_URL=http://airflow-api-server.airflow.svc.cluster.local:8080 이고 
 
 ## Gold B 상시 적재 담당자
 
-Bronze v2 지연 수집기는 이미 60초마다 운영 중이고, Gold B 조회 뷰도 배포했습니다. 상시 Spark 적재는 별도입니다. 기본 Spark 4.2.0/Python 3.10.12 환경에 맞춘 최종 업무 이미지 digest, 실행 명령·환경변수, checkpoint prefix, Driver/Executor 자원을 전달 부탁드립니다. Silver·Gold A 배치와 한 대에서 동시에 돌릴지 여부는 이 자원 요구량을 보고 맞추겠습니다.
+Bronze v2 지연 수집기는 이미 60초마다 운영 중이고 Gold B 조회 뷰도 배포했습니다. 상시 Spark 적재는 별도입니다. 2026-10-24 전용 실행 계정·AWS 역할·Kafka TLS와 재처리/합치기 pool을 준비했습니다. ECR 저장소는 `827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/gold-b`입니다. 저장소 준비와 이미지 발행은 별도이고, 새 publisher IAM 사용자를 추측해 권한을 추가하지 않았습니다. 최종 이미지 digest와 checkpoint prefix를 확정해 주시면 runtime을 연결합니다. 작은 합성 입력에서는 Silver·Gold A 배치와 한 Spark 노드 공유를 검증했지만 실제 EKS/S3 실측은 남았습니다. 상세 계정·권한·pending 설정은 [Gold B 실행 기반](../infra/platform/gold-b/README.md)을 참고해 주세요.
 
 ## 후기 점수화 담당자
 

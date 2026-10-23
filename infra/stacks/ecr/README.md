@@ -1,5 +1,7 @@
 # ecr stack
 
+공유 설정의 `enable_gold_b_repository=true`는 Gold B 업무 이미지 저장소를 준비한다. 저장소 생성과 이미지 빌드·push는 별도이며 기존 de-ai-18 Spark push 범위를 넓히지 않는다. [실행 기반](../../platform/gold-b/README.md)을 따른다.
+
 Spark 후속 준비: 공유 입력은 enable_spark_repositories=true와 개발자 de-ai-18을 선택한다. plan 시 spark-base/silver-gold-a 저장소 2개와 해당 사용자 push 정책 1개만 추가되고 기존 web/was/connect는 유지되어야 한다. plan과 실제 apply/이미지 발행 완료는 구분한다. 실행 Pod의 AWS 역할은 별도 spark-access 스택이다.
 
 WEB/WAS용 ECR 두 개와 선택적 Connect 저장소, immutable tag·scan on push.

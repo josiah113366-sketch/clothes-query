@@ -12,7 +12,8 @@
 | Kafka 보관 | 7일 설정 적용, #86 머지 | 20GiB 용량과 유입량 감시; 유입량에 무관한 7일 보관 보장은 아님 |
 | Bronze v2 지연 수집기 | Running, 실제 Pod의 커넥터·그룹 모두 v2, 23:26 S3 저장·Athena 조회 재확인 | 장기 신선도 감시, 인증서 갱신 후 복사/재시작, v2 정지→R3 실제 시험은 별도 |
 | Silver·Gold A Spark | Driver 1·Executor 2 종료 코드 0, Silver/Gold A manifest·완료 기록 PASS, 실제 출력 존재 | 로그 보존·완료 Pod 정리·자동 축소로 Spark 노드 0대/EC2 terminated 확인. coverage_status UNVERIFIED 및 추가 업무 사례는 담당자 확인 |
-| Gold B 상시 적재 Spark | main에 실행 코드·형식 검사기·Dockerfile·실행 명령/자원 제안 도착. 격리 로컬에서 배치와 동시 실행·41,000건 검증 | ECR 최종 digest·적재 전용 권한/인증서·checkpoint 확정·EKS/S3 자원 실측 후 배포 |
+| Gold B 상시 적재 Spark | main 코드·Dockerfile 도착, 로컬 배치 동시 실행·41,000건 검증. 전용 계정/RBAC·Pod Identity·S3 권한·Kafka TLS 적용, ECR gold-b 저장소 준비 | ECR 최종 digest·checkpoint 확정/해당 권한·실제 EKS/S3 자원 검증 후 실행 |
+| Gold B 재처리·합치기 | #100 main·Airflow에 paused 등록. gold-b-ledger-jobs 역할, Kafka TLS, gold_b_ledger 1슬롯 pool 적용. 전용 노드 toleration 보완 코드는 공유 브랜치 | 최종 이미지·runtime ConfigMap/환경변수 공급·노드 배치 보완 머지 후 수동 검증. Bronze v2 코드는 #101 머지/해당 이미지 필요 |
 | 판정 | #95 컬럼 5개·뷰 4개 반영, 실제 판정 역할 조회 통과, 배포 후 00:10/00:15 예약 실행 success | Gold B 상시 적재 데이터·업무 규칙 검증 |
 | 조사 | JP Haiku 호출 성공 이력, 실제 이미지/역할의 모듈 로딩·Athena·대기 조회 통과, 대기 0건 | 검증 사건과 기대 결과를 받은 뒤 DAG→모델→리포트 저장 검증 |
 | 승인 화면 | approval-dashboard·전용 workgroup·기존 Secret 연결, REAL backend 조회·패치노트 S3 읽기·Airflow 인증 통과 | gold_b_reprocess/silver_gold_a_reprocess가 Airflow에서 404. 업무 DAG 등록·계약 필요 |
@@ -27,7 +28,7 @@
 3. **완료 — 인프라: Gold B 조회 뷰 배포.** 기존 세 뷰 배포 후 #95의 원장 컬럼 5개와 payment_states 포함 네 뷰까지 반영했다. 실제 detection-job SA 조회와 뒤이은 00:10 판정 예약 실행 성공을 확인했다. 더미 업무 행은 만들지 않았다.
 4. **완료 — 인프라: 승인 연결.** 실제 Deployment를 approval-dashboard·승인 전용 workgroup·AWS_REGION/DEFAULT_REGION·기존 airflow-api-client Secret의 username/password로 연결했다. 모델 registry GetObject/제한 목록 조회만 추가했고 권한 경계 7개를 검증했다. 후보/요청 실제 조회 및 Airflow 인증 성공, 이미지·계정 파일 불변을 확인했다. 사람 계정·화면 로직은 앱 담당이다.
 5. **첫 실행·자동 축소 확인 — Silver·Gold A 담당 + 인프라.** 실행 trade-v2-eks-20261023-b0185ff의 Driver/Executor exit=0과 Silver·Gold A S3 manifest·완료 기록 PASS를 확인했다. coverage_status는 UNVERIFIED이므로 업무 범위·금액 등 추가 사례 검증은 담당자가 확인한다. 전체 Pod 로그를 S3에 보존하고 완료 Pod만 정리했다. 20:20:10 KST에 Spark 노드 0대/EC2 terminated를 확인했다. 수동 노드 삭제 없이 전용 풀을 유지했다.
-6. **후속 연결 대기 — Gold B 담당 + 인프라: 상시 적재 연결.** main 문서에 실행 명령·자원 제안·checkpoint 제안 경로가 추가된 것을 확인했다. 최종 ECR digest와 적재 전용 ServiceAccount/Pod Identity·Kafka 사용자/인증서는 아직 없다. [한 노드 공유 시험](operations/spark-shared-capacity-check.md)은 작은 입력의 격리 로컬 결과이며 EKS/S3 실측과 checkpoint 계약 확정이 남았다. collector는 이미 별도 일반 Python Pod이며 이 상시 Spark와 다르다.
+6. **실행 입력 대기 — Gold B 담당 + 인프라: 상시 적재 연결.** 전용 실행 계정 4개, AWS 역할 3개, Kafka 사용자/인증서 2세트, pool 1슬롯과 ECR gold-b 저장소를 적용했다. IAM 허용·차단 36개와 실제 Kafka TLS 메타데이터 접속 2개를 검증했고 노드·업무 Pod·DAG 실행은 추가하지 않았다. 최종 ECR digest·checkpoint 확정 및 권한·runtime 공급·EKS/S3 실측이 남았다. [실행 기반](../infra/platform/gold-b/README.md)과 [공유 시험](operations/spark-shared-capacity-check.md)을 따른다. collector는 상시 Spark와 별도다.
 7. **연결 일부 완료 — 판정·조사 담당 + 인프라: 실제 업무 검증.** 판정은 최신 뷰 반영 뒤에도 예약 실행 성공, 조사는 실제 역할/이미지의 모듈 로딩·Athena·대기 조회 통과와 기존 JP Haiku Converse 성공 이력이 있다. 대기 사건은 0건으로 조사 DAG의 업무 입력→모델→리포트 저장은 검증 사건을 받아야 한다. 원래 paused 상태는 유지했다.
 8. **재처리 담당 + 인프라: 승인 → Airflow → 재처리 → 완료 → 재판정.** 재처리 DAG ID·입력·완료 이벤트와 권한을 실제 코드에 맞춰 대조한다. Silver 공개/R6는 #87의 완료 목록·completed_at·Glue 공개 계약 확정/구현이 남아 있다.
 
@@ -41,7 +42,7 @@
 
 2026-10-24 확인한 열린 PR: #97(재판정 실행 상한), #96(채점 스크립트), #87(자원/공개 계약), #90(앱의 7일 기본값), #85(규칙 문서), draft #73(운영 도구), draft #74(데이터 실행 기반). #89·#92·#93·#94·#95는 main 반영된 상태다. 새 #96/#97의 상세 리뷰·승인·배포는 이번 작업에서 수행하지 않았다.
 
-미게시 적용 후속 silver-gold-a-connections, agent-bedrock-catalog, grafana-plugin-recovery, bronze-v2-lag-collector, spark-nodepool-enable, airflow-log-access-restore, dashboard-runtime-connect, common-cpu-diet는 infra/applied-state-sync 한 브랜치에 통합했다. draft #73의 원격 head도 포함된다. #74와의 실제 대조에서 빠진 gold-b-catalog 등 26개 경로를 발견해 원격 #74 head를 추가 병합했다. 기존 브랜치는 보존하며 공유할 대상은 이 통합 브랜치 한 개다. 사용자 요청 없이 push/PR/승인/머지하거나 기존 PR을 닫지 않는다.
+적용 후속 silver-gold-a-connections, agent-bedrock-catalog, grafana-plugin-recovery, bronze-v2-lag-collector, spark-nodepool-enable, airflow-log-access-restore, dashboard-runtime-connect, common-cpu-diet는 infra/applied-state-sync 한 브랜치에 통합했다. draft #73/#74와 최신 main #100까지 포함하며 기존 브랜치를 보존한다. 사용자가 CI 제외 실행 기반 작업과 push를 요청해 Gold B 기반까지 같은 브랜치로 공유한다. PR 생성·승인·머지와 기존 PR 종료는 요청되지 않아 실행하지 않는다. 기존 dashboard Terraform CI 실패는 이 작업에서 수정하지 않았다.
 
 **즉시 주의:** 이 통합 브랜치의 compute auto tfvars는 실제 활성 상태에 맞춰 enabled=true다. main에는 아직 false가 남으므로 반영 전 이전 설정으로 compute apply하지 않는다. 일부 bindings만 있는 오래된 local var-file로 전체 map을 덮어쓰지 않는다. 개인 이메일은 infrastructure-alerts의 Git 제외 입력을 사용하며 Git에는 수신 주소를 넣지 않는다.
 

@@ -1,12 +1,12 @@
 # 적용된 인프라 후속 통합
 
-상태: 완료 — 로컬 통합·검증·커밋, 원격 공유 전
+상태: 통합·검증 완료 — 사용자 요청으로 Gold B 연결 기반을 추가하고 브랜치 공유
 브랜치: infra/applied-state-sync
-최초 기준: 2026-10-23 origin/main 4d80c76 (#95 포함). 현재 통합 기준: 2026-10-24 origin/main 6c00ddc (#98/#99 포함).
+최초 기준: 2026-10-23 origin/main 4d80c76 (#95 포함). 현재 통합 기준: 2026-10-24 origin/main 85600ca (#100 포함).
 
 ## 목적과 범위
 
-실제 환경에 적용된 후속이 여러 로컬 브랜치에 나뉘어 있어, 오래된 main 설정으로 apply할 때 Spark 풀·실행 권한·관리 도구 설정을 되돌릴 수 있었다. 사용자 요청에 따라 최신 main에서 통합 브랜치를 만들고 아래 여덟 후속을 원본 커밋 이력과 함께 순차 병합했다. 새 AWS 배포나 업무 실행이 아니라 Git 공유 준비다.
+실제 환경에 적용된 후속이 여러 로컬 브랜치에 나뉘어 있어, 오래된 main 설정으로 apply할 때 Spark 풀·실행 권한·관리 도구 설정을 되돌릴 수 있었다. 사용자 요청에 따라 최신 main에서 통합 브랜치를 만들고 아래 여덟 후속을 원본 커밋 이력과 함께 순차 병합했다. 최초 범위는 Git 공유 준비였고, 이후 사용자가 CI 제외 가능한 작업과 push를 요청해 Gold B 실행 기반을 추가 적용했다. 업무 잡은 시작하지 않는다.
 
 | 원본 브랜치 | 포함 내용 |
 |---|---|
@@ -61,6 +61,12 @@ Dashboard 모델 registry 읽기와 JP Haiku 활성 설정은 최신 적용값�
 원격 #73/#74와 원본 브랜치는 그대로 보존했다. 새로 올릴 대상은 infra/applied-state-sync 한 개이며, 이를 공유한 뒤 두 draft를 대체 초안으로 정리하는 방안을 문서에 남겼다. 기존 PR을 닫거나 head를 덮어쓰거나 push·PR·승인·머지는 실행하지 않았다.
 
 ## 작업 결과
+
+2026-10-24 사용자가 CI를 제외한 가능한 인프라 작업 후 push를 요청했다. #100이 머지된 최신 main을 통합했고 #101 앱 코드는 가져오지 않았다. Gold B 실행 기반 준비 도구와 좁은 권한 map을 추가했다. ECR gold-b 저장소 1개, IAM 역할·정책·Pod Identity 9개를 create-only 계획으로 적용했다. 기존 리소스 변경·삭제·교체는 없고 적용 뒤 두 스택 plan은 변경 없음이었다. Kubernetes 계정/RBAC/ConfigMap/KafkaUser/NetworkPolicy 14개와 TLS Secret 2개, Airflow gold_b_ledger 1슬롯 pool을 준비했다.
+
+역할별 허용·차단 12개씩 총 36개와 association 일치를 검증했고, 새 TLS 사용자 2개로 실제 Kafka 업무 토픽 5개의 메타데이터 접속을 확인했다. 메시지 소비·offset commit은 없었다. 현재 Airflow 3.3.2의 실제 KPO로 보완한 DAG 2개의 파싱·Spark toleration 변환·paused 기본값을 확인했다. 기존 node/pipelines Pod UID가 유지됐고 업무 Pod·노드·DAG 실행은 추가하지 않았다. 기본 pool 128슬롯과 기존 판정 활성 상태는 유지했다.
+
+Terraform 23 roots·22 mock suites/98 plan 통과, Gold B 기반 Python 7개·기존 Gold B 회귀 226개·Spark 25개·Airflow 6개 통과。 마지막 입력 생성기 변경 뒤에도 기반 7개를 재확인했다. 최종 이미지 digest·checkpoint가 미정이므로 null pending 파일만 생성하고 AIRFLOW_GOLD_B_RUNTIME/적재 실행 환경은 공급하지 않았다. 기존 Silver·Gold A 자원 값도 아직 변경하지 않았다. CI 실패 수정·새 PR·기존 PR 종료·승인·머지는 범위에서 제외했다. 실제 비밀 입력·state·plan·인증서는 Git 제외 경로에만 보존한다.
 
 2026-10-24 사용자가 Gold B 적재를 시험하고 기존 Spark 배치와 한 노드를 공유할 수 있는지 확인하도록 요청했다. main Gold B 이미지를 팀 기본 4.2.0/Python 3.10 이미지로 로컬 빌드하고, 내부 Docker 네트워크에서 실제 Kafka 스트리밍과 Silver·Gold A 배치를 함께 실행했다. 원장 41,000건, 주문 200건·매출 2,360,000이 기대값과 일치했고 두 작업 exit 0·OOM 없음, 합산 메모리 표본 최고 약 2.55GiB였다. 시험 종료 감지 경쟁 조건은 원본 오류를 보존하고 독립 결과 검증 후 수정했다. EKS 자원 예약 후보와 검증 한계는 [공유 검토](../operations/spark-shared-capacity-check.md)에 남겼다. 시험 컨테이너·네트워크를 정리했고 AWS 배포 및 기존 Spark 설정 변경은 하지 않았다.
 

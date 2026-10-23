@@ -1,4 +1,9 @@
 variable "name" { type = string }
+variable "enable_gold_b_repository" {
+  description = "Prepare the Gold B image repository without inferring a publishing IAM user."
+  type        = bool
+  default     = false
+}
 variable "enable_spark_repositories" {
   description = "Opt in to separate Spark base and Silver/Gold A business image repositories."
   type        = bool

@@ -1,7 +1,8 @@
 resource "aws_ecr_repository" "this" {
   for_each = toset(concat(
     ["web", "was"], var.enable_connect_repository ? ["connect"] : [],
-    var.enable_spark_repositories ? ["spark-base", "silver-gold-a"] : []
+    var.enable_spark_repositories ? ["spark-base", "silver-gold-a"] : [],
+    var.enable_gold_b_repository ? ["gold-b"] : []
   ))
   name                 = "${var.name}/${each.key}"
   image_tag_mutability = "IMMUTABLE"

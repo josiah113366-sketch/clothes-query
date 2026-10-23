@@ -6,6 +6,10 @@ variable "enable_connect_repository" {
   type    = bool
   default = false
 }
+variable "enable_gold_b_repository" {
+  type    = bool
+  default = false
+}
 variable "enable_spark_repositories" {
   type    = bool
   default = false

@@ -1,8 +1,10 @@
 # 인프라 통합 브랜치 공유 준비
 
-상태: 로컬 준비 완료, push·PR 생성·기존 PR 변경·승인·머지 미실행
+상태: 통합·검증 완료, 사용자 요청에 따라 push. PR 생성·기존 PR 변경·승인·머지는 미실행
 대상 브랜치: infra/applied-state-sync
-기준 main: 6c00ddc (#95·#98·#99 포함)
+기준 main: 85600ca (#95·#98·#99·#100 포함)
+
+2026-10-24 추가: 사용자 요청으로 CI 수정은 제외하고 Gold B 연결 기반을 준비했다. ECR gold-b 저장소와 전용 실행 역할 3개, 계정/RBAC·Kafka TLS 2세트·Airflow 1슬롯 pool을 적용·검증했다. #100 DAG의 Spark taint 허용 코드는 이 브랜치에 보완했다. 아직 최종 이미지 digest와 checkpoint가 없어 업무 실행 설정은 공급하지 않았고 노드·업무 Pod를 시작하지 않았다. 자세한 결과는 [실행 기반](../../infra/platform/gold-b/README.md)과 [작업 기록](../tasks/infra-applied-state-sync.md)을 따른다.
 
 2026-10-24 draft 대조 결과: #73은 기존 통합에 포함됐지만 #74의 독립 gold-b-catalog 스택·DAG 공급/배치 검사·접근 테스트 등 26개 경로가 누락돼 있었다. 원격 #74 head를 실제로 병합해 누락분과 기존 이력을 보존했다. 충돌에서는 현재 적용한 Dashboard 모델 레지스트리 읽기와 JP Haiku 설정을 유지했다. 따라서 기존 두 draft를 단순 폐기하지 않고, 그 내용까지 포함한 통합 브랜치를 공유 대상으로 삼는다.
 

@@ -60,6 +60,9 @@ def gold_b_pod(task_id, module, kafka):
         cmds=["python3", "-m", module],
         env_vars=env,
         node_selector=RUNTIME.get("node_selector", {}),
+        tolerations=[{"key": "clothes-query/dedicated", "operator": "Equal", "value": "spark", "effect": "NoSchedule"}]
+        if RUNTIME.get("node_selector", {}).get("karpenter.sh/nodepool") == "clothes-query-dev-compute-spark" else [],
+        labels={"app": "gold-b-ledger-jobs"},
         volumes=volumes,
         volume_mounts=mounts,
         container_resources=k8s.V1ResourceRequirements(
