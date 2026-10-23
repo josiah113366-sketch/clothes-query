@@ -12,6 +12,10 @@
 docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미지>@sha256:<digest> --build-arg CODE_REF=<Git-커밋> -t <업무-ECR-이미지>:<태그> .
 ```
 
+팀 기본 이미지에 이미 있는 연결 JAR은 고정 버전·SHA-256을 확인한 뒤 재사용하고, 없는 JAR만 추가한다. 다른 버전이나 체크섬이 다르면 빌드를 중단한다. 같은 AWS SDK를 새 레이어에 중복 저장하지 않는다.
+
+머지 전 빌드는 PR 코드의 검증용 후보이며 운영 digest로 전달하지 않는다. 리뷰 반영·main 머지 후 깨끗한 main 커밋을 CODE_REF로 지정하고, 팀 기본 ECR digest로 최종 이미지를 다시 빌드한다.
+
 이미지는 Spark 공식 Kubernetes entrypoint를 사용한다. 코드 위치는 `/opt/pipelines`, 진입점은 `local:///opt/pipelines/pipelines/spark_batch.py`다. 원문·.local·캐시·시험 파일은 이미지에서 제외한다.
 
 ### 실행 요청 JSON
