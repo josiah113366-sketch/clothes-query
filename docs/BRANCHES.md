@@ -95,6 +95,7 @@ gitGraph
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 | `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 머지됨 | 2026-10-22 |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
+| `sim/sink-pause` | [sim-sink-pause.md](tasks/sim-sink-pause.md) | 진행 중 | |
 | `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 머지됨 | 2026-10-22 (#60) |
 | `sim/console` | `docs/tasks/sim-console.md` | 머지됨 | |
