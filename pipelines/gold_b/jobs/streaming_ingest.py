@@ -11,6 +11,7 @@
 
 Kafka에서 어디까지 읽었는지는 Spark 체크포인트가 기억한다. Kafka에 처리 위치를 커밋하지 않는다.
 build_query(Spark 연결)는 Docker의 Spark 4.1.3과 로컬 Kafka로 확인했다 (이 PC에서는 Spark가 바로 뜨지 않음). write_batch는 단위 시험으로 확인한다.
+실행 입구는 main이다 (python -m pipelines.gold_b.jobs.streaming_ingest). 형식 검사기(format_check.FormatChecker)를 끼워 시작한다.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import re
 from typing import Callable, Mapping, Sequence
 
 from pipelines.gold_b.ledger import (EVENT_TIME, Checker, KafkaMessage, Store, hour_folder, hour_of,
-                                     message_rows, utc_naive)
+                                     message_rows, open_store, utc_naive)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "gold_b.yaml"
 INGESTED_TABLES = ("topic_messages", "payment_events", "malformed_events")   # ③은 수집기가 쌓는다
@@ -180,3 +181,52 @@ def build_query(spark, *, settings: Settings, config: Config, checker: Checker, 
             .option("checkpointLocation", settings.checkpoint)
             .trigger(processingTime=f"{config.trigger_seconds} seconds")
             .start())
+
+
+# ---------- 실행 입구 ----------
+
+ENV_RULES_PATH = "GOLD_B_RULES_PATH"   # 형식 규칙표 경로 (생략하면 저장소의 docs/contracts/format_rules.yaml)
+
+
+def spark_session():
+    """UTC 시간대의 Spark 세션. Kafka 연결 라이브러리(spark-sql-kafka)는 spark-submit이나 실행 이미지가 준다."""
+    from pyspark.sql import SparkSession
+
+    return (SparkSession.builder.appName("gold-b-ingest")
+            .config("spark.sql.session.timeZone", "UTC").getOrCreate())
+
+
+def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None,
+         session: Callable[[], object] = spark_session, log: Callable[[str], None] = _log) -> int:
+    """적재 잡 실행 입구: 형식 검사기를 끼워 Kafka → 원장 ①②④ 스트리밍을 시작하고, 멈출 때까지 기다린다.
+
+    설정 파일·환경변수·형식 규칙표가 잘못됐으면 Spark를 띄우기 전에 1로 끝난다.
+    스트리밍 중 실패는 예외로 올라가고, 다시 띄우면 체크포인트에서 이어 읽는다.
+    """
+    import argparse
+    import os
+
+    from pipelines.format_rules import RuleConfigError
+    from pipelines.gold_b.format_check import FormatChecker
+
+    parser = argparse.ArgumentParser(prog="python -m pipelines.gold_b.jobs.streaming_ingest",
+                                     description="Gold B 적재 잡: Kafka 토픽을 1분마다 읽어 원장 ①②④에 쌓는다")
+    parser.add_argument("--config", default=str(CONFIG_PATH), help="토픽·주기 설정 파일 (기본: config/gold_b.yaml)")
+    args = parser.parse_args(argv)
+    env = os.environ if env is None else env
+    try:
+        config = load_config(args.config)
+        settings = Settings.from_env(env)
+        checker = FormatChecker(rules_path=env.get(ENV_RULES_PATH) or None)
+    except (ConfigError, RuleConfigError, OSError) as exc:
+        log(f"적재 잡 준비 실패: {exc}")
+        return 1
+    query = build_query(session(), settings=settings, config=config, checker=checker,
+                        store=open_store(settings.ledger_root), log=log)
+    log(f"적재 잡 시작: 토픽 {len(config.topics)}개, {config.trigger_seconds}초마다, 형식 규칙 {checker.rule_version}")
+    query.awaitTermination()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

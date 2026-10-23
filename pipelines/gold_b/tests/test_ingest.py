@@ -1,7 +1,7 @@
 """적재 잡 시험. Spark 없이 1분 묶음 처리(write_batch)와 설정을 확인한다.
 
-Spark 연결(build_query)은 이 PC에서 Spark가 뜨지 않아 시험하지 않는다.
-형식 검사는 아직 없어서 재처리 시험과 같은 가짜(SampleChecker)를 쓴다.
+Spark 연결(build_query)은 이 PC에서 Spark가 뜨지 않아 시험하지 않는다 (실행 입구 시험은 가짜 쿼리로 바꿔 본다).
+묶음 시험은 재처리 시험과 같은 가짜(SampleChecker)를 쓰고, 실제 형식 검사기 연결은 따로 확인한다.
 """
 from __future__ import annotations
 
@@ -12,8 +12,9 @@ import pytest
 pytest.importorskip("pyarrow")
 
 from pipelines.gold_b.jobs.streaming_ingest import (CONFIG_PATH, Config, ConfigError, Settings,  # noqa: E402
-                                                    kafka_options, load_config, topic_pattern, write_batch)
+                                                    kafka_options, load_config, main, topic_pattern, write_batch)
 from pipelines.gold_b.ledger import EVENT_TIME, LocalStore, hour_of  # noqa: E402
+from test_ddl import load_samples  # noqa: E402
 from test_reprocess import SampleChecker, comparable, sample_messages, streamed_rows  # noqa: E402
 
 LOADED_AT = datetime(2026, 10, 21, 6, 31)
@@ -86,3 +87,57 @@ def test_config_file():
     config = load_config(CONFIG_PATH)
     assert config.topics == ("payments", "orders", "order-items", "members-events", "clickstream", "reviews.raw")
     assert (config.trigger_seconds, config.starting_offsets) == (60, "earliest")
+
+
+# ---------- 형식 검사기 연결과 실행 입구 ----------
+
+def test_batch_with_the_format_checker(tmp_path):
+    """실제 형식 검사기로 샘플 묶음을 쓰면 ② 31줄, ① 9줄, ④는 샘플 기대 오류 수다 (재처리 잡과 같은 검사기)."""
+    pytest.importorskip("yaml")
+    from pipelines.gold_b.format_check import FormatChecker
+
+    checker = FormatChecker()
+    summary = write_batch(sample_messages(), checker=checker, store=LocalStore(tmp_path), loaded_at=LOADED_AT)
+    assert summary["rows"]["topic_messages"] == len(load_samples()) == 31
+    assert summary["rows"]["payment_events"] == sum(s["expected"]["payment_events"] for s in load_samples()) == 9
+    assert summary["rows"]["malformed_events"] == sum(len({e["field"] for e in s["expected"]["malformed"]})
+                                                      for s in load_samples())
+    assert {row["rule_version"] for row in all_rows(LocalStore(tmp_path), "malformed_events")} == {checker.rule_version}
+
+
+class FakeQuery:
+    def __init__(self):
+        self.waited = False
+
+    def awaitTermination(self):
+        self.waited = True
+
+
+def test_main_starts_the_stream_with_the_format_checker(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    from pipelines.gold_b.jobs import streaming_ingest
+
+    seen: dict = {}
+    query = FakeQuery()
+
+    def fake_build_query(spark, **kwargs):
+        seen.update(kwargs, spark=spark)
+        return query
+
+    monkeypatch.setattr(streaming_ingest, "build_query", fake_build_query)
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path), "GOLD_B_CHECKPOINT": str(tmp_path / "checkpoint"),
+           "KAFKA_BOOTSTRAP": "localhost:9092"}
+    logs: list[str] = []
+    assert main([], env=env, session=lambda: "spark", log=logs.append) == 0
+    assert query.waited and seen["spark"] == "spark"
+    assert seen["checker"].rule_version == "0.2.0"
+    assert isinstance(seen["store"], LocalStore)
+    assert seen["config"].topics == load_config(CONFIG_PATH).topics
+    assert logs[-1].startswith("적재 잡 시작")
+
+
+def test_main_stops_when_settings_are_missing():
+    pytest.importorskip("yaml")
+    logs: list[str] = []
+    assert main([], env={}, session=lambda: pytest.fail("Spark를 띄우면 안 된다"), log=logs.append) == 1
+    assert logs[-1].startswith("적재 잡 준비 실패")
