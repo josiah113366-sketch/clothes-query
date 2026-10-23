@@ -72,6 +72,8 @@ gitGraph
   merge sim/cdc-orders
   branch pipelines/silver
   commit id: "pipelines(silver)"
+  branch pipelines/gold-a
+  commit id: "pipelines(gold-a)"
 ```
 
 구조도는 아래 대장의 "머지됨"과 "진행 중" 행을 그대로 옮겨 그린다. 대장을 먼저 고치고 구조도를 맞춘다.
@@ -93,6 +95,9 @@ gitGraph
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 | `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 머지됨 | 2026-10-22 |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
+| `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
+| `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 머지됨 | 2026-10-22 (#60) |
+| `sim/console` | `docs/tasks/sim-console.md` | 머지됨 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -124,6 +129,8 @@ gitGraph
 | `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
+| `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 비활성 Spark 기반 통합 공유, 업무 명세·배포 대기 | |
+| `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 
 ### api
@@ -142,7 +149,11 @@ gitGraph
 | `agent/review-fixes` | [agent-review-fixes.md](tasks/agent-review-fixes.md) | 머지됨 (PR #48) | 2026-10-21 |
 | `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
 | `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
-| `agent/ddl` | `agent-ddl.md` (이 대장 PR 다음에 PR) | 진행 중 | |
+
+| `agent/ddl` | [agent-ddl.md](tasks/agent-ddl.md) | 머지됨 (PR #53) | 2026-10-22 |
+| `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
+| `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
+| `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -155,12 +166,10 @@ gitGraph
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 검토 대기 | |
-| `pipelines/format-rules-silver` | [pipelines-format-rules-silver.md](tasks/pipelines-format-rules-silver.md) | main 대상 PR 검토 대기 | |
-| `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 검토 대기 | |
-
-
-| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 검토 대기 | |
+| `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 기본 구현 main 머지됨 (#26), 단가 기준은 #63 반영 | 2026-10-21 |
+| `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 머지됨 (#55) | 2026-10-22 |
+| `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 머지됨 (#45) | 2026-10-22 |
+| `pipelines/format-rules-silver` | [pipelines-format-rules-silver.md](tasks/pipelines-format-rules-silver.md) | 머지됨 (#65) | 2026-10-22 |
 | `pipelines/reconciliation` | [pipelines-reconciliation.md](tasks/pipelines-reconciliation.md) | 머지됨 (#35) | 2026-10-22 |
 | `pipelines/format-rules-gold-b` | [pipelines-format-rules-gold-b.md](tasks/pipelines-format-rules-gold-b.md) | 머지됨 (#63) | 2026-10-22 |
 
@@ -168,5 +177,6 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
+
 | `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
 | `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 검토 대기 | |

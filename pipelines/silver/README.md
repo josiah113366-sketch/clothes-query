@@ -84,6 +84,10 @@ python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronz
 
 ## 결정: 현재 구현된 리뷰 입력
 
+**2026-10-22 날짜 기준 확인:** 리뷰 비즈니스 분석 범위는 KST 작성일이다. Bronze 폴더는 UTC 작성일을 유지하고 Silver가 UTC/KST 표현을 모두 만든다. 예: KST 22일 00:30 리뷰는 Bronze UTC 21일 폴더에서 읽어 Silver KST 22일 폴더로 출력한다. KST D일 실행은 UTC D-1·D 폴더를 읽고 review_date_kst로 선택한다. 시간대가 있는 KST 입력에는 9시간을 다시 더하지 않는다.
+
+SageMaker에는 선택한 Silver 범위의 review_id/text를 전달하고, 작업 실행일이 달라도 Gold A는 원래 review_date_kst로 집계한다. 실제 모델 입력 생성·DAG 연결은 후속이며 [공통 날짜 계약](../../docs/contracts/README.md#리뷰-분석-날짜-계약--kst-작성일-2026-10-22-결정)을 따른다.
+
 | 항목 | 기준 |
 |---|---|
 | 입력 | 리뷰 시뮬레이터 `--sink lake`의 `reviews/year=YYYY/month=MM/day=DD/*.jsonl` (UTC 작성일) |
@@ -117,7 +121,7 @@ python -m pipelines.silver.reviews --input-root review-simulator/.local/lake --o
 
 입력과 출력의 날짜 폴더 모양을 year/month/day로 통일한다. Bronze는 UTC 작성일, Silver는 KST 작성일 기준이다. KST 시작일의 전날 UTC부터 종료일 UTC까지 검색하고 KST 작성일로 행을 선택한 뒤 review_id로 중복 처리한다. 검색 범위에서 운영 JSONL 파일을 하나도 찾지 못하면 기존 출력을 덮어쓰지 않고 실패한다. 명시적으로 비어 있는 입력 파일이나 읽은 파일 중 대상 KST 리뷰가 없는 경우는 정상 0건 결과로 처리한다.
 
-Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 파일 경로를 함께 사용하도록 수정해야 한다. 기존 dt 입력이나 고정 날짜 파일 경로와는 바로 연결되지 않는다. Gold A 수정과 기존 결과 파일 이동은 이번 범위에 포함하지 않는다.
+Gold A는 요청 범위의 current.json을 읽고 status·dq_results와 정상 파일 경로를 함께 확인한다. 실행 방법은 [Gold A 안내](../gold_a/README.md)를 따른다. 과거 고정 날짜 파일 경로를 직접 합치지 않는다.
 
 ## 결정: 거래 Silver 계산 규칙
 
@@ -249,7 +253,7 @@ python -m pipelines.silver.products --designs-input <디자인-JSONL-경로> --v
 1. 필요한 as_of 또는 정확한 리뷰 요청 범위의 current.json을 읽는다.
 2. status와 outputs의 dq_results.jsonl을 확인한다. PASS는 읽은 입력의 검사 통과이며 원천 입수의 완전성을 증명하지 않는다.
 3. outputs가 가리키는 정상 파일만 읽는다. runs/ 또는 scopes/ 전체를 합치면 과거 실행·중첩 날짜가 중복된다.
-4. INCOMPLETE이면 정상 데이터는 존재할 수 있지만 해당 범위를 완전한 결과로 표시하지 않는다. Gold A의 실제 차단·표시 처리는 후속 구현이다.
+4. INCOMPLETE이면 정상 데이터는 존재할 수 있지만 해당 범위를 완전한 결과로 표시하지 않는다. Gold A 기본 실행은 품질 미완료 입력의 공개를 차단하며, 거래·퍼널의 --scope-aware 실행만 영향 범위 보류와 PARTIAL 표시를 제공한다.
 
 - 회원·리뷰의 필드 오류·JSON 파싱 오류를 행별로 격리한다. 키를 아는 오류는 같은 키의 모든 입력을 보류한다. 같은 원천/발행 시각 충돌은 과거 버전에서도 검사한다.
 - 회원은 오류가 있는 회원의 과거 ACTIVE 상태를 최신으로 대체 출력하지 않는다. 리뷰도 오류 있는 최신 리뷰 대신 과거 리뷰를 조용히 선택하지 않는다.

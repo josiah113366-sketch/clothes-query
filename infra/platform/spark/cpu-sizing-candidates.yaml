@@ -1,0 +1,13 @@
+# Analysis only, not Helm values. These are NOT applied or validated under load.
+common_cpu_allocatable_m_estimate: 1780
+current_requests_m: 1650
+candidates:
+  kafka-exporter: {current_m: 100, candidate_m: 10}
+  kafka-ui: {current_m: 100, candidate_m: 25}
+  topic-operator: {current_m: 100, candidate_m: 50}
+  user-operator: {current_m: 100, candidate_m: 50}
+  strimzi-cluster-operator: {current_m: 200, candidate_m: 100}
+  kafka-broker: {current_m: 500, candidate_m: 250}
+  kafka-connect: {current_m: 250, candidate_m: 100}
+# Airflow unchanged: burst CPU and DAG processor memory were observed.
+shared_spark_requests_m: {submitter: 100, driver: 100, executor: 500}

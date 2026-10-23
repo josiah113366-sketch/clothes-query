@@ -53,6 +53,7 @@ from sim.common.control import MODES, ControlSource, ControlState
 from sim.common.curve import rate_factor
 from sim.common.db import SafeDatabaseError, describe_db_error
 from sim.common.rng import SimRandom, derive_seed
+from sim.common.stats import STATS_SECONDS
 
 UNIQUE_VIOLATION = "23505"
 TRANSITION_ORDER = (PAID, PAYMENT_FAILED, CANCELLED, SHIPPED, DELIVERED, "REFUNDED")
@@ -139,6 +140,7 @@ class BehaviorRunner:
         max_visits: int | None = None,
         pg_extra_fail: Mapping[str, float] = NO_EXTRA_FAIL,
         out: Callable[[str], None] = print,
+        stats: Callable[[dict], None] | None = None,
     ) -> None:
         if mode not in MODES:
             raise ValueError(f"mode는 {', '.join(MODES)} 중 하나여야 합니다.")
@@ -158,6 +160,7 @@ class BehaviorRunner:
         self.max_visits = max_visits
         self.pg_extra_fail = pg_extra_fail  # PG 장애 주입. 제어 신호(pg_extra_fail)로 바뀐다
         self.out = out
+        self.stats = stats  # 컨트롤러 화면용 누적 숫자 (StatsFile.write). 없으면 쓰지 않는다
         self.running = True
         self.summary = BehaviorSummary()
         self.queue = ScheduledQueue()
@@ -172,6 +175,7 @@ class BehaviorRunner:
         self._order_rng = SimRandom(0)
         self._pool_warned = False
         self._last_poll = self._last_progress = self._last_refresh = float("-inf")
+        self._last_stats = float("-inf")
         self._progress_mark = BehaviorSummary()
 
     def request_stop(self) -> None:
@@ -280,6 +284,9 @@ class BehaviorRunner:
         if now_real - self._last_progress >= params.PROGRESS_SECONDS:
             self._print_progress(now_real - self._last_progress)
             self._last_progress = now_real
+        if self.stats is not None and now_real - self._last_stats >= STATS_SECONDS:
+            self._last_stats = now_real
+            self.stats(self.stats_data())
         refresh = getattr(self.members, "refresh_seconds", params.POOL_REFRESH_SECONDS)
         if now_real - self._last_refresh >= refresh:
             self._last_refresh = now_real
@@ -515,6 +522,25 @@ class BehaviorRunner:
             remaining -= step
 
     # --- 출력 ---
+
+    def stats_data(self) -> dict:
+        """컨트롤러 화면용 누적 숫자. PII 없음."""
+        s = self.summary
+        return {
+            "mode": self.mode,
+            "running": self.running,
+            "sim_time": self.clock.now().isoformat(timespec="seconds"),
+            "visits": s.visits,
+            "views": s.views,
+            "cart_adds": s.cart_adds,
+            "orders": s.orders,
+            "orders_rejected": s.orders_rejected,
+            "payments_success": s.payments_success,
+            "payments_failed": s.payments_failed,
+            "transitions": dict(s.transitions),
+            "queue": len(self.queue),
+            "reconnects": s.reconnects,
+        }
 
     def _print_progress(self, span: float) -> None:
         s, mark = self.summary, self._progress_mark

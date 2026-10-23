@@ -54,9 +54,16 @@ variable "memory" {
 }
 
 variable "schedule_expression" {
-  description = "Daily run time (UTC). Default 00:30 UTC = 09:30 KST, after the UTC day closed."
+  description = "Daily run time in schedule_timezone. Default 00:00 KST (2026-10-23 lemin), right after the KST day closed."
   type        = string
-  default     = "cron(30 0 * * ? *)"
+  default     = "cron(0 0 * * ? *)"
+}
+
+# 2026-10-23 lemin: 주문 시뮬레이터가 KST 벽시계 시각을 UTC 처럼 RDS 에 넣으므로, 하루가 끝나는 시점도 KST 0시로 맞춘다
+variable "schedule_timezone" {
+  description = "IANA time zone of schedule_expression."
+  type        = string
+  default     = "Asia/Seoul"
 }
 
 variable "log_retention_days" {
