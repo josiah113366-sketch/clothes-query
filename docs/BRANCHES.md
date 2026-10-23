@@ -182,7 +182,8 @@ gitGraph
 | `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
 | `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 머지됨 (#78) | 2026-10-23 |
 | `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 머지됨 (#84) | 2026-10-23 |
-| `pipelines/gold-b-format-check` | [gold-b-format-check.md](tasks/gold-b-format-check.md) | 검토 대기 (`pipelines/gold-b-reprocess` 머지 뒤) | |
+| `pipelines/gold-b-format-check` | [gold-b-format-check.md](tasks/gold-b-format-check.md) | 검토 대기 (`pipelines/gold-b-compact` 머지 뒤) | |
+| `pipelines/gold-b-compact` | [gold-b-compact.md](tasks/gold-b-compact.md) | 검토 대기 (`pipelines/gold-b-reprocess` 머지 뒤) | |
 
 ### gold-a
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
