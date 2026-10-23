@@ -1,0 +1,7 @@
+# 공유 ALB(infra/platform/ingress)가 이 namespace의 Ingress를 받도록 라벨을 붙인다.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dashboard
+  labels:
+    clothes-query/ingress: shared

@@ -1,0 +1,11 @@
+# 컨텍스트는 dashboard/ 폴더다. 계정 파일과 비밀값은 이미지에 절대 넣지 않는다.
+.local/
+.streamlit/secrets.toml
+.venv/
+.ruff_cache/
+__pycache__/
+*.pyc
+.git
+make_test_accounts.py
+TODO.md
+README.md

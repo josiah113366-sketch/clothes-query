@@ -1,0 +1,32 @@
+# 소급 작성 초안 (2026-10-23). lemin 확인 후 내용을 고쳐도 된다. 아직 S3 에 올라가지 않았으므로 지금은 어느 필드든 고칠 수 있다.
+# released_at 은 합친 모델을 만든 날(2026-10-14)로 넣었다. 실제 배포일로 바꾸려면 여기만 고친다.
+model_version: 2.4b_score_s2c
+model_version_no: 1.0
+change_type: 최초
+released_at: 2026-10-14
+summary: 점수형 감성 모델(s2c) 첫 배포. LoRA를 기본 모델에 합쳐 SageMaker 실행
+rescore_required: true
+
+changes:
+  - category: 모델
+    item: 점수형 모델 s2c
+    detail: 속성마다 -2~+2 점수를 매기는 모델. 언급 없는 속성은 출력하지 않음. 3단계 분류 열 없음
+  - category: 모델
+    item: LoRA 병합 배포
+    detail: 어댑터를 기본 모델(2.4B)에 합친 단일 모델로 배포. 병합 전후 지표 차이 없음
+  - category: 속성 목록
+    item: 속성 11개
+    detail: 재질·촉감, 사이즈·핏, 색상·디자인, 품질·내구성, 가격·가성비, 냄새, 세탁·관리, 활용성·사용감, 배송, 포장, 교환·환불·CS
+  - category: 배포
+    item: 하루 1회 배치
+    detail: SageMaker Processing Job(ml.g4dn.xlarge), 길이 정렬 후 배치 16
+
+evaluation:
+  eval_set: 사람 평가 hold-out (합친 모델, 길이 정렬, 배치 16)
+  eval_n: 99
+  f1: 0.868
+  mae: 0.263
+  qwk: 0.915
+  source: merge_bench.json
+
+notes: []
