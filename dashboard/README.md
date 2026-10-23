@@ -7,6 +7,7 @@
 | product (상품 관리) | 통합 조회, 주문·매출, 상품 판매, 구매 퍼널, 리뷰·속성 분석 | Gold A: order_sales_hourly, product_sales_daily, funnel_daily/funnel_session_product, review_product_daily, review_aspect_daily |
 | data (데이터 관리) | 파이프라인 상태, 결제 관제, 형식 오류, 이상탐지, 원인 리포트(임시), 감성분석 모델, 재처리 이력 | Gold B: bronze_lag_snapshots, payment_attempts, malformed_events/messages, anomaly(탐지 담당 정의), reprocess_events, 감성분석 모델 화면은 버전·패치노트를 S3 `review-score/model-registry/releases/`(`MODEL_REGISTRY_URI`)에서, 점수 현황은 athena-review-score 의 review_aspect_scores / review_score_log (아직 더미) 에서 읽는다 |
 
+
 두 Role을 모두 가진 사용자는 전체 화면을 본다.
 
 ## 폴더
@@ -15,6 +16,7 @@
 - `make_test_accounts.py` 테스트 계정 3개 생성 (local 모드용)
 - `data.py` 데이터 조회 함수(지금은 더미, 테이블/컬럼 이름은 노션 설계 그대로). **실연결 때 함수 본문만 Athena 조회로 교체**
 - `ui.py` 공통 선택 위젯(상품·기간)과 표시 도우미(비율 NaN 처리, 날짜 기준 안내)
+- `approval_io.py` 재처리 승인 화면의 연결·조회(진짜 Athena/Airflow 또는 연습용 가짜 저장소). 설명은 파일 맨 위, 작업 기록은 `docs/tasks/dashboard-approval-page.md`
 - `pages_product/`, `pages_data/` 화면 파일
 
 ## 로컬 실행

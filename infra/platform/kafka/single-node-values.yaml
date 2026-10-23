@@ -6,11 +6,14 @@ kafka:
   replicas: 1
   storageGi: 20
   retentionHours: 72
+  # retentionHours is a fallback only; never render both aliases for Strimzi.
+  # Effective retention: 168 hours / 7 days.
+  retentionMs: 604800000
   resources:
     requests: {cpu: "500m", memory: "1536Mi"}
     limits: {cpu: "1", memory: "1536Mi"}
   heapMi: 512
-# Set retentionMs: 259200000 on every business topic in runtime values.
+# Set retentionMs: 604800000 on every business topic in runtime values.
 # Topic-level retention overrides retentionHours; topics remain unspecified here.
 connect:
   enabled: false

@@ -64,10 +64,10 @@
   },
   {
     "name": "unknown_failure_code",
-    "description": "매핑에 없는 실패 코드. 형식은 맞으므로 쌓이고 뷰에서 UNKNOWN",
+    "description": "원천 DDL에 없는 실패 코드. 규칙표 0.2.0은 실패 코드 5개만 허용해서 형식 오류",
     "kafka": {"topic": "payments", "partition": 0, "offset": 102, "timestamp": "2026-10-21T06:04:01Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a8", "order_id": "00000000-4000-8000-0000-0000000000b8", "attempt_no": 1, "method": "BANK_TRANSFER", "pg": "PG_B", "amount": 15900, "status": "FAILED", "failure_code": "PG_MAINTENANCE", "requested_at": "2026-10-21T06:03:55Z", "completed_at": "2026-10-21T06:03:59Z", "__op": "c", "__source_ts_ms": 1792562639800, "__source_snapshot": "false"},
-    "expected": {"payment_events": true, "malformed": [], "payment_attempts": true, "failure_cause": "UNKNOWN", "note": "원천 DDL에는 없는 코드. 공통 계약의 「모르는 실패 코드」 제안에 따름"}
+    "expected": {"payment_events": false, "malformed": [{"field": "failure_code", "reason": "INVALID_VALUE"}], "payment_attempts": false, "note": "규칙표 0.2.0대로 형식 오류로 둔다 (2026-10-23 결정). 결제 원장에 넣고 뷰에서 UNKNOWN으로 나누는 확장안은 보류"}
   },
   {
     "name": "missing_failure_code",
@@ -123,6 +123,6 @@
     "description": "op u (결제 수정). 계약상 오면 안 되는 메시지. 설계대로 c·r만 payment_events에 넣고 이 메시지는 topic_messages에만 남음",
     "kafka": {"topic": "payments", "partition": 1, "offset": 205, "timestamp": "2026-10-21T06:08:30Z"},
     "value": {"payment_id": "00000000-4000-8000-0000-0000000000a3", "order_id": "00000000-4000-8000-0000-0000000000b3", "attempt_no": 1, "method": "CARD", "pg": "PG_B", "amount": 12900, "status": "SUCCESS", "failure_code": null, "requested_at": "2026-10-21T06:02:01Z", "completed_at": "2026-10-21T06:02:03Z", "__op": "u", "__source_ts_ms": 1792562910000, "__source_snapshot": "false"},
-    "expected": {"payment_events": false, "malformed": [], "note": "u를 형식 오류로도 기록할지는 설계에 없음. 2단계에서 정함"}
+    "expected": {"payment_events": false, "malformed": [], "note": "u는 형식 오류로 남기지 않는다 (2026-10-23, 설계대로 c·r만 payment_events)"}
   }
 ]

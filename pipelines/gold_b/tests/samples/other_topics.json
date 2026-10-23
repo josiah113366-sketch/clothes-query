@@ -74,20 +74,20 @@
     "description": "개인정보 컬럼(email)이 들어옴. 샘플이라 값은 넣지 않고 <redacted>로 둠",
     "kafka": {"topic": "members-events", "partition": 1, "offset": 3001, "timestamp": "2026-10-21T06:09:00Z"},
     "value": {"member_id": "00000000-4000-8000-0000-0000000000c3", "signup_at": "2026-10-21T06:08:59Z", "signup_channel": "web", "gender": "M", "age_band": "20s", "region_sigungu": "수원시", "marketing_consent": false, "status": "ACTIVE", "withdrawn_at": null, "created_at": "2026-10-21T06:08:59Z", "email": "<redacted>", "__op": "c", "__source_ts_ms": 1792562939000, "__source_snapshot": "false"},
-    "expected": {"payment_events": false, "malformed": [{"field": "email", "reason": null}], "note": "PII 컬럼의 오류 사유는 설계에 없음 (4가지 중 무엇인지 2단계에서 정함)"}
+    "expected": {"payment_events": false, "malformed": [{"field": "email", "reason": "INVALID_VALUE"}], "note": "개인정보 컬럼은 규칙표 0.2.0의 금지 필드(forbidden_fields)라 INVALID_VALUE. raw_sample에서는 값을 가린다"}
   },
   {
     "name": "review_ok",
     "description": "정상 리뷰 (review.v2, 키 = product_id). 운영에서는 이 토픽이 비어 있을 수 있음",
     "kafka": {"topic": "reviews.raw", "partition": 0, "offset": 40, "timestamp": "2026-10-21T06:10:00Z", "key": "W-0006"},
     "value": {"schema_version": "review.v2", "event_id": "00000000-4000-8000-0000-000000000101", "event_type": "review_created", "review_id": "R-000000000001", "created_at": "2026-10-21T15:09:58+09:00", "emitted_at": "2026-10-21T06:10:00+00:00", "product_id": "W-0006", "product_name": "샘플 니트", "category": null, "option_size": "M", "option_color": "블랙", "member_id": "C-0000000001", "order_id": null, "purchased_at": null, "age_group": "30대", "rating": 4, "text": "<본문 생략>", "has_photo": false, "source": "simulator"},
-    "expected": {"payment_events": false, "malformed": [], "note": "리뷰 규칙은 민혁 님 컬럼 확정 후. 지금은 rating만 확인"}
+    "expected": {"payment_events": false, "malformed": [], "note": "Gold B는 reviews.raw를 형식 검사하지 않는다 (2026-10-23 결정). topic_messages에만 남는다"}
   },
   {
     "name": "review_bad_rating",
-    "description": "rating이 1~5 밖",
+    "description": "rating이 1~5 밖. Gold B는 reviews.raw를 형식 검사하지 않아서 오류로 남기지 않는다",
     "kafka": {"topic": "reviews.raw", "partition": 0, "offset": 41, "timestamp": "2026-10-21T06:10:05Z", "key": "W-0006"},
     "value": {"schema_version": "review.v2", "event_id": "00000000-4000-8000-0000-000000000102", "event_type": "review_created", "review_id": "R-000000000002", "created_at": "2026-10-21T15:10:03+09:00", "emitted_at": "2026-10-21T06:10:05+00:00", "product_id": "W-0006", "product_name": "샘플 니트", "category": null, "option_size": "L", "option_color": "블랙", "member_id": "C-0000000002", "order_id": null, "purchased_at": null, "age_group": "40대", "rating": 6, "text": "<본문 생략>", "has_photo": false, "source": "simulator"},
-    "expected": {"payment_events": false, "malformed": [{"field": "rating", "reason": "INVALID_VALUE"}]}
+    "expected": {"payment_events": false, "malformed": [], "note": "reviews.raw는 형식 검사 안 함 (2026-10-23 결정). 리뷰 이상은 내용 이상(리뷰 분석)으로 본다"}
   }
 ]

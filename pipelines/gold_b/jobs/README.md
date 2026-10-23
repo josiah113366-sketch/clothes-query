@@ -1,6 +1,46 @@
 # pipelines/gold_b/jobs
 
-Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수 ②)만 있다. 적재 잡(4단계)과 파일 합치기(6단계)는 나중에 여기에 만든다.
+Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수 ②), **적재 잡**(`streaming_ingest.py`, 4단계), **파일 합치기**(`compact.py`, 6단계)가 있다.
+
+## 적재 잡 (`streaming_ingest.py`)
+
+Kafka 토픽(`config/gold_b.yaml`)을 Spark Structured Streaming으로 1분마다 읽어 원장 ①②④에 쌓는다. ③은 수집기가 쌓는다.
+
+- 묶음 하나(`write_batch`): 메시지마다 형식 검사를 하고 원장 줄을 만든다 (재처리 잡과 같은 `ledger.message_rows`). ②에는 모든 메시지, ①에는 형식을 통과한 결제, ④에는 오류마다 한 줄. 줄을 이벤트 시각의 시간 폴더로 나눠 (표, 시간 폴더)마다 파일 하나로 쓰고, `loaded_at`은 그 묶음을 쓴 시각이다.
+- 파일 이름은 그 파일에 든 메시지 위치로 정한다 (`part-ingest-<16자리>.parquet`). Spark가 끝내지 못한 묶음을 다시 처리하면 덮어써서 두 번 쌓이지 않는다.
+- 어디까지 읽었는지는 Spark 체크포인트가 기억한다. 체크포인트가 없으면 Kafka에 남은 가장 오래된 메시지부터 읽는다. 묶음 하나는 최대 20,000건.
+- 보관 기간보다 오래 멈춰 메시지가 지워졌으면 멈추지 않고 남은 것부터 읽는다. 빠진 구간은 `topic_messages` 오프셋 빈틈으로 보이고 Bronze 재처리로 채운다.
+
+| 환경변수 | 뜻 |
+|---|---|
+| `GOLD_B_LEDGER_ROOT` | 원장 저장 위치 (`s3://<버킷>/gold_b` 또는 로컬 폴더) |
+| `GOLD_B_CHECKPOINT` | Spark 체크포인트 위치 (S3면 `s3a://…`) |
+| `KAFKA_BOOTSTRAP`, `KAFKA_SECURITY_PROTOCOL` | Kafka 주소, `PLAINTEXT` 또는 `SSL` (시뮬레이터·수집기와 같은 이름) |
+| `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | SSL일 때 PEM 파일 (클라이언트 인증서는 둘 다) |
+| `GOLD_B_RULES_PATH` | 형식 규칙표 경로 (생략하면 저장소의 `docs/contracts/format_rules.yaml`) |
+
+### 적재 잡 부르는 방법
+
+```bash
+python -m pipelines.gold_b.jobs.streaming_ingest                    # 저장소 루트에서, 설정은 config/gold_b.yaml
+python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
+```
+
+- 형식 검사기(`pipelines/gold_b/format_check.py`, 공통 규칙의 `gold_b`)를 끼워 스트리밍을 시작하고 멈출 때까지 기다린다. 재처리 잡과 같은 검사기라 같은 메시지는 같은 원장 줄이 된다.
+- 설정 파일·환경변수·형식 규칙표가 잘못됐으면 Spark를 띄우기 전에 1로 끝난다. 스트리밍 중 실패는 오류로 끝나고, 다시 띄우면 체크포인트에서 이어 읽는다.
+- 로그에는 묶음 번호와 메시지·파일 수만 남긴다 (주소·메시지 내용은 남기지 않음).
+- Spark 연결(`build_query`)은 Docker의 Spark 4.1.3으로 로컬 Kafka를 읽어 확인했다 (같은 체크포인트로 다시 켜도 빠지거나 두 번 쌓이지 않음). 형식 검사기를 끼운 Spark 실행은 아직 못 했다 (Gold B 이미지가 아직 없음).
+
+### 적재 잡 배포에 필요한 것 (재영 님께)
+
+- 늘 켜 두는 Spark 스트리밍 잡 하나. 같은 체크포인트로 두 개를 동시에 띄우지 않는다.
+- 이미지: 팀 기본 Spark 이미지(`infra/platform/spark/image`: Spark 4.2.0, Python 3.10.12, `spark-sql-kafka`·S3A(`hadoop-aws`) 포함)에서 출발한다. Gold B 코드는 Python 3.10에서 돈다 (2026-10-23 맞춤, Python 3.10.12 컨테이너에서 Gold B 시험 통과). 그 위에 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`(설정 `config/gold_b.yaml` 포함), `docs/contracts/format_rules.yaml`, `pipelines/gold_b/requirements.txt` 패키지(3.10은 pyarrow 25.0.1)를 넣는다. Gold B 이미지의 Dockerfile은 따로 만든다.
+- 제출: `spark-submit local:///<이미지 안 저장소 위치>/pipelines/gold_b/jobs/streaming_ingest.py`. `PYTHONPATH`에 저장소 루트를 더한다.
+- 묶음(최대 20,000건)은 Driver로 모아 파이썬으로 처리한다. Executor는 Kafka만 읽는다.
+- 권한: S3 `gold_b/topic_messages/`·`gold_b/payment_events/`·`gold_b/malformed_events/` 쓰기 (같은 이름 덮어쓰기 포함), 체크포인트 위치 읽기·쓰기·지우기. Kafka 6개 토픽 읽기 (consumer group은 Spark 기본 이름 `spark-kafka-source-…`, Kafka에 커밋 안 함).
+- 환경변수는 위 표. Kafka SSL 파일은 Secret으로 붙인다.
+
+확인: `python -m pytest -q pipelines/gold_b/tests/test_ingest.py` (설정 파일·형식 검사기 시험은 `PyYAML`이 있어야 돈다).
 
 ## 재처리 잡이 하는 일
 
@@ -10,7 +50,7 @@ Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수
 2. 시작 전에 확인하고, 걸리면 `FAILED`로 끝낸다 (다시 돌려도 소용없어서 재시도하지 않음).
    - 형식 검사 함수의 규칙 버전이 승인된 `rule_version`과 다름
    - 아직 안 끝난 폴더가 있음 (폴더 끝 + 10분이 지나지 않음)
-   - Kafka 보관 기간(72시간) 밖 → 원본 없음. Bronze에서 다시 읽기는 아직 없다
+   - Kafka 보관 기간(7일, 2026-10-23 #86으로 72시간에서 늘어남) 밖 → 원본 없음. Bronze에서 다시 읽기는 아직 없다
 3. `reprocess_events`에 `STARTED`를 쓴다.
 4. 폴더마다 차례로:
    - 폴더 앞뒤로 10분씩 더 Kafka에서 읽는다 (시각으로 위치를 찾음). 결제는 결제 시각보다 늦게 Kafka에 들어올 수 있어서다.
@@ -46,7 +86,32 @@ Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수
 
 ## 부르는 방법
 
-형식 검사기가 아직 없어서 **지금은 단독으로 실행하지 않는다.** 실행 입구(명령줄)는 형식 검사기와 함께 만든다 (`pipelines/gold-b-format-check`). 그 입구는 poller로 다음 요청을 고르고 `run()`을 부른다. 다시 돌릴지와 몇 번까지 돌릴지는 poller가 `reprocess_events`를 보고 정하므로, Airflow DAG는 5분마다 한 번씩 부르기만 하면 된다 (한 번에 하나).
+```bash
+python -m pipelines.gold_b.jobs.reprocess              # 승인된 요청 하나를 골라 돌린다
+python -m pipelines.gold_b.jobs.reprocess --dry-run    # 고른 요청만 알려 주고 돌리지 않는다
+```
+
+poller로 요청을 고르고, 형식 검사기(`pipelines/gold_b/format_check.py`)로 원장 줄을 다시 만든다. 할 일이 없거나 성공하면 0, 실패하면 1로 끝난다. 다시 돌릴지와 몇 번까지 돌릴지는 다음 번에 poller가 `reprocess_events`를 보고 정한다. 준비 단계(규칙표, Kafka 설정)에서 실패하면 요청을 실패로 남기지 않고 1로 끝난다 (다음 번에 다시 고름).
+
+| 환경변수 | 뜻 |
+|---|---|
+| `GOLD_B_LEDGER_ROOT` | 원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더 (필수) |
+| `KAFKA_BOOTSTRAP` | Kafka 주소 (필수) |
+| `KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT`(기본) 또는 `SSL` |
+| `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | mTLS 파일 경로 |
+| `KAFKA_ADDRESS_FAMILY` | 로컬에서 IPv6로 먼저 붙는 문제가 있을 때만 `v4` |
+| `GOLD_B_RULES_PATH` | 형식 규칙표 경로 (생략하면 저장소의 `docs/contracts/format_rules.yaml`) |
+
+### Airflow DAG 명세 (재영 님께)
+
+DAG 파일은 Airflow 공급 경로(`infra/platform/airflow/dags/`)에 둔다.
+
+- DAG `gold_b_reprocess`: 5분마다(`*/5 * * * *`), `max_active_runs` 1, 밀린 실행을 몰아서 돌리지 않음(`catchup` 끔)
+- 작업 하나: 위 명령을 Pod로 실행한다. 다시 돌린 횟수는 poller가 세므로 Airflow 재시도는 0으로 둔다 (두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감).
+- Pod 권한: S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. Kafka 6개 토픽 읽기 (임시 그룹 `gold-b-reprocess-*`, 커밋 없음)
+- 이미지: Python 3.10 이상 (팀 기본 Spark 이미지의 3.10.12에서 돈다), `pipelines/gold_b/requirements.txt`, 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`, `docs/contracts/format_rules.yaml`
+
+코드에서 부를 때는 이렇게 한다.
 
 ```python
 from pipelines.gold_b.jobs.reprocess import KafkaReader, next_request, read_events, run
@@ -80,3 +145,39 @@ python -m pytest -q pipelines/gold_b/tests/test_reprocess.py
 ```
 
 가짜 Kafka와 샘플 메시지(`tests/samples/`)로 교체 결과, 두 번 돌린 결과, 남기는 줄, 시작 전 거부, 중간 실패와 다시 돌리기를 확인한다. poller는 승인 순서, `SILVER` 제외, 승인 만료, 거절, 끝남, 다시 돌리기(일시 실패, 중간에 멈춤), 최대 3번, 확장자 없는 Athena 파일 읽기를 확인한다.
+
+## 파일 합치기 (`compact.py`)
+
+적재 잡과 수집기가 1분마다 파일을 하나씩 만들어서 한 시간 폴더에 60개 넘게 쌓인다. 하루 1회, 끝난 UTC 하루의 시간 폴더마다 파일을 하나로 합친다.
+
+1. 그 날 끝 + 10분이 안 지났으면 거부한다.
+2. 원장 4개 × 24개 시간 폴더마다, 파일이 2개 이상이면 합친다. `reprocess_events`는 합치지 않는다.
+3. **줄은 하나도 빼거나 고치지 않는다** (`loaded_at` 포함). `topic_messages`의 같은 위치 두 줄도 탐지가 보는 신뢰성 신호라서 그대로 둔다.
+4. 합친 파일(`part-compact-…`)을 먼저 쓰고 줄 수를 확인한 뒤 원래 파일을 지운다. 합친 파일에는 원래 파일 이름 목록을 적어 둔다. 지우다가 멈춘 뒤 다시 돌리면, 남은 원래 파일은 다시 합치지 않고 지운다 (줄이 두 번 들어가지 않음).
+5. 적재 잡이 그 사이 새로 쓴 파일은 목록에 없어서 지워지지 않고, 다음에 합친다.
+
+**재처리 잡과 같은 폴더를 동시에 건드리면 안 된다.** DAG(재영 님과 만듦)에서 둘을 한 번에 하나씩 돌린다.
+
+```bash
+python -m pipelines.gold_b.jobs.compact                    # 어제(UTC)를 합친다
+python -m pipelines.gold_b.jobs.compact --day 2026-10-21   # 그 날(UTC)을 합친다
+```
+
+환경변수는 `GOLD_B_LEDGER_ROOT`(원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더) 하나다. 성공하면 0, 실패하면 1로 끝난다. 그 날이 끝나고 10분이 지나지 않았으면 거부한다.
+
+DAG 명세 (재영 님께, DAG 파일은 `infra/platform/airflow/dags/`):
+- DAG `gold_b_compact`: 하루 1번, UTC 00:30 이후 (그 날 끝 + 10분 여유 뒤), `max_active_runs` 1, `catchup` 끔
+- 제안: 재처리 DAG(`gold_b_reprocess`)와 같은 Airflow pool(슬롯 1개)에 넣어 두 작업이 겹치지 않게 한다. 지금 Airflow는 전체 동시 작업이 1개라 겹치지 않지만, 그 설정이 바뀌어도 막히게 한다.
+- Pod 권한: S3 원장 4개 폴더(`payment_events`, `topic_messages`, `bronze_lag_snapshots`, `malformed_events`) 읽기·쓰기·지우기
+
+코드에서 부를 때는 이렇게 한다.
+
+```python
+from datetime import date
+from pipelines.gold_b.jobs.compact import run
+from pipelines.gold_b.ledger import open_store
+
+run(date(2026, 10, 21), store=open_store(…))   # s3://<버킷>/gold_b 또는 로컬 폴더. DAG는 어제(UTC)를 넘긴다
+```
+
+S3 권한은 원장 4개 폴더 읽기·쓰기·지우기다. 확인은 `python -m pytest -q pipelines/gold_b/tests/test_compact.py`.
