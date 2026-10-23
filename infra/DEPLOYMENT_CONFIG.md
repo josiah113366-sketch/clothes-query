@@ -2,6 +2,8 @@
 
 사용자 결정(2026-10-21): 공통 배포값을 Git으로 관리하고 개인정보·인증 비밀을 분리한다. 설정 공유는 AWS 배포 실행이 아니며 자동 apply를 추가하지 않는다.
 
+2026-10-23 Spark 준비: ecr 공유 auto 입력은 기존 저장소를 보존하며 Spark 저장소 2개와 de-ai-18 push 정책만 추가하도록 선택했다. plan과 적용 완료는 구분한다. spark-access는 별도 backend key를 쓰며 namespace=null·enabled=false다. network의 추가 S3 action은 platform/spark/handoff/network-magic.tfvars.example 검토안으로만 두고 아직 공유 auto 입력에 적용하지 않았다. compute Spark enabled=false도 유지한다.
+
 ## 파일과 우선순위
 
 | 파일 | Git | 내용 |
@@ -47,8 +49,6 @@ EKS 개인 파일 예시:
 다른 스택의 기존 로컬 파일은 호환을 위해 `{}`로 남겼다. 개인 값이 없으면 생략해도 되고 기존 `-var-file=deployment.local.tfvars.json` 명령을 계속 사용해도 된다. AWS profile·키·SSO 정보는 각 PC에서 관리한다. 개인 입력이 필요한데 파일이 없으면 `-input=false`로 즉시 실패하게 하며 팀원의 개인 값을 대신 하드코딩하지 않는다.
 
 ## 범위와 의존 관계
-
-2026-10-23 Spark 준비: ecr 공유 auto 입력은 기존 저장소를 보존하며 Spark 저장소 2개와 de-ai-18 push 정책만 추가하도록 선택했다. plan과 적용 완료는 구분한다. spark-access는 별도 backend key를 쓰며 namespace=null·enabled=false다. network의 추가 S3 action은 platform/spark/handoff/network-magic.tfvars.example 검토안으로만 두고 아직 공유 auto 입력에 적용하지 않았다. compute Spark enabled=false도 유지한다.
 
 현재 공유 설정은 network/eks/rds/storage/ecr/compute/workload-access/team-access/gold-b-access/agent-development-access/operations-alerts에 준비했다. apps는 기존 backend 위치만 공유한다. Gold B·조사 쓰기·Airflow·개발 접근 소스는 #40·#50·#41·#49로 main에 반영됐다. `operations-alerts` 소스는 여전히 별도 보류 브랜치에 있고 설정 파일만으로 미반영 모듈이 생기지는 않는다.
 
