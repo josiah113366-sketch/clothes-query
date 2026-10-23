@@ -4,6 +4,8 @@
 대상 브랜치: infra/applied-state-sync
 기준 main: 85600ca (#95·#98·#99·#100 포함)
 
+후속 요청: #102 작성 뒤 사용자가 CI 두 실패의 해결을 요청했다. [체크섬 복구](ci-checksum-recovery.md)는 dashboard Linux provider h1 보완과 Debezium 다운로드/고정 해시 검증 경로를 수정한다. 기존 'CI 수정 제외'는 이전 준비 단계의 범위이며 현재 원격 결과는 #102 checks에서 확인한다.
+
 2026-10-24 추가: 사용자 요청으로 CI 수정은 제외하고 Gold B 연결 기반을 준비했다. ECR gold-b 저장소와 전용 실행 역할 3개, 계정/RBAC·Kafka TLS 2세트·Airflow 1슬롯 pool을 적용·검증했다. #100 DAG의 Spark taint 허용 코드는 이 브랜치에 보완했다. 아직 최종 이미지 digest와 checkpoint가 없어 업무 실행 설정은 공급하지 않았고 노드·업무 Pod를 시작하지 않았다. 자세한 결과는 [실행 기반](../../infra/platform/gold-b/README.md)과 [작업 기록](../tasks/infra-applied-state-sync.md)을 따른다.
 
 2026-10-24 draft 대조 결과: #73은 기존 통합에 포함됐지만 #74의 독립 gold-b-catalog 스택·DAG 공급/배치 검사·접근 테스트 등 26개 경로가 누락돼 있었다. 원격 #74 head를 실제로 병합해 누락분과 기존 이력을 보존했다. 충돌에서는 현재 적용한 Dashboard 모델 레지스트리 읽기와 JP Haiku 설정을 유지했다. 따라서 기존 두 draft를 단순 폐기하지 않고, 그 내용까지 포함한 통합 브랜치를 공유 대상으로 삼는다.
