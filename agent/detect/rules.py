@@ -22,7 +22,7 @@ class Config:
     silver_checks_table: str = None       # R6: Silver 주문 총액 검사 결과 표 이름 (예: silver.order_total_checks). None이면 R6을 돌리지 않는다. 표 위치는 Silver·인프라 담당과 확정 전
     r6_check_name: str = "order_item_total_match"   # R6: 읽을 검사 이름 (Silver 제공안)
     ratio_wait_min: int = 3               # 비율 규칙은 구간이 끝난 지 몇 분 지난 것만 본다 (Gold B 문서)
-    format_rule_version: str = "0.1.0"    # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다). Gold B는 공통 형식 규칙 YAML의 version 값을 그대로 쓴다(현재 0.1.0). 최종 이름이 바뀌면 같이 바꾼다. 다르면 R4가 0건으로 나온다
+    format_rule_version: str = "0.2.0"    # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다). Gold B는 공통 형식 규칙 YAML(docs/contracts/format_rules.yaml)의 version 값을 그대로 쓴다(현재 0.2.0). YAML 버전이 바뀌면 같이 바꾼다(test_job.py가 두 값이 같은지 확인한다). 다르면 R4가 0건으로 나온다
     pgs: tuple = ("PG_A", "PG_B")
     topics: tuple = ("payments", "orders", "order-items", "members-events", "clickstream")   # 실제 배포된 업무 토픽 5개 (heartbeat 토픽, 아직 없는 reviews.raw는 뺀다)
     dialect: str = "athena"               # athena | sqlite (시각 표기만 다르다)

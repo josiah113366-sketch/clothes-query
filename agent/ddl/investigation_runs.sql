@@ -5,7 +5,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS agent.investigation_runs (
   anomaly_id             STRING    COMMENT '조사한 이상',
   started_at             TIMESTAMP COMMENT '조사 시작 시각 (UTC)',
   finished_at            TIMESTAMP COMMENT '조사 끝낸 시각 (UTC). 오류로 끝나도 기록한다',
-  status                 STRING    COMMENT 'REPORTED(리포트 제출, 검사 통과), INCOMPLETE(검사를 못 통과한 리포트), UNKNOWN(한도 안에 결론 못 냄), ERROR(실행 오류)',
+  status                 STRING    COMMENT 'REPORTED(리포트 제출, 검사 통과), INCOMPLETE(검사를 못 통과한 리포트), UNKNOWN(한도 안에 결론 못 냄), ERROR(실행 오류), EXPIRED(조사 기간을 넘겨 조사하지 못한 이상에 남기는 표시. 조사한 것이 아님)',
   report_id              STRING    COMMENT '만든 리포트. 없으면 NULL',
   cause_layer            STRING    COMMENT '리포트의 원인 층. 없으면 NULL',
   turns                  BIGINT    COMMENT '모델을 부른 횟수',

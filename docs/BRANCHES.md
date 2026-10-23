@@ -155,6 +155,7 @@ gitGraph
 | `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
 | `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
 
+
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
