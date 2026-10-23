@@ -169,8 +169,8 @@ def make_order_source(
     """주문을 읽을 곳을 고른다.
 
     orders : 로컬 JSONL 주문 파일 (가짜 주문, 예전 방식)
-    rds    : RDS orders 테이블. 리뷰 시각이 [start, end) 에 떨어질 수 있는 결제만 읽는다
-             → 결제 시각 [start - 최대 텀, end - 최소 텀). 경계에서 빠지지 않게 앞뒤로 하루씩 여유를 둔다
+    rds    : RDS orders 테이블(배송완료 항목만). 리뷰 시각이 [start, end) 에 떨어질 수 있는 주문만 읽는다
+             → 배송완료 시각 [start - 최대 텀, end - 최소 텀). 경계에서 빠지지 않게 앞뒤로 하루씩 여유를 둔다
                (텀은 초 단위라 정확히 잘라도 되지만, 여유를 둬도 due_orders 가 다시 거르므로 결과는 같다)
     """
     if source == "rds":
@@ -194,12 +194,13 @@ def _order_specs(
 
     1) 주문을 읽는다 (source=orders: JSONL 파일 / source=rds: RDS orders 테이블, make_order_source)
        order_source 를 주면 그것을 쓴다(테스트에서 가짜 DB 를 넣을 때)
-    2) 결제 시각 + 텀(0~7일)이 [day 00:00 UTC, 다음 날 00:00 UTC) 안인 주문만 남긴다 (orders.due_orders)
+    2) 기준 시각(RDS: 배송완료, JSONL: 결제) + 텀(0~7일)이 [day 00:00 UTC, 다음 날 00:00 UTC) 안인 주문만 남긴다 (orders.due_orders)
     3) 상품: 주문에 RDS 상품 정보가 있으면 그것을, 없으면 상품 목록(catalog)에서 찾는다.
        상품 목록에도 없는 상품의 주문은 건너뛰고 건수만 로그에 남긴다
     4) 연령대: 주문에 RDS 회원 연령대가 있으면 그것을, 없으면 무작위(scenario.AGE_GROUP_WEIGHTS)
     limit > 0 이면 리뷰 시각이 빠른 순서로 그 수만큼만 만든다(--sink lake 면 그날 파티션에 그만큼만 남는다).
     날짜는 UTC 기준이다. 레이크의 dt 파티션(Bronze = UTC)과 같은 경계로 잘라야 한 번 실행 = 파티션 하나가 된다.
+    (RDS 주문 시각은 주문 시뮬레이터가 KST 벽시계 값을 UTC 처럼 넣은 것이라, 여기서 자르는 날짜 D 는 사실상 KST 날짜 D 다)
     """
     start = datetime(day.year, day.month, day.day, tzinfo=UTC)
     end = start + timedelta(days=1)
@@ -274,7 +275,7 @@ def run(
     source
       random : 가상 시계 + 무작위 상품으로 리뷰를 만든다 (예전 방식). count 기본 10, 0 이면 계속.
       orders : 주문 파일에서 "리뷰 시각(결제 + 0~7일)이 날짜 day(UTC) 안인 주문"을 골라 리뷰를 만든다.
-               day 기본 = 어제(UTC, 다 끝난 마지막 하루). count 기본 0 = 그날 주문 전부.
+               day 기본 = 어제(KST 달력, 다 끝난 마지막 하루. 2026-10-23 에 UTC → KST). count 기본 0 = 그날 주문 전부.
       rds    : orders 와 같지만 주문을 RDS orders 테이블에서 읽는다(주문 항목 하나 = 리뷰 하나,
                상품 정보·회원 연령대도 RDS 값). 접속 주소는 ORDERS_DATABASE_URL.
     order_source : 테스트용. 주문을 읽을 곳을 직접 넣는다(가짜 DB 등)
@@ -320,7 +321,9 @@ def run(
     # orders : 그날 주문을 미리 골라 (명세, 주문) 목록으로 만들어 둔다
     todo: list[tuple[ReviewSpec, Order]] | None = None
     if order_mode:
-        day = day or (datetime.now(UTC) - timedelta(days=1)).date()
+        # 기본 = 어제(KST 달력). 2026-10-23: 주문 시뮬레이터가 KST 벽시계 시각을 UTC 처럼 RDS 에 넣으므로
+        # 데이터의 날짜 D 는 KST 날짜 D 다. 그래서 KST 0시가 지나야 그날 하루가 끝난 것으로 본다
+        day = day or (datetime.now(UTC) + timedelta(hours=9) - timedelta(days=1)).date()
         todo = _order_specs(
             engine,
             catalog,

@@ -7,7 +7,8 @@
 #   인자 있음 : 그대로 rsim 에 넘긴다. 예) inject --file s3://.../manual/a.csv  (deploy/run_inject.py 가 이렇게 부른다)
 #
 # 환경변수 (태스크 정의에 deploy.py·switch.py 가 넣는다. 한 번만 바꾸려면 RunTask overrides)
-#   RUN_DATE           리뷰 날짜(UTC, YYYY-MM-DD). 비우면 어제(UTC) = 로컬 rsim run 기본값과 같다
+#   RUN_DATE           리뷰 날짜(YYYY-MM-DD). 비우면 어제(KST 달력) = 로컬 rsim run 기본값과 같다
+#                      2026-10-23: 주문 시뮬레이터가 KST 시각을 UTC 처럼 넣으므로 "어제"도 KST 로 센다(예약 실행 = 00:00 KST)
 #   ORDERS_SOURCE      fake(기본) / rds. rds 면 ORDERS_DATABASE_URL 이 secret 으로 들어온다(deploy/aws_common.secrets_of)
 #   ORDERS_FAKE_START  가짜 주문 시작 시각. 고정값이라 같은 날짜를 다시 돌려도 같은 주문 → 같은 리뷰 ID (덮어쓰기)
 #   ORDERS_PER_DAY     하루 평균 주문 수. 하루 리뷰 수 ≈ ORDERS_PER_DAY x REVIEW_RATE
@@ -20,10 +21,11 @@ if [ "$#" -gt 0 ]; then
     exec rsim "$@"
 fi
 
-DAY="${RUN_DATE:-$(date -u -d yesterday +%F)}"
+# 컨테이너에 시간대 데이터가 없어도 되게 UTC + 9시간으로 KST 날짜를 구한다
+DAY="${RUN_DATE:-$(date -u -d "@$(( $(date -u +%s) + 9 * 3600 - 86400 ))" +%F)}"
 
 if [ "${ORDERS_SOURCE:-fake}" = "rds" ]; then
-    echo "리뷰 날짜 $DAY (UTC), 주문 = RDS orders 테이블, LLM=${LLM:-bedrock}"
+    echo "리뷰 날짜 $DAY (KST 달력), 주문 = RDS orders 테이블, LLM=${LLM:-bedrock}"
     exec rsim run --source rds --sink lake --llm "${LLM:-bedrock}" --date "$DAY"
 fi
 

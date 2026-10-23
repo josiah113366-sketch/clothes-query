@@ -1,6 +1,6 @@
 """RDS 주문으로 실제 리뷰(Bedrock)를 지금 한 번 만든다 (2026-10-21, v0.3.0).
 
-    python deploy/run_rds.py                      # 어제(UTC) 리뷰. 비용 안내 후 y 를 눌러야 시작
+    python deploy/run_rds.py                      # 어제(KST 달력) 리뷰. 비용 안내 후 y 를 눌러야 시작
     python deploy/run_rds.py --date 2026-10-20    # 날짜 지정 (UTC)
     python deploy/run_rds.py --yes                # 확인 없이 바로 시작
 
@@ -12,7 +12,7 @@
      → S3 bronze/reviews/year=/month=/day= 그 날짜 파티션을 덮어쓴다
 
 비용: 리뷰 수 ≈ 그날 리뷰 시각인 RDS 주문 항목 수 x REVIEW_RATE. Bedrock 1,000건당 약 $0.21(docs/examples-scorecard.md).
-RDS 에 그날 리뷰 시각(결제 후 0~7일)인 주문이 없으면 리뷰 0건으로 정상 종료한다(비용 거의 0).
+RDS 에 그날 리뷰 시각(배송완료 후 0~7일, 0.3.2)인 주문이 없으면 리뷰 0건으로 정상 종료한다(비용 거의 0).
 결과 확인: python deploy/status.py 또는 출력되는 로그 명령 (로그의 "RDS 주문 항목 N건 읽음", "끝: 전송 N건").
 """
 
@@ -30,7 +30,7 @@ from aws_common import (
     register_revision,
     run_task,
     session,
-    yesterday_utc,
+    yesterday_kst,
 )
 from secret import has_value
 
@@ -74,11 +74,11 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--date", help="리뷰 날짜(UTC, YYYY-MM-DD). 기본 어제")
+    ap.add_argument("--date", help="리뷰 날짜(YYYY-MM-DD). 기본 어제(KST 달력)")
     ap.add_argument("--yes", action="store_true", help="비용 확인 없이 바로 시작")
     ap.add_argument("--region", default=None)
     args = ap.parse_args(argv)
-    day = args.date or yesterday_utc()
+    day = args.date or yesterday_kst()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
         raise SystemExit("--date 는 YYYY-MM-DD 로 주세요")
 

@@ -165,5 +165,12 @@ check("도구 정의 11개", len(TOOL_SPECS), 11)
 check("모든 도구가 SELECT만 만든다 (울타리 통과)", all(
     validate_sql(sql) for name, (b, _) in __import__("ledger_tools").TOOLS.items()
     for _, sql in b({**W, "request_id": "rq-1", "rule_version": "v1.0"}, "athena")), True)
+# Athena일 때만 시간 폴더(dt) 조건이 붙는다. 원장 4종을 읽는 도구 + 마지막 적재·수집 시각
+lt = __import__("ledger_tools")
+for fn in (lt.ingest_volume, lt.bronze_lag, lt.malformed_summary, lt.malformed_fields):
+    a_args = {**W, "rule_version": "v1.0"}
+    check(f"폴더 조건: {fn.__name__} Athena에만 붙음", ("dt BETWEEN" in fn(a_args, "athena")[0][1], "dt BETWEEN" in fn(a_args, "sqlite")[0][1]), (True, False))
+rel = dict(lt.ledger_reliability(W, "athena"))
+check("폴더 조건: 신뢰성 도구의 원장 조회에 붙음", all("dt " in rel[k] for k in ("gaps", "duplicate_messages", "partitions_seen", "last_loaded", "last_collected")), True)
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

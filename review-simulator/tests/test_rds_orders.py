@@ -2,7 +2,8 @@
 
 확인하는 것
 - SQL 결과 한 줄 → Order 변환(상품 정보·연령대·주문 항목 키)
-- RdsOrderSource 가 읽기 전용으로 열고, 상태·결제 시각 범위를 파라미터로 넘기는지
+- RdsOrderSource 가 읽기 전용으로 열고, 상태(DELIVERED 만)·배송완료 시각 범위를 파라미터로 넘기는지
+- 리뷰 텀(0~7일)이 결제가 아니라 배송완료 시각부터 세어지는지 (2026-10-23)
 - run(source="rds") 가 주문 항목마다 리뷰 하나를 만들고, RDS 값(order_id·member_id·article_id·연령대)을 그대로 쓰는지
 - 프롬프트에 RDS 상품 정보(product_info)와 연령대가 들어가는지
 """
@@ -38,6 +39,8 @@ def _row(i: int, order: int | None = None, paid_at: datetime = PAID0, age_band="
         "order_item_id": f"22222222-0000-0000-0000-{i:012d}",
         "article_id": f"0{108775015 + i % 3}",
         "paid_at": paid_at + timedelta(minutes=i),
+        # 배송완료는 결제 5~12시간 뒤 (simulator behavior params: 배송 시작 2~6시간 + 배송 3~6시간)
+        "delivered_at": paid_at + timedelta(hours=8, minutes=i),
         "age_band": age_band,
         "prod_name": "Strap top",
         "colour_group_name": "Black",
@@ -106,7 +109,9 @@ def test_rds_source_reads_only_and_passes_filters() -> None:
     assert len(orders) == 2
     assert log["read_only"] is True
     assert log["params"]["statuses"] == list(RDS_REVIEW_STATUSES)
-    assert "CANCELLED" not in RDS_REVIEW_STATUSES and "REFUNDED" not in RDS_REVIEW_STATUSES
+    # 2026-10-23 lemin: 배송완료된 주문만 리뷰 대상
+    assert RDS_REVIEW_STATUSES == ("DELIVERED",)
+    assert "o.updated_at >= %(since)s" in log["sql"]
     # 개인정보 컬럼은 쿼리에 없다
     for col in ("name", "email", "phone", "birth_date"):
         assert f"m.{col}" not in log["sql"]
@@ -189,3 +194,16 @@ def test_prompt_uses_rds_product_info_and_age(workdir) -> None:
     prompt = build_user_prompt([spec], [])
     assert "Strap top" in prompt and "Vest top" in prompt and "Black" in prompt
     assert "40대" in prompt
+
+
+def test_review_delay_counts_from_delivery_not_payment() -> None:
+    # 결제 후 8시간 뒤 배송완료 → 리뷰 시각은 배송완료 이후, 배송완료 + 7일 이내 (결제 직후 리뷰는 없다)
+    orders = [order_from_row(_row(i)) for i in range(50)]
+    timing = ReviewTiming(min_days=0, max_days=7)
+    for o in orders:
+        assert o.delivered_at == o.paid_at + timedelta(hours=8)
+        assert o.review_base_at == o.delivered_at
+        due = timing.due_at(o)
+        assert o.delivered_at <= due <= o.delivered_at + timedelta(days=7)
+    with pytest.raises(SystemExit):
+        order_from_row({**_row(1), "delivered_at": datetime(2026, 10, 14)})  # 시간대 없음
