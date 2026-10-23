@@ -171,7 +171,7 @@ sim behavior live --visits-daily 20000 --speed 1440 --duration 60 --click-sink j
 시연자가 버튼(또는 명령)으로 모드와 장애를 바꾸고, 바꾸기 **전에** 정답표(`incident_log`)를 JSON으로 남긴다. 정답표는 AI 조사 에이전트가 맞혀야 할 답이라, 기록이 실패하면 아무것도 바꾸지 않는다. 컨트롤러는 제어 파일만 쓰고(데이터 오염만 DB에 직접 쓴다), 실행 중인 `sim member live`와 `sim behavior live`가 1초마다 그 파일을 읽어 따라 움직인다.
 
 ```bash
-sim controller serve                                   # http://127.0.0.1:8080 (버튼 화면)
+sim controller serve                                   # http://127.0.0.1:8080 (콘솔 화면)
 sim controller mode burst                              # 다른 터미널에서
 sim controller pg-outage --pg PG_B --extra-fail 0.85 --minutes 10
 sim controller pollution --kind ORDER_TOTAL_MISMATCH --count 30
@@ -225,6 +225,10 @@ sim controller end                                     # 진행 중 사건 종�
 `ended_by`는 `timer`, `manual`, `shutdown`, `complete`, `failed`(적용 실패) 중 하나다. 오염의 `result`에는 `kind`, `affected_count`, `order_ids`(최대 500개)가 들어간다. 회원 정보, 접속 정보, 버킷 이름은 넣지 않는다. 기록 순서는 "시작 기록 → 바꾸기"이고, 끝은 "되돌리기 → 끝 기록"이다. 끝 기록이 실패하면 1초마다 다시 쓴다.
 
 - **인증:** `/api/*`는 `Authorization: Bearer <SIM_CONTROLLER_TOKEN>`이 필요하다. 로컬(`127.0.0.1`)에 열 때만 토큰 없이 켤 수 있고, 다른 주소에 열면서 토큰이 없으면 시작하지 않는다. `/healthz`는 토큰 없이 `{"ok": true}`다. 버튼 화면은 운영자용이라 정답표 내용(`result`)은 보여 주지 않는다.
+- **콘솔 화면 (`sim/console`):** 모드·실행 스위치, 장애 주입, 진행 중 사건 남은 시간에 더해 **트래픽**을 보여 준다. KPI(방문/초, 주문/분, 결제 성공률, 가입/분, API 요청/초·p95), 방문→조회→담기→주문→결제→배송 흐름 애니메이션, "보낸 것 vs 받은 것" 그래프(주문·결제·클릭·가입, 모드 띠), API 상태(p95, 응답 코드, Kafka 발행, DB 풀), PG별 결제 성공률. HTML 한 장이고 외부 스크립트·CDN이 없다.
+  - **보낸 것:** `member live`·`behavior live`가 제어 파일과 같은 폴더에 누적 숫자를 2초마다 쓴다(`stats-member.json`, `stats-behavior.json`, 숫자와 모드만, PII 없음). 15초보다 오래된 파일은 멈춘 것으로 본다.
+  - **받은 것:** `SIM_API_URL`이 있으면 컨트롤러가 2초마다 `SIM_API_URL/metrics`를 읽는다(시간 제한 1.5초). 상태 점검 경로(`/healthz`, `/readyz`, `/metrics`)는 요청 수에서 뺀다. API Pod가 1개라는 전제다(여러 개면 ALB가 고른 한 Pod의 숫자만 보인다).
+  - **기록:** 컨트롤러가 최근 30분 표본을 메모리에 둔다. `GET /api/traffic?since=<epoch 초>`(토큰 필요)로 받고, 화면을 새로 열어도 같은 그래프가 보인다. 컨트롤러가 다시 시작하면 비어서 시작한다.
 - **데이터 오염**은 `DATABASE_URL`이 있을 때만 켜진다(없으면 오염 요청만 503). 로컬이 아니면 `SIM_ALLOW_REMOTE_DB=1`이 필요하다.
 - **시각:** 컨트롤러는 벽시계(UTC)만 쓴다. ECS에서는 실행기를 `--speed 1`로 돌린다. 배속이 1이 아니면 정답표 시각과 데이터 시각이 어긋난다.
 - **종료와 재시작:** SIGINT/SIGTERM이면 진행 중 사건을 `shutdown`으로 끝내고 제어 파일을 `normal`, 장애 없음으로 되돌린 뒤 종료 코드 0으로 끝난다. 다시 켜면 깨끗한 상태로 시작한다.

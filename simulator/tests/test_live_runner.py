@@ -360,3 +360,13 @@ def test_slow_insert_does_not_lower_the_arrival_rate(regions) -> None:
     # 실제 120초 = 시뮬레이터 2일
     expected = _expected_normal(START, START + timedelta(days=2), daily=5000)
     assert _within_5_sigma(summary.total, expected)
+
+
+def test_stats_are_written_every_two_real_seconds(regions) -> None:
+    written: list[dict] = []
+    runner, *_ = make(regions, duration=10, stats=written.append)
+    runner.run()
+    assert 4 <= len(written) <= 6
+    assert written[-1]["mode"] == "normal" and written[-1]["running"] is True
+    assert written[-1]["signups"] <= runner.summary.total
+    assert set(written[-1]) == {"mode", "running", "signups", "reconnects"}  # PII 없음
