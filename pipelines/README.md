@@ -159,6 +159,8 @@ manifest에도 held_scopes·held_context·held_click_context·previous_run_id·p
 
 #### Athena 조회 대상 갱신 — 고려사항·연결 미구현
 
+아래 날짜별 LOCATION 교체는 이전 검토안이다. 현재 선택한 운영 공개 방식은 [실행 ID 고정 조회 명세](../docs/contracts/silver-gold-a-publication.md)이며, 두 방식을 동시에 적용하지 않는다. 카탈로그 연결은 아직 미구현이다.
+
 current.json은 Spark 후속 처리의 공개 참조다. 이것을 교체해도 Glue/Athena의 테이블·파티션 위치는 바뀌지 않는다. Athena를 통한 공개 완료는 별도로 확인해야 한다.
 
 - 제안: 일반 파티션을 직접 등록하는 테이블은 저장·검증이 끝난 실행의 데이터셋/날짜 경로로 파티션 LOCATION을 갱신한다. 파일 이동이 아니라 조회 주소 변경이다. 새 날짜는 파티션 등록도 필요하다. 실제 출력의 날짜 폴더·파티션 컬럼을 먼저 확인하며 설명용 dt 경로를 그대로 적용하지 않는다.
