@@ -95,6 +95,9 @@ gitGraph
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 | `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 머지됨 | 2026-10-22 |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
+| `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
+| `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 머지됨 | 2026-10-22 (#60) |
+| `sim/console` | `docs/tasks/sim-console.md` | 머지됨 | |
 
 ### docs
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -126,6 +129,9 @@ gitGraph
 | `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
+| `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 비활성 Spark 기반 통합 공유, 업무 명세·배포 대기 | |
+| `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
+| `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -143,7 +149,12 @@ gitGraph
 | `agent/review-fixes` | [agent-review-fixes.md](tasks/agent-review-fixes.md) | 머지됨 (PR #48) | 2026-10-21 |
 | `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
 | `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
-| `agent/ddl` | `agent-ddl.md` (이 대장 PR 다음에 PR) | 진행 중 | |
+
+| `agent/ddl` | [agent-ddl.md](tasks/agent-ddl.md) | 머지됨 (PR #53) | 2026-10-22 |
+| `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
+| `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
+| `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
+
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -156,7 +167,6 @@ gitGraph
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/runtime` | [pipelines-runtime.md](tasks/pipelines-runtime.md) | Spark 거래·리뷰 검증, 실제 배포 대기 | |
 | `pipelines/silver` | [silver-pipelines.md](tasks/silver-pipelines.md) | 기본 구현 main 머지됨 (#26), 단가 기준은 #63 반영 | 2026-10-21 |
 | `pipelines/payment-fingerprint` | [pipelines-payment-fingerprint.md](tasks/pipelines-payment-fingerprint.md) | 머지됨 (#55) | 2026-10-22 |
 | `pipelines/r6-output` | [pipelines-r6-output.md](tasks/pipelines-r6-output.md) | 머지됨 (#45) | 2026-10-22 |
@@ -167,9 +177,7 @@ gitGraph
 ### gold-b
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 1단계 main 머지됨 (#36) | 2026-10-22 |
+| `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
 
-### gold-a
-| 브랜치 | 작업 지시서 | 상태 | 머지일 |
-|---|---|---|---|
-| `pipelines/gold-a` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | main 동기화 완료·PR 검토 대기 (#34는 Silver에 머지) | |
+| `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
+| `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 검토 대기 | |

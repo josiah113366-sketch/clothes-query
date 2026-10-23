@@ -1,4 +1,4 @@
-상태: 구현·로컬 검증 완료 · main 대상 리뷰 준비 · 운영 연결 전 · 브랜치: `pipelines/runtime`
+상태: 구현·로컬 검증 완료 · 최신 main 통합 및 PR 검증 중 · 운영 연결 전 · 브랜치: `pipelines/runtime`
 
 # Silver·Gold A 운영 실행 연결
 
@@ -145,3 +145,11 @@
 - Linux 이미지 검증: 비관리자 UID 10001, pyarrow import, Asia/Seoul 시간대, /app 안의 .local/.env/__pycache__ 비포함, 실제 CLI help 확인. 네트워크를 끄고 읽기 전용 합성 입력을 마운트해 거래·퍼널·리뷰 모델 점수까지 가짜 S3로 각각 PASS를 확인했다. 처음의 마운트된 시험 스크립트 직접 실행은 /app import 경로 부재로 실패했으며 실제 모듈과 동일한 작업 디렉터리의 import 경로에서 다시 검증했다.
 - 마지막 경계 보완 후 운영 어댑터 8개 재검증 통과(3.66초), Ruff·diff 검사 통과. 이미지 push·namespace·ServiceAccount·Pod Identity/S3 권한·ECR 저장소·DAG 마운트는 아직 생성하지 않았다. 운영 데이터·S3 쓰기·Airflow Trigger는 실행하지 않았다.
 - 상품 기준정보 JSONL 스냅샷의 실제 S3 위치, 실제 Bronze 크기·형식·완전성, 모델 결과 완료 범위, 실제 R6 판정 소비, 정기·부분 재처리·A/B 대조 연결은 후속이다. 현재 실행기는 전체 입력 스냅샷 방식이며 기존 범위별 보류·부분 병합을 자동 호출하지 않는다.
+
+### main 통합·인프라 리뷰 준비 (2026-10-23)
+
+- origin/main fbc6108을 충돌 없이 통합했다. main에 이미 반영된 Gold A·형식 규칙·Gold B 코드를 유지하며 운영 실행 연결 변경만 비교한다.
+- Python 회귀 135개 통과, Spark 전용 2개 모듈은 Linux 이미지에서 별도 검증한다. 처음 기본 Windows 임시 폴더에서 실행한 검사는 임시 폴더 권한 오류로 중단됐으며, 작업 폴더 내 basetemp를 지정한 재실행은 통과했다.
+- 변경한 pipelines Python 파일의 Ruff(py310) 및 git diff --check 통과. 전체 pipelines Ruff는 main에서 추가된 Gold B·기존 시험 파일의 경고 12개가 있어 이번 작업 범위와 구분했다.
+- 브랜치 대장 변경은 후속 취합으로 분리하고 이번 PR에서는 main과 동일하게 유지한다.
+- 인프라 리뷰 범위는 이미지·Spark 제출·실행 계정·S3 권한·커미터·Airflow 연결이다. 실제 배포 이미지 확정·EKS 업무 실행·Glue 공개·R6 완료 시각 및 재처리 DAG는 미완료다.

@@ -7,7 +7,7 @@ AWS 리소스는 `infra/stacks/ecs-review-simulator`(Terraform)가 만들고, �
 ```
 deploy.py ──▶ ECR 이미지 + 태스크 정의(새 리비전) ◀── switch.py (REVIEW_RATE 만 바꿈)
                          │
-   onoff.py on/off ──▶ 예약 실행(매일 00:30 UTC, 처음엔 꺼짐)
+   onoff.py on/off ──▶ 예약 실행(매일 00:00 KST, 처음엔 꺼짐)
    onoff.py once / run_incident.py / run_inject.py ──▶ 한 번 실행
                          │
                          ▼

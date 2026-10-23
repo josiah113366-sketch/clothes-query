@@ -427,3 +427,15 @@ def test_behavior_does_not_import_other_modules() -> None:
     forbidden = re.compile(r"^\s*(from|import)\s+sim\.(member|controller|cdc|sink)\b", re.MULTILINE)
     for path in root.glob("*.py"):
         assert not forbidden.search(path.read_text(encoding="utf-8")), path.name
+
+
+def test_stats_are_written_every_two_real_seconds(member_ids, catalog) -> None:
+    written: list[dict] = []
+    runner, *_ = make(member_ids, catalog, visits_daily=30_000, stats=written.append)
+    runner.run_until(MONDAY + timedelta(minutes=10))  # 배속 60: 실제 10초
+    assert 4 <= len(written) <= 6
+    last = written[-1]
+    assert last["mode"] == "normal" and last["running"] is True
+    assert last["visits"] <= runner.summary.visits and last["queue"] >= 0
+    assert set(last) >= {"orders", "payments_success", "payments_failed", "transitions", "sim_time"}
+    assert [w["visits"] for w in written] == sorted(w["visits"] for w in written)

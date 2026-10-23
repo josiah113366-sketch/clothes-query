@@ -37,6 +37,19 @@ def _range(col, a, b, dialect):
     return f"{col} >= {_ts(a, dialect)} AND {col} < {_ts(b, dialect)}"
 
 
+def _folder(a, b, dialect):
+    """Athena는 시간 폴더(dt, UTC)로 읽을 범위를 좁혀야 스캔량이 준다(1GiB 상한). dt는 kafka_timestamp(topic_messages·malformed_*)·collected_at(bronze_lag_snapshots)의 날짜라 조건 시각의 날짜와 같다(은서 님 확인). payment_*는 뷰에 폴더 칸이 없어 쓰지 않는다."""
+    if dialect != "athena":
+        return ""
+    return f" AND dt BETWEEN '{a:%Y-%m-%d}' AND '{b:%Y-%m-%d}'"
+
+
+def _recent(b, dialect):
+    """마지막 적재·수집 시각은 전체를 훑지 않고 조회 끝 시각 앞 이틀만 본다. 이틀 넘게 멈췄으면 NULL로 나와 멈춤으로 읽힌다."""
+    day = (b - timedelta(days=2)).strftime("%Y-%m-%d")
+    return f"dt >= '{day}'" if dialect == "athena" else "1 = 1"
+
+
 # ---------- 도구 본체: 각각 (표시 이름, SQL 목록)을 돌려준다 ----------
 
 def payment_summary(args, dialect):
@@ -90,7 +103,7 @@ def ingest_volume(args, dialect):
     """토픽별 유입 메시지 수. 유입이 늘었는지 본다 (시나리오 2의 원인 구분)."""
     a, b = check_window(args["window_start"], args["window_end"])
     topic = _pick(args.get("topic"), TOPICS, "topic")
-    cond = _range("kafka_timestamp", a, b, dialect) + (f" AND topic = '{topic}'" if topic else "")
+    cond = _range("kafka_timestamp", a, b, dialect) + _folder(a, b, dialect) + (f" AND topic = '{topic}'" if topic else "")
     return [("ingest_volume", f"""SELECT topic, COUNT(*) AS messages,
        MIN(kafka_timestamp) AS first_message, MAX(kafka_timestamp) AS last_message
 FROM gold_b.topic_messages
@@ -104,7 +117,7 @@ def bronze_lag(args, dialect):
     """토픽별 Bronze 적재 지연: 가장 오래 밀린 시간, 처리 위치가 멈췄는지, 커넥터 상태 (시나리오 2)."""
     a, b = check_window(args["window_start"], args["window_end"])
     topic = _pick(args.get("topic"), TOPICS, "topic")
-    cond = _range("collected_at", a, b, dialect) + (f" AND topic = '{topic}'" if topic else "")
+    cond = _range("collected_at", a, b, dialect) + _folder(a, b, dialect) + (f" AND topic = '{topic}'" if topic else "")
     return [("bronze_lag", f"""SELECT topic,
        COUNT(*) AS snapshots,
        MAX(lag_sec) AS max_lag_sec,
@@ -128,7 +141,7 @@ def malformed_summary(args, dialect):
     a, b = check_window(args["window_start"], args["window_end"])
     topic = _pick(args.get("topic"), TOPICS, "topic")
     version = _word(args.get("rule_version"), "rule_version")
-    cond = _range("kafka_timestamp", a, b, dialect) + f" AND rule_version = '{version}'" + (f" AND topic = '{topic}'" if topic else "")
+    cond = _range("kafka_timestamp", a, b, dialect) + _folder(a, b, dialect) + f" AND rule_version = '{version}'" + (f" AND topic = '{topic}'" if topic else "")
     return [("malformed_summary", f"""SELECT topic, reason,
        COUNT(DISTINCT CAST(kafka_partition AS VARCHAR) || '-' || CAST(kafka_offset AS VARCHAR)) AS broken_messages,
        MIN(kafka_timestamp) AS first_seen
@@ -144,7 +157,7 @@ def malformed_fields(args, dialect):
     a, b = check_window(args["window_start"], args["window_end"])
     topic = _pick(args.get("topic"), TOPICS, "topic")
     version = _word(args.get("rule_version"), "rule_version")
-    cond = _range("kafka_timestamp", a, b, dialect) + f" AND rule_version = '{version}'" + (f" AND topic = '{topic}'" if topic else "")
+    cond = _range("kafka_timestamp", a, b, dialect) + _folder(a, b, dialect) + f" AND rule_version = '{version}'" + (f" AND topic = '{topic}'" if topic else "")
     return [("malformed_fields", f"""SELECT topic, field, reason, kafka_partition,
        COUNT(*) AS errors, MIN(kafka_timestamp) AS first_seen, MIN(kafka_offset) AS earliest_offset
 FROM gold_b.malformed_events
@@ -157,7 +170,7 @@ LIMIT 200""")]
 def ledger_reliability(args, dialect):
     """원장을 믿어도 되나: 메시지 누락, 중복, 적재 잡·수집기 멈춤 (신뢰성 쿼리 3개와 같은 질문)."""
     a, b = check_window(args["window_start"], args["window_end"])
-    kt = _range("kafka_timestamp", a, b, dialect)
+    kt = _range("kafka_timestamp", a, b, dialect) + _folder(a, b, dialect)
     key = "topic || '-' || CAST(kafka_partition AS VARCHAR) || '-' || CAST(kafka_offset AS VARCHAR)"
     return [
         ("gaps", f"""SELECT topic, kafka_partition, MIN(kafka_offset) AS first_offset, MAX(kafka_offset) AS last_offset,
@@ -180,8 +193,8 @@ FROM gold_b.topic_messages
 WHERE {kt}
 GROUP BY topic, kafka_partition
 LIMIT 200"""),
-        ("last_loaded", "SELECT MAX(loaded_at) AS last_loaded_at FROM gold_b.topic_messages LIMIT 1"),
-        ("last_collected", "SELECT MAX(collected_at) AS last_collected_at FROM gold_b.bronze_lag_snapshots LIMIT 1"),
+        ("last_loaded", f"SELECT MAX(loaded_at) AS last_loaded_at FROM gold_b.topic_messages WHERE {_recent(b, dialect)} LIMIT 1"),
+        ("last_collected", f"SELECT MAX(collected_at) AS last_collected_at FROM gold_b.bronze_lag_snapshots WHERE {_recent(b, dialect)} LIMIT 1"),
     ]
 
 
