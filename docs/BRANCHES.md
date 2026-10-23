@@ -168,5 +168,5 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
-| `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 검토 대기 | |
-| `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 진행 중 (`pipelines/gold-b` 위) | |
+| `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
+| `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 검토 대기 | |
