@@ -853,7 +853,7 @@ pipelines/gold_b/
 - [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
 - [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
 - [x]  PR 올리고 합치기 (#70, 2026-10-23)
-- [x]  결제 UPDATE 처리 (`pipelines/gold-b-payment-update`, 2026-10-23): 새 기반 뷰 `payment_states`, `payment_conflicts`는 보류 목록, `payment_attempts`는 보류 없는 결제의 마지막 이벤트. 시나리오 샘플로 SQLite 시험(`tests/test_payment_states.py`)과 로컬 Trino 484 확인
+- [x]  결제 UPDATE 처리 (`pipelines/gold-b-payment-update`, #95, 2026-10-23): 새 기반 뷰 `payment_states`, `payment_conflicts`는 보류 목록, `payment_attempts`는 보류 없는 결제의 마지막 이벤트. 시나리오 샘플로 SQLite 시험(`tests/test_payment_states.py`)과 로컬 Trino 484 확인
 - [ ]  Athena에서 Glue 표 칸 추가(`ALTER TABLE`)와 뷰 다시 만들기 (`payment_states` → `payment_conflicts`·`payment_attempts`, `views/README.md`)
 
 ### 4단계: 적재 잡
