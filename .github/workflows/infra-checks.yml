@@ -79,6 +79,7 @@ jobs:
       - name: Render and check monitoring boundaries
         run: |
           python -m pip install -r infra/platform/monitoring/requirements.txt
+          python -m unittest discover -s infra/platform/monitoring -p test_readiness.py -v
           helm_binary="$(python infra/checks/install_helm.py)"
           python infra/platform/monitoring/check.py --helm "$helm_binary" --prometheus-config .cache/monitoring-prometheus.yml
       - name: Validate Prometheus config and alert behavior without AWS
@@ -86,7 +87,7 @@ jobs:
           image=$(python -c 'import yaml; print(yaml.safe_load(open("infra/platform/monitoring/chart/values.yaml"))["prometheus"]["image"])')
           docker run --rm --network none --read-only --cap-drop ALL -v "$PWD:/workspace:ro" -w /workspace --entrypoint /bin/promtool "$image" check config --syntax-only .cache/monitoring-prometheus.yml
           docker run --rm --network none --read-only --cap-drop ALL -v "$PWD:/workspace:ro" -w /workspace --entrypoint /bin/promtool "$image" check rules infra/platform/monitoring/chart/files/rules.yaml
-          docker run --rm --network none --read-only --cap-drop ALL -v "$PWD:/workspace:ro" -w /workspace --entrypoint /bin/promtool "$image" test rules infra/platform/monitoring/rule-tests.yaml
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=128m --cap-drop ALL -v "$PWD:/workspace:ro" -w /workspace --entrypoint /bin/promtool "$image" test rules infra/platform/monitoring/rule-tests.yaml
 
   kafka-local:
     runs-on: ubuntu-24.04

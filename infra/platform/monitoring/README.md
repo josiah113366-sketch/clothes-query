@@ -1,5 +1,7 @@
 # 개발용 모니터링
 
+장애 감지 범위·일회성 읽기 점검은 [READINESS.md](READINESS.md), Kafka/CDC/RDS 복구 순서는 [장애 대응 안내](../../../docs/operations/incident-recovery.md)를 따른다. 화면 경보와 외부 통보, 백업 설정과 실제 복원 검증을 구분한다.
+
 기존 WAS 노드에 Prometheus·Grafana·Metrics Server를 배치한다. Kafka/Airflow 공용 노드와 API Deployment·NodePool 설정은 변경하지 않는다. WAS 전용 taint를 허용하는 monitoring Pod만 추가하며, 새 EC2·ALB·NodeClass는 기본 구성에서 생성하지 않는다.
 
 ## 구성과 비용
@@ -15,7 +17,7 @@
 
 Kafka/Connect JMX, Kafka consumer lag, WAS `/metrics`, Prometheus 자체를 60초마다 수집한다. Grafana Infrastructure 폴더의 `Clothes Query - Infrastructure`에서 연결 상태·lag·CDC 지연·WAS 요청/오류·DB 연결 대기를 본다. 대상이 사라지는 경우도 경보로 표시한다. 지표가 없는 화면은 건강하다는 뜻이 아니다.
 
-Metrics Server는 `kubectl top`을 제공한다. 현재 Grafana에는 노드/Pod CPU·메모리 이력 수집을 연결하지 않았다. RDS/WAL/PVC 여유, S3 파일 도착 시각, Airflow 업무 성공 여부도 이 구성의 범위가 아니다. 알림 규칙은 Prometheus/Grafana에서 볼 수 있지만 메일·Discord·Alertmanager 수신 채널은 연결하지 않았다.
+Metrics Server는 `kubectl top`을 제공한다. 현재 Grafana에는 노드/Pod CPU·메모리 이력 수집을 연결하지 않았다. RDS/WAL/PVC 여유와 S3 파일 도착은 상시 수집 대신 [읽기 전용 점검](READINESS.md)에서 확인한다. Airflow 업무 성공 감시는 미연결이다. 경보는 Prometheus 화면에서 확인할 수 있지만 메일·Discord·Alertmanager 수신 채널은 연결하지 않았다.
 
 ## 검사
 

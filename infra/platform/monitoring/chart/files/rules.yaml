@@ -50,3 +50,24 @@ groups:
       severity: warning
     annotations:
       summary: CDC streaming connection is disconnected
+  - alert: MissingCDCMetric
+    expr: absent(debezium_postgres_connected{job="clothes-query-connect",context="streaming"})
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: CDC streaming metric is absent; connection health is unknown
+  - alert: MissingConnectTaskMetric
+    expr: absent(kafka_connect_task_status{job="clothes-query-connect"})
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Connect task status metric is absent; task health is unknown
+  - alert: PrometheusConfigReloadFailed
+    expr: prometheus_config_last_reload_successful == 0
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: Prometheus configuration reload failed; inspect the previous active configuration

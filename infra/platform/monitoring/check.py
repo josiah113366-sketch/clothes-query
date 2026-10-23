@@ -47,11 +47,11 @@ def main():
     assert len(prom["scrape_configs"]) == 5
     assert len({x["job_name"] for x in prom["scrape_configs"]}) == 5
     rules = yaml.safe_load(configs["monitoring-prometheus"]["rules.yml"])
-    assert len(rules["groups"][0]["rules"]) == 7
+    assert len(rules["groups"][0]["rules"]) == 10
     dashboard = json.loads(configs["monitoring-grafana-dashboard"]["infrastructure.json"])
     assert len(dashboard["panels"]) == 10
     # Missing targets must show an alert instead of silently appearing healthy.
-    assert sum("absent(" in r["expr"] for r in rules["groups"][0]["rules"]) == 3
+    assert sum("absent(" in r["expr"] for r in rules["groups"][0]["rules"]) == 5
     for bindings in [x for x in objects if x["kind"] in {"RoleBinding", "ClusterRoleBinding"}]:
         for subject in bindings["subjects"]:
             assert subject["namespace"] == "monitoring"
