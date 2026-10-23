@@ -24,6 +24,7 @@ from pipelines.spark_batch import (
     build_trade,
     execute,
     read_source,
+    resolve_inputs,
 )
 
 
@@ -314,6 +315,71 @@ class SparkTradeTest(unittest.TestCase):
             guarded = plan_spark_holds(small, previous, ["order_sales_hourly"])[0]
             self.assertEqual(guarded[0]["reason"], "PREVIOUS_UNRESOLVED_SCOPE")
 
+
+
+    def test_09_product_parquet_trade_and_funnels(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            paths, _, _ = self.prepare(root, deepcopy(self.base))
+            for name in ("designs", "variants"):
+                target = root / (name + "-parquet")
+                self.spark.read.json(paths[name]).write.parquet(str(target))
+                paths[name] = [str(target)]
+            resolved, inventory = resolve_inputs(paths)
+            self.assertTrue(all(item["uri"].endswith(".parquet") for item in inventory
+                                if item["dataset"] in {"designs", "variants"}))
+            self.assertTrue(all(resolved[name] for name in ("designs", "variants")))
+            config = {"job": "trade", "run_id": "parquet-trade", "input_complete": True,
+                      "inputs": paths, "output_root": str(root / "output")}
+            gold = execute(self.spark, config)
+            self.assertEqual(gold["status"], "PASS")
+            reference = build_gold(build_silver(self.base["orders"], self.base["order_items"], self.base["payments"], True),
+                                   build_products(self.base["designs"], self.base["variants"])["silver_product_variant"])
+            for name in reference:
+                self.assertEqual(self.rows(self.spark.read.parquet(gold["outputs"][name])), canonical(reference[name]))
+            paths["clicks"] = [str(self.fixture / "clicks.jsonl")]
+            funnel = execute(self.spark, {**config, "job": "funnels", "run_id": "parquet-funnels"})
+            self.assertEqual(funnel["status"], "PASS")
+            self.assertGreater(funnel["output_counts"]["funnel_session_product"], 0)
+
+    def test_10_product_parquet_validation_and_mixed_duplicate(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            paths, _, catalog_raw = self.prepare(root, deepcopy(self.base))
+            target = root / "variants-parquet"
+            self.spark.read.json(paths["variants"]).write.parquet(str(target))
+            raw = read_source(self.spark, "product_variant", [paths["variants"][0], *resolve_inputs(
+                {"variants": [str(target)]})[0]["variants"]])
+            design = read_source(self.spark, "product_design", paths["designs"])
+            catalog = build_catalog(raw.unionByName(design))
+            try:
+                self.assertEqual(self.rows(catalog["silver_product_variant"]),
+                                 canonical(build_products(self.base["designs"], self.base["variants"])["silver_product_variant"]))
+                self.assertTrue(all(row.article_id.startswith("0") for row in catalog["silver_product_variant"].collect()))
+            finally:
+                for frame in catalog["_cache"]:
+                    frame.unpersist()
+            for mode in ("conflict", "wrong-type", "missing-reference"):
+                with self.subTest(mode=mode):
+                    bad = self.spark.read.json(paths["variants"])
+                    if mode == "conflict":
+                        bad = bad.withColumn("price", F.col("price") + 100)
+                    elif mode == "wrong-type":
+                        bad = bad.withColumn("price", F.col("price").cast("string"))
+                    else:
+                        bad = bad.withColumn("product_code", F.lit(999999999).cast("long"))
+                    target = root / mode
+                    bad.write.parquet(str(target))
+                    files = resolve_inputs({"variants": [str(target)]})[0]["variants"]
+                    invalid = read_source(self.spark, "product_variant", files)
+                    if mode == "conflict":
+                        invalid = invalid.unionByName(catalog_raw)
+                    else:
+                        invalid = invalid.unionByName(design)
+                    with self.assertRaisesRegex(ValueError, "상품 기준정보"):
+                        build_catalog(invalid)
+            with self.assertRaisesRegex(ValueError, "상품 기준정보만"):
+                read_source(self.spark, "payments", files)
 
 
 if __name__ == "__main__":

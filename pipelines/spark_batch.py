@@ -48,57 +48,82 @@ def dumps(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _normalize_partition(dataset, files, rules_path):
+def _normalize_partition(dataset, files, rules_path, source_format="jsonl"):
     rules = FormatRules(rules_path)
-    for uri, text in files:
+    for uri, number, line in files:
         uri = "s3://" + uri[6:] if uri.startswith("s3a://") else uri
-        for number, line in enumerate(text.lstrip("\ufeff").splitlines(), 1):
-            if not line.strip():
-                continue
-            raw = decode_record(line, uri, number)
-            source = raw["_input_source"]
-            source["kafka"] = kafka_reference(raw)
-            source_id = f"{dataset}:{uri}:{number}"
-            key = raw.get(KEYS[dataset])
-            key = (str(key) if type(key) is int else key) if dataset == "product_design" else key
-            key = key if isinstance(key, str) and key.strip() else None
-            order_id = raw.get("order_id")
-            order_id = order_id if isinstance(order_id, str) and order_id.strip() else None
-            issue, normalized = None, None
-            kind, version = "", ""
-            try:
-                if raw.get("_input_error"):
-                    raise RowError("record", raw["_input_error"], "업무 행 JSON 객체를 읽을 수 없습니다")
-                if dataset in {"orders", "order_items", "payments"}:
-                    if any(name in raw for name in ("before", "after", "payload", "op")):
-                        raise RuntimeError("펼쳐진 CDC 입력이 필요합니다")
-                    transactions._check_cdc(raw, dataset)
-                    rules.validate(dataset, raw)
-                    normalize = {"orders": transactions._order, "order_items": transactions._item,
-                                 "payments": transactions._payment}[dataset]
-                    normalized = normalize(raw)
-                    if dataset == "orders":
-                        kind, at = transactions._version(raw, normalized)
-                        version = str(at)
-                else:
-                    ints = products.DESIGN_INTEGERS if dataset == "product_design" else products.VARIANT_INTEGERS
-                    texts = products.DESIGN_TEXT if dataset == "product_design" else products.VARIANT_TEXT
-                    normalized = {**{k: integer(raw, k) for k in ints}, **{k: required_text(raw, k) for k in texts}}
-            except (RowError, FormatError, FingerprintError) as error:
-                issue = {"field": error.field, "error_code": getattr(error, "code", "INVALID_VALUE"),
-                         "reason": str(error), "category": "INVALID"}
-                if isinstance(error, FormatError):
-                    issue["rule_id"] = error.rule_id
-            signature = (normalized["payment_content_hash"] if dataset == "payments" else dumps(normalized)) if normalized else None
-            yield dataset, key, order_id, source_id, dumps(raw), signature, kind, version, dumps(issue) if issue else None
+        if not line.strip():
+            continue
+        raw = decode_record(line, uri, number)
+        source = raw["_input_source"]
+        if source_format == "parquet":
+            source["format"] = "parquet"
+            source["position_kind"] = "execution_row_ordinal"
+        source["kafka"] = kafka_reference(raw)
+        source_id = f"{dataset}:{uri}:{number}"
+        key = raw.get(KEYS[dataset])
+        key = (str(key) if type(key) is int else key) if dataset == "product_design" else key
+        key = key if isinstance(key, str) and key.strip() else None
+        order_id = raw.get("order_id")
+        order_id = order_id if isinstance(order_id, str) and order_id.strip() else None
+        issue, normalized = None, None
+        kind, version = "", ""
+        try:
+            if raw.get("_input_error"):
+                raise RowError("record", raw["_input_error"], "업무 행 JSON 객체를 읽을 수 없습니다")
+            if dataset in {"orders", "order_items", "payments"}:
+                if any(name in raw for name in ("before", "after", "payload", "op")):
+                    raise RuntimeError("펼쳐진 CDC 입력이 필요합니다")
+                transactions._check_cdc(raw, dataset)
+                rules.validate(dataset, raw)
+                normalize = {"orders": transactions._order, "order_items": transactions._item,
+                             "payments": transactions._payment}[dataset]
+                normalized = normalize(raw)
+                if dataset == "orders":
+                    kind, at = transactions._version(raw, normalized)
+                    version = str(at)
+            else:
+                ints = products.DESIGN_INTEGERS if dataset == "product_design" else products.VARIANT_INTEGERS
+                texts = products.DESIGN_TEXT if dataset == "product_design" else products.VARIANT_TEXT
+                normalized = {**{k: integer(raw, k) for k in ints}, **{k: required_text(raw, k) for k in texts}}
+        except (RowError, FormatError, FingerprintError) as error:
+            issue = {"field": error.field, "error_code": getattr(error, "code", "INVALID_VALUE"),
+                     "reason": str(error), "category": "INVALID"}
+            if isinstance(error, FormatError):
+                issue["rule_id"] = error.rule_id
+        signature = (normalized["payment_content_hash"] if dataset == "payments" else dumps(normalized)) if normalized else None
+        yield dataset, key, order_id, source_id, dumps(raw), signature, kind, version, dumps(issue) if issue else None
 
 
 def read_source(spark, dataset, paths, rules_path=DEFAULT_RULES):
     if not paths:
         raise ValueError("입력 파일 목록이 비어 있습니다: " + dataset)
+    parquet = [path for path in paths if path.endswith(".parquet")]
+    if parquet and dataset not in {"product_design", "product_variant"}:
+        raise ValueError("Parquet 원천 입력은 상품 기준정보만 지원합니다")
+    frames = []
+    if parquet:
+        source = spark.read.parquet(*parquet)
+        # 원본 타입을 캐스팅하지 않고 기존 상품 검사에 전달한다. ID 선행 0도 보존한다.
+        documents = source.select(F.input_file_name().alias("uri"),
+                                 F.to_json(F.struct(*[source[c] for c in source.columns]),
+                                           {"ignoreNullFields": "false"}).alias("payload"))
+        records = documents.rdd.zipWithIndex().map(lambda pair: (
+            pair[0].uri, pair[1] + 1, pair[0].payload))
+        frames.append(spark.createDataFrame(records.mapPartitions(
+            lambda rows: _normalize_partition(dataset, rows, str(rules_path), "parquet")), RAW_SCHEMA))
     # 파일 단위 읽기는 Executor에서 한다. Sink 분할 파일 기준이며 Driver에 원문을 수집하지 않는다.
-    rdd = spark.sparkContext.wholeTextFiles(",".join(paths), minPartitions=max(2, spark.sparkContext.defaultParallelism))
-    return spark.createDataFrame(rdd.mapPartitions(lambda rows: _normalize_partition(dataset, rows, str(rules_path))), RAW_SCHEMA)
+    text_paths = [path for path in paths if not path.endswith(".parquet")]
+    if text_paths:
+        rdd = spark.sparkContext.wholeTextFiles(",".join(text_paths), minPartitions=max(2, spark.sparkContext.defaultParallelism))
+        records = rdd.flatMap(lambda pair: ((pair[0], number, line)
+            for number, line in enumerate(pair[1].lstrip("\ufeff").splitlines(), 1)))
+        frames.append(spark.createDataFrame(records.mapPartitions(
+            lambda rows: _normalize_partition(dataset, rows, str(rules_path))), RAW_SCHEMA))
+    result = frames[0]
+    for frame in frames[1:]:
+        result = result.unionByName(frame)
+    return result
 
 
 def global_issues(raw):
@@ -272,6 +297,7 @@ def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
     resolved, inventory = {}, []
     seen = set()
     for name, locations in inputs.items():
+        allowed_suffixes = tuple(suffixes) + ((".parquet",) if name in {"designs", "variants"} else ())
         if not isinstance(locations, list) or not locations:
             raise ValueError("입력별 파일 또는 접두사 목록이 필요합니다")
         files = []
@@ -287,7 +313,7 @@ def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
                            for item in page.get("Contents", [])) if uri.endswith("/") else [
                     {"Key": key, **client.head_object(Bucket=bucket, Key=key)}]
                 for obj in objects:
-                    if not obj["Key"].endswith(suffixes):
+                    if not obj["Key"].endswith(allowed_suffixes):
                         continue
                     path = f"s3://{bucket}/{obj['Key']}"
                     files.append(path)
@@ -297,7 +323,7 @@ def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
                 path = Path(uri).resolve()
                 paths = sorted(path.rglob("*")) if path.is_dir() else [path]
                 for path in paths:
-                    if path.suffix not in suffixes or not path.is_file():
+                    if path.suffix not in allowed_suffixes or not path.is_file():
                         continue
                     files.append(str(path))
                     inventory.append({"dataset": name, "uri": str(path), "size": path.stat().st_size,

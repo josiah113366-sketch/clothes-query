@@ -24,15 +24,17 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
     "orders": ["s3://<데이터-버킷>/bronze/orders/"],
     "order_items": ["s3://<데이터-버킷>/bronze/order-items/"],
     "payments": ["s3://<데이터-버킷>/bronze/payments/"],
-    "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
-    "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"]
+    "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
+    "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"]
   }
 }
 ```
 
-접두사는 `/`로 끝낸다. Driver는 파일 목록·ETag·크기만 고정하고 Executor가 JSON Lines 본문을 읽는다. 확장자는 .json/.jsonl을 지원한다. 기본 제한은 최대 10,000개 파일, 파일당 64MiB, 주문당 10,000행이다. 주문당 한도는 max_order_rows(1~100,000)로 조정 가능하다. 초과 시 임의로 자르지 않고 실행 실패다.
+접두사는 `/`로 끝낸다. Driver는 파일 목록·ETag·크기만 고정하고 Executor가 본문을 읽는다. 거래 원천은 .json/.jsonl이며 상품 designs/variants는 .parquet도 직접 읽는다. 실제 상품 기준정보의 확인된 위치는 s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet 및 s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet다. 해당 별도 버킷의 읽기 권한이 필요하다. 기본 제한은 최대 10,000개 파일, 파일당 64MiB, 주문당 10,000행이다. 주문당 한도는 max_order_rows(1~100,000)로 조정 가능하다. 초과 시 임의로 자르지 않고 실행 실패다.
 
-거래는 필요한 변경 이력·주문상품·결제를 함께 준비한다. UTC 수집 날짜 폴더를 KST 일별 매출로 바로 취급하지 않는다. input_complete는 실행자의 준비 확인이며 원천 완전성을 증명하지 않는다. 입력 객체 ETag를 공개 전 다시 확인하지만 이는 특정 버전 직접 읽기·Kafka watermark 검증을 대신하지 않는다. 상품 JSONL 스냅샷의 실제 S3 위치는 아직 확인이 필요하다.
+상품 Parquet은 Spark reader로 Executor에서 읽고 기존 상품 정제·중복·충돌·디자인 참조 검사를 그대로 적용한다. 임의 문자열/정수 캐스팅으로 잘못된 타입을 숨기지 않으며 article_id 선행 0을 보존한다. JSONL과 Parquet 혼합도 같은 상품 키 기준으로 검사한다. Parquet 원본 참조의 line은 실행 내 논리 순번이며 파일의 물리 행 번호가 아니다. source의 format=parquet, position_kind=execution_row_ordinal로 구분한다. 행 재탐색은 파일 참조·상품 키를 사용한다. 거래·퍼널·리뷰가 같은 상품 reader를 사용한다.
+
+거래는 필요한 변경 이력·주문상품·결제를 함께 준비한다. UTC 수집 날짜 폴더를 KST 일별 매출로 바로 취급하지 않는다. input_complete는 실행자의 준비 확인이며 원천 완전성을 증명하지 않는다. 입력 객체 ETag를 공개 전 다시 확인하지만 이는 특정 버전 직접 읽기·Kafka watermark 검증을 대신하지 않는다. 상품 Parquet도 다른 원천과 동일하게 객체 목록·크기·ETag를 고정한다.
 
 ### 코드 구성
 
@@ -53,8 +55,8 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
     "orders": ["s3://<데이터-버킷>/bronze/orders/"],
     "order_items": ["s3://<데이터-버킷>/bronze/order-items/"],
     "payments": ["s3://<데이터-버킷>/bronze/payments/"],
-    "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
-    "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"],
+    "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
+    "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"],
     "clicks": ["s3://<데이터-버킷>/bronze/clickstream/"]
   }
 }
@@ -88,8 +90,8 @@ Gold는 저장된 Silver/상품 Parquet을 다시 읽는다. 거래·클릭 품�
   "model_version": "<모델-버전>",
   "inputs": {
     "reviews": ["s3://<데이터-버킷>/bronze/reviews/<대상-파일>.jsonl"],
-    "designs": ["s3://<데이터-버킷>/<상품스냅샷>/designs.jsonl"],
-    "variants": ["s3://<데이터-버킷>/<상품스냅샷>/variants.jsonl"],
+    "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
+    "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"],
     "analysis": ["s3://<데이터-버킷>/<모델-결과>/scores.csv"]
   }
 }

@@ -123,6 +123,11 @@ class SparkReviewsTest(unittest.TestCase):
             pointer = root / "output/gold_a/runtime/reviews/current.json"
             self.assertEqual(gold["output_counts"]["review_aspect_daily"], 1)
             actual = rows(self.spark.read.parquet(gold["outputs"]["review_product_daily"]))
+            # 동일 리뷰를 실제 상품 시드와 같은 Parquet 기준정보로 다시 집계한다.
+            for name in ("designs", "variants"):
+                target = root / (name + "-parquet")
+                self.spark.read.json(config["inputs"][name]).write.parquet(str(target))
+                config["inputs"][name] = [str(target)]
             again = execute(self.spark, {**config, "run_id": "repeat"})
             self.assertEqual(actual, rows(self.spark.read.parquet(again["outputs"]["review_product_daily"])))
             previous = pointer.read_bytes()

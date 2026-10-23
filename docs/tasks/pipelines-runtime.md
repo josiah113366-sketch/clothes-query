@@ -1,9 +1,10 @@
-상태: 클릭·퍼널 및 거래 부분 공개 보완 로컬 검증 완료 · 사용자 커밋 승인(2026-10-23) · 운영 연결 전 · 브랜치: `pipelines/runtime`
+상태: 기존 구현 908c252 원격 공유 완료 · 상품 Parquet 입력 검수·커밋 승인(2026-10-23) · 운영 연결 전 · 브랜치: `pipelines/runtime`
 
 # Silver·Gold A 운영 실행 연결
 
 ## 승인 범위
 
+- 사용자 승인(2026-10-23): 실제 상품 기준정보를 Parquet 그대로 읽도록 상품 입력을 확장한다. 거래·퍼널·리뷰 공통 reader와 입력 고정 목록에 적용하며 계산 규칙은 바꾸지 않는다. 구현·검증 후 사용자가 검수 및 커밋을 승인했다. 이번 추가 변경의 push·배포는 별도 확인 후 진행한다.
 - 최신 사용자 승인(2026-10-23): 검토한 클릭 Silver·퍼널 Spark 및 거래 부분 공개 보완, Athena 공개 연결 고려사항을 커밋한다. push·PR·배포는 별도 확인 후 진행한다.
 
 - 사용자 승인: 기존 계산 코드를 호출하는 처리 이미지·S3 실행기·수동 Airflow DAG 구현.
@@ -27,6 +28,15 @@
 - 금액 MISMATCH도 Silver 완료 기록과 R6 상세에 보존하며 Gold A 최신 결과를 유지.
 - 다운로드 누락·입력 변경·크기 초과·업로드 실패가 정상 완료로 공개되지 않는지 확인.
 - 전체 pipelines 회귀·Ruff·DAG 구문 검사·가능하면 이미지 빌드. 운영 검증과 로컬 검증을 구분한다.
+
+### 상품 Parquet 입력 보완 (2026-10-23) · 검수 및 커밋 승인
+
+- 실제 Glue hm_seed_v2의 상품 위치를 확인했다. hm-ecommerce-data/seed_v2/product_design/product_design.parquet(515,600바이트), product_variant/product_variant.parquet(2,043,237바이트)이며 별도 상품 버킷 읽기 권한이 필요하다.
+- spark_batch.py의 resolve_inputs는 designs/variants에 한해 .parquet 객체를 고정하고 read_source는 Spark Parquet reader로 Executor에서 읽는다. JSONL과 공통 정제·타입·중복·내용 충돌·디자인 참조 검사를 재사용한다. 거래·퍼널·리뷰 모두 같은 reader를 사용한다. 원본 파일·ETag를 보존하며 Parquet 논리 순번은 물리 행 번호로 주장하지 않는다.
+- 실제 Spark 4.2.0/Python 3.10.12: 상품 Parquet 거래·퍼널 실행, JSONL/Parquet 동일 내용 중복, 선행 0, 문자열 금액·내용 충돌·디자인 참조 누락 거부, 기존 JSONL 회귀 등 3개 시험 통과(47.989초). 리뷰 3개 시험도 통과(66.281초): JSONL 상품 최초 실행과 Parquet 상품 재실행의 지표 동일, CSV 점수·매핑·정상 0건·오류 시 이전 결과 유지 검증.
+- S3에서 상품 두 파일만 읽기 전용으로 내려받아 외부 통신 없는 로컬 Spark에서 기존 catalog 검사를 통과했다. 디자인 44,623행·상품 101,452행·총 2,558,837바이트. 이는 실제 EKS/S3A/Pod Identity 검증은 아니다. 실제 데이터는 Git 제외 .local 시험 폴더에만 두었다.
+- 첫 시험은 fixture 마운트 경로가 잘못되어 0개 실행, 리뷰 단독 시험은 클래스명 오타로 0개 실행 후 정정해 위 실제 시험을 통과했다. Ruff Python 3.10·git diff --check 통과.
+- 커밋 전 변경 5개 파일의 전체 diff·호출 경로를 검수했고 Ruff Python 3.10·git diff --check를 다시 통과했다. 기존 Spark 6개 시험 및 실제 상품 시드 검증 이후 계산 코드는 바뀌지 않았다. 원격 908c252에는 이번 Parquet 보완이 아직 없으며 추가 push·새 배포 이미지 발행은 별도다.
 
 ## 작업 결과
 
