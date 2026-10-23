@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-views
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-views` (최신 `main` `783fa84` 병합) · main 대상 PR 제출 · 남은 일: Athena 권한이 생기면 뷰 생성과 샘플 확인
+> 상태: 완료 (#70, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-views` (최신 `main` `783fa84` 병합) · 남은 일: Athena 권한이 생기면 뷰 생성과 샘플 확인
 
 ## 목표
 
