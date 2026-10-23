@@ -19,6 +19,7 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `collector/` | Bronze 지연 수집기: ③ `bronze_lag_snapshots`를 1분마다 쌓음 ([설명](collector/README.md)) |
 | `tests/test_lag_collector.py` | 수집기 계산·상태·파일 쓰기 (가짜 Kafka·Connect) |
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
+
 | `format_check.py` | 형식 검사기: 메시지 하나를 공통 형식 규칙(`gold_b`)으로 검사해 ① 결제 줄(지문 포함)과 ④ 오류 목록을 만듦. 적재 잡·재처리 잡이 같이 씀 |
 | `tests/test_format_check.py` | 샘플 전부의 기대 결과, 결제 줄과 지문, `raw_sample` 마스킹, 읽을 수 없는 값 |
 | `jobs/reprocess.py` | 재처리 잡: 승인된 시간대의 원장 ①②④를 Kafka에서 다시 읽어 1시간 폴더 단위로 교체. poller와 실행 입구 ([설명](jobs/README.md)) |
@@ -26,6 +27,7 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `jobs/compact.py` | 파일 합치기: 끝난 하루의 시간 폴더마다 작은 파일을 하나로 (줄은 그대로) ([설명](jobs/README.md)) |
 | `tests/test_compact.py` | 합친 뒤 줄이 그대로인지, 안 끝난 날 거부, 중간에 멈춘 뒤 다시 돌리기 |
 | `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`, `PyYAML`) |
+
 
 정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena에서 만드는 것은 권한이 생긴 뒤에 한다.
 

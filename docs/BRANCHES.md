@@ -114,6 +114,7 @@ gitGraph
 |---|---|---|---|
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
+| `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
 | `infra/agent-development-access` | [infra-agent-development-access.md](tasks/infra-agent-development-access.md) | 실제 적용·PR #49 검토 대기 | |
 | `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
@@ -181,6 +182,7 @@ gitGraph
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
 | `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
 | `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 머지됨 (#78) | 2026-10-23 |
+
 | `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 머지됨 (#84) | 2026-10-23 |
 | `pipelines/gold-b-format-check` | [gold-b-format-check.md](tasks/gold-b-format-check.md) | 검토 대기 (`pipelines/gold-b-compact` 머지 뒤) | |
 | `pipelines/gold-b-compact` | [gold-b-compact.md](tasks/gold-b-compact.md) | 검토 대기 (`pipelines/gold-b-reprocess` 머지 뒤) | |
