@@ -46,15 +46,15 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
 
 ## 재처리 잡이 하는 일
 
-규칙이나 코드를 고친 뒤 사람이 승인하면, 그 시간대에 Kafka에 들어온 메시지(대상 메시지)를 다시 검사해 **그 메시지들의 옛 결과만 새 결과로 바꾼다** (메시지 단위, 2026-10-23). 평소에는 적재 잡이 원장에 계속 쌓고, 재처리는 기존 결과를 고치기만 한다. 고치는 원장은 ①`payment_events` ②`topic_messages` ④`malformed_events`이고, ③`bronze_lag_snapshots`는 그 시점에만 잴 수 있는 값이라 건드리지 않는다. 설계는 [docs/design/gold-b/README.md](../../../docs/design/gold-b/README.md) 「재실행·재처리 설계와 검증」이다.
+규칙이나 코드를 고친 뒤 사람이 승인하면, 그 시간대에 Kafka에 들어온 메시지(대상 메시지)를 다시 검사해 **그 메시지들의 옛 결과만 새 결과로 바꾼다** (메시지 단위, 2026-10-23). 평소에는 적재 잡이 원장에 계속 쌓고, 재처리는 기존 결과를 고치기만 한다. 고치는 원장은 ①`payment_events` ②`topic_messages` ④`malformed_events`이고, ③`bronze_lag_snapshots`는 그 시점에만 잴 수 있는 값이라 건드리지 않는다. Kafka 보관 기간(7일)이 지난 시간 폴더는 Bronze v2 파일에서 메시지를 다시 만든다 (2026-10-24, 아래 「Bronze에서 읽기」). 설계는 [docs/design/gold-b/README.md](../../../docs/design/gold-b/README.md) 「재실행·재처리 설계와 검증」이다.
 
 1. 승인 범위를 UTC 1시간 폴더로 넓힌다. 끝은 포함하지 않는다 (14:40~16:20 → 14·15·16시).
 2. 시작 전에 확인하고, 걸리면 `FAILED`로 끝낸다 (다시 돌려도 소용없어서 재시도하지 않음).
    - 형식 검사 함수의 규칙 버전이 승인된 `rule_version`과 다름
    - 아직 안 끝난 폴더가 있음 (폴더 끝 + 10분이 지나지 않음)
-   - Kafka 보관 기간(7일, 2026-10-23 #86으로 72시간에서 늘어남) 밖 → 원본 없음. Bronze에서 다시 읽기는 아직 없다
+   - Kafka 보관 기간(7일, 2026-10-23 #86으로 72시간에서 늘어남)이 지난 폴더가 있는데 Bronze 위치(`GOLD_B_BRONZE_ROOT`)가 없음 → 원본 없음
 3. `reprocess_events`에 `STARTED`를 쓴다.
-4. 승인 폴더 시간대에 Kafka에 들어온 메시지를 한 번에 다시 읽는다 (시각으로 위치를 찾음). 앞뒤 여유 시간은 더 읽지 않는다.
+4. 승인 폴더 시간대에 Kafka에 들어온 메시지를 한 번에 다시 읽는다 (시각으로 위치를 찾음). 앞뒤 여유 시간은 더 읽지 않는다. 보관 기간이 지난 폴더(폴더 시작 - 10분이 지금 - 7일보다 앞)는 Bronze v2 파일에서 읽는다. 한 요청에 둘이 섞여도 된다.
 5. 메시지마다 형식 검사를 하고 새 줄을 만든다. 옛 결과와 새 결과가 있는 시간 폴더는 메시지로 정한다: ②④는 Kafka 시각 폴더, ①은 결제 시각(`completed_at`) 폴더. 결제 시각 폴더는 승인 범위 밖일 수 있다 (예: 다음 날 들어온 결제 수정).
 6. 승인 범위 밖 결제 시각 폴더는 결과가 바뀌는 결제가 있을 때만 고친다 (같은 통과 줄이 이미 있으면 건드리지 않음). 그 시간대도 재판정되므로 꼭 필요한 만큼만이다.
 7. (가) 검사 결과(①·④)의 새 줄을 폴더마다 파일로 먼저 더한다. 이 뒤에 멈춰도 결과가 사라지지 않는다 (같은 위치에 옛·새 결과가 함께 있으면 뷰가 더 늦게 쌓인 새 결과를 고름). ②는 먼저 더하지 않는다 (유입량이 정리 전까지 늘어 보이지 않게).
@@ -65,6 +65,17 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
 9. 도중에 실패하면 `FAILED`를 쓰고 예외를 다시 올린다. 끝난 폴더의 `LEDGER_REPLACED`는 남는다. 다시 돌리면 정리된다.
 
 같은 입력과 같은 규칙으로 다시 돌리면 원장이 같다 (`loaded_at`만 다름). 재처리는 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서 **파일 합치기와 같은 시간에 돌리지 않는다** (DAG에서 하나씩).
+
+### Bronze에서 읽기 (2026-10-24)
+
+Bronze v2(`connectors/bronze-s3-sink-v2.yaml`, #89)는 줄마다 메시지 값과 Kafka 위치·시각(`kafka_topic`, `kafka_partition`, `kafka_offset`, `kafka_timestamp`, `kafka_timestamp_type`)을 남긴다. 위치를 알아서 원장의 같은 줄을 찾아 바꿀 수 있다.
+
+- 읽는 곳: `GOLD_B_BRONZE_ROOT` 아래 `<토픽>/year=YYYY/month=MM/day=dd/`의 `.json` 파일 (Kafka 시각의 UTC 날짜 폴더). 그 날 파일을 다 읽고 `kafka_timestamp`가 Bronze로 읽을 시간 폴더 안인 줄만 쓴다.
+- 줄에서 `kafka_*` 5칸을 떼어 메시지를 되돌린다. 값의 칸 이름은 Kafka와 같다 (`__op`·`__source_ts_ms`). 키는 Bronze에 없지만 형식 검사기는 키를 보지 않는다. 칸 순서는 Kafka Connect가 다시 써서 달라질 수 있어, ④ `raw_sample`의 칸 순서만 다를 수 있다 (검사 결과·결제 지문은 같음).
+- Sink가 다시 켜지면 같은 메시지가 두 파일에 들어갈 수 있어서 위치(토픽, 파티션, offset)로 하나만 쓴다. Kafka 범위에도 든 메시지(시각이 위치 순서와 다른 것)도 하나만 쓴다.
+- Bronze 토픽은 5개다. `reviews.raw`는 Bronze에 없어서 `LEDGER_REPLACED`의 `missing_topics`에 남고 그 줄은 그대로 둔다.
+- 빈 값과 JSON 객체가 아닌 값은 Sink가 쓰지 않아 Bronze에 없다. 그 메시지는 대상이 아니라서 옛 줄이 그대로 남는다.
+- 그 날의 Bronze 파일이 하나도 없거나 줄에 Kafka 위치·시각이 없으면(옛 `bronze/` 형식) 재시도 없이 `FAILED`로 멈춘다. 파일은 있는데 그 시간대 메시지가 없으면 바꿀 것이 없다 (`messages` 0).
 
 ## 다음에 돌릴 요청 고르기 (poller)
 
@@ -82,9 +93,9 @@ python -m pipelines.gold_b.jobs.streaming_ingest --config <설정 파일>
 
 | `step` | `window_start` ~ `window_end` | `source` | `detail` (JSON) |
 |---|---|---|---|
-| `STARTED` | 승인 범위 | `KAFKA` | 승인 폴더 목록, 몇 번째 실행인지(`run`) |
-| `LEDGER_REPLACED` | 정리한 시간 폴더 (예: 15:00 ~ 16:00). 승인 범위 밖 결제 시각 폴더도 | `KAFKA` | 그 폴더의 대상 메시지 수(`messages`), 표별 새 줄 수·남긴 옛 줄 수, 범위 밖이면 `outside_window`, Kafka에 없는 토픽 |
-| `FAILED` | 시작 전이면 승인 범위, 도중이면 남은 폴더 범위 | 시작 전이면 비움, 도중이면 `KAFKA` | 실패 이유, 재시도해도 되는지(`retryable`), 끝낸 폴더 수 |
+| `STARTED` | 승인 범위 | 승인 폴더가 모두 Bronze면 `BRONZE`, 아니면 `KAFKA` | 승인 폴더 목록, 몇 번째 실행인지(`run`), Bronze로 읽는 폴더(`bronze_folders`, 있을 때만) |
+| `LEDGER_REPLACED` | 정리한 시간 폴더 (예: 15:00 ~ 16:00). 승인 범위 밖 결제 시각 폴더도 | 그 폴더를 다시 읽은 곳 `KAFKA`·`BRONZE` (범위 밖 폴더는 `STARTED`와 같음) | 그 폴더의 대상 메시지 수(`messages`), 표별 새 줄 수·남긴 옛 줄 수, 범위 밖이면 `outside_window`, 원본(Kafka·Bronze)에 없는 토픽(`missing_topics`) |
+| `FAILED` | 시작 전이면 승인 범위, 도중이면 남은 폴더 범위 | 시작 전이면 비움, 도중이면 `STARTED`와 같음 | 실패 이유, 재시도해도 되는지(`retryable`), 끝낸 폴더 수 |
 
 실패 이유에는 이 잡이 만든 문장만 쓰고, Kafka·S3 오류는 종류만 쓴다 (오류 문장에 주소·버킷 이름이 들어 있을 수 있음).
 
@@ -105,6 +116,7 @@ poller로 요청을 고르고, 형식 검사기(`pipelines/gold_b/format_check.p
 | `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | mTLS 파일 경로 |
 | `KAFKA_ADDRESS_FAMILY` | 로컬에서 IPv6로 먼저 붙는 문제가 있을 때만 `v4` |
 | `GOLD_B_RULES_PATH` | 형식 규칙표 경로 (생략하면 저장소의 `docs/contracts/format_rules.yaml`) |
+| `GOLD_B_BRONZE_ROOT` | Bronze v2 위치: `s3://<버킷>/bronze_v2` 또는 로컬 폴더. 없으면 Kafka 보관 기간(7일)이 지난 시간대의 요청을 거부한다 |
 
 ### Airflow DAG (재영 님께)
 
@@ -113,14 +125,15 @@ DAG는 `infra/platform/airflow/dags/gold_b.py`의 `gold_b_reprocess`다 (2026-10
 - 5분마다(`*/5 * * * *`), `max_active_runs` 1, 밀린 실행을 몰아서 돌리지 않음(`catchup` 끔), 실행 상한 2시간
 - 설정 확인 태스크 뒤에 위 명령을 Pod로 실행한다. 다시 돌린 횟수는 poller가 세므로 Airflow 재시도는 0이다 (두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감).
 - Kafka 인증서 Secret을 `/opt/kafka-tls`에 붙이고 `KAFKA_SECURITY_PROTOCOL=SSL`과 `KAFKA_SSL_*` 경로를 준다.
+- 실행 설정 `bronze_root`가 있으면 `GOLD_B_BRONZE_ROOT`로 준다.
 - 파일 합치기 DAG와 같은 pool에 넣어 같은 시간에 돌지 않는다.
-- Pod 권한: S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. Kafka 6개 토픽 읽기 (임시 그룹 `gold-b-reprocess-*`, 커밋 없음)
+- Pod 권한: S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. Kafka 6개 토픽 읽기 (임시 그룹 `gold-b-reprocess-*`, 커밋 없음). `bronze_root`를 쓰면 S3 `bronze_v2/` 읽기(목록 포함)
 - 이미지: Python 3.10 이상 (팀 기본 Spark 이미지의 3.10.12에서 돈다), `pipelines/gold_b/requirements.txt`, 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`, `docs/contracts/format_rules.yaml`
 
 코드에서 부를 때는 이렇게 한다.
 
 ```python
-from pipelines.gold_b.jobs.reprocess import KafkaReader, next_request, read_events, run
+from pipelines.gold_b.jobs.reprocess import BronzeReader, KafkaReader, next_request, read_events, run
 from pipelines.gold_b.ledger import open_store
 
 store = open_store(…)                               # s3://<버킷>/gold_b 또는 로컬 폴더
@@ -132,6 +145,7 @@ if pending is not None:
         store=store,
         checker=…,                                      # 형식 검사 함수 (rule_version 속성 + 메시지 하나 → 판정)
         run_number=pending.run_number,
+        bronze=BronzeReader(open_store(…)),             # Bronze v2 위치. 없으면(None) 보관 기간이 지난 요청을 거부
     )
     result.replaced   # 실제로 교체한 시간 폴더 [시작, 끝) 목록
 ```
@@ -142,15 +156,15 @@ if pending is not None:
 
 - 패키지: `confluent-kafka`, `pyarrow`, `boto3` (`pipelines/gold_b/requirements.txt`). Spark는 쓰지 않는다 (한 시간 폴더는 수천 줄).
 - Kafka: 대상 토픽 읽기 (임시 그룹으로 `assign`만, 커밋 없음)
-- S3: `gold_b/payment_events/`, `gold_b/topic_messages/`, `gold_b/malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기
+- S3: `gold_b/payment_events/`, `gold_b/topic_messages/`, `gold_b/malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. 보관 기간이 지난 시간대는 Bronze v2(`bronze_v2/`) 읽기
 
 ## 확인
 
 ```bash
-python -m pytest -q pipelines/gold_b/tests/test_reprocess.py
+python -m pytest -q pipelines/gold_b/tests/test_reprocess.py pipelines/gold_b/tests/test_bronze_reprocess.py
 ```
 
-가짜 Kafka와 샘플 메시지(`tests/samples/`)로 교체 결과, 두 번 돌린 결과, 남기는 줄, 시작 전 거부, 중간 실패와 다시 돌리기를 확인한다. poller는 승인 순서, `SILVER` 제외, 승인 만료, 거절, 끝남, 다시 돌리기(일시 실패, 중간에 멈춤), 최대 3번, 확장자 없는 Athena 파일 읽기를 확인한다.
+가짜 Kafka와 샘플 메시지(`tests/samples/`)로 교체 결과, 두 번 돌린 결과, 남기는 줄, 시작 전 거부, 중간 실패와 다시 돌리기를 확인한다. poller는 승인 순서, `SILVER` 제외, 승인 만료, 거절, 끝남, 다시 돌리기(일시 실패, 중간에 멈춤), 최대 3번, 확장자 없는 Athena 파일 읽기를 확인한다. Bronze는 Bronze v2 형식 샘플 파일로 Bronze만 읽기, Kafka와 섞기, 같은 줄 두 번, 원본 없음, 옛 형식 줄, Bronze 위치 없음, S3 경로를 보고, 실제 형식 검사기로 Kafka로 다시 만든 줄과 같은지 확인한다.
 
 ## 파일 합치기 (`compact.py`)
 

@@ -248,6 +248,23 @@ def test_checks_refuse_wrong_runtime(monkeypatch, change):
             check()
 
 
+def test_reprocess_pod_gets_the_bronze_location_when_set(monkeypatch):
+    """bronze_root가 있으면 재처리 Pod에 GOLD_B_BRONZE_ROOT로 준다 (보관 기간이 지난 시간대를 Bronze에서 읽음).
+    없으면 주지 않아 잡이 그런 요청을 거부한다. 파일 합치기는 Bronze를 읽지 않는다."""
+    name = job("reprocess").ENV_BRONZE_ROOT
+    dags = load(monkeypatch, {**RUNTIME, "bronze_root": "s3://example-bucket/bronze_v2"})
+    assert parts(dags.reprocess_dag)[1].kwargs["env_vars"][name] == "s3://example-bucket/bronze_v2"
+    assert name not in parts(dags.compact_dag)[1].kwargs["env_vars"]
+    assert name not in parts(load(monkeypatch, RUNTIME).reprocess_dag)[1].kwargs["env_vars"]
+
+
+def test_only_reprocess_checks_the_bronze_location(monkeypatch):
+    reprocess_check, compact_check = checks(load(monkeypatch, {**RUNTIME, "bronze_root": "/data/bronze_v2"}))
+    with pytest.raises(ValueError, match="bronze_root"):
+        reprocess_check()
+    assert compact_check() is True
+
+
 def test_only_reprocess_needs_kafka_settings(monkeypatch):
     runtime = {k: v for k, v in RUNTIME.items() if k not in ("kafka_bootstrap", "kafka_tls_secret")}
     reprocess_check, compact_check = checks(load(monkeypatch, runtime))

@@ -22,8 +22,9 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `ledger.py` | 원장 공통 도구: 표별 Parquet 스키마(DDL과 같음), 시간 폴더, 메시지 하나의 원장 줄, 파일 저장소(로컬·S3) |
 | `format_check.py` | 형식 검사기: 메시지 하나를 공통 형식 규칙(`gold_b`)으로 검사해 ① 결제 줄(지문 포함)과 ④ 오류 목록을 만듦. 적재 잡·재처리 잡이 같이 씀 |
 | `tests/test_format_check.py` | 샘플 전부의 기대 결과, 결제 줄과 지문, `raw_sample` 마스킹, 읽을 수 없는 값 |
-| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대에 Kafka에 들어온 메시지를 다시 검사해 그 메시지들의 옛 결과(①②④)만 새 결과로 바꿈. 범위 밖 결제 시각 폴더도 고침. poller와 실행 입구 ([설명](jobs/README.md)) |
+| `jobs/reprocess.py` | 재처리 잡: 승인된 시간대에 Kafka에 들어온 메시지를 다시 검사해 그 메시지들의 옛 결과(①②④)만 새 결과로 바꿈. 범위 밖 결제 시각 폴더도 고침. Kafka 보관 기간(7일)이 지난 시간대는 Bronze v2 파일에서 다시 읽음. poller와 실행 입구 ([설명](jobs/README.md)) |
 | `tests/test_reprocess.py` | 재처리 교체·재실행·남기는 줄·시작 전 거부·중간 실패, poller, 실행 입구 (가짜 Kafka, 샘플 메시지) |
+| `tests/test_bronze_reprocess.py` | Bronze 재처리: Bronze v2 형식 샘플 파일로 Bronze만 읽기·Kafka와 섞기·같은 줄 두 번·원본 없음·옛 형식 줄, 실제 형식 검사기로 Kafka로 다시 만든 줄과 같은지, S3 경로 |
 | `jobs/compact.py` | 파일 합치기: 끝난 하루의 시간 폴더마다 작은 파일을 하나로 (줄은 그대로) ([설명](jobs/README.md)) |
 | `tests/test_compact.py` | 합친 뒤 줄이 그대로인지, 안 끝난 날 거부, 중간에 멈춘 뒤 다시 돌리기 |
 | `requirements.txt` | Gold B 실행 패키지 (`confluent-kafka`, `pyarrow`, `boto3`, `PyYAML`). Spark는 실행 환경이 준다 |

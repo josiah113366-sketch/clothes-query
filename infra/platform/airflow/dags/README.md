@@ -30,6 +30,7 @@ namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR �
 - 둘 다 꺼진 채로 만들어지고, 밀린 실행은 하지 않으며(catchup 끔) 한 번에 하나만 돈다. 실행 상한은 재처리 2시간, 파일 합치기 1시간이다.
 - 두 DAG의 Pod는 같은 pool에 넣는다. 재처리가 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서 둘이 같은 시간에 돌면 안 된다.
 - 승인 화면(`agent/approval`)은 R1·R4·R5 재처리를 Airflow로 부르지 않고, 이 DAG가 5분마다 승인 줄을 읽는다고 본다. 켜지 않으면 승인된 Gold B 재처리가 시작되지 않는다.
+- 재처리는 Kafka 보관 기간(7일)이 지난 시간대를 Bronze v2 파일에서 읽는다. `bronze_root`가 없으면 그런 요청은 시작 전에 거부한다.
 - Pod는 k8s API 토큰을 붙이지 않고(automount 끔) EC2 메타데이터를 끈다. 자원은 요청 0.25 CPU·512Mi, 상한 1 CPU·2Gi이고 끝나면 지운다.
 
 실행 설정은 비공개 ConfigMap을 통한 `AIRFLOW_GOLD_B_RUNTIME` JSON으로 공급한다 (Silver의 `AIRFLOW_PIPELINE_RUNTIME`과 따로). 없거나 틀리면 확인 태스크에서 멈추고 Pod를 띄우지 않는다. `agent`·`kafka`·`kube-system` namespace는 거부한다.
@@ -42,6 +43,7 @@ namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR �
   "ledger_root": "s3://<버킷>/gold_b",
   "kafka_bootstrap": "<Kafka TLS 리스너 주소>",
   "kafka_tls_secret": "<Kafka 인증서 Secret>",
+  "bronze_root": "s3://<버킷>/bronze_v2",
   "pool": "gold_b_ledger",
   "node_selector": {}
 }
@@ -53,6 +55,7 @@ namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR �
 | `namespace`, `service_account` | 예 | 잡 Pod를 띄울 자리와 실행 신원 (Pod Identity) |
 | `ledger_root` | 예 | 원장 위치 `s3://<버킷>/gold_b` |
 | `kafka_bootstrap`, `kafka_tls_secret` | 재처리만 | Kafka TLS 주소와 인증서 Secret. Secret은 `/opt/kafka-tls`에 붙이고 키는 `ca.crt`(Kafka 클러스터 CA), `user.crt`, `user.key`다 |
+| `bronze_root` | 아니오 (재처리만) | Bronze v2 위치 `s3://<버킷>/bronze_v2`. 재처리 Pod에 `GOLD_B_BRONZE_ROOT`로 준다. 없으면 Kafka 보관 기간(7일)이 지난 시간대의 요청을 거부한다 |
 | `pool` | 아니오 | 두 DAG가 같이 쓰는 Airflow pool (슬롯 1개). 없으면 기본 pool. 지금은 Airflow 전체 동시 작업이 1개라 겹치지 않는다 |
 | `node_selector` | 아니오 | Pod 배치 (없으면 지정하지 않음) |
 
@@ -60,5 +63,5 @@ namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR �
 
 - Airflow에 `AIRFLOW_GOLD_B_RUNTIME` 공급. `pool`을 쓰면 그 pool(슬롯 1개)을 먼저 만든다. 없는 pool 이름을 주면 태스크가 돌지 않는다.
 - Airflow의 잡 namespace Pod 실행 RBAC
-- 실행 신원 권한 (두 DAG가 같이 씀): S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/`·`bronze_lag_snapshots/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기
+- 실행 신원 권한 (두 DAG가 같이 씀): S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/`·`bronze_lag_snapshots/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. `bronze_root`를 쓰면 `bronze_v2/` 읽기(목록 포함)
 - Kafka (재처리만): TLS 사용자에 6개 토픽 `Read`·`Describe`, 잡 namespace를 클라이언트 리스너에 허용. 잡은 임시 그룹 이름(`gold-b-reprocess-…`)으로 파티션을 직접 지정해 읽고 커밋하지 않는다. 그룹 권한 오류가 나면 이름 앞부분 `gold-b-reprocess-`로 준다. Strimzi 사용자 Secret의 `ca.crt`는 클라이언트 CA라서, 클러스터 CA를 `ca.crt`로 넣은 Secret을 잡 namespace에 만든다.
