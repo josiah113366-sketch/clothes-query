@@ -144,10 +144,22 @@ def main(env=None, io=None, converse=None, now_fn=None):
     results = [run_one(a, io.query, io.write, converse, now_fn) for a in pending]
     lookback = int(env.get("INVESTIGATE_LOOKBACK_HOURS", 24))
     expired = mark_expired(io.query, io.write, now_fn(), lookback) if env.get("INVESTIGATE_MARK_EXPIRED", "1") == "1" else 0
-    summary = {"found": len(pending), "results": results, "expired_marked": expired, "model_id": converse.model_id, "usage": converse.usage}
+    errors = sum(1 for r in results if r["status"] == "ERROR")
+    summary = {"found": len(pending), "errors": errors, "results": results, "expired_marked": expired, "model_id": converse.model_id, "usage": converse.usage}
     print(json.dumps(summary, ensure_ascii=False, default=str))
     return summary
 
 
+def exit_code(summary):
+    """종료 코드 기준: 조사 대상이 있는데 전부 ERROR면 실패(1), 그 밖에는 성공(0).
+    일부만 ERROR면 성공으로 끝낸다. 실패한 이상은 실행 기록에 ERROR로 남아 다음 5분 순찰에서 다시 조사하고(최대 MAX_ERROR_RETRIES회),
+    성공한 이상의 리포트는 이미 저장돼 있다. 일부 실패 때문에 작업 전체를 실패로 돌려 재시도하면 같은 일을 또 하게 된다.
+    일부 실패 건수는 요약의 errors로 본다."""
+    return 1 if summary["found"] and summary["errors"] == summary["found"] else 0
+
+
 if __name__ == "__main__":
-    main()
+    code = exit_code(main())
+    if code:
+        print("조사 대상이 있었지만 모두 ERROR로 끝났습니다.", file=sys.stderr)
+    sys.exit(code)

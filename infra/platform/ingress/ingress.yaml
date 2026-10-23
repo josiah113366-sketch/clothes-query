@@ -1,0 +1,75 @@
+# 임시 구성: 도메인·인증서 없이 ALB 기본 주소로 접속하고, 서비스는 포트로 나눈다(HTTP). 허용 IP만 접속할 수 있다.
+#   :80 dashboard / :8080 Airflow / :8081 Kafka UI
+# 실제 허용 IP는 이 파일에 쓰지 않는다. <ALLOWED_CIDR>는 apply할 때 치환한다(README 참고).
+# 도메인과 ACM 인증서가 생기면 HTTPS(443) + host 분기로 바꾼다.
+# 적용 전 세 namespace에 라벨을 붙인다: kubectl label ns airflow kafka dashboard clothes-query/ingress=shared
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: platform-shared
+spec:
+  scheme: internet-facing
+  targetType: ip
+  inboundCIDRs: ["<ALLOWED_CIDR>"]            # 팀 네트워크의 공인 IP/대역만 허용. 필수. Kafka UI는 로그인이 없다
+  group:
+    name: platform-shared                      # 이 이름이 같은 Ingress들이 ALB 하나를 공유
+  namespaceSelector:
+    matchLabels:
+      clothes-query/ingress: shared
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: platform-shared
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: platform-shared
+    scope: Cluster
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dashboard
+  namespace: dashboard            # 배포 담당이 정하는 namespace/Service 이름에 맞춘다
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /_stcore/health
+spec:
+  ingressClassName: platform-shared
+  rules:
+    - http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: dashboard, port: {number: 8501}}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: airflow
+  namespace: airflow
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":8080}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /api/v2/monitor/health
+spec:
+  ingressClassName: platform-shared
+  rules:
+    - http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: airflow-api-server, port: {number: 8080}}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kafka-ui
+  namespace: kafka
+  annotations:
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":8081}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+spec:
+  ingressClassName: platform-shared
+  rules:
+    - http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: kafka-ui, port: {number: 8080}}}}

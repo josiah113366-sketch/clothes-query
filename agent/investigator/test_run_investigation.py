@@ -5,7 +5,7 @@
 import json
 from datetime import datetime
 
-from run_investigation import find_pending, main, mark_expired, run_one
+from run_investigation import exit_code, find_pending, main, mark_expired, run_one
 
 ok = True
 
@@ -139,5 +139,15 @@ try:
     check("진입점: workgroup이 없으면 종료", "통과됨", "종료")
 except SystemExit:
     check("진입점: workgroup이 없으면 종료", "종료", "종료")
+
+# --- 종료 코드: 대상이 있는데 전부 ERROR면 실패, 일부 실패·대상 없음은 성공 ---
+io = FakeIO([anomaly("a-1"), anomaly("a-2")])
+s_all = main(env={}, io=io, converse=Boom(), now_fn=lambda: NOW)
+check("전부 ERROR: errors 수와 실패 종료 코드", (s_all["found"], s_all["errors"], exit_code(s_all)), (2, 2, 1))
+io = FakeIO([])
+s_none = main(env={}, io=io, converse=FakeModel(), now_fn=lambda: NOW)
+check("조사 대상 없음: 성공 종료 코드", (s_none["found"], exit_code(s_none)), (0, 0))
+check("일부만 ERROR: 성공 종료 코드(요약 errors로 확인)", exit_code({"found": 3, "errors": 1}), 0)
+check("전부 성공: 성공 종료 코드", exit_code({"found": 2, "errors": 0}), 0)
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
