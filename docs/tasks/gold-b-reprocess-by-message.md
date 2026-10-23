@@ -96,7 +96,7 @@
 
 ## 완료 확인
 
-- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (189개, 로컬 Python 3.12)
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (191개, 로컬 Python 3.12)
 - [x] 위 「확인할 것」 (시험, 아래 작업 결과)
 - [x] `git diff --check`
 
@@ -132,9 +132,18 @@
 - 기존 시험에서 바뀐 기대: 중간 실패 시험의 06시 파일 수 2 → 3 ((가)에서 더한 새 줄 파일), 통과했던 늦은 u의 옛 ① 줄은 이제 지움, 한계였던 시험은 복구로.
 - Python 3.10 컨테이너 시험은 다시 돌리지 않았다 (패키지를 다시 받아야 함). 새 코드에 3.10에서 안 되는 문법은 없다.
 
+### 주현 님 확인 반영 (2026-10-24)
+
+주현 님 답: 범위 밖 `LEDGER_REPLACED`로 그 시간대를 재판정하는 것은 괜찮다. 조건은 `at`이 교체가 끝난 뒤일 것(새 줄의 `loaded_at`은 재처리 시작 시각 하나라 이미 그렇다), 결과의 결제 시각 폴더 범위로 남길 것(이미 그렇다). 범위 밖 표시 키는 `outside_window`. 그리고 두 가지를 부탁받아 바꿨다.
+
+- 범위 밖 폴더는 꼭 필요한 만큼만: 폴더 하나 재판정에 Athena 쿼리가 50개쯤 나가서, 결과가 바뀌는 결제가 있을 때만 고친다 (`narrow_outside`). 시간 경계 결제를 같은 결과로 다시 검사할 때는 범위 밖 폴더가 생기지 않는다.
+- 정리 중 `topic_messages` 중복: (가)에서 ②는 먼저 더하지 않는다 (`PREADDED_TABLES`). 판정이 세는 유입량·R4 분모와 신뢰성 점검의 "같은 위치 두 번"이 정리 전까지 늘어 보이지 않는다.
+
+시험 2개를 더했다 (`test_topic_messages_are_not_added_before_tidying`, `test_boundary_payment_with_the_same_result_leaves_its_folder_alone`). 두 변경을 되돌리면 이 시험이 실패하는 것을 확인했다. 중간에 멈추는 시험은 "(가)에서 새 줄 파일을 쓴 뒤 멈춤"으로 바꿨다 (범위 밖 폴더를 고를 때 원장을 먼저 읽게 되어서). 전체 191개 통과.
+
 ### 다음 할 일
 
-- 주현 님: 승인 범위 밖 시간대의 `LEDGER_REPLACED`(detail `outside_window`)로 재판정하는 것과 승인 화면 표시 (설계 문서 팀원 확인 표).
+- 주현 님: 승인 범위 밖 시간대의 `LEDGER_REPLACED`(detail `outside_window`)로 재판정하는 것과 승인 화면 표시는 확인됨 (2026-10-24). 판정 잡이 한 번에 폴더 하나씩 재판정하도록 바꾸는 것은 주현 님 쪽.
 - DAG: 재처리와 파일 합치기를 같은 Airflow pool(슬롯 1개)에 넣어 같은 시간에 돌지 않게 (`jobs/README.md` DAG 명세).
 - Bronze 재처리 브랜치는 이 방식을 그대로 쓴다 (Bronze v2 줄로 만든 메시지를 `plan_replacement`에 넣음).
 - `pipelines/gold-b-image`와 브랜치 대장 gold-b 표 끝에서 충돌한다. 나중에 올리는 PR 전에 먼저 머지된 쪽을 받아 정리한다.

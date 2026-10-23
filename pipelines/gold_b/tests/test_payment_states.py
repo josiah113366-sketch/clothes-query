@@ -368,15 +368,19 @@ def test_same_request_twice_gives_the_same_ledgers(tmp_path):
     assert len(store.files(hour_folder("topic_messages", hour22(9)[0]))) == 1
 
 
-class CrashBeforeTidyStore(LocalStore):
-    """(가)에서 새 줄을 더한 뒤, (나)에서 원장 폴더를 처음 읽을 때 한 번 멈춘다."""
+class CrashAfterAddingStore(LocalStore):
+    """(가)에서 새 줄 파일을 쓴 뒤, (나)에서 원장 폴더를 처음 읽을 때 한 번 멈춘다."""
 
     def __init__(self, root):
         super().__init__(root)
-        self.crashed = False
+        self.added = self.crashed = False
+
+    def write(self, path, table, rows, metadata=None):
+        super().write(path, table, rows, metadata)
+        self.added = self.added or "-new-" in path
 
     def files(self, folder, any_name=False):
-        if not self.crashed and not folder.startswith("reprocess_events"):
+        if self.added and not self.crashed and not folder.startswith("reprocess_events"):
             self.crashed = True
             raise OSError("멈춤 (시험)")
         return super().files(folder, any_name)
@@ -387,7 +391,7 @@ def test_stop_after_adding_new_results_loses_nothing(tmp_path):
     다시 돌리면 정리되어 위치마다 결과가 하나다."""
     samples = [SAMPLES["upd_recovered_c"], late("upd_recovered_u", "2026-10-22T09:41:02Z")]
     stream(tmp_path, samples)
-    store = CrashBeforeTidyStore(tmp_path)
+    store = CrashAfterAddingStore(tmp_path)
     with pytest.raises(OSError):
         reprocess(tmp_path, samples, "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", RecheckRules(NEW_RULES, []),
                   store=store)
@@ -401,3 +405,34 @@ def test_stop_after_adding_new_results_loses_nothing(tmp_path):
     assert len([r for r in rows["payment_events"] if r["kafka_offset"] == 1003]) == 1
     assert len([r for r in rows["topic_messages"] if r["kafka_offset"] == 1003]) == 1
     assert state_of(tmp_path, pid("54"))["hold_reason"] is None
+
+
+def test_topic_messages_are_not_added_before_tidying(tmp_path):
+    """(가)에서는 검사 결과(①·④)만 먼저 더한다. ②는 (나)에서 바로 바꿔서, 정리 전에 멈춰도 같은 위치가 두 번 보이지 않는다
+    (판정이 세는 유입량·R4 분모와 신뢰성 점검의 "같은 위치 두 번"이 늘지 않게, 2026-10-24 주현 님)."""
+    samples = [SAMPLES["upd_normal_c"]]
+    stream(tmp_path, samples)
+    store = CrashAfterAddingStore(tmp_path)
+    with pytest.raises(OSError):
+        reprocess(tmp_path, samples, "2026-10-22T06:00:00Z", "2026-10-22T07:00:00Z", RecheckRules(NEW_RULES, []),
+                  store=store)
+
+    rows = stored_rows(tmp_path, LEDGERS)
+    assert len([r for r in rows["payment_events"] if r["kafka_offset"] == 1000]) == 2   # 옛 결과와 먼저 더한 새 결과
+    assert len([r for r in rows["topic_messages"] if r["kafka_offset"] == 1000]) == 1
+
+
+def test_boundary_payment_with_the_same_result_leaves_its_folder_alone(tmp_path):
+    """결제 시각 06:59:59, Kafka 07:00:01인 결제를 07시 재처리에서 같은 결과(통과)로 다시 검사하면, 결제 시각 폴더(06시,
+    승인 범위 밖)는 건드리지 않고 재판정할 범위 밖 폴더도 생기지 않는다 (꼭 필요한 만큼만, 2026-10-24 주현 님)."""
+    p = late("upd_normal_c", "2026-10-22T07:00:01Z",
+             value={"requested_at": "2026-10-22T06:59:55Z", "completed_at": "2026-10-22T06:59:59Z"})
+    stream(tmp_path, [p])
+    before = stored_rows(tmp_path)
+
+    result = reprocess(tmp_path, [p], "2026-10-22T07:00:00Z", "2026-10-22T08:00:00Z", RecheckRules(NEW_RULES, []))
+
+    assert stored_rows(tmp_path)["payment_events"] == before["payment_events"]   # 옛 통과 줄 그대로 (규칙 버전·쌓은 시각도)
+    assert (result.replaced, result.outside) == ([hour22(7)], [])
+    assert replaced_folders(tmp_path) == [(7, False)]
+    assert state_of(tmp_path, pid("51"))["hold_reason"] is None
