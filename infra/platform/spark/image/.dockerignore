@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!pom.xml
+!install_jars.py
+!Dockerfile.smoke
+!smoke.py
