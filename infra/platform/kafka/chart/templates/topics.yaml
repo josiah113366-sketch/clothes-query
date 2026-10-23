@@ -13,7 +13,7 @@ spec:
   replicas: {{ include "cq.replicationFactor" $ }}
   config:
     min.insync.replicas: {{ include "cq.minIsr" $ }}
-    retention.ms: {{ .retentionMs }}
+    retention.ms: {{ printf "%.0f" (float64 .retentionMs) }}
     cleanup.policy: delete
 {{- end }}
 {{- if .Values.connect.enabled }}
