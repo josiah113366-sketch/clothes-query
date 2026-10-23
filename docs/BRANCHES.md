@@ -141,6 +141,7 @@ gitGraph
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
 | `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 기반 공유 #75 머지됨. 후속 로컬 변경은 spark-runtime-followup으로 분리 | |
 | `infra/spark-runtime-followup` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | ECR·거래 커미터 권한·패키지 후속, 최신 main 반영. AWS 미적용 | |
+| `infra/spark-nodepool-enable` | [infra-spark-nodepool-enable.md](tasks/infra-spark-nodepool-enable.md) | 전용 Spark 풀 활성화, 검증 Job 일시정지 유지 | 2026-10-23 |
 | `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 

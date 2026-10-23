@@ -116,9 +116,9 @@ class RuntimeSafetyTests(unittest.TestCase):
         job = runtime.submission_job("example.invalid/spark@sha256:" + "a" * 64, "local:///opt/jobs/main.py", "shared-trial", "shared-memory")
         self.assertEqual(job["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]["cpu"], "100m")
 
-    def test_shared_deployment_config_keeps_spark_capacity_disabled(self):
+    def test_shared_deployment_config_enables_approved_spark_capacity(self):
         path = Path(__file__).resolve().parents[2] / "stacks/compute/deployment.auto.tfvars.json"
-        self.assertIs(json.loads(path.read_text())["spark_node_pool"]["enabled"], False)
+        self.assertIs(json.loads(path.read_text())["spark_node_pool"]["enabled"], True)
 
     def test_two_executors_fit_development_request_and_namespace_budgets(self):
         conf = dict(line.split(maxsplit=1) for line in runtime.properties("dedicated").splitlines())

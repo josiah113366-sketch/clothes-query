@@ -37,9 +37,9 @@
 
 ### 전용 노드풀 후보
 
-`compute` 스택에 `spark_node_pool` 입력을 추가했다. **기본과 공유 auto tfvars 모두 enabled=false**라 기존 설정으로는 Spark NodePool을 생성하지 않는다. 별도 state/NodeClass를 중복 생성하지 않고 기존 private NodeClass를 참조한다.
+`compute` 스택의 `spark_node_pool` 입력은 모듈 기본값이 비활성이다. **2026-10-23 전용 풀 연결 요청으로 공유 auto tfvars는 enabled=true**로 전환했다. 별도 state/NodeClass를 중복 생성하지 않고 기존 private NodeClass를 참조한다. 검증 Job 재개와 실제 노드 생성은 별도 단계다.
 
-실제 적용을 결정하면 선택값을 공유 auto tfvars에 반영하고 현재의 비활성 CI guard도 함께 검토해야 한다. 로컬 var-file에서만 true로 켜 두고 Git에 false를 남기면, 다음 기본 apply가 기존 Spark NodePool을 삭제하려 할 수 있다.
+공유 auto tfvars와 CI 검증은 활성화된 전용 풀 설정을 함께 반영한다. 이전 커밋의 enabled=false로 apply하면 기존 Spark NodePool 삭제를 계획할 수 있으므로 최신 활성화 설정과 plan을 확인한다. 로컬 var-file에만 활성화를 숨기지 않는다.
 
 `capacity/dedicated.tfvars.example`은 검토용이다. 활성화할 때는 `clothes-query-dev-compute-spark`, Spark 전용 taint, amd64·On-Demand·두 AZ, t3a.large 한 대분인 2CPU/8GiB의 예산을 사용한다. 모듈의 일반 기본값 대신 공유 auto tfvars의 선택값을 사용한다. 고정 replicas는 없고, 작업 파드가 없으면 노드도 0대일 수 있다. `WhenEmpty`/10분 정리로 실행 중인 작업을 저사용률만으로 통합하지 않는다. OS 패치·만료·장애 교체까지 막는 설정은 아니다.
 
