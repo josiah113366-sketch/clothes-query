@@ -90,6 +90,21 @@ variable "enable_investigation_catalog" {
   type        = bool
   default     = false
 }
+variable "investigation_bedrock_profiles" {
+  description = "Confirmed Tokyo inference profiles and explicit model destination ARNs; empty until the model owner selects them."
+  type = map(object({
+    profile_arn = string
+    model_arns  = set(string)
+  }))
+  default = {}
+  validation {
+    condition = alltrue([for p in values(var.investigation_bedrock_profiles) :
+      can(regex("^arn:aws:bedrock:ap-northeast-1:[0-9]{12}:inference-profile/(apac|jp)\\.[A-Za-z0-9._:-]+$", p.profile_arn)) &&
+      length(p.model_arns) > 0 && alltrue([for a in p.model_arns : can(regex("^arn:aws:bedrock:ap-[a-z]+-[0-9]+::foundation-model/[A-Za-z0-9._:-]+$", a))])
+    ])
+    error_message = "Use explicit Tokyo apac./jp. profile ARNs and explicit Asia-Pacific destination model ARNs; wildcards are not accepted."
+  }
+}
 variable "investigation_database_name" {
   type    = string
   default = "agent"
