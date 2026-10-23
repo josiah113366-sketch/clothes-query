@@ -2,7 +2,9 @@
 
 상태: 로컬 준비 완료, push·PR 생성·기존 PR 변경·승인·머지 미실행
 대상 브랜치: infra/applied-state-sync
-기준 main: 4d80c76 (#95)
+기준 main: 6c00ddc (#95·#98·#99 포함)
+
+2026-10-24 draft 대조 결과: #73은 기존 통합에 포함됐지만 #74의 독립 gold-b-catalog 스택·DAG 공급/배치 검사·접근 테스트 등 26개 경로가 누락돼 있었다. 원격 #74 head를 실제로 병합해 누락분과 기존 이력을 보존했다. 충돌에서는 현재 적용한 Dashboard 모델 레지스트리 읽기와 JP Haiku 설정을 유지했다. 따라서 기존 두 draft를 단순 폐기하지 않고, 그 내용까지 포함한 통합 브랜치를 공유 대상으로 삼는다.
 
 ## 검토 목적
 
@@ -22,6 +24,13 @@
 
 ## 기존 #73/#74 처리안
 
+| 기존 PR | 원래 목적 | 현재 정리 |
+|---|---|---|
+| #73 infra/operations-tools-share | 모니터링·Argo CD 설치 코드와 검증 공유 | 전체 원격 head가 통합 브랜치에 포함됨. 후속 경보·복구·점검도 추가됨 |
+| #74 infra/data-runtime-share | Airflow Git DAG·승인 접근·Gold B DB 및 상태 기록 공유 | 빠진 DB 스택·배치 검사 등을 추가 병합해 원격 head 전체 이력을 보존함 |
+
+지금 올릴 대상은 infra/applied-state-sync 한 개다. 여덟 적용 후속과 두 draft를 따로 다시 push/PR할 필요는 없다. 과거 CICD/비용 후보·중지한 Gold B 이미지 실험과 기타 보류 브랜치는 올릴 대상으로 판단하지 않고 보존한다.
+
 제안: 새 통합 브랜치로 검토 대상을 하나로 정하고, 팀원이 내용과 이력을 확인한 뒤 기존 draft #73/#74를 중복 초안으로 정리한다. 새 PR 생성 및 기존 PR 종료는 사용자가 요청한 뒤에만 진행한다. 기존 PR을 먼저 닫거나 head를 강제로 덮어쓰지 않는다. 이 문서는 처리안이며 GitHub 작업을 실행하지 않는다.
 
 ## PR 제목 초안
@@ -39,6 +48,7 @@ infra: 실제 적용된 운영·데이터 실행 기반과 상태 점검 통합
 검증:
 
 - Terraform 22 roots init/validate와 mock plan 93개 통과. 실제 state 비교 9개 스택 managed resource 변경 없음.
+- draft #74 누락 보완 후 재검증: 23 roots init/validate·mock plan 97개 통과. gold-b-catalog/dashboard-access/gold-b-access 실제 plan 모두 변경 없음. Airflow 공유값과 실제 비공개 overlay 렌더에서 Deployment 3개·migration Job 1개의 공용 풀 배치 및 새 노드/PVC 없음 확인. Helm upgrade는 실행하지 않았음.
 - 통합 시 Python 검사 49개, Kafka/monitoring/Argo CD Helm 및 Prometheus 검사 통과.
 - 후속 #95 관련 SQL/DDL 회귀 40개, 실제 판정 역할 조회 및 배포 뒤 00:10/00:15 예약 실행 성공.
 - 추가 상태 점검 테스트 15개 통과. 실제 첫 실행 OK 34/INFO 5/WAITING 6, 경고·확인 불가 없음. 두 번째 실행의 사용량 조회 UNKNOWN은 별도 metrics API 재조회에서 정상 응답했으며 실패를 정상으로 숨기지 않습니다.

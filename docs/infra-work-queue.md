@@ -1,6 +1,6 @@
 # 인프라 연결과 남은 작업
 
-기준: 2026-10-24 KST, origin/main 4d80c76(#95 포함) 및 후속 순차 적용·검증. 배포 완료·업무 검증 성공·Git 반영 완료는 별개다. 8개 미게시 후속을 infra/applied-state-sync에 통합했고, 이어서 #95 컬럼·뷰를 실제 적용했다. 원본 브랜치와 root의 중지된 Gold B 이미지 실험은 보존한다. [후속 검증과 입력 대기 목록](operations/runtime-verification-20261024.md)을 따른다.
+기준: 2026-10-24 KST, origin/main 6c00ddc(#95·#98·#99 포함) 및 후속 순차 적용·검증. 배포 완료·업무 검증 성공·Git 반영 완료는 별개다. 8개 미게시 후속과 기존 draft #74의 누락 코드까지 infra/applied-state-sync에 통합했고, #95 컬럼·뷰는 실제 적용했다. #98 이미지 코드·#99 재처리 변경은 main 코드 보존이며 그 자체가 실환경 배포 완료는 아니다. 원본 브랜치와 root의 중지된 Gold B 이미지 실험은 보존한다. [후속 검증과 입력 대기 목록](operations/runtime-verification-20261024.md)을 따른다.
 
 현재 노드는 API t3a.medium 1대와 공용 t3a.large 1대, 총 2대다. 사용자 승인으로 공용 2→1 통합을 완료했고 빈 노드의 EC2 terminated까지 확인했다. Kafka 브로커 UID·재시작 횟수는 유지됐으며 모든 상시 Pod와 커넥터는 정상이다. 공용 CPU 예약은 1,400m, 메모리 예약은 5,504Mi이며 통합 직후 실제 메모리는 약 70%였다. 노드 용량 한도와 자동 증설은 유지하므로 항상 두 대로 고정된 것은 아니다. Spark 풀은 활성화돼 있으나 현재 Spark 노드는 0대다.
 
@@ -41,7 +41,7 @@
 
 2026-10-24 확인한 열린 PR: #97(재판정 실행 상한), #96(채점 스크립트), #87(자원/공개 계약), #90(앱의 7일 기본값), #85(규칙 문서), draft #73(운영 도구), draft #74(데이터 실행 기반). #89·#92·#93·#94·#95는 main 반영된 상태다. 새 #96/#97의 상세 리뷰·승인·배포는 이번 작업에서 수행하지 않았다.
 
-미게시 적용 후속 silver-gold-a-connections, agent-bedrock-catalog, grafana-plugin-recovery, bronze-v2-lag-collector, spark-nodepool-enable, airflow-log-access-restore, dashboard-runtime-connect, common-cpu-diet는 infra/applied-state-sync 한 브랜치에 통합했다. 원본 브랜치는 보존했다. 기존 #73/#74와 중복되므로 이후 공유 시 이 통합 브랜치를 기준으로 정리한다. 사용자 요청 없이 push/PR/승인/머지하거나 기존 PR을 닫지 않는다.
+미게시 적용 후속 silver-gold-a-connections, agent-bedrock-catalog, grafana-plugin-recovery, bronze-v2-lag-collector, spark-nodepool-enable, airflow-log-access-restore, dashboard-runtime-connect, common-cpu-diet는 infra/applied-state-sync 한 브랜치에 통합했다. draft #73의 원격 head도 포함된다. #74와의 실제 대조에서 빠진 gold-b-catalog 등 26개 경로를 발견해 원격 #74 head를 추가 병합했다. 기존 브랜치는 보존하며 공유할 대상은 이 통합 브랜치 한 개다. 사용자 요청 없이 push/PR/승인/머지하거나 기존 PR을 닫지 않는다.
 
 **즉시 주의:** 이 통합 브랜치의 compute auto tfvars는 실제 활성 상태에 맞춰 enabled=true다. main에는 아직 false가 남으므로 반영 전 이전 설정으로 compute apply하지 않는다. 일부 bindings만 있는 오래된 local var-file로 전체 map을 덮어쓰지 않는다. 개인 이메일은 infrastructure-alerts의 Git 제외 입력을 사용하며 Git에는 수신 주소를 넣지 않는다.
 

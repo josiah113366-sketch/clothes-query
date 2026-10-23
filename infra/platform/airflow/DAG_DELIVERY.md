@@ -1,5 +1,7 @@
 # 현재 Airflow DAG 공급·확인 절차
 
+> 아래는 2026-10-22 공급 경로 확인 기록입니다. 추가된 agent bundle과 업무 설정은 [AGENT_RUNTIME.md](AGENT_RUNTIME.md), 현재 인계 상태는 [infra-runtime-handoff.md](../../../docs/infra-runtime-handoff.md)를 함께 확인합니다.
+
 2026-10-22 실제 Airflow에서 읽기 전용으로 확인한 DAG 공급 절차다. `infra/data-runtime-share`는 GitDagBundle 적용 코드와 이 안내서를 함께 담는다. 이 PR이 머지되기 전 main의 최초 ConfigMap 방식 values와 구분한다. 배포에는 기존 비공개 runtime override가 필요하며 이 문서 통합 과정에서 재배포하지 않았다.
 
 ## 현재 경로

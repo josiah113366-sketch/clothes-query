@@ -2,7 +2,7 @@
 
 상태: 완료 — 로컬 통합·검증·커밋, 원격 공유 전
 브랜치: infra/applied-state-sync
-기준: 2026-10-23 origin/main 4d80c76 (#95 포함)
+최초 기준: 2026-10-23 origin/main 4d80c76 (#95 포함). 현재 통합 기준: 2026-10-24 origin/main 6c00ddc (#98/#99 포함).
 
 ## 목적과 범위
 
@@ -51,6 +51,14 @@ Gold B 상시 Spark의 최종 이미지·checkpoint·자원, 조사 업무 전�
 검사 15개가 통과했다. 실제 첫 실행은 OK 34/INFO 5/WAITING 6/UNKNOWN 0/WARN 0으로 현재 미연결·paused 상태와 일치했다. 두 번째 실행은 사용량 조회에서 UNKNOWN 1개를 반환했고 native 종료 코드 2를 확인했다. 이후 metrics API와 kubectl top 재조회는 정상이며 공용 메모리는 약 75%였다. 조회 실패를 정상으로 바꾸거나 최종 검증 전체가 항상 정상이라고 기록하지 않는다. 도쿄 버킷 확인, 다른 context에서 추가 점검 중단, 잘못된/오래된 지표·제한된 객체 조회의 UNKNOWN 유지, 빈 오류 원장 처리 등을 검증했다.
 
 현재 구조에 맞춰 장애 대응의 첫 확인·복구 후 기준, PDB/7일 보관/이메일 한계와 v2/R3 확인 순서를 보완했다. Git 공유 문서에는 리뷰 묶음·검증·#73/#74 중복 처리안과 PR 제목/본문을 준비했다. 담당자별 전달문에는 인프라 담당이 연결할 내용과 업무 담당이 확정할 입력·스키마·기대 결과를 나눴다. 외부 메시지·push·PR·승인·머지는 하지 않았다. 원격 CI도 아직 실행 전이다.
+
+## 기존 draft PR 보존 대조
+
+2026-10-24 사용자가 이전 draft PR과 올릴 브랜치 수를 확인하도록 요청했다. #73의 원격 head는 통합에 포함됐지만 #74에는 아직 빠진 gold-b-catalog 독립 스택·DAG 공급/배치 검사·접근 테스트 등 26개 경로가 있었다. 기존 '8개 후속 통합'이 '#74의 모든 내용 보존'을 보장하지 않았으므로 이를 명시적으로 바로잡았다. 최신 main 6c00ddc(#98/#99 포함)을 먼저 병합한 뒤 원격 #74 head를 추가 병합했다.
+
+Dashboard 모델 registry 읽기와 JP Haiku 활성 설정은 최신 적용값을 유지해 충돌을 해결했다. 기존 state/backend 주소를 보존했으며 gold-b-catalog/dashboard-access/gold-b-access plan은 모두 변경 없음이다. Terraform 23 roots validate·mock plan 97개, Airflow/Spark/모니터링 Python 검사 46개가 통과했다. 공유값 및 실제 비공개 Helm overlay를 렌더해 Deployment 3개·migration Job 1개가 개별 hostname 없이 공용 풀을 선택하고 새 노드/PVC가 없는 것을 확인했다. 배포는 하지 않았다.
+
+원격 #73/#74와 원본 브랜치는 그대로 보존했다. 새로 올릴 대상은 infra/applied-state-sync 한 개이며, 이를 공유한 뒤 두 draft를 대체 초안으로 정리하는 방안을 문서에 남겼다. 기존 PR을 닫거나 head를 덮어쓰거나 push·PR·승인·머지는 실행하지 않았다.
 
 ## 작업 결과
 

@@ -111,7 +111,7 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `infra/applied-state-sync` | [infra-applied-state-sync.md](tasks/infra-applied-state-sync.md) | 적용 후속 8개 로컬 통합·9개 state plan 무변경 검증, 원격 공유 전 | |
+| `infra/applied-state-sync` | [infra-applied-state-sync.md](tasks/infra-applied-state-sync.md) | 적용 후속·draft #73/#74 보존·최신 main 반영·검증 완료, 원격 공유 전 | |
 | `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 적용·조회 검증 완료, applied-state-sync에 통합·원본 보존 | |
 | `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | 실행 기반 적용·첫 업무 실행 확인, applied-state-sync에 통합·원본 보존 | |
 | `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | JP Haiku·agent 설정 적용, applied-state-sync에 통합·원본 보존 | |
