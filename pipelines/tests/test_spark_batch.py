@@ -75,8 +75,9 @@ class SparkTradeTest(unittest.TestCase):
 
     def test_01_normal_duplicate_retry_and_gold_match_python(self):
         data = deepcopy(self.base)
+        data["payments"][0]["completed_at"] = "2026-10-18T15:10:00.1234Z"
         data["payments"].append(deepcopy(data["payments"][0]))
-        data["payments"][-1]["completed_at"] = "2026-10-18T15:10:00Z"
+        data["payments"][-1]["completed_at"] = "2026-10-18T15:10:00.123400+00:00"
         reference = build_silver(data["orders"], data["order_items"], data["payments"], True)
         with tempfile.TemporaryDirectory() as work:
             _, raw, catalog_raw = self.prepare(Path(work), data)

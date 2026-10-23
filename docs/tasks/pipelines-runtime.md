@@ -1,4 +1,4 @@
-상태: 구현·로컬 검증 완료 · main 대상 PR #82 리뷰 요청 완료 · 운영 연결 전 · 브랜치: `pipelines/runtime`
+상태: PR #82 리뷰 보완 구현·로컬 검증 완료 · 재검토 요청 준비 · 운영 연결 전 · 브랜치: `pipelines/runtime`
 
 # Silver·Gold A 운영 실행 연결
 
@@ -161,3 +161,24 @@
 - Gold A 운영 입력은 Iceberg 기반 `clothes_query_dev_review_score.review_aspect_scores_latest` Athena 뷰로 결정되어 있다. CSV는 현행 파일 입력·로컬 검증 방식으로 구분했다.
 - 실제 Terraform/SQL의 뷰는 리뷰별 최대 model_version_no의 속성 전체를 반환한다. KST review_date로 선택하고 model_version/model_version_no/analyzed_at/review_date를 보존해야 한다. 단일 최신 모델이 모든 리뷰에 적용됐다고 가정하거나 이전 속성으로 보충하지 않는다.
 - 뷰 조회·완료 결과 고정·Spark 입력 연결은 아직 미구현이며 운영 리뷰 연결 전에 필요하다. 두 README와 PR 명세를 수정했고 실행 코드를 연결한 것으로 표시하지 않는다.
+
+### 연결 전 리뷰 3항목 보완 (2026-10-23)
+
+1. 전용 노드: 제출기 toleration을 clothes-query/dedicated=spark:NoSchedule로 지정했다. runtime_configmap(기본 silver-gold-a-runtime)을 /opt/spark/infra에 마운트해 인프라 Driver·Executor template을 Spark 설정으로 연결한다. 두 template의 toleration·spark-main 존재를 제출 전에 확인한다. 인프라 기본 template의 Driver는 같은 ConfigMap을 마운트해 Executor template도 읽는다. 인프라 리소스 생성/수정은 하지 않았다.
+2. 실패 전달: submit_spark.py가 spark-submit 반환 코드 0과 Driver Pod phase=Succeeded 및 spark-main 종료 코드 0을 모두 확인해야 성공으로 종료한다. Failed·관찰 불능·Pod 소실/UID 변경·시간 초과는 비정상 종료한다. 대기 3,000초 및 중단 시 제출 프로세스를 종료한다. Driver 자동 삭제는 검수에서 요청 외 운영 정책으로 분리했다. 중단 후 Driver가 실행 중일 수 있어 운영자가 확인해야 한다. 최종 상태 관찰용 submitter Pod get RBAC 연결은 인프라 확인 대상이다.
+3. Python 3.10 시각: timestamps.py에서 1~6자리 소수초를 6자리까지 0으로 채워 손실 없이 읽는다. 공통 YAML 검사기·결제 지문·Silver 및 원문 후보의 영향 범위 판정에 연결했다. 정규화된 Silver만 읽는 Gold A 판매·퍼널 계산 파일은 검수에서 변경을 제외했다. 0/3/6자리와 UTC/KST는 기존 값 유지, 지문 7자리 이상 거부·UTC 정규화·payment-content.v1·format_rules.yaml 0.2.0은 변경하지 않는다. 공통 검사기 배포 시 timestamps.py도 포함해야 한다.
+
+검증:
+
+- 수정된 업무 이미지 자체의 Python 3.10.12에서 시각 호환 2개 및 Driver 상태/CLI 실패 전달 8개 통과. 소수초 0~6자리×Z/UTC/KST 21조합, 기존 지문 제한, 제출기 0/Driver 실패 시 CLI 종료 코드 1, 시간 초과·UID·Pod 소실·권한 실패 등을 포함한다. Driver API는 가짜 클라이언트이며 실제 EKS 판정 시험으로 표기하지 않는다.
+- 같은 이미지 자체에서 Spark 4.2.0 거래·퍼널 10개(197.748초), 리뷰 3개(75.460초) 통과. 거래 회귀에 .1234Z/.123400+00:00 동일 내용 중복 사례를 추가했다. 업무 소스 마운트 없이 이미지 안의 코드를 사용했다.
+- 실제 로컬 Airflow 3.3.1 DagBag 파싱 및 KubernetesPodOperator의 Pod 렌더링 통과. 제출기 toleration·노드 선택·ConfigMap·읽기 전용 마운트·제출 래퍼 명령 및 Driver/Executor template 경로를 확인했다. Kubernetes hook만 가짜로 제공했으며 실제 클러스터에는 접속하지 않았다. 초기 검사 스크립트의 구형 DagBag 인자/DB 조회 방식은 3.3 API에 맞게 정정했다.
+- 증거: Git 제외 pipelines/gold_a/.local/pr82-review-fixes/의 image-build.log, dag-check.log, test_spark_batch.py.log, test_spark_reviews.py.log. 로컬 이미지 clothes-query-pipelines:pr82-review-fixes는 미커밋 보완을 +review-fixes로 구분한 후보이며 최종 운영 digest가 아니다.
+- 리뷰 보완 코드를 검수해 이번 커밋에 포함한다. EKS 검증·운영 이미지 재빌드는 후속이며 인프라 변경·머지·ECR 발행·EKS 실행은 하지 않았다.
+- 최종 Python 회귀 145개 통과·Spark 전용 2개 모듈은 위 이미지 검사로 별도 실행했다. 변경 Python 파일 Ruff(py310)·git diff --check 통과.
+
+### 검수 후 확정 범위
+
+- Gold A 판매·퍼널 계산은 정규화된 Silver 시각을 읽으므로 기존 파서를 유지한다. 원문 오류 후보를 읽는 Gold A 영향 범위 판정만 공통 파서에 연결한다.
+- Driver 자동 취소·Pod DELETE와 제출 JVM 메모리 변경은 포함하지 않는다. 시간 초과·중단 후 Driver 상태 확인은 운영 절차이며 실제 자원 값은 인프라 검토 대상이다.
+- 범위 축소 후 Python 회귀 145개(13.58초), 실제 Python 3.10.12 핵심 10개(0.042초) 재검증 통과. Spark 13개는 축소 전 보완본 검증이며 전체를 재실행하지 않았다. 로컬 후보는 축소 전 코드이므로 운영 이미지로 사용하지 않고 최종 main 커밋으로 재빌드한다.

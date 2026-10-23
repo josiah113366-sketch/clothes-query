@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from pipelines.format_rules import DEFAULT_RULES, FormatRules, RuleConfigError
+from pipelines.timestamps import parse_iso_datetime
 
 from .common import RowError, collect_latest, decode_record, publish_bundle
 
@@ -78,7 +79,7 @@ def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
-        result = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        result = parse_iso_datetime(value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if result.tzinfo is None or result.utcoffset() is None:

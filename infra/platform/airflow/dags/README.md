@@ -11,3 +11,9 @@
 namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR 이미지·실행 설정은 별도 준비가 필요하다. 인프라 확인 기준 main의 이 폴더는 약 60초마다 Airflow로 동기화되며 신규 DAG는 기본 일시정지 상태다. 별도 DAG ConfigMap/subPath 마운트를 추가하지 않는다. 이 파일은 이를 생성하지 않는다. 이미지가 없는 상태에서는 설정 확인 태스크에서 실패하며 Pod를 실행하지 않는다. 최초는 paused·schedule 없음·max_active_runs=1·재시도 0이다.
 
 제출기는 Driver를 생성·관찰하고 Driver는 Executor Pod·Service·ConfigMap을 관리한다. Kubernetes 인증용 토큰을 쓰므로 일반 Python 시제품의 automount=false 설정을 그대로 적용하지 않는다. Driver·Executor의 S3 접근은 별도 Pod Identity로 연결한다. 자원 기본값은 전용 노드에 대한 제안이며 인프라 검토 후 spark_conf로 조정한다.
+
+### Spark 전용 노드·종료 검증
+
+- 제출기 toleration은 clothes-query/dedicated=spark:NoSchedule이다. runtime_configmap(기본 silver-gold-a-runtime)을 /opt/spark/infra에 마운트해 Driver·Executor 인프라 Pod template도 사용한다. 두 template에도 같은 toleration이 필요하며 Driver가 Executor template을 읽을 수 있도록 같은 ConfigMap을 마운트한다.
+- 제출 명령은 python3 -m pipelines.submit_spark다. 내부 spark-submit 종료 코드와 Driver phase=Succeeded 및 spark-main 컨테이너 종료 코드 0을 함께 확인한다. waitAppCompletion만으로 성공 판정을 하지 않는다.
+- namespace Pod get 권한으로 최종 상태를 관찰한다. Driver 자동 삭제는 포함하지 않으며 중단·시간 초과 시 운영자가 상태를 확인한다. 3,000초 대기 상한·자동 재시도 0이며 실패·관찰 불능은 Airflow 실패로 전달한다. 실제 EKS 검증은 별도다.

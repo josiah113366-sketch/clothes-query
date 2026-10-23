@@ -2,7 +2,7 @@
 
 ## 운영 실행 연결 · Spark 거래 배치
 
-최종 실행 엔진은 **Spark**다. 운영 진입점은 `spark_batch.py` 하나다. 이전 단일 Python S3 실행기 `batch.py`는 제거했다. Spark 실행 범위는 거래 Silver·판매 Gold A, 리뷰 Silver·리뷰 Gold A, 클릭 Silver·구매 퍼널이다. 클릭·퍼널 변경은 사용자 검수 전이며 미커밋 상태다. 회원 Spark 전환과 실제 운영 배포는 별도다.
+최종 실행 엔진은 **Spark**다. 운영 진입점은 `spark_batch.py` 하나다. 이전 단일 Python S3 실행기 `batch.py`는 제거했다. Spark 실행 범위는 거래 Silver·판매 Gold A, 리뷰 Silver·리뷰 Gold A, 클릭 Silver·구매 퍼널이다. 클릭·퍼널까지 PR #82에 포함했으며 main 반영·운영 검증 전이다. 회원 Spark 전환과 실제 운영 배포는 별도다.
 
 ### 실행 환경·이미지
 
@@ -43,7 +43,7 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
 - gold_a/reviews.py: 리뷰 지표·점수 규칙과 Spark 상품 연결/집계/실행
 - 별도 spark_reviews.py와 이전 batch.py는 두지 않는다. 기존 데이터셋의 순수 Python 계산은 비교 검증 및 아직 필요한 검색·부분 재처리에 사용하며 운영 DAG는 Spark만 호출한다.
 
-### 퍼널 실행 요청 · 사용자 검수 전
+### 퍼널 실행 요청
 
 같은 진입점과 DAG에서 job=funnels를 사용한다. 거래 입력 5개에 clicks를 추가하며 원천은 bronze/clickstream/이다. 기존 거래 복원·금액 검사·상품 기준정보 처리를 재사용한다.
 
@@ -179,7 +179,8 @@ current.json은 Spark 후속 처리의 공개 참조다. 이것을 교체해도 
   "submitter_service_account": "<제출기-SA>",
   "driver_service_account": "<Driver-SA>",
   "executor_service_account": "<Executor-SA>",
-  "node_selector": {"<전용노드-라벨>": "<값>"},
+  "runtime_configmap": "silver-gold-a-runtime",
+  "node_selector": {"karpenter.sh/nodepool": "clothes-query-dev-compute-spark"},
   "spark_conf": {"spark.sql.shuffle.partitions": "8"}
 }
 ```
@@ -192,7 +193,15 @@ Airflow DAG ID는 `silver_gold_a_batch`, schedule 없음·초기 paused·max_act
 {"config_uri":"s3://<버킷>/<실행요청>/trade-20261022-001.json"}
 ```
 
-제출기는 spark-submit --master k8s://https://kubernetes.default.svc --deploy-mode cluster로 제출한다. `spark.kubernetes.submission.waitAppCompletion=true`로 Driver의 최종 종료까지 기다린다. 제출 명령 접수만으로 성공 처리하지 않는다. Executor는 min/initial=1, max=2, shuffle tracking을 사용한다. 자원 기본값은 코드의 초기 제안이며 실제 노드 allocatable·인프라 설정으로 조정한다.
+제출기는 `python3 -m pipelines.submit_spark` 래퍼에서 spark-submit --master k8s://https://kubernetes.default.svc --deploy-mode cluster를 호출한다. `waitAppCompletion=true`에 더해 **제출 명령 종료 코드 0, Driver Pod phase=Succeeded, 주 컨테이너 spark-main의 종료 코드 0**을 모두 확인해야 성공이다. 실패·권한 오류·Pod 소실·UID 변경·시간 초과는 제출기 비정상 종료로 Airflow에 전달한다. 대기 상한은 3,000초다. 중단 시 제출 프로세스를 종료한다. Driver Pod를 자동 삭제하는 정책은 포함하지 않는다. 시간 초과·관찰 실패 시 Driver가 계속 실행 중일 수 있으므로 로그의 Pod 이름으로 운영자가 상태를 확인해야 한다.
+
+제출기에는 `clothes-query/dedicated=spark:NoSchedule` toleration을 명시한다. 인프라의 runtime ConfigMap(기본 silver-gold-a-runtime)에 있는 driver-pod-template.yaml/executor-pod-template.yaml을 /opt/spark/infra에 읽기 전용 마운트하고 Spark 설정으로 연결한다. 두 template의 같은 toleration과 spark-main 컨테이너를 제출 전에 검사한다. Driver template은 같은 ConfigMap을 Driver에도 마운트해 Executor template을 계속 읽을 수 있어야 한다. 이 마운트는 Spark Pod template 전달용이며 Airflow DAG 파일 배포용 ConfigMap이 아니다.
+
+최종 상태 확인에는 제출기 ServiceAccount의 해당 namespace Pod get 권한이 필요하다. 기존 Spark 제출 RBAC와 함께 인프라에서 실제 연결을 확인한다. Executor는 min/initial=1, max=2, shuffle tracking을 사용한다. 자원 기본값은 코드의 초기 제안이며 실제 노드 allocatable·인프라 설정으로 조정한다.
+
+공통 시각 파서는 timestamps.py다. Python 3.10.12에서 1·2·4·5자리 소수초를 6자리까지 0으로 채워 같은 순간을 손실 없이 읽는다. UTC/KST 변환이나 초 단위 절삭·반올림을 추가하지 않는다. 지문의 7자리 이상 거부, UTC 6자리 직렬화·payment-content.v1 규칙은 유지한다. 공통 형식 검사기와 Silver·Gold 파싱이 같은 함수를 사용하므로 Gold B가 공통 검사기를 이미지에 복사할 때 timestamps.py도 함께 포함해야 한다.
+
+근거: [Spark Pod template 규칙](https://spark.apache.org/docs/4.2.0/running-on-kubernetes.html#pod-template), [Kubernetes Pod 종료 상태](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/).
 
 ### S3 결과와 완료 공개
 

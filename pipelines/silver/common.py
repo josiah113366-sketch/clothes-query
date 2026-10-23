@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pipelines.format_rules import FormatError
+from pipelines.timestamps import parse_iso_datetime
 
 
 class RowError(ValueError):
@@ -29,7 +30,7 @@ def required_text(row: dict, field: str) -> str:
 def timestamp(row: dict, field: str) -> datetime:
     value = required_text(row, field)
     try:
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        parsed = parse_iso_datetime(value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "ISO 시각이어야 합니다") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -132,7 +133,7 @@ def kafka_reference(raw: dict) -> dict:
             valid = value in ("CreateTime", "LogAppendTime")
         elif isinstance(value, str):
             try:
-                parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+                parsed = parse_iso_datetime(value)
                 valid = parsed.tzinfo is not None and parsed.utcoffset() is not None
             except ValueError:
                 pass

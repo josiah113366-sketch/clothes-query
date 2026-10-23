@@ -10,6 +10,8 @@ from airflow.sdk import dag, get_current_context, task
 from kubernetes.client import models as k8s
 
 RUNTIME = json.loads(os.environ.get("AIRFLOW_PIPELINE_RUNTIME", "{}"))
+NODE_SELECTOR = RUNTIME.get("node_selector", {"karpenter.sh/nodepool": "clothes-query-dev-compute-spark"})
+TEMPLATE_DIR = "/opt/spark/infra"
 
 
 @dag(
@@ -47,6 +49,10 @@ def silver_gold_a_batch():
         "spark.kubernetes.authenticate.submission.oauthTokenFile": "/var/run/secrets/kubernetes.io/serviceaccount/token",
         "spark.kubernetes.authenticate.submission.caCertFile": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
         "spark.kubernetes.submission.waitAppCompletion": "true",
+        "spark.kubernetes.driver.podTemplateFile": TEMPLATE_DIR + "/driver-pod-template.yaml",
+        "spark.kubernetes.executor.podTemplateFile": TEMPLATE_DIR + "/executor-pod-template.yaml",
+        "spark.kubernetes.driver.podTemplateContainerName": "spark-main",
+        "spark.kubernetes.executor.podTemplateContainerName": "spark-main",
         "spark.dynamicAllocation.enabled": "true",
         "spark.dynamicAllocation.shuffleTracking.enabled": "true",
         "spark.dynamicAllocation.minExecutors": "1",
@@ -61,12 +67,13 @@ def silver_gold_a_batch():
     }
     # 실제 자원 값은 인프라 공급 설정으로 조정하되 실행 신원·완료 대기는 고정한다.
     overrides = RUNTIME.get("spark_conf", {})
-    protected = {key for key in conf if "authenticate" in key or key in {
+    protected = {key for key in conf if "authenticate" in key or "podTemplate" in key or key in {
         "spark.kubernetes.namespace", "spark.kubernetes.container.image", "spark.kubernetes.submission.waitAppCompletion"}}
+    protected.add("spark.kubernetes.driver.pod.name")
     if set(overrides) & protected:
         raise ValueError("실행 신원·이미지·완료 확인은 전용 설정 필드로 지정하세요")
     conf.update(overrides)
-    for key, value in RUNTIME.get("node_selector", {}).items():
+    for key, value in NODE_SELECTOR.items():
         conf["spark.kubernetes.node.selector." + key] = value
     arguments = ["--master", RUNTIME.get("master", "k8s://https://kubernetes.default.svc"),
                  "--deploy-mode", "cluster"]
@@ -81,9 +88,15 @@ def silver_gold_a_batch():
         image=RUNTIME.get("image", "unconfigured"),
         in_cluster=True,
         automount_service_account_token=True,
-        cmds=["/opt/spark/bin/spark-submit"],
-        arguments=arguments,
-        node_selector=RUNTIME.get("node_selector", {}),
+        cmds=["python3", "-m", "pipelines.submit_spark"],
+        arguments=["--namespace", RUNTIME.get("namespace", "unconfigured"),
+                   "--template-dir", TEMPLATE_DIR, "--timeout-seconds", "3000", "--", *arguments],
+        node_selector=NODE_SELECTOR,
+        tolerations=[k8s.V1Toleration(key="clothes-query/dedicated", operator="Equal",
+                                    value="spark", effect="NoSchedule")],
+        volumes=[k8s.V1Volume(name="spark-runtime", config_map=k8s.V1ConfigMapVolumeSource(
+            name=RUNTIME.get("runtime_configmap", "silver-gold-a-runtime")))],
+        volume_mounts=[k8s.V1VolumeMount(name="spark-runtime", mount_path=TEMPLATE_DIR, read_only=True)],
         container_resources=k8s.V1ResourceRequirements(
             requests={"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "256Mi"},
             limits={"cpu": "500m", "memory": "768Mi", "ephemeral-storage": "1Gi"},

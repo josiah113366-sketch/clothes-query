@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from pipelines.silver.common import publish_bundle
+from pipelines.timestamps import parse_iso_datetime
 
 
 def exclusive_output(dataset: str):
@@ -338,7 +339,7 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
                 for issue in issues[:error_refs_limit]]}
 
     def kst(value):
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        parsed = parse_iso_datetime(value)
         if parsed.tzinfo is None:
             raise ValueError("시간대가 없는 후보 시각")
         return parsed.astimezone(ZoneInfo("Asia/Seoul"))

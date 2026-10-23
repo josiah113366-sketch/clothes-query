@@ -16,6 +16,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from pipelines.timestamps import parse_iso_datetime
+
 from .common import RowError, collect_latest, decode_record, publish_bundle
 
 KST = ZoneInfo("Asia/Seoul")
@@ -89,7 +91,7 @@ def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        parsed = parse_iso_datetime(value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
