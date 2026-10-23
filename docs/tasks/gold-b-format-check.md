@@ -56,7 +56,7 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
 - [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (100개)
 - [x] `python -m pytest -q pipelines` 통과 (185개)
 - [x] 재처리 브랜치(최신 `main` #78 포함)를 다시 병합한 뒤 `pipelines/gold_b/tests` 123개, `pipelines` 208개 통과 (수집기 시험 23개 포함)
-- [x] (보완) Python 3.10 맞추기 뒤 `pipelines/gold_b/tests` 126개 통과, Python 3.10.12에서 결제 시각·지문이 3.12와 같음
+- [x] (보완) Python 3.10 맞추기 뒤 `pipelines/gold_b/tests` 126개 통과 (Python 3.12와 3.10.12 모두), Python 3.10.12에서 결제 시각·지문이 3.12와 같음
 - [x] 샘플 31개가 모두 기대 결과와 같은지 (형식 검사기 + `message_rows`)
 - [x] `raw_sample`에 개인정보 값·ID·시각이 남지 않는지
 - [x] 코드·README에 비밀값·실제 주소·버킷 이름이 없는지 (`git grep`)
@@ -94,5 +94,6 @@ Kafka 메시지 하나를 공통 형식 규칙(`docs/contracts/format_rules.yaml
   - **확인한 결과:**
     - Python 3.12: `pipelines/gold_b/tests` 126개 통과. `pipelines`는 221개 통과, 오류 13개는 #82의 Silver·Gold A Spark 시험이다 (`SPARK_TEST_INPUT`과 로컬 Spark가 있어야 돈다. Gold B와 무관).
     - Python 3.10.12 (로컬에 있던 `spark:4.1.3` 이미지, 새로 받은 것 없음): 결제 샘플 17개 모두 예전 `fromisoformat`으로는 읽지 못하고, 공통 파서로는 읽으며 시각과 지문이 3.12와 같다. Gold B·공통 모듈 18개 파일 문법 검사 통과.
-    - 3.10에서 시험 전체는 돌리지 않았다 (pyarrow·PyYAML·pytest를 받아야 함). `confluent-kafka` 2.16.0의 3.10 설치도 확인하지 않았다.
+    - Python 3.10.12 컨테이너에 PyPI에서 pyarrow 25.0.1(50.1MB)·PyYAML 6.0.3·pytest 9.1.1을 받아 (사용자 허락, 컨테이너 안에만 설치하고 지움) `pipelines/gold_b/tests` 126개 통과. ingest·compact까지 합친 상태(커밋하지 않은 시험용 병합)에서는 Gold B 시험 139개 통과. 처음 돌릴 때 설계 문서를 컨테이너에 넣지 않아 `test_views.py` 5개가 실패했고, 3.12에서도 같게 실패해 Python 버전 문제가 아님을 확인한 뒤 설계 문서를 넣어 다시 돌렸다.
+    - `confluent-kafka` 2.16.0의 3.10 설치는 확인하지 않았다 (시험은 가짜 Kafka를 써서 필요 없음).
   - **다음 할 일:** `pipelines/gold-b-ingest`에 반영 (배포 설명을 팀 기본 Spark 이미지 기준으로), Gold B Dockerfile (새 브랜치).
