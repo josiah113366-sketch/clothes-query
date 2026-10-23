@@ -54,5 +54,5 @@ Athena에 만들기 (권한 준비 후): `ddl/database.sql` → 나머지 5개 �
 
 - 입력 토픽과 메시지 모양: `connectors/cdc-source.yaml` (봉투가 풀린 평평한 CDC JSON, `__op`), 시뮬레이터의 `clickstream`
 - 결제 컬럼: `db/schema/004_orders.sql`
-- 형식 검사 규칙표: `docs/contracts/format_rules.yaml` (2단계에서 연결)
-- 결제 내용 지문: `pipelines/payment_fingerprint.py` (2단계, Silver와 같은 함수. 규칙은 현지 님과 정함)
+- 형식 검사 규칙표: `docs/contracts/format_rules.yaml` (형식 검사기 `format_check.py`가 `gold_b` 규칙으로 읽음)
+- 결제 내용 지문: `pipelines/payment_fingerprint.py` (형식 검사기가 결제 줄에 붙임. Silver와 같은 함수)
