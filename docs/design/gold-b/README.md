@@ -807,7 +807,8 @@ pipelines/gold_b/
 ### 6단계: 파일 합치기
 
 - [x]  `jobs/compact.py` 시간 폴더 안 작은 파일 합치기
-- [ ]  `dags/gold_b_compact.py` 하루 1회
+- [x]  실행 입구 `python -m pipelines.gold_b.jobs.compact` (날짜를 주지 않으면 어제 UTC)
+- [ ]  `dags/gold_b_compact.py` 하루 1회, 재처리와 같은 폴더를 동시에 건드리지 않게 (재영 님. DAG 공급 경로가 `infra/platform/airflow/dags/`)
 - [x]  합친 뒤 조회 결과가 같은지 확인 (합치기 전후 줄이 `loaded_at`까지 같음, 시험)
 - [ ]  PR 올리고 합치기
 

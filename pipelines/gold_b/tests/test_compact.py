@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("pyarrow")
 
-from pipelines.gold_b.jobs.compact import COMPACTED_FROM, CompactError, run  # noqa: E402
+from pipelines.gold_b.jobs.compact import COMPACTED_FROM, CompactError, main, run  # noqa: E402
 from pipelines.gold_b.ledger import LocalStore, hour_folder  # noqa: E402
 
 UTC = timezone.utc
@@ -110,3 +110,19 @@ def test_rerun_after_crash_does_not_double_rows(tmp_path):
 
     assert len(store.files(folder)) == 1
     assert rows(store, "topic_messages", H06) == before + Counter([tuple(sorted(late.items()))])
+
+
+def test_main_compacts_yesterday_by_default(tmp_path):
+    """실행 입구 (python -m pipelines.gold_b.jobs.compact): 날짜를 주지 않으면 어제(UTC)를 합친다."""
+    store = LocalStore(tmp_path)
+    seed(store)
+    assert main([], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=after_day, log=lambda _: None) == 0
+    assert len(store.files(hour_folder("topic_messages", H06))) == 1
+
+
+def test_main_fails_without_root_or_for_an_unfinished_day(tmp_path):
+    logs: list[str] = []
+    assert main([], env={}, log=logs.append) == 1
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path)}
+    assert main(["--day", "2026-10-22"], env=env, now=after_day, log=logs.append) == 1
+    assert "아직 끝나지 않았다" in logs[-1]

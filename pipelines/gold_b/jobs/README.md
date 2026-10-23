@@ -93,6 +93,20 @@ python -m pytest -q pipelines/gold_b/tests/test_reprocess.py
 
 **재처리 잡과 같은 폴더를 동시에 건드리면 안 된다.** DAG(재영 님과 만듦)에서 둘을 한 번에 하나씩 돌린다.
 
+```bash
+python -m pipelines.gold_b.jobs.compact                    # 어제(UTC)를 합친다
+python -m pipelines.gold_b.jobs.compact --day 2026-10-21   # 그 날(UTC)을 합친다
+```
+
+환경변수는 `GOLD_B_LEDGER_ROOT`(원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더) 하나다. 성공하면 0, 실패하면 1로 끝난다. 그 날이 끝나고 10분이 지나지 않았으면 거부한다.
+
+DAG 명세 (재영 님께, DAG 파일은 `infra/platform/airflow/dags/`):
+- DAG `gold_b_compact`: 하루 1번, UTC 00:30 이후 (그 날 끝 + 10분 여유 뒤), `max_active_runs` 1, `catchup` 끔
+- 제안: 재처리 DAG(`gold_b_reprocess`)와 같은 Airflow pool(슬롯 1개)에 넣어 두 작업이 겹치지 않게 한다. 지금 Airflow는 전체 동시 작업이 1개라 겹치지 않지만, 그 설정이 바뀌어도 막히게 한다.
+- Pod 권한: S3 원장 4개 폴더(`payment_events`, `topic_messages`, `bronze_lag_snapshots`, `malformed_events`) 읽기·쓰기·지우기
+
+코드에서 부를 때는 이렇게 한다.
+
 ```python
 from datetime import date
 from pipelines.gold_b.jobs.compact import run

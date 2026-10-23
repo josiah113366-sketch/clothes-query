@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 import json
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 import uuid
 
-from pipelines.gold_b.ledger import HOUR, Store, hour_folder, utc_naive
+from pipelines.gold_b.ledger import HOUR, Store, hour_folder, open_store, utc_naive
 
 LEDGERS = ("payment_events", "topic_messages", "bronze_lag_snapshots", "malformed_events")
 COMPACTED_FROM = "gold_b.compacted_from"   # 합친 파일에 적는 원래 파일 이름 목록 (JSON)
@@ -92,3 +92,39 @@ def run(day: date, *, store: Store, tables: Sequence[str] = LEDGERS, margin: tim
     log(f"파일 합치기 {day:%Y-%m-%d}: 폴더 {len(done)}개, 원래 파일 {sum(r['files'] for r in done)}개 → "
         f"{len(done)}개, 줄 {sum(r['rows'] for r in done)}개")
     return done
+
+
+# ---------- 실행 입구 ----------
+
+ENV_LEDGER_ROOT = "GOLD_B_LEDGER_ROOT"    # s3://<버킷>/gold_b 또는 로컬 폴더 (필수)
+
+
+def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None,
+         now: Callable[[], datetime] = _utc_now, log: Callable[[str], None] = _log) -> int:
+    """하루치(UTC) 시간 폴더를 합친다. Airflow DAG가 하루 1번 부른다. 성공하면 0, 실패하면 1."""
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(prog="python -m pipelines.gold_b.jobs.compact",
+                                     description="Gold B 파일 합치기: 끝난 UTC 하루의 시간 폴더마다 파일을 하나로 합친다")
+    parser.add_argument("--day", type=date.fromisoformat, help="합칠 날 (UTC, YYYY-MM-DD). 생략하면 어제(UTC)")
+    args = parser.parse_args(argv)
+    env = os.environ if env is None else env
+    root = (env.get(ENV_LEDGER_ROOT) or "").strip()
+    if not root:
+        log(f"{ENV_LEDGER_ROOT}가 없다")
+        return 1
+    day = args.day or (utc_naive(now()) - timedelta(days=1)).date()
+    try:
+        run(day, store=open_store(root), now=now, log=log)
+    except CompactError as exc:
+        log(f"파일 합치기 {day:%Y-%m-%d} 실패: {exc}")
+        return 1
+    except Exception as exc:   # S3 오류 문장에는 버킷 이름이 들어 있을 수 있어서 종류만 남긴다
+        log(f"파일 합치기 {day:%Y-%m-%d} 실패: {type(exc).__name__}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
