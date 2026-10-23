@@ -155,3 +155,9 @@
 - 인프라 리뷰 범위는 이미지·Spark 제출·실행 계정·S3 권한·커미터·Airflow 연결이다. 실제 배포 이미지 확정·EKS 업무 실행·Glue 공개·R6 완료 시각 및 재처리 DAG는 미완료다.
 
 - PR #82: pipelines/runtime → main, 일반 PR로 생성하고 jaeyan42에게 인프라 리뷰를 요청했다. 생성 시 충돌 없음. 머지·ECR 발행·EKS 실행은 하지 않았다.
+
+### 리뷰 운영 점수 입력 명세 보완 (2026-10-23)
+
+- Gold A 운영 입력은 Iceberg 기반 `clothes_query_dev_review_score.review_aspect_scores_latest` Athena 뷰로 결정되어 있다. CSV는 현행 파일 입력·로컬 검증 방식으로 구분했다.
+- 실제 Terraform/SQL의 뷰는 리뷰별 최대 model_version_no의 속성 전체를 반환한다. KST review_date로 선택하고 model_version/model_version_no/analyzed_at/review_date를 보존해야 한다. 단일 최신 모델이 모든 리뷰에 적용됐다고 가정하거나 이전 속성으로 보충하지 않는다.
+- 뷰 조회·완료 결과 고정·Spark 입력 연결은 아직 미구현이며 운영 리뷰 연결 전에 필요하다. 두 README와 PR 명세를 수정했고 실행 코드를 연결한 것으로 표시하지 않는다.

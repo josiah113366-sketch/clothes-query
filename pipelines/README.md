@@ -80,6 +80,21 @@ Gold는 저장된 Silver/상품 Parquet을 다시 읽는다. 거래·클릭 품�
 
 ### 리뷰 실행 요청
 
+**운영 점수 입력 결정: Iceberg 기반 Athena 뷰** `clothes_query_dev_review_score.review_aspect_scores_latest`를 조회한다. 모델 파일이나 SageMaker 중간 CSV를 Gold A가 운영 입력으로 직접 선택하지 않는다.
+
+```sql
+SELECT review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date
+FROM clothes_query_dev_review_score.review_aspect_scores_latest
+WHERE review_date BETWEEN DATE '2026-10-19' AND DATE '2026-10-19';
+```
+
+- review_date는 KST 리뷰 작성일이며 Gold A 대상 날짜와 맞춘다.
+- 저장소의 뷰는 리뷰별 최대 model_version_no의 속성 결과 전체를 선택한다. 전체 리뷰에 동일한 최신 모델이 적용됐다고 보장하지 않으므로 model_version·model_version_no를 그대로 보존한다. 새 모델에서 빠진 속성을 이전 모델로 채우지 않는다.
+- Gold A는 review_id로 정제 리뷰의 상품·별점·작성일을 연결한다. 점수만 받은 기록으로 상품·작성일을 추정하지 않는다.
+- **구현 상태:** 아래 예시는 현재 구현된 파일 입력·로컬 검증 방식이다. Athena 조회·완료 결과 고정·뷰 메타데이터 보존을 Spark 실행에 연결하는 코드는 아직 없다. 운영 리뷰 연결의 필수 후속 작업이며, 아래 CSV 예시를 최종 운영 계약으로 사용하지 않는다.
+
+#### 현재 파일 입력·로컬 검증 예시
+
 같은 진입점과 DAG에서 job=reviews를 사용한다. 운영 리뷰 파일을 명시적으로 지정하며 정답표 입력은 거부한다. KST 날짜 선택은 파일 경로가 아니라 정제된 created_at 시각을 기준으로 수행한다. 필요한 UTC 날짜 파일을 빠짐없이 지정하는 책임은 실행 요청 생성 단계에 있다.
 
 ```json
