@@ -169,7 +169,7 @@ gitGraph
 ### conn
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
-| `conn/bronze-v2` | [conn-bronze-v2.md](tasks/conn-bronze-v2.md) | 진행 중 (infra 포함, 사용자 예외 승인) | |
+| `conn/bronze-v2` | [conn-bronze-v2.md](tasks/conn-bronze-v2.md) | 머지됨 (infra 포함, 사용자 예외 승인) | |
 
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
