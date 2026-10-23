@@ -12,6 +12,7 @@
 - [storage](storage/README.md)
 - [ecr](ecr/README.md)
 - [dashboard](dashboard/README.md): 대시보드 이미지 저장소(ECR). 별도 state
+- [dashboard-access](dashboard-access/README.md): 기존 승인 화면 역할·Pod Identity·전용 workgroup과 패치노트 읽기. 별도 state
 - [apps](apps/README.md)
 - [workload-access](workload-access/README.md): network/eks/storage 이후 명시된 서비스 입력으로 AWS 접근 역할 준비
 - [gold-b-access](gold-b-access/README.md): network/eks/storage 이후 판정·조사 역할과 전용 Athena workgroup (조회용 자원 적용 완료)

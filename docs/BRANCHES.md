@@ -143,6 +143,7 @@ gitGraph
 | `infra/spark-runtime-followup` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | ECR·거래 커미터 권한·패키지 후속, 최신 main 반영. AWS 미적용 | |
 | `infra/spark-nodepool-enable` | [infra-spark-nodepool-enable.md](tasks/infra-spark-nodepool-enable.md) | 전용 Spark 풀 활성화, 검증 Job 일시정지 유지 | 2026-10-23 |
 | `infra/airflow-log-access-restore` | [로그 복구](tasks/infra-airflow-log-access-restore.md), [Gold B 뷰 배포](tasks/infra-gold-b-view-deploy.md) | 로그 API 복구·조회 뷰 실제 계정 검증 완료 | 2026-10-23 |
+| `infra/dashboard-runtime-connect` | [infra-dashboard-runtime-connect.md](tasks/infra-dashboard-runtime-connect.md) | 승인 Pod 권한·인증·모델 패치노트 연결 검증 완료 | 2026-10-23 |
 | `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 

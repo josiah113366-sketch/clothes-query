@@ -14,6 +14,7 @@
 - [apps](apps/README.md): Namespace·Pod Identity·ConfigMap 및 선택적 WEB/WAS·HTTPS ALB Ingress
 - [workload-access](workload-access/README.md): 명시된 namespace/ServiceAccount·S3 prefix/action별 역할 및 Pod Identity association
 - [gold-b-access](gold-b-access/README.md): 판정/조사 역할·Athena workgroup·분리된 S3 조회 결과, 정답표 차단
+- [dashboard-access](dashboard-access/README.md): 승인 화면 역할·전용 Athena workgroup·패치노트 읽기·승인 이벤트 쓰기
 - [ecs-simulator](ecs-simulator/README.md): 시뮬레이터 ECR·ECS 클러스터·서비스·IAM·SG
 - [team-access](team-access/README.md): 동료 EKS 신원을 애플리케이션 namespace 배포 권한에 연결
 
