@@ -52,6 +52,7 @@ EXPECTED = {
 }
 LEDGERS = ("payment_events", "topic_messages", "bronze_lag_snapshots", "malformed_events")
 TOPICS = {"payments", "orders", "order-items", "members-events", "clickstream", "reviews.raw"}
+UNCHECKED_TOPICS = {"reviews.raw"}   # Gold B가 형식 검사하지 않는 토픽 (2026-10-23 결정). topic_messages에만 남는다
 REASONS = {"PARSE_ERROR", "MISSING_FIELD", "TYPE_MISMATCH", "INVALID_VALUE"}
 FAILURE_CAUSES = {None, "PG", "CUSTOMER", "UNKNOWN"}
 # 원장에 컬럼으로 있는 결제 업무 필드 (payment_conflicts.conflict_fields에 이름이 나올 수 있는 것)
@@ -179,7 +180,7 @@ def test_every_topic_has_a_normal_and_a_broken_sample():
     normal = {s["kafka"]["topic"] for s in samples if not s["expected"]["malformed"]}
     broken = {s["kafka"]["topic"] for s in samples if s["expected"]["malformed"]}
     assert normal == TOPICS
-    assert broken == TOPICS
+    assert broken == TOPICS - UNCHECKED_TOPICS
 
 
 def test_payment_samples_follow_view_rules():
@@ -285,8 +286,8 @@ def test_sample_ledgers_round_trip_through_hour_folders(tmp_path):
         for name, _ in parse_ddl(table)["columns"]:
             assert read.schema.field(name).type == schema.field(name).type
 
-    # 기대 건수: 결제 10줄(중복·충돌 두 쌍 포함), 메시지 31줄, 오류 = 샘플 기대 오류 합
-    assert len(rows["payment_events"]) == 10
+    # 기대 건수: 결제 9줄(중복·충돌 두 쌍 포함, 모르는 실패 코드는 형식 오류), 메시지 31줄, 오류 = 샘플 기대 오류 합
+    assert len(rows["payment_events"]) == 9
     assert len(rows["topic_messages"]) == len(samples) == 31
     assert len(rows["malformed_events"]) == sum(len(s["expected"]["malformed"]) for s in samples)
     per_message = Counter((r["topic"], r["kafka_partition"], r["kafka_offset"]) for r in rows["malformed_events"])
