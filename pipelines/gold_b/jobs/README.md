@@ -10,7 +10,7 @@ Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수
 2. 시작 전에 확인하고, 걸리면 `FAILED`로 끝낸다 (다시 돌려도 소용없어서 재시도하지 않음).
    - 형식 검사 함수의 규칙 버전이 승인된 `rule_version`과 다름
    - 아직 안 끝난 폴더가 있음 (폴더 끝 + 10분이 지나지 않음)
-   - Kafka 보관 기간(72시간) 밖 → 원본 없음. Bronze에서 다시 읽기는 아직 없다
+   - Kafka 보관 기간(7일, 2026-10-23 #86으로 72시간에서 늘어남) 밖 → 원본 없음. Bronze에서 다시 읽기는 아직 없다
 3. `reprocess_events`에 `STARTED`를 쓴다.
 4. 폴더마다 차례로:
    - 폴더 앞뒤로 10분씩 더 Kafka에서 읽는다 (시각으로 위치를 찾음). 결제는 결제 시각보다 늦게 Kafka에 들어올 수 있어서다.
@@ -46,7 +46,32 @@ Gold B 잡을 둔다. 지금은 **재처리 잡**(`reprocess.py`, 7단계 필수
 
 ## 부르는 방법
 
-형식 검사기가 아직 없어서 **지금은 단독으로 실행하지 않는다.** 실행 입구(명령줄)는 형식 검사기와 함께 만든다 (`pipelines/gold-b-format-check`). 그 입구는 poller로 다음 요청을 고르고 `run()`을 부른다. 다시 돌릴지와 몇 번까지 돌릴지는 poller가 `reprocess_events`를 보고 정하므로, Airflow DAG는 5분마다 한 번씩 부르기만 하면 된다 (한 번에 하나).
+```bash
+python -m pipelines.gold_b.jobs.reprocess              # 승인된 요청 하나를 골라 돌린다
+python -m pipelines.gold_b.jobs.reprocess --dry-run    # 고른 요청만 알려 주고 돌리지 않는다
+```
+
+poller로 요청을 고르고, 형식 검사기(`pipelines/gold_b/format_check.py`)로 원장 줄을 다시 만든다. 할 일이 없거나 성공하면 0, 실패하면 1로 끝난다. 다시 돌릴지와 몇 번까지 돌릴지는 다음 번에 poller가 `reprocess_events`를 보고 정한다. 준비 단계(규칙표, Kafka 설정)에서 실패하면 요청을 실패로 남기지 않고 1로 끝난다 (다음 번에 다시 고름).
+
+| 환경변수 | 뜻 |
+|---|---|
+| `GOLD_B_LEDGER_ROOT` | 원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더 (필수) |
+| `KAFKA_BOOTSTRAP` | Kafka 주소 (필수) |
+| `KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT`(기본) 또는 `SSL` |
+| `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | mTLS 파일 경로 |
+| `KAFKA_ADDRESS_FAMILY` | 로컬에서 IPv6로 먼저 붙는 문제가 있을 때만 `v4` |
+| `GOLD_B_RULES_PATH` | 형식 규칙표 경로 (생략하면 저장소의 `docs/contracts/format_rules.yaml`) |
+
+### Airflow DAG 명세 (재영 님께)
+
+DAG 파일은 Airflow 공급 경로(`infra/platform/airflow/dags/`)에 둔다.
+
+- DAG `gold_b_reprocess`: 5분마다(`*/5 * * * *`), `max_active_runs` 1, 밀린 실행을 몰아서 돌리지 않음(`catchup` 끔)
+- 작업 하나: 위 명령을 Pod로 실행한다. 다시 돌린 횟수는 poller가 세므로 Airflow 재시도는 0으로 둔다 (두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감).
+- Pod 권한: S3 `gold_b/payment_events/`·`topic_messages/`·`malformed_events/` 읽기·쓰기·지우기, `gold_b/reprocess_events/` 읽기·쓰기. Kafka 6개 토픽 읽기 (임시 그룹 `gold-b-reprocess-*`, 커밋 없음)
+- 이미지: Python 3.10 이상 (팀 기본 Spark 이미지의 3.10.12에서 돈다), `pipelines/gold_b/requirements.txt`, 저장소의 공통 모듈(`pipelines/*.py`. 지문·형식 규칙이 `timestamps.py`를 부른다), `pipelines/gold_b/`, `docs/contracts/format_rules.yaml`
+
+코드에서 부를 때는 이렇게 한다.
 
 ```python
 from pipelines.gold_b.jobs.reprocess import KafkaReader, next_request, read_events, run
