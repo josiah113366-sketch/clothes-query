@@ -26,9 +26,13 @@ locals {
   # S3 리소스 ARN. 버킷 이름은 공개 저장소에 쓰지 않으므로 전부 입력(var.bucket_arn)에서 조립한다.
   review_input_arn = "${var.bucket_arn}/${var.review_input_prefix}/*"
   model_arn        = "${var.bucket_arn}/${var.work_prefix}/model/*"
-  code_arn         = "${var.bucket_arn}/${var.work_prefix}/code/*"
-  output_arn       = "${var.bucket_arn}/${var.output_prefix}/*"
-  error_arn        = "${var.bucket_arn}/${var.error_prefix}/*"
+  # 릴리스 묶음(2026-10-23 결정): <work>/model-registry/releases/<버전>/manifest.json + code/(score_batch.py, requirements.txt).
+  # Job 역할은 묶음의 code/ 만 읽고, manifest 는 실행기(launcher)가 읽는다. 예전 <work>/code/ 는 더 쓰지 않는다.
+  registry_prefix   = "${var.work_prefix}/model-registry/releases"
+  registry_arn      = "${var.bucket_arn}/${local.registry_prefix}/*"
+  registry_code_arn = "${var.bucket_arn}/${local.registry_prefix}/*/code/*"
+  output_arn        = "${var.bucket_arn}/${var.output_prefix}/*"
+  error_arn         = "${var.bucket_arn}/${var.error_prefix}/*"
   # 미점수 후기 입력(select_unscored.py 가 쓰고 Job 이 읽는다)과 후기별 점수 로그(Job 이 쓰는 staging)
   unscored_input_arn = "${var.bucket_arn}/${var.unscored_input_prefix}/*"
   score_log_arn      = "${var.bucket_arn}/${var.score_log_prefix}/*"
@@ -37,7 +41,7 @@ locals {
   list_prefixes = [
     "${var.review_input_prefix}/*",
     "${var.work_prefix}/model/*",
-    "${var.work_prefix}/code/*",
+    "${local.registry_prefix}/*",
     "${var.output_prefix}/*",
     "${var.unscored_input_prefix}/*",
   ]
@@ -72,7 +76,7 @@ resource "aws_iam_role" "processing" {
 # S3: 읽기/쓰기를 prefix 단위로 나눈다.
 #   - 리뷰 입력(silver/reviews/*)  : 읽기만. Silver 리뷰(KST 작성일 파티션)를 읽는다. Bronze·reviews_truth/·ground_truth/·gold_b/ 는 prefix 가 달라 접근할 수 없다.
 #     (같은 scope 폴더 안의 격리 레코드·품질 결과 파일도 이 prefix 아래라 읽을 수 있다. 읽기 전용이다.)
-#   - 모델·코드(<work>/model, code): 읽기만.
+#   - 모델 가중치(<work>/model)와 릴리스 묶음의 실행 코드(<work>/model-registry/releases/<버전>/code): 읽기만.
 #   - 점수 결과·오류(output_prefix, error_prefix): 쓰기만. 결과는 <output_prefix>(= staging)/year=/month=/day=/scores_<model_version>_<실행시각>.parquet 로 쌓인다(파일명이 겹치지 않아 덮어쓰기 없음).
 data "aws_iam_policy_document" "processing_s3" {
   statement {
@@ -82,7 +86,7 @@ data "aws_iam_policy_document" "processing_s3" {
       local.review_input_arn,
       local.unscored_input_arn,
       local.model_arn,
-      local.code_arn,
+      local.registry_code_arn,
     ]
   }
   statement {
@@ -253,6 +257,23 @@ data "aws_iam_policy_document" "launcher" {
     actions   = ["s3:PutObject"]
     resources = [local.unscored_input_arn]
   }
+  # run_processing_job.py 가 Job 을 만들기 전에 릴리스 묶음의 manifest 를 읽고, S3 가중치 목록(이름·크기)을 manifest 와 대조한다.
+  statement {
+    sid       = "ReadReleaseManifest"
+    actions   = ["s3:GetObject"]
+    resources = [local.registry_arn]
+  }
+  statement {
+    sid       = "ListWeightsForCheck"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      # 레지스트리 prefix 는 없는 버전을 물었을 때 AccessDenied 대신 NoSuchKey 를 받기 위해 넣는다
+      values = ["${var.work_prefix}/model/*", "${local.registry_prefix}/*"]
+    }
+  }
 }
 
 resource "aws_iam_policy" "launcher" {
@@ -264,8 +285,10 @@ resource "aws_iam_policy" "launcher" {
 # ------------------------------------------------------------------ 스크립트용 설정 묶음
 # run_processing_job.py 가 Terraform 을 몰라도 되게 이 값 하나만 읽는다(ecs-review-simulator 와 같은 방식).
 # 버킷 이름·계정 ID 가 들어 있어 저장소에는 두지 않고 SSM 에만 둔다.
-# 스크립트가 읽어서 쓸 것: model_version, role_arn, image_uri, instance_type, volume_size_gb, max_runtime_seconds, job_name_prefix,
-#   s3 경로 4개, network(use_vpc=true 일 때만 값이 있음), tags(Job 의 Tags 에 그대로 넣기, 비용 추적용 Component).
+# 스크립트가 읽어서 쓸 것: release(지금 쓸 모델 버전 이름), role_arn, instance_type, volume_size_gb, max_runtime_seconds, job_name_prefix,
+#   s3 경로, network(use_vpc=true 일 때만 값이 있음), tags(Job 의 Tags 에 그대로 넣기, 비용 추적용 Component).
+# 2026-10-23 결정: 모델 이름·번호·이미지·코드 위치는 릴리스 묶음 manifest 가 정한다. 여기에는 버전과 무관한 값과 release 하나만 둔다.
+#   image_uri 는 Job 이 쓰지 않는다. upload_model.py 로 새 묶음을 만들 때 넣는 기본 이미지다(manifest runtime.image_uri 로 복사됨).
 resource "aws_ssm_parameter" "config" {
   name        = var.config_parameter_name
   description = "review-score SageMaker processing job script config (managed by Terraform)"
@@ -273,17 +296,16 @@ resource "aws_ssm_parameter" "config" {
   value = jsonencode({
     region              = var.region
     role_arn            = aws_iam_role.processing.arn
-    image_uri           = local.image_uri
+    image_uri           = local.image_uri # 새 릴리스 묶음용 기본 이미지. Job 은 manifest 의 이미지를 쓴다
+    release             = var.release
     instance_type       = var.instance_type
     volume_size_gb      = var.volume_size_gb
     max_runtime_seconds = var.max_runtime_seconds
     job_name_prefix     = var.job_name_prefix
     bucket              = var.bucket_name
     review_input_root   = "s3://${var.bucket_name}/${var.review_input_prefix}"
-    model_version       = var.model_version
     model_prefix        = "s3://${var.bucket_name}/${var.work_prefix}/model/"
-    code_prefix         = "s3://${var.bucket_name}/${var.work_prefix}/code/"
-    model_version_no    = var.model_version_no
+    registry_prefix     = "s3://${var.bucket_name}/${local.registry_prefix}/"
     output_prefix       = "s3://${var.bucket_name}/${var.output_prefix}/"
     log_prefix          = "s3://${var.bucket_name}/${var.score_log_prefix}/"
     unscored_prefix     = var.unscored_input_prefix
