@@ -757,6 +757,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 재영 | S3 폴더(`gold_b/`), Athena 사용, Glue 데이터베이스 관리 방식(Terraform 여부) | 테이블 이름이 실제로 생기려면 필요 | 필요 |
 | 재영 | DDL·설계에 버킷 이름을 그대로 둘지, 자리표시자로 바꿀지 (`connectors/bronze-s3-sink.yaml`에는 이미 있음) | 공개 레포 규칙 | 필요 |
 | 재영 | 적재 잡·수집기 실행 위치와 자원, 배포 방식 | 상시 실행할 자리 | 필요 |
+| 재영 | 적재 잡 배포 (2026-10-24): 팀 기본 Spark 이미지 ECR digest, Gold B 이미지 ECR 저장소, namespace·Pod Identity(S3 원장 3개 쓰기, 체크포인트), Kafka `KafkaUser`·ACL(6개 토픽 읽기)·인증서 Secret·클라이언트 리스너 허용, 늘 켜 둔 Spark 스트리밍 (`jobs/README.md` 「적재 잡 배포에 필요한 것」) | 원장에 데이터가 쌓이게 (판정 R1·R4·R5) | 필요 |
 | 재영 | Athena 접근 경로(NAT 또는 VPC 엔드포인트)와 권한 (주현 님, 대시보드 포함) | 탐지·에이전트·대시보드가 조회하려면 필요 | 필요 |
 | 재영 | 규칙 파일 배포 방식 (이미지 포함 / S3) | 규칙 변경을 적재 잡에 반영 | 필요 |
 | 재영 | Airflow DAG 위치, 재시도 2번, 같은 시간대 한 번에 하나씩 (재판정은 DAG로 잇지 않음, `team-inputs.md`와 같음) | 재처리 흐름 | 필요 |
@@ -774,6 +775,8 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 ```
 pipelines/gold_b/
   README.md                      # 원장·뷰·잡 설명 (이 문서 요약)
+  Dockerfile                     # Gold B 이미지 (잡 4개, 팀 기본 Spark 이미지에서 출발)
+  Dockerfile.dockerignore        # 이미지에 넣는 파일
   ddl/
     database.sql
     payment_events.sql
@@ -864,7 +867,8 @@ pipelines/gold_b/
 - [x]  이벤트 시각 기준 시간 폴더로 쓰기, `loaded_at` 기록
 - [x]  로컬 또는 개발 Kafka로 샘플을 흘려 원장 확인 (로컬 Kafka 3.7, 가짜 판정)
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.streaming_ingest` (설정이 틀리면 Spark를 띄우기 전에 멈춤)
-- [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md`. 이미지는 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지를 더함)
+- [x]  Gold B 이미지 `pipelines/gold_b/Dockerfile` (`pipelines/gold-b-image`, 2026-10-24): 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지, 넣을 파일 목록 시험. 실제 빌드는 팀 기본 이미지가 ECR에 올라온 뒤
+- [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md` 「적재 잡 배포에 필요한 것」)
 - [ ]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인
 - [x]  잡을 재시작해도 빠지거나 두 번 쌓이지 않는지 확인 (체크포인트, 로컬 Docker)
 - [x]  PR 올리고 합치기 (#92, 2026-10-23)
