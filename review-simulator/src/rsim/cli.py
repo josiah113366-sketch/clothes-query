@@ -110,7 +110,7 @@ def run(
         datetime | None,
         typer.Option(
             formats=["%Y-%m-%d"],
-            help="--source orders·rds 날짜(UTC, 예: 2026-10-08). 그날 리뷰 시각인 주문만. 없으면 어제",
+            help="--source orders·rds 날짜(UTC, 예: 2026-10-08). 그날 리뷰 시각인 주문만. 없으면 어제(KST 달력)",
         ),
     ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="디버그 로그 출력")] = False,

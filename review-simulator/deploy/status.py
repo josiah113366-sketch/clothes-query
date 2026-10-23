@@ -158,7 +158,9 @@ def main(argv: list[str] | None = None) -> None:
     ecs, logs = sess.client("ecs"), sess.client("logs")
 
     sch = get_schedule(sess.client("scheduler"), cfg)
-    print(f"[스케줄] {sch['State']} · {sch['ScheduleExpression']} UTC")
+    # 시간대는 스케줄에 저장된 값을 그대로 보여 준다 (2026-10-23 에 UTC → Asia/Seoul)
+    tz = sch.get("ScheduleExpressionTimezone") or "UTC"
+    print(f"[스케줄] {sch['State']} · {sch['ScheduleExpression']} {tz}")
 
     td = latest_task_definition(ecs, cfg["task_family"])
     model = "google.gemma-3-12b-it"
