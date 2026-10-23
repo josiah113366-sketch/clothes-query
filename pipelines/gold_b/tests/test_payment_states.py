@@ -24,10 +24,10 @@ if sqlite3.sqlite_version_info < (3, 25, 0):
 
 from pipelines.gold_b.format_check import DATASETS, FormatChecker  # noqa: E402
 from pipelines.gold_b.jobs.reprocess import Request, run  # noqa: E402
-from pipelines.gold_b.ledger import (TABLE_COLUMNS, KafkaMessage, LocalStore, hour_of, message_rows,  # noqa: E402
-                                     utc_naive)
+from pipelines.gold_b.ledger import (TABLE_COLUMNS, KafkaMessage, LocalStore, hour_folder, hour_of,  # noqa: E402
+                                     message_rows, utc_naive)
 from test_ddl import SAMPLES as SAMPLE_DIR, _utc, load_payment_updates, load_samples  # noqa: E402
-from test_reprocess import FakeKafka, ticking, write_ledgers  # noqa: E402
+from test_reprocess import FakeKafka, comparable, events as reprocess_events, ticking, write_ledgers  # noqa: E402
 
 VIEWS = Path(__file__).resolve().parent.parent / "views"
 VIEW_ORDER = ("payment_states", "payment_conflicts", "payment_attempts")   # 뒤의 두 뷰는 payment_states를 읽는다
@@ -209,18 +209,32 @@ def stream(root: Path, samples: list[dict], name: str = "part-stream.parquet") -
 
 
 def reprocess(root: Path, samples: list[dict], start: str, end: str, rules: RecheckRules,
-              at: datetime = AFTER) -> None:
-    """새 규칙으로 [start, end)의 시간 폴더를 재처리한다. Kafka에는 samples의 메시지가 있다."""
-    run(Request(f"rq-{start}-{at:%H%M}", _utc(start), _utc(end), rules.version),
-        source=FakeKafka([message(s) for s in samples]), store=LocalStore(root),
-        checker=FormatChecker(rules), now=ticking(at), log=lambda _: None)
+              at: datetime = AFTER, store: LocalStore | None = None):
+    """새 규칙으로 [start, end)의 시간 폴더를 재처리한다. Kafka에는 samples의 메시지가 있다. run()의 Result를 돌려준다."""
+    return run(Request(f"rq-{start}-{at:%H%M}", _utc(start), _utc(end), rules.version),
+               source=FakeKafka([message(s) for s in samples]), store=store or LocalStore(root),
+               checker=FormatChecker(rules), now=ticking(at), log=lambda _: None)
 
 
-def stored_rows(root: Path) -> dict[str, list[dict]]:
+def hour22(h: int) -> tuple[datetime, datetime]:
+    """2026-10-22 h시 폴더 [시작, 끝)."""
+    return datetime(2026, 10, 22, h), datetime(2026, 10, 22, h) + timedelta(hours=1)
+
+
+def replaced_folders(root: Path) -> list[tuple[int, bool]]:
+    """LEDGER_REPLACED마다 (시간, 승인 범위 밖인가)."""
+    return [(e["window_start"].hour, json.loads(e["detail"]).get("outside_window", False))
+            for e in reprocess_events(LocalStore(root)) if e["step"] == "LEDGER_REPLACED"]
+
+
+LEDGERS = ("payment_events", "topic_messages", "malformed_events")   # 재처리가 고치는 원장 3개
+
+
+def stored_rows(root: Path, tables: tuple[str, ...] = TABLES) -> dict[str, list[dict]]:
     store = LocalStore(root)
     return {table: [row for path in sorted((root / table).rglob("*.parquet")) if not path.name.startswith(".")
                     for row in store.read(path.relative_to(root).as_posix(), table)]
-            for table in TABLES}
+            for table in tables}
 
 
 def state_of(root: Path, payment_id: str) -> dict:
@@ -252,40 +266,138 @@ def test_reprocess_decides_a_bad_latest_update(tmp_path, still_failing):
         [(FormatChecker().rule_version, True), (NEW_RULES, still_failing)]
 
 
-def test_stricter_rules_hold_an_update_stored_in_two_folders(tmp_path):
-    """u의 결제 시각은 06시(① 06시 폴더), Kafka 시각은 07시(④ 07시 폴더). 07시 폴더만 더 엄격한 규칙으로 재처리하면
-    새 오류 줄이 06시 폴더의 옛 통과 줄보다 늦게 쌓여 보류된다 (위치마다 가장 늦은 검사 결과를 고르는 1단계)."""
+def test_stricter_rules_clean_the_old_pass_of_a_late_update(tmp_path):
+    """통과했던 u(결제 시각 06:10, Kafka 07:30)가 더 엄격한 새 규칙에서 오류가 된다. 07시만 재처리해도 06시 폴더(승인 범위 밖)의
+    옛 ① 줄을 지우고 07시에 ④를 쓴다 (옛 결과를 있던 자리까지 찾아 정리, 2026-10-23). 결제는 보류된다."""
     samples = [SAMPLES["upd_normal_c"], late("upd_normal_u", "2026-10-22T07:30:02Z")]
     stream(tmp_path, samples)
     assert state_of(tmp_path, pid("51"))["hold_reason"] is None
 
-    reprocess(tmp_path, samples, "2026-10-22T07:00:00Z", "2026-10-22T08:00:00Z",
-              RecheckRules(NEW_RULES, [{"field": "amount", "reason": "INVALID_VALUE"}], only={"amount": 39000}))
+    result = reprocess(tmp_path, samples, "2026-10-22T07:00:00Z", "2026-10-22T08:00:00Z",
+                       RecheckRules(NEW_RULES, [{"field": "amount", "reason": "INVALID_VALUE"}], only={"amount": 39000}))
 
     rows = stored_rows(tmp_path)
-    old_pass = [r for r in rows["payment_events"] if r["kafka_offset"] == 1001]
-    assert [(hour_of(r["completed_at"]).hour, r["rule_version"]) for r in old_pass] == \
-        [(6, FormatChecker().rule_version)]
+    assert [r["kafka_offset"] for r in rows["payment_events"]] == [1000]       # c는 대상이 아니라 그대로, u의 옛 통과는 지움
     assert [(r["field"], r["rule_version"]) for r in rows["malformed_events"]] == [("amount", NEW_RULES)]
     assert state_of(tmp_path, pid("51"))["hold_reason"] == "INVALID_LATEST"
+    assert (result.replaced, result.outside) == ([hour22(7)], [hour22(6)])
+    assert replaced_folders(tmp_path) == [(6, True), (7, False)]
 
 
-@pytest.mark.parametrize("kafka_time, window_end, recovered", [
-    ("2026-10-22T07:05:02Z", "2026-10-22T08:00:00Z", True),
-    ("2026-10-22T09:41:02Z", "2026-10-22T10:00:00Z", False),
+@pytest.mark.parametrize("kafka_time, start, end", [
+    ("2026-10-22T07:05:02Z", "2026-10-22T07:00:00Z", "2026-10-22T08:00:00Z"),
+    ("2026-10-22T09:41:02Z", "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z"),
+    ("2026-10-23T09:41:02Z", "2026-10-23T09:00:00Z", "2026-10-23T10:00:00Z"),   # 다음 날 들어온 결제 수정
 ])
-def test_bad_update_is_recovered_only_from_its_payment_folder(tmp_path, kafka_time, window_end, recovered):
-    """한계 (2026-10-23): 통과한 ① 줄은 결제 시각 폴더에만 쓴다. 그 폴더를 재처리할 때는 Kafka 시각이 폴더 ±10분인
-    메시지만 다시 읽는다. 그래서 결제 시각(06:13)보다 1시간 넘게 늦게 온 잘못된 u는 새 규칙으로 재처리해도 복구되지 않고
-    보류가 유지된다 (틀린 값을 보이지는 않는다). 이때는 새 정상 이벤트가 오면 풀린다. 재처리 잡을 고치면 이 시험을 바꾼다."""
+def test_late_bad_update_is_recovered_from_its_kafka_hour(tmp_path, kafka_time, start, end):
+    """잘못된 u(PG_C)의 결제 시각은 10/22 06:13. 오류가 보이는 Kafka 시각 폴더만 새 규칙(PG_C 허용)으로 재처리해도,
+    통과한 ① 줄을 결제 시각 폴더(06시, 승인 범위 밖)에 써서 복구된다. 옛 규칙의 오류 줄은 이력으로 남는다 (2026-10-23)."""
     samples = [SAMPLES["upd_recovered_c"], late("upd_recovered_u", kafka_time)]
     stream(tmp_path, samples)
-    reprocess(tmp_path, samples, "2026-10-22T06:00:00Z", window_end, RecheckRules(NEW_RULES, []))
-    assert state_of(tmp_path, pid("54"))["hold_reason"] == (None if recovered else "INVALID_LATEST")
+    assert state_of(tmp_path, pid("54"))["hold_reason"] == "INVALID_LATEST"
 
-    if not recovered:
-        fixed = late("upd_recovered_u", "2026-10-22T10:30:02Z", offset=1009,
-                     value={"pg": "PG_B", "__source_ts_ms": 1792665001000})
-        stream(tmp_path, [fixed], name="part-stream-2.parquet")
-        got = state_of(tmp_path, pid("54"))
-        assert (got["kafka_offset"], got["hold_reason"], got["pg"]) == (1009, None, "PG_B")
+    result = reprocess(tmp_path, samples, start, end, RecheckRules(NEW_RULES, []))
+
+    got = state_of(tmp_path, pid("54"))
+    assert (got["kafka_offset"], got["hold_reason"], got["pg"], got["rule_version"]) == (1003, None, "PG_C", NEW_RULES)
+    assert result.outside == [hour22(6)]
+    errors = [r for r in stored_rows(tmp_path)["malformed_events"] if r["kafka_offset"] == 1003]
+    assert [r["rule_version"] for r in errors] == [FormatChecker().rule_version]
+
+
+def test_same_rule_version_fix_shows_the_corrected_value(tmp_path):
+    """06:13 실패를 성공으로 바로잡은 u(Kafka 09:41)가 검사 코드 버그로 오류였다. 코드만 고치고 같은 규칙 버전으로
+    09시를 재처리하면, 옛 오류를 지우고 통과한 ① 줄을 06시에 써서 정정된 성공이 보인다 (정정 전 실패가 보이지 않음)."""
+    version = FormatChecker().rule_version
+    c = late("upd_recovered_c", "2026-10-22T06:13:02Z", value={"status": "FAILED", "failure_code": "PG_TIMEOUT"})
+    u = late("upd_recovered_u", "2026-10-22T09:41:02Z", value={"pg": "PG_B", "status": "SUCCESS"})
+    stream(tmp_path, [c])
+    buggy, m = FormatChecker(RecheckRules(version, [{"field": "completed_at", "reason": "TYPE_MISMATCH"}])), message(u)
+    write_ledgers(LocalStore(tmp_path), message_rows(m, buggy(m), version, utc_naive(m.timestamp) + STREAM_DELAY),
+                  "part-stream-u.parquet")
+    assert state_of(tmp_path, pid("54"))["hold_reason"] == "INVALID_LATEST"
+
+    reprocess(tmp_path, [c, u], "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", RecheckRules(version, []))
+
+    got = state_of(tmp_path, pid("54"))
+    assert (got["kafka_offset"], got["status"], got["failure_code"], got["hold_reason"]) == (1003, "SUCCESS", None, None)
+    assert [r for r in stored_rows(tmp_path)["malformed_events"] if r["kafka_offset"] == 1003] == []
+
+
+def test_messages_outside_the_window_are_left_alone(tmp_path):
+    """결제 시각 06:59:59, Kafka 07:00:01인 결제는 06시를 재처리할 때 대상이 아니다 (대상은 Kafka 시각으로 정함).
+    더 엄격한 새 규칙으로 06시만 재처리해도 그 결제의 줄은 그대로다 (예전에는 옛 ① 줄만 지워져 뷰에서 사라졌다)."""
+    p = late("upd_normal_c", "2026-10-22T07:00:01Z",
+             value={"requested_at": "2026-10-22T06:59:55Z", "completed_at": "2026-10-22T06:59:59Z"})
+    stream(tmp_path, [p])
+    before = stored_rows(tmp_path)
+
+    result = reprocess(tmp_path, [p], "2026-10-22T06:00:00Z", "2026-10-22T07:00:00Z",
+                       RecheckRules(NEW_RULES, [{"field": "amount", "reason": "INVALID_VALUE"}]))
+
+    assert stored_rows(tmp_path) == before
+    assert state_of(tmp_path, pid("51"))["hold_reason"] is None
+    assert (result.replaced, result.outside) == ([hour22(6)], [])
+
+
+def test_late_update_inside_the_window_needs_no_outside_folder(tmp_path):
+    """결제 시각 06:13, Kafka 07:20인 잘못된 u. 06~08시를 같이 재처리하면 06시 폴더도 승인 범위라 범위 밖 폴더 없이 복구된다
+    (예전에는 06시 차례에 07:20 메시지를 읽지 않고 07시 차례에 ① 줄을 버려서 복구되지 않았다)."""
+    samples = [SAMPLES["upd_recovered_c"], late("upd_recovered_u", "2026-10-22T07:20:02Z")]
+    stream(tmp_path, samples)
+
+    result = reprocess(tmp_path, samples, "2026-10-22T06:00:00Z", "2026-10-22T08:00:00Z", RecheckRules(NEW_RULES, []))
+
+    assert state_of(tmp_path, pid("54"))["hold_reason"] is None
+    assert (result.replaced, result.outside) == ([hour22(6), hour22(7)], [])
+
+
+def test_same_request_twice_gives_the_same_ledgers(tmp_path):
+    """같은 요청을 두 번 돌려도 범위 밖 폴더까지 원장이 같고(loaded_at만 다름), 고친 폴더는 파일 하나로 정리된다."""
+    samples = [SAMPLES["upd_recovered_c"], late("upd_recovered_u", "2026-10-22T09:41:02Z")]
+    stream(tmp_path, samples)
+    rules = RecheckRules(NEW_RULES, [])
+    reprocess(tmp_path, samples, "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", rules)
+    first = {table: comparable(rows) for table, rows in stored_rows(tmp_path, LEDGERS).items()}
+
+    reprocess(tmp_path, samples, "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", rules, at=AFTER + timedelta(hours=1))
+
+    assert {table: comparable(rows) for table, rows in stored_rows(tmp_path, LEDGERS).items()} == first
+    store = LocalStore(tmp_path)
+    assert len(store.files(hour_folder("payment_events", hour22(6)[0]))) == 1
+    assert len(store.files(hour_folder("topic_messages", hour22(9)[0]))) == 1
+
+
+class CrashBeforeTidyStore(LocalStore):
+    """(가)에서 새 줄을 더한 뒤, (나)에서 원장 폴더를 처음 읽을 때 한 번 멈춘다."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.crashed = False
+
+    def files(self, folder, any_name=False):
+        if not self.crashed and not folder.startswith("reprocess_events"):
+            self.crashed = True
+            raise OSError("멈춤 (시험)")
+        return super().files(folder, any_name)
+
+
+def test_stop_after_adding_new_results_loses_nothing(tmp_path):
+    """(가) 뒤에 멈추면 같은 위치에 옛 오류와 새 통과가 함께 남아, 뷰는 더 늦게 쌓인 새 결과를 보여 준다.
+    다시 돌리면 정리되어 위치마다 결과가 하나다."""
+    samples = [SAMPLES["upd_recovered_c"], late("upd_recovered_u", "2026-10-22T09:41:02Z")]
+    stream(tmp_path, samples)
+    store = CrashBeforeTidyStore(tmp_path)
+    with pytest.raises(OSError):
+        reprocess(tmp_path, samples, "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", RecheckRules(NEW_RULES, []),
+                  store=store)
+    assert [e["step"] for e in reprocess_events(store)] == ["STARTED", "FAILED"]
+    assert state_of(tmp_path, pid("54"))["hold_reason"] is None
+
+    reprocess(tmp_path, samples, "2026-10-22T09:00:00Z", "2026-10-22T10:00:00Z", RecheckRules(NEW_RULES, []),
+              at=AFTER + timedelta(hours=1))
+
+    rows = stored_rows(tmp_path, LEDGERS)
+    assert len([r for r in rows["payment_events"] if r["kafka_offset"] == 1003]) == 1
+    assert len([r for r in rows["topic_messages"] if r["kafka_offset"] == 1003]) == 1
+    assert state_of(tmp_path, pid("54"))["hold_reason"] is None
