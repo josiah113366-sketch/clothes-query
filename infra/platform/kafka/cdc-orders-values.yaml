@@ -7,13 +7,13 @@ kafka:
   # api namespace 의 업무 API(WAS)가 clickstream 에 발행한다 (api/mvp). mTLS·ACL 은 그대로 필요하다.
   clientNamespaces: [api]
 topics:
-  - {name: clickstream, partitions: 3, retentionMs: 259200000}
-  - {name: members-events, partitions: 3, retentionMs: 259200000}
-  - {name: orders, partitions: 3, retentionMs: 259200000}
-  - {name: order-items, partitions: 3, retentionMs: 259200000}
-  - {name: payments, partitions: 3, retentionMs: 259200000}
+  - {name: clickstream, partitions: 3, retentionMs: 604800000}
+  - {name: members-events, partitions: 3, retentionMs: 604800000}
+  - {name: orders, partitions: 3, retentionMs: 604800000}
+  - {name: order-items, partitions: 3, retentionMs: 604800000}
+  - {name: payments, partitions: 3, retentionMs: 604800000}
   # Debezium heartbeat (topic.heartbeat.prefix=debezium-heartbeat, topic.prefix=cdc).
-  - {name: debezium-heartbeat.cdc, partitions: 1, retentionMs: 259200000}
+  - {name: debezium-heartbeat.cdc, partitions: 1, retentionMs: 604800000}
 # 업무 API(WAS)가 클릭을 받아 clickstream 에 발행한다 (api/mvp). 인증서는 api namespace 로 복사한다.
 clients:
   - name: api
