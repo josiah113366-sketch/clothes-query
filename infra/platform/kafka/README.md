@@ -1,5 +1,7 @@
 # EKS Kafka·Connect
 
+2026-10-23 보관 변경: 실제 단일 브로커 환경의 업무 토픽 5개와 heartbeat를 **7일(604800000ms)**로 늘렸다. 디스크는 20GiB다. 브로커에는 `log.retention.ms`만 전달하며 `retentionHours`는 비활성 fallback이다. Strimzi에서 두 alias를 함께 두면 반복 재생성이 발생하므로 동시에 렌더링하지 않는다. 아래 72시간 설명은 이전 배포 기록이다. [변경·검증 기록](../../../docs/tasks/infra-kafka-retention-week.md).
+
 2026-10-20 업무 CDC 준비(`sim/cdc-orders`, 적용 전): [cdc-orders-values.yaml](cdc-orders-values.yaml)을 `single-node-values.yaml` 뒤, 비공개 `runtime.local.yaml`(Connect 이미지 digest) 앞에 병합해 **같은 `cq-kafka` release를 upgrade**한다. `measurement-values.yaml`은 빼서 `infra-smoke` 토픽·클라이언트를 지운다. 업무 토픽 5개(`clickstream`, `members-events`, `orders`, `order-items`, `payments`, 각 3 파티션·72시간)와 heartbeat 토픽, Connect 1대, 읽기 전용 Kafka UI(`ui.enabled`, ClusterIP, `kubectl port-forward -n kafka svc/kafka-ui 8080:8080`)가 추가된다. 브로커·NodePool·PVC는 바뀌지 않는다. 적용 순서는 [cdc-orders/README.md](cdc-orders/README.md), 커넥터는 [connectors/README.md](../../../connectors/README.md)를 따른다.
 
 2026-10-18 업무 계약과 분리한 [시험 데이터 경로](pipeline-smoke/README.md)의 실제 RDS → Kafka → S3 JSON6개 전달과 중단 후 이어받기를 확인했다. 더미 DB/slot·Kafka/Connect·S3 모든 버전8개·시험 권한을 정리했고 현재 Connect는 비활성이다. RDS 복제 설정과 데이터 없는 ECR 이미지는 남았다. 로컬 전체 경로는 `local-smoke/check.py --compact --s3`, AWS overlay는 별도 비활성 예시다. Connect의 선택적 consumeTopics/consumerGroups는 Sink에 필요한 literal 읽기 ACL만 추가하며 기존 source-only 기본 권한은 유지한다.
