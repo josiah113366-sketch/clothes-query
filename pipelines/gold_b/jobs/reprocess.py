@@ -11,10 +11,14 @@ run() 한 번에 하는 일
      원장 3개를 교체하고(새 파일을 먼저 쓰고 옛 파일을 지움) LEDGER_REPLACED를 쓴다.
   5. 도중에 실패하면 FAILED를 쓰고 예외를 다시 올린다. 끝난 폴더의 LEDGER_REPLACED는 남는다.
 
+next_request()는 poller다. reprocess_events를 읽어 지금 돌릴 승인 요청 하나를 고른다 (source가 KAFKA·BRONZE인 것만,
+승인이 가장 이른 것부터). Airflow DAG가 5분마다 부른다.
+
 Kafka는 읽기만 한다 (임시 그룹으로 assign만 하고 처리 위치를 커밋하지 않음).
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
@@ -32,6 +36,14 @@ SOURCE_KAFKA = "KAFKA"
 REPLACED_TABLES = ("payment_events", "topic_messages", "malformed_events")
 DEFAULT_TOPICS = ("payments", "orders", "order-items", "members-events", "clickstream", "reviews.raw")
 TIMEOUT_SEC = 30.0
+
+# poller 기준 (설계 「⑤ reprocess_events」의 재처리 시작)
+GOLD_B_SOURCES = ("KAFKA", "BRONZE")       # 이 잡이 맡는 요청의 source. SILVER는 승인 화면이 Silver DAG를 직접 부른다
+APPROVAL_TTL = timedelta(minutes=60)       # 승인 뒤 이 시간 안에 시작하지 못하면 승인 만료 (승인 화면과 같은 값)
+MAX_RUNS = 3                               # 한 요청을 돌리는 최대 횟수: 처음 1번 + 일시 실패 자동 재시도 2번
+_RUN_STEPS = ("STARTED", "LEDGER_REPLACED", "FAILED")
+_STEP_ORDER = {step: i for i, step in enumerate(
+    ("REQUESTED", "APPROVED", "REJECTED", "STARTED", "LEDGER_REPLACED", "FAILED", "REDETECTED", "VERIFIED"))}
 
 
 class ReprocessError(RuntimeError):
@@ -54,7 +66,7 @@ class Request:
     window_start: datetime
     window_end: datetime
     rule_version: str
-    attempt: int = 1                      # 몇 번째 시도 (Airflow 시도 번호)
+    attempt: int = 1                      # 요청 단위 시도 번호 (승인 화면이 정함). 한 요청 안의 재실행 횟수는 STARTED의 detail.run
     parent_request_id: str | None = None
 
 
@@ -240,8 +252,9 @@ def _utc_now() -> datetime:
 
 def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker,
         options: Options = Options(), now: Callable[[], datetime] = _utc_now,
-        log: Callable[[str], None] = _log) -> Result:
-    """재처리 한 번. 성공하면 교체한 시간 폴더를 돌려주고, 실패하면 FAILED를 쓴 뒤 예외를 다시 올린다."""
+        log: Callable[[str], None] = _log, run_number: int = 1) -> Result:
+    """재처리 한 번. 성공하면 교체한 시간 폴더를 돌려주고, 실패하면 FAILED를 쓴 뒤 예외를 다시 올린다.
+    run_number는 이 요청을 몇 번째로 돌리는지다 (poller가 정함, STARTED의 detail.run)."""
     events = _Events(store, request, now)
     approved = (utc_naive(request.window_start), utc_naive(request.window_end))
 
@@ -268,7 +281,7 @@ def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker
     try:
         events.write("STARTED", approved, SOURCE_KAFKA,
                      {"folders": [f"{h:%Y-%m-%dT%H:00}" for h in hours],
-                      "margin_minutes": int(options.margin.total_seconds() // 60)})
+                      "margin_minutes": int(options.margin.total_seconds() // 60), "run": run_number})
         log(f"재처리 {request.request_id} 시작: 시간 폴더 {len(hours)}개")
         for hour in hours:
             current = hour
@@ -285,6 +298,88 @@ def run(request: Request, *, source: KafkaSource, store: Store, checker: Checker
         fail((current, hours[-1] + HOUR), SOURCE_KAFKA, exc, len(replaced))
         raise
     return Result(request.request_id, replaced, details)
+
+
+# ---------- 다음에 돌릴 요청 고르기 (poller) ----------
+
+@dataclass(frozen=True)
+class Pending:
+    request: Request
+    run_number: int      # 이 요청을 몇 번째로 돌리는지 (1부터)
+
+
+def read_events(store: Store) -> list[dict]:
+    """reprocess_events의 줄 전부. 승인 화면·판정 잡이 Athena INSERT로 쓴 파일은 이름에 확장자가 없을 수 있어서 다 읽는다."""
+    rows: list[dict] = []
+    for path in store.files("reprocess_events", any_name=True):
+        rows.extend(store.read(path, "reprocess_events"))
+    return rows
+
+
+def _detail(row: Mapping) -> dict:
+    try:
+        value = json.loads(row.get("detail") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _finished(runs: Sequence[Mapping], approved: Mapping) -> bool:
+    """마지막 STARTED 뒤에 승인 범위의 시간 폴더가 모두 LEDGER_REPLACED로 끝났는가."""
+    try:
+        wanted = set(hour_folders(approved["window_start"], approved["window_end"]))
+    except ReprocessError:
+        return False
+    starts = [i for i, row in enumerate(runs) if row["step"] == "STARTED"]
+    after = runs[starts[-1] + 1:] if starts else runs
+    replaced = {utc_naive(row["window_start"]) for row in after
+                if row["step"] == "LEDGER_REPLACED" and row.get("window_start") is not None}
+    return wanted <= replaced
+
+
+def next_request(rows: Sequence[Mapping], now: datetime, *, sources: Sequence[str] = GOLD_B_SOURCES,
+                 ttl: timedelta = APPROVAL_TTL, max_runs: int = MAX_RUNS) -> Pending | None:
+    """poller: 지금 돌릴 요청 하나 (승인이 가장 이른 것부터, 한 번에 하나). 없으면 None.
+
+    - APPROVED 줄의 source가 sources에 있는 요청만 맡는다.
+    - 아직 시작하지 않았으면 승인 뒤 ttl 안일 때만 돌린다 (지나면 승인 만료).
+    - 시작했으면 다시 돌려도 되는 실패(FAILED의 retryable)나 중간에 멈춘 실행(마지막 STARTED 뒤 폴더가 다 끝나지 않음)만,
+      돌린 횟수(STARTED 수)가 max_runs보다 적을 때 다시 돌린다.
+    """
+    now = utc_naive(now)
+    by_request: dict[str, list[Mapping]] = defaultdict(list)
+    for row in rows:
+        if row.get("request_id") and row.get("at") is not None:
+            by_request[row["request_id"]].append(row)
+    candidates = []
+    for request_id, events in by_request.items():
+        events = sorted(events, key=lambda r: (utc_naive(r["at"]), _STEP_ORDER.get(r["step"], len(_STEP_ORDER))))
+        approvals = [row for row in events if row["step"] == "APPROVED"]
+        if not approvals or any(row["step"] == "REJECTED" for row in events):
+            continue
+        approved = approvals[-1]
+        if approved.get("source") not in sources:
+            continue
+        if approved.get("window_start") is None or approved.get("window_end") is None:
+            continue
+        runs = [row for row in events if row["step"] in _RUN_STEPS]
+        run_count = sum(row["step"] == "STARTED" for row in runs)
+        if not runs:
+            if now - utc_naive(approved["at"]) > ttl:
+                continue                                   # 승인 만료
+        elif runs[-1]["step"] == "FAILED":
+            if _detail(runs[-1]).get("retryable") is not True or run_count >= max_runs:
+                continue                                   # 다시 돌려도 소용없거나 이미 다 돌림
+        elif _finished(runs, approved) or run_count >= max_runs:
+            continue                                       # 끝났거나 이미 다 돌림
+        candidates.append((utc_naive(approved["at"]), request_id, approved, run_count))
+    if not candidates:
+        return None
+    _, request_id, approved, run_count = min(candidates, key=lambda c: (c[0], c[1]))
+    request = Request(request_id=request_id, window_start=utc_naive(approved["window_start"]),
+                      window_end=utc_naive(approved["window_end"]), rule_version=approved.get("rule_version") or "",
+                      attempt=approved.get("attempt") or 1, parent_request_id=approved.get("parent_request_id"))
+    return Pending(request, run_count + 1)
 
 
 # ---------- Kafka 읽기 ----------
