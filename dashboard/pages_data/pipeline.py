@@ -32,8 +32,21 @@ with t_lag:
     lag["collected_at_kst"] = data.to_kst(lag.collected_at)
 
     latest = lag[lag.collected_at == lag.collected_at.max()]
-    bad = latest[(latest.connector_state != "RUNNING") | (latest.lag_sec > NORMAL_MAX_SEC)]
-    per_min = lag.groupby("collected_at_kst")[["lag_sec", "lag_msgs"]].max()
+    # 한 토픽에 파티션이 여러 개라(실데이터: 토픽 5개 · 15파티션) 같은 시각·토픽 행이 여러 줄이다.
+    # 토픽 단위로 모은다: 지연 초는 가장 느린 파티션(max), 밀린 메시지는 합계(sum),
+    # 커넥터 상태는 파티션 값들을 이어 붙인다(전부 RUNNING 이면 "RUNNING" 하나).
+    latest_t = (
+        latest.groupby("topic")
+        .agg(
+            lag_sec=("lag_sec", "max"),
+            lag_msgs=("lag_msgs", "sum"),
+            connector_state=("connector_state", lambda s: ",".join(sorted(set(s.dropna())))),
+        )
+        .reset_index()
+    )
+    bad = latest_t[(latest_t.connector_state != "RUNNING") | (latest_t.lag_sec > NORMAL_MAX_SEC)]
+    # 1분 추이: 지연은 토픽·파티션 중 최대, 밀린 메시지는 전체 합계
+    per_min = lag.groupby("collected_at_kst").agg(lag_sec=("lag_sec", "max"), lag_msgs=("lag_msgs", "sum"))
     ui.kpis(
         [
             {
@@ -73,7 +86,8 @@ with t_lag:
         )
 
     with ui.panel("토픽별 Bronze 적재 지연", "1분 측정 · KST · 초"):
-        pv = lag.pivot(index="collected_at_kst", columns="topic", values="lag_sec")
+        # pivot 대신 pivot_table(max): 같은 시각·토픽에 파티션 행이 여러 개라 가장 느린 파티션 값을 쓴다
+        pv = lag.pivot_table(index="collected_at_kst", columns="topic", values="lag_sec", aggfunc="max")
         pv = pv[sorted(pv.columns)]  # 토픽 이름 순서 = 색 순서 (고정)
         charts.line(
             pv,
