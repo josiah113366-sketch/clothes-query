@@ -2,7 +2,7 @@
   "uid": "clothes-query-infra",
   "title": "Clothes Query - Infrastructure",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "timezone": "browser",
   "refresh": "1m",
@@ -16,6 +16,263 @@
   ],
   "panels": [
     {
+      "id": 101,
+      "type": "stat",
+      "title": "Node count",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(kube_node_info{job=\"clothes-query-node-state\"})",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 102,
+      "type": "stat",
+      "title": "Ready nodes",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(kube_node_status_condition{job=\"clothes-query-node-state\",condition=\"Ready\",status=\"true\"})",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 103,
+      "type": "timeseries",
+      "title": "Nodes by pool",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (label_karpenter_sh_nodepool) (kube_node_labels{job=\"clothes-query-node-state\"})",
+          "legendFormat": "{{label_karpenter_sh_nodepool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 104,
+      "type": "timeseries",
+      "title": "Node CPU used / allocatable (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (node) (rate(node_cpu_usage_seconds_total{job=\"clothes-query-node-usage\"}[3m])) / on(node) max by(node) (kube_node_status_allocatable{job=\"clothes-query-node-state\",resource=\"cpu\"})",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Includes node system usage; divided by allocatable capacity. Values may exceed 100%. CPU needs at least two scrapes. Missing data is not zero usage."
+    },
+    {
+      "id": 105,
+      "type": "timeseries",
+      "title": "Node memory working set / allocatable (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * max by(node) (node_memory_working_set_bytes{job=\"clothes-query-node-usage\"}) / on(node) max by(node) (kube_node_status_allocatable{job=\"clothes-query-node-state\",resource=\"memory\"})",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Includes node system usage; divided by allocatable capacity. Values may exceed 100%. CPU needs at least two scrapes. Missing data is not zero usage."
+    },
+    {
+      "id": 106,
+      "type": "timeseries",
+      "title": "Node container CPU requests / allocatable (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by(node) (kube_pod_container_resource_requests{job=\"clothes-query-node-state\",resource=\"cpu\",node!=\"\"} * on(namespace,pod) group_left() (max by(namespace,pod) (kube_pod_status_phase{job=\"clothes-query-node-state\",phase=~\"Running|Pending\"} == 1))) / on(node) max by(node) (kube_node_status_allocatable{job=\"clothes-query-node-state\",resource=\"cpu\"})",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Active Pod container requests only. Excludes init-container maximums, Pod overhead and scheduler constraints; this is not an exact schedulable-capacity guarantee."
+    },
+    {
+      "id": 107,
+      "type": "timeseries",
+      "title": "Node container memory requests / allocatable (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by(node) (kube_pod_container_resource_requests{job=\"clothes-query-node-state\",resource=\"memory\",node!=\"\"} * on(namespace,pod) group_left() (max by(namespace,pod) (kube_pod_status_phase{job=\"clothes-query-node-state\",phase=~\"Running|Pending\"} == 1))) / on(node) max by(node) (kube_node_status_allocatable{job=\"clothes-query-node-state\",resource=\"memory\"})",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Active Pod container requests only. Excludes init-container maximums, Pod overhead and scheduler constraints; this is not an exact schedulable-capacity guarantee."
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Scrape health (1 = reachable)",
@@ -25,7 +282,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 32,
         "w": 12,
         "h": 8
       },
@@ -59,7 +316,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 32,
         "w": 12,
         "h": 8
       },
@@ -93,7 +350,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -127,7 +384,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -161,7 +418,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -195,7 +452,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -229,7 +486,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 56,
         "w": 12,
         "h": 8
       },
@@ -263,7 +520,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 56,
         "w": 12,
         "h": 8
       },
@@ -297,7 +554,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 64,
         "w": 12,
         "h": 8
       },
@@ -331,7 +588,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 64,
         "w": 12,
         "h": 8
       },

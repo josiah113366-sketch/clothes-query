@@ -18,7 +18,7 @@ def main():
     output = subprocess.run(command + ["-n", "monitoring"], capture_output=True, check=True)
     objects = [x for x in yaml.safe_load_all(output.stdout) if x]
     deployments = [x for x in objects if x["kind"] == "Deployment"]
-    assert len(deployments) == 3
+    assert len(deployments) == 4
     assert not any(x["kind"] in {"Ingress", "Secret", "NodePool", "NodeClass", "DaemonSet"} for x in objects)
     cluster_kinds = {"NodePool", "StorageClass", "ClusterRole", "ClusterRoleBinding", "APIService"}
     for obj in objects:
@@ -39,7 +39,7 @@ def main():
             requests = container["resources"]["requests"]
             cpu_m += int(requests["cpu"].removesuffix("m"))
             memory_mi += int(requests["memory"].removesuffix("Mi"))
-    assert (cpu_m, memory_mi) == (300, 896)
+    assert (cpu_m, memory_mi) == (325, 960)
     configs = {x["metadata"]["name"]: x["data"] for x in objects if x["kind"] == "ConfigMap"}
     grafana = next(x for x in deployments if x["metadata"]["name"] == "monitoring-grafana")
     grafana_env = grafana["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -48,12 +48,27 @@ def main():
     if args.prometheus_config:
         args.prometheus_config.parent.mkdir(parents=True, exist_ok=True)
         args.prometheus_config.write_text(configs["monitoring-prometheus"]["prometheus.yml"], encoding="utf-8")
-    assert len(prom["scrape_configs"]) == 5
-    assert len({x["job_name"] for x in prom["scrape_configs"]}) == 5
+    assert len(prom["scrape_configs"]) == 7
+    assert len({x["job_name"] for x in prom["scrape_configs"]}) == 7
     rules = yaml.safe_load(configs["monitoring-prometheus"]["rules.yml"])
     assert len(rules["groups"][0]["rules"]) == 10
     dashboard = json.loads(configs["monitoring-grafana-dashboard"]["infrastructure.json"])
-    assert len(dashboard["panels"]) == 10
+    assert len(dashboard["panels"]) == 17
+    node_jobs = {j['job_name']: j for j in prom['scrape_configs'] if j['job_name'].startswith('clothes-query-node-')}
+    usage = node_jobs['clothes-query-node-usage']
+    assert usage['metrics_path'] == '/metrics/resource' and usage['scheme'] == 'https'
+    assert usage['tls_config'] == {'ca_file': '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'}
+    assert usage['metric_relabel_configs'][0]['action'] == 'keep'
+    state_role = next(o for o in objects if o['kind'] == 'ClusterRole' and o['metadata']['name'] == 'clothes-query-monitoring-node-state')
+    assert state_role['rules'] == [{'apiGroups': [''], 'resources': ['nodes', 'pods'], 'verbs': ['list', 'watch']}]
+    kubelet_role = next(o for o in objects if o['kind'] == 'ClusterRole' and o['metadata']['name'] == 'clothes-query-monitoring-kubelet-read')
+    assert kubelet_role['rules'] == [
+        {'apiGroups': [''], 'resources': ['nodes'], 'verbs': ['get', 'list', 'watch']},
+        {'apiGroups': [''], 'resources': ['nodes/metrics'], 'verbs': ['get']}]
+    disabled = subprocess.run(command + ['-n', 'monitoring', '--set', 'nodeMetrics.enabled=false'], capture_output=True, check=True)
+    disabled_objects = [o for o in yaml.safe_load_all(disabled.stdout) if o]
+    assert len([o for o in disabled_objects if o['kind'] == 'Deployment']) == 3
+    assert not any(o['metadata']['name'] == 'monitoring-node-state' for o in disabled_objects)
     # Missing targets must show an alert instead of silently appearing healthy.
     assert sum("absent(" in r["expr"] for r in rules["groups"][0]["rules"]) == 5
     for bindings in [x for x in objects if x["kind"] in {"RoleBinding", "ClusterRoleBinding"}]:
@@ -83,7 +98,7 @@ def main():
     assert delivery["spec"]["template"]["spec"]["automountServiceAccountToken"] is False
     assert delivery["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"] == {"cpu": "25m", "memory": "64Mi"}
     assert not any(x["kind"] in {"Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding", "PersistentVolumeClaim"} for x in enabled_objects if x["metadata"]["name"] == "monitoring-alertmanager")
-    print(f"PASS: {len(objects)} resources, existing WAS pool, 300m/896Mi, 5 jobs, 10 panels; namespace/image guards; optional new pool")
+    print(f"PASS: {len(objects)} resources, existing WAS pool, 325m/960Mi, 7 jobs, 17 panels; namespace/image guards; optional new pool")
 
 
 if __name__ == "__main__":

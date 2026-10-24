@@ -1,0 +1,25 @@
+- job_name: clothes-query-node-state
+  sample_limit: 10000
+  static_configs:
+    - targets: [monitoring-node-state:8080]
+- job_name: clothes-query-node-usage
+  scheme: https
+  metrics_path: /metrics/resource
+  scrape_interval: 60s
+  scrape_timeout: 10s
+  sample_limit: 10000
+  authorization:
+    credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  tls_config:
+    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  kubernetes_sd_configs:
+    - role: node
+  relabel_configs:
+    - source_labels: [__meta_kubernetes_node_name]
+      target_label: node
+    - source_labels: [__meta_kubernetes_node_label_karpenter_sh_nodepool]
+      target_label: nodepool
+  metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: node_cpu_usage_seconds_total|node_memory_working_set_bytes
+      action: keep

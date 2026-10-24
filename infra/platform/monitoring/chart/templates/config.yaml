@@ -17,6 +17,9 @@ data:
     {{- end }}
     scrape_configs:
 {{ .Files.Get "files/scrape-jobs.yaml" | indent 6 }}
+{{- if .Values.nodeMetrics.enabled }}
+{{ .Files.Get "files/node-scrape-jobs.yaml" | indent 6 }}
+{{- end }}
   rules.yml: |
 {{ .Files.Get "files/rules.yaml" | indent 4 }}
 ---

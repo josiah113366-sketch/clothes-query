@@ -1,4 +1,11 @@
 # Reuse the existing WAS node. No NodePool/NodeClass is created by default.
+nodeMetrics:
+  enabled: true
+  # Official kube-state-metrics v2.20.0 (Kubernetes 1.36), verified registry digest.
+  image: registry.k8s.io/kube-state-metrics/kube-state-metrics@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
 nodePool:
   create: false
   name: clothes-query-dev-api
