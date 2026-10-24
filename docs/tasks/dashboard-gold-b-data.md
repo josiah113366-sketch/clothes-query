@@ -1,6 +1,6 @@
 # 작업 지시서: dashboard/gold-b-data
 
-> 상태: 진행 중 · 브랜치: `dashboard/gold-b-data` (민혁 님 `dashboard/decorator`(#107) 끝 `e3d27d3`에서 만듦. #107 다음에 머지) · 담당: 은서 (`dashboard/TODO.md` B1) · 다음 작업: 구현 (2026-10-24 사용자: "일단 대시보드 연결부터 완성해줘")
+> 상태: 검토 대기 · 브랜치: `dashboard/gold-b-data` (민혁 님 `dashboard/decorator`(#107) 끝 `e3d27d3`에서 만듦. #107 다음에 머지) · 담당: 은서 (`dashboard/TODO.md` B1) · 다음 작업: PR (사용자, #107 머지 뒤), 뷰 읽기 권한 (재영 님), 배포 (민혁 님) (2026-10-24 사용자: "일단 대시보드 연결부터 완성해줘")
 
 ## 목표
 
@@ -47,9 +47,44 @@
 
 ## 완료 확인
 
-- [ ] `python test_gold_b_data.py` 통과 (dashboard 폴더에서)
-- [ ] `python test_approval_page.py` 통과 (기존 시험)
-- [ ] 실제 Athena에서 세 SQL이 돈다
-- [ ] `git diff --check`
+- [x] `python test_gold_b_data.py` 통과 (dashboard 폴더에서, 30개)
+- [x] `python test_approval_page.py` 통과 (기존 시험, 28개)
+- [x] 실제 Athena에서 세 SQL이 돈다
+- [x] `git diff --check`
 
 ## 작업 결과 (머지 전에 작성한다)
+
+### 만든 것
+
+- `dashboard/data.py`: #107의 `_athena`·`_utc`·`_hour_partitions`를 그대로 써서 조회 함수 3개를 만들고, 지연과 같은 조건(workgroup 있음)에서 `_REAL`에 등록했다.
+  - `get_payment_attempts(시간)`: `gold_b.payment_attempts` 뷰의 최근 N시간(`completed_at`)
+  - `get_malformed_events()`: `gold_b.malformed_events` 최근 6시간(`MALFORMED_HOURS`), 시간 폴더 조건
+  - `get_reprocess_events()`: `gold_b.reprocess_events` 최근 7일(`REPROCESS_DAYS`), `at`은 따옴표로
+  - Athena 결과(모두 글자)를 시각은 UTC 시각, 위치·시도 번호는 숫자로 바꾸고 칸은 더미와 같게 돌려준다. 시험할 수 있게 `query`, `now`를 받는다.
+  - 결제 시도 더미에서 `copies`를 뺐다 (뷰와 같은 칸).
+- 화면: 결제 관제 목록·설명에서 `copies`를 뺐다. 세 화면의 "※ 현재는 더미 데이터입니다"는 더미일 때만 나오고, 실데이터면 읽은 범위를 적는다. 재처리 이력 설명을 메시지 단위 재처리(#99)에 맞췄다.
+- `dashboard/test_gold_b_data.py` (30개): 가짜 `_athena`(값이 모두 글자인 표)로 SQL(표, 시간 폴더, 자정 넘김, 따옴표)·칸·형식·빈 결과, workgroup이 있을 때 등록, 조회 실패 시 더미 대체를 보고, 세 화면을 더미·실데이터 모양·실패 없는 결제로 연다 (`AppTest`). `streamlit_echarts`가 없는 PC에서는 그리기만 빈 함수로 대신한다.
+- 문서: `dashboard/README.md` 배포 6번, `dashboard/TODO.md` B1 담당·F3 메모.
+
+### 왜
+
+- 지연(③)은 #107이 이미 연결했고, 같은 파일을 고치는 다른 브랜치를 따로 올리면 충돌한다. 그래서 #107 위에서 남은 세 화면만 더했다.
+- `copies`는 #95 뒤 뷰에 없는 칸이라, 실데이터가 들어오면 결제 화면 목록이 멈춘다.
+
+### 확인한 결과
+
+- `python test_gold_b_data.py` 30개, `python test_approval_page.py` 28개 통과 (로컬 Python 3.12, streamlit 1.59.2).
+- 코드를 일부러 틀리게 바꾼 8가지(결제 목록 `copies`, 시각 변환 두 곳 빠짐, `at` 따옴표 빠짐, 시간 폴더 조건 빠짐, 재처리 등록 빠짐, 더미 안내 항상/안 보임)를 시험이 모두 잡았다.
+- 실제 Athena (은서 님 AWS 자격, 대시보드 workgroup, SELECT만): `payment_attempts` 뷰 474줄(10-20~21 시험 적재분, 성공 430·실패 44, 실패 원인 고객 39·PG 5), `malformed_events` 0줄, `reprocess_events` 0줄, 지연 150줄. 세 SQL 모두 문법·칸·형식이 맞다.
+- 대시보드 역할 권한 (IAM 시뮬레이션): 원장 `payment_events`·`malformed_events`·`reprocess_events`와 그 S3 폴더는 허용, 뷰 `payment_attempts`·`payment_states`는 거부.
+
+### 알아 둘 것
+
+- 팀 규칙상 결과가 비면 더미로 대체한다. 그래서 형식 오류(평소 0건)와 재처리 이력(요청이 없을 때)은 실데이터가 연결돼도 평소에 더미가 보일 수 있다 (화면 아래에 더미라고 적힘). 빈 결과를 그대로 보여 줄지는 민혁 님과 정할 일이다.
+- 결제 관제는 최근 6시간만 읽어서, 적재 잡이 상시로 돌기 전에는 비어 있어 더미가 보인다.
+
+### 다음 할 일
+
+- 재영 님: 대시보드 역할에 뷰 `gold_b.payment_states`·`gold_b.payment_attempts`의 `glue:GetTable` 추가 (`pipeline-status-read-only` 정책).
+- 사용자: #107 머지 뒤 이 브랜치 PR (최신 `main` 병합이 필요하면 그때 함).
+- 민혁 님: 머지 뒤 대시보드 이미지 재배포.

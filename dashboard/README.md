@@ -105,6 +105,7 @@ streamlit run app.py
 3. Athena/S3 읽기 권한(Pod Identity 역할)을 붙인 뒤 `data.py`의 `_REAL`에 조회 함수를 등록하고 `DATA_SOURCE=auto`로 바꾼다. 그 전에는 `dummy`.
 4. 모델 버전·패치노트(감성분석 모델 화면): `MODEL_REGISTRY_URI=s3://<버킷>/review-score/model-registry/releases/`와 그 경로 읽기 권한을 주고 `DATA_SOURCE=auto`면 S3의 `index.json`·`<버전>.json`을 읽는다. 값이 없거나 읽기에 실패하면 더미로 대체한다. 로컬에서 확인하려면 AWS 자격증명이 있는 셸에서 `MODEL_REGISTRY_URI=... streamlit run app.py`.
 5. 파이프라인 상태 › 데이터 흐름 탭: `DASHBOARD_ATHENA_WORKGROUP`(없으면 `APPROVAL_ATHENA_WORKGROUP`)과 `AWS_REGION`이 있으면 Athena에서 `gold_b.bronze_lag_snapshots`, `silver.silver_runs`, `gold_a.gold_runs`, Gold B 원장 3개를 60초마다 읽는다. 이 탭은 **더미로 대체하지 않는다.** workgroup이 없거나 읽는 곳이 아직 없는 단계는 회색 "미연결", 조회가 실패한 단계는 회색 "확인 불가"로 그린다. 같은 환경변수가 있으면 지연·점검 탭의 지연 측정도 실데이터를 읽는다.
+6. 결제 관제·형식 오류·재처리 이력 (TODO B1): 같은 workgroup 환경변수가 있으면 `gold_b.payment_attempts` 뷰(최근 6시간), `gold_b.malformed_events`(최근 6시간, 시간 폴더 조건), `gold_b.reprocess_events`(최근 7일)를 읽는다. 조회가 실패하거나 결과가 없으면 다른 화면처럼 더미로 대체하고 화면 아래에 더미라고 적는다. 결제 관제는 대시보드 역할에 뷰 `payment_states`·`payment_attempts`의 Glue 읽기 권한(`glue:GetTable`)이 더 있어야 한다 (2026-10-24 기준 없음, TODO F3). 형식 오류·재처리 기록은 지금 권한으로 읽힌다.
 
 ## 추후 할 일
 baseline 이후 영역별 할 일(담당자·상태 기록용)은 [`TODO.md`](TODO.md)에 정리한다. 아래는 그중 핵심.
