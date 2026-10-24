@@ -59,7 +59,7 @@ def access_probe():
             cmds=["python", "-c"],
             arguments=[CODE],
             env_vars={"PROBE_ROLE": role, "AWS_EC2_METADATA_DISABLED": "true"},
-            node_selector={"kubernetes.io/hostname": PROBE["hostname"]},
+            node_selector={"karpenter.sh/nodepool": "clothes-query-dev-compute"},
             container_resources=k8s.V1ResourceRequirements(
                 requests={"cpu": "25m", "memory": "96Mi"},
                 limits={"cpu": "200m", "memory": "192Mi"},

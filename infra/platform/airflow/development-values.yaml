@@ -98,6 +98,16 @@ scheduler:
     enabled: false
 dagProcessor:
   replicas: 1
+  # Keep the existing bundle name when migrating from the local probe mount.
+  # Public repository: no token or deploy key is embedded in this configuration.
+  dagBundleConfigList:
+    - name: dags-folder
+      classpath: airflow.providers.git.bundles.git.GitDagBundle
+      kwargs:
+        repo_url: https://github.com/josiah113366-sketch/clothes-query.git
+        tracking_ref: main
+        subdir: infra/platform/airflow/dags
+        refresh_interval: 60
   strategy:
     type: Recreate
     rollingUpdate: null
@@ -107,9 +117,6 @@ dagProcessor:
   logGroomerSidecar:
     enabled: false
 volumes:
-  - name: infra-dags
-    configMap:
-      name: airflow-infra-dags
   - name: simple-auth
     secret:
       secretName: airflow-simple-auth
@@ -120,10 +127,6 @@ volumes:
     configMap:
       name: airflow-rds-ca
 volumeMounts:
-  - name: infra-dags
-    mountPath: /opt/airflow/dags/infra_probe.py
-    subPath: infra_probe.py
-    readOnly: true
   - name: simple-auth
     mountPath: /opt/airflow/auth-source
     readOnly: true

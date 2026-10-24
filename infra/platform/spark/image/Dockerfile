@@ -11,6 +11,10 @@ RUN mvn --batch-mode --no-transfer-progress \
 
 FROM ${SPARK_BASE_IMAGE}
 USER root
+COPY requirements-pipelines.txt /tmp/requirements-pipelines.txt
+RUN python3 -m pip install --no-cache-dir --only-binary=:all: -r /tmp/requirements-pipelines.txt \
+    && python3 -m pip check \
+    && rm /tmp/requirements-pipelines.txt
 COPY --from=dependencies /deps /tmp/spark-dependencies
 COPY install_jars.py /tmp/install_jars.py
 # Validate the upstream distribution instead of silently mixing Hadoop versions.

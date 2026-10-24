@@ -106,28 +106,26 @@ spec:
       auto.create.topics.enable: false
       unclean.leader.election.enable: false
       {{- if .Values.kafka.retentionMs }}
-      log.retention.ms: {{ .Values.kafka.retentionMs }}
+      log.retention.ms: {{ printf "%.0f" (float64 .Values.kafka.retentionMs) }}
       {{- else }}
       log.retention.hours: {{ .Values.kafka.retentionHours }}
       {{- end }}
     template:
       podDisruptionBudget:
-        maxUnavailable: 1
+        maxUnavailable: {{ .Values.kafka.podDisruptionBudgetMaxUnavailable }}
   entityOperator:
     topicOperator:
       image: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
       {{- if eq .Values.profile "single-node" }}
       resources:
-        requests: {cpu: "100m", memory: "256Mi"}
-        limits: {cpu: "500m", memory: "384Mi"}
+        {{- toYaml .Values.kafka.entityOperatorResources | nindent 8 }}
       jvmOptions: {"-Xms": "128m", "-Xmx": "128m"}
       {{- end }}
     userOperator:
       image: quay.io/strimzi/operator@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
       {{- if eq .Values.profile "single-node" }}
       resources:
-        requests: {cpu: "100m", memory: "256Mi"}
-        limits: {cpu: "500m", memory: "384Mi"}
+        {{- toYaml .Values.kafka.entityOperatorResources | nindent 8 }}
       jvmOptions: {"-Xms": "128m", "-Xmx": "128m"}
       {{- end }}
   {{- if .Values.metrics.lagExporter.enabled }}

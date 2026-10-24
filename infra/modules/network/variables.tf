@@ -40,7 +40,7 @@ variable "additional_s3_endpoint_actions" {
   default     = []
   validation {
     condition = alltrue([for action in var.additional_s3_endpoint_actions : contains([
-      "s3:GetObjectVersion", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"
+      "s3:GetObjectVersion", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads"
     ], action)])
     error_message = "Only explicit supported object/version/multipart actions may extend the endpoint policy."
   }

@@ -34,4 +34,5 @@ module "gold_b_access" {
   enable_investigation_catalog   = var.enable_investigation_catalog
   investigation_database_name    = var.investigation_database_name
   investigation_write_prefixes   = var.investigation_write_prefixes
+  investigation_bedrock_profiles = var.investigation_bedrock_profiles
 }

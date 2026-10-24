@@ -112,6 +112,14 @@
             "limits"
           ]
         },
+        "podDisruptionBudgetMaxUnavailable": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "entityOperatorResources": {
+          "$ref": "#/properties/kafka/properties/resources"
+        },
         "heapMi": {
           "type": "integer",
           "minimum": 128,

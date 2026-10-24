@@ -17,6 +17,8 @@
 
 ## 실행과 확인
 
+2026-10-23 확정된 JP Claude Haiku 4.5 프로필 및 도쿄/오사카 목적지 모델만 조사 역할에 추가 적용했다. #53의 표 4개와 anomaly_current 뷰도 기존 DB에 배포했고, 실제 판정 ServiceAccount 첫 INSERT·SELECT를 통과했다. 업무 이미지/ConfigMap 연결 및 실제 모델 호출은 이 단계에 포함하지 않는다. [현재 적용 기록](../../../docs/tasks/infra-agent-bedrock-catalog.md)을 따른다. 아래는 초기 준비 시점의 일반 검증 안내다.
+
 실제 계정/state bucket은 Git 제외 `deployment.local.tfvars.json`, backend bucket은 `deployment.backend.hcl`로 공급한다. [전체 안내](../../IMPLEMENTATION.md)에 따라 init, fmt, validate, mock, plan 후 적용한다. 실제 적용 전 동일 역할/workgroup/association의 존재와 소유권을 확인한다. 보류 중인 `infra/athena-query-base`는 같은 판정 workgroup 이름을 사용하므로 두 스택을 함께 적용하지 않는다. 이번 스택으로 통합해 쓸 경우 기존 미적용 후보는 대체한다.
 
 이 스택은 IAM/Workgroup만 관리한다. namespace/ServiceAccount 소유권은 별도 manifest에 있으며 Airflow/업무 chart에서 재사용한다. scheduler가 판정 Pod를 띄우는 RBAC도 별도로 연결해야 한다. 판정의 업무 기록 쓰기는 실제 저장 prefix·writer 방식이 확정될 때까지 빈 목록으로 유지한다. Athena INSERT와 S3 직접 Parquet append의 요구 권한은 다를 수 있다. 읽기 전용 Glue 권한만으로 신규 테이블 생성은 불가능하다.

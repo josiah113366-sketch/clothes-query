@@ -20,9 +20,10 @@ variable "state_region" {
 }
 variable "bindings" {
   type = map(object({
-    namespace       = string
-    service_account = string
-    s3_access       = map(set(string))
+    namespace          = string
+    service_account    = string
+    s3_access          = map(set(string))
+    s3_directory_reads = optional(set(string), [])
   }))
   default = {}
 }

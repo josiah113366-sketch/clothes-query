@@ -1,5 +1,8 @@
 # Handoff contract only. Not loaded by runtime.py or the business application.
-# null = awaiting team confirmation; no permissions or workloads are created.
+# Historical handoff template, not live deployment state.
+# Trade and new review inputs use Bronze v2; legacy review reads remain during migration.
+# Operational permissions: infra/stacks/spark-access.
+# null = awaiting values for a new handoff; no permissions or workloads are created.
 confirmed_developer_access:
   ecr_push_principal_arn: arn:aws:iam::827913617635:user/de-ai-18
   permissions_applied: false
@@ -18,19 +21,20 @@ confirmed_runtime:
 pending:
   namespace: null
   namespace_shared_with_gold_b: null
-  service_account_prefix: null
+  service_account_prefix: silver-gold-a
   python_version_requirement: match_provided_base_image
   business_image_digest: null
   ecr_repository: null
   code_and_rules_delivery: same_business_image_for_driver_and_executors
-  config_request_prefix_uri: null
+  config_request_prefix_uri: s3://clothes-query-datalake/pipelines/requests/
+  input_manifest_prefix_uri: s3://clothes-query-datalake/pipelines/input-manifests/
   config_request_uri: null
   dag_repository_path: null
   dag_delivery_method: null
   inputs:
-    orders: {uri: 's3://clothes-query-datalake/bronze/orders/', format: json_lines}
-    order_items: {uri: 's3://clothes-query-datalake/bronze/order-items/', format: json_lines}
-    payments: {uri: 's3://clothes-query-datalake/bronze/payments/', format: json_lines}
+    orders: {uri: 's3://clothes-query-datalake/bronze_v2/orders/', format: json_lines}
+    order_items: {uri: 's3://clothes-query-datalake/bronze_v2/order-items/', format: json_lines}
+    payments: {uri: 's3://clothes-query-datalake/bronze_v2/payments/', format: json_lines}
   input_date_partition_rule: UTC_Kafka_record_date_folders__KST_business_date_aggregation
   outputs:
     silver_uri: 's3://clothes-query-datalake/silver/runtime/trade/'
@@ -41,10 +45,10 @@ pending:
   delete_prefixes: null
   glue_access_required: true
   glue_databases_and_operations: null
-  silver_entry_file: null
-  silver_arguments: null
-  gold_a_entry_file: null
-  gold_a_arguments: null
+  silver_entry_file: local:///opt/pipelines/pipelines/spark_batch.py
+  silver_arguments: ['--config-uri', '<fixed-request-json-uri>']
+  gold_a_entry_file: local:///opt/pipelines/pipelines/spark_batch.py
+  gold_a_arguments: ['--config-uri', '<fixed-request-json-uri>']
   silver_completion_condition: null
   test_date_range: null
   test_data_size_estimate: null
@@ -54,13 +58,22 @@ supplied_contract:
   bucket: clothes-query-datalake
   input_partition_layout: year=YYYY/month=MM/day=DD/
   entry_file_proposal: local:///opt/pipelines/pipelines/spark_batch.py
-  entry_implemented: false
+  entry_implemented: reported_by_owner__remote_commit_unavailable
   argument_proposal: ['--config-uri', '<fixed-request-json-uri>']
   run_request_fields: [run_id, job, inputs, output_root, input_complete, scope]
   run_records: manifest.json_and_completed_run_id_json_and_current_json_under_each_output_root
   publication_guard: incomplete_Silver_quality_blocks_Gold_A_publication
   product_snapshot_uri: null
-  s3_committer: null
+  s3_committer: magic
+  magic_working_path_pattern: runs/<run_id>/<dataset>/__magic_job-*/
+  shared_temporary_prefix: null
+  bucket_multipart_listing_required: null
+  reported_code_commit: 908c252
+  reported_job_kinds: [trade, funnels, reviews]
+  prepared_data_permission_scope: trade_only
+  python_packages: {PyYAML: '6.0.3', boto3: '1.43.71', pyarrow: '25.0.1', tzdata: '2026.3'}
+  r6_tables_proposed: [silver_runs, order_amount_checks]
+  r6_completed_at_implemented: false
   permanent_successful_run_deletion: false
 
 colleague_proposal:

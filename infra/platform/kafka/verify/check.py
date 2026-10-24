@@ -340,6 +340,8 @@ def main():
                   compact_kafka["entityOperator"]["topicOperator"]["resources"],
                   compact_kafka["entityOperator"]["userOperator"]["resources"],
                   yaml.safe_load((ROOT / "operator-values.yaml").read_text())["resources"]]
+        # A single broker must not be evicted by voluntary node consolidation.
+        assert compact_kafka["kafka"]["template"]["podDisruptionBudget"]["maxUnavailable"] == 0
         def memory_mib(value):
             return int(value[:-2]) * (1024 if value.endswith("Gi") else 1)
         assert sum(memory_mib(r["requests"]["memory"]) for r in budget) == 3456

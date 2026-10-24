@@ -19,6 +19,11 @@ kafka:
     requests: {cpu: "500m", memory: "2Gi"}
     limits: {cpu: "1", memory: "2Gi"}
   heapMi: 1024
+  podDisruptionBudgetMaxUnavailable: 1
+  # Used by the single-node development profile only.
+  entityOperatorResources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits: {cpu: "500m", memory: "384Mi"}
   # Explicit namespace names allowed to reach client listener; mTLS/ACL still required.
   clientNamespaces: []
 # Business contracts are not yet fixed. No invented six-topic mapping.

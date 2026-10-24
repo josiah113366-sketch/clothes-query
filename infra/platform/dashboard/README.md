@@ -10,6 +10,12 @@
 | `k8s/service.yaml` | ClusterIP 8501 |
 | `deploy.ps1` | 빌드·ECR push·digest 반영·apply 를 한 번에 하는 PowerShell 스크립트 (아래 "스크립트로 배포") |
 
+## 실제 승인 연결
+
+2026-10-23 실제 승인 연결: ServiceAccount는 `dashboard/approval-dashboard`, workgroup은 `clothes-query-dev-dashboard`다. 기존 Secret `dashboard/airflow-api-client`의 `username`·`password`를 사용한다. 기존 역할과 전용 workgroup은 [dashboard-access](../../stacks/dashboard-access/README.md)에서 관리한다. 실제 Pod의 승인 조회·S3 패치노트·Airflow 인증을 확인했다. 재처리 DAG 등록과 실제 승인·재처리 시험은 구분하며 최신 Silver 정상 실행 결과는 [공개 연결 기록](../../../docs/tasks/infra-silver-publication.md)을 따른다. [기존 배포·검증 기록](../../../docs/tasks/infra-dashboard-runtime-connect.md)도 보존한다.
+
+2026-10-24 파이프라인 상태 화면을 위해 같은 역할에 Gold B 원장 4개·Silver/Gold 완료 목록의 Glue/S3 읽기를 추가했다. 기존 전용 workgroup을 그대로 쓰며 새 원본 쓰기·삭제는 허용하지 않는다. `gold_a.gold_runs`의 실제 파티션이 가리키는 채널별 완료 목록도 읽는다. 화면 코드 배포와 데이터 조회 권한 적용은 별개다. [대상과 확인 기록](../../../docs/tasks/infra-dashboard-status-read.md)을 따른다.
+
 ## 스크립트로 배포 (처음 한 번 준비가 끝난 뒤)
 저장소 루트에서 실행한다. Docker Desktop 실행, AWS 로그인, kubeconfig(`infra/EKS_ACCESS.md`)가 필요하다. `KUBECONFIG` 가 없으면 `.cache\eks-kubeconfig.private` 를 쓴다.
 ```powershell
@@ -46,5 +52,4 @@
 ## 알아둘 것
 - 로그인 실패 잠금은 파드별 메모리라 replicas 는 1로 둔다.
 - HTTP 구간에서는 비밀번호가 암호화되지 않는다. 운영 전 도메인과 HTTPS 로 바꾼다.
-- 실데이터를 읽으려면 Athena 조회 함수 등록, 읽기 전용 Pod Identity ServiceAccount(`gold_a/`·`gold_b/`·`review-score/model-registry/releases/`만, `ground_truth/` 금지)가 필요하다(`DATA_SOURCE=auto` 는 이미 설정됨). 모델 패치노트 위치(`MODEL_REGISTRY_URI`)는 `deployment.yaml`에 채워 두었다. 할 일은 `dashboard/TODO.md` 의 F3, F4.
-- 이미지 빌드·ECR 저장소, 위 YAML 의 실제 적용은 하지 않았고 `kubectl apply --dry-run=server` 도 해 보지 않았다.
+- `DATA_SOURCE=auto`는 데이터별 연결 상태에 따라 실데이터 또는 더미를 쓴다. 실제 연결된 것은 승인 조회와 모델 패치노트이며, Gold A 등 나머지 분석 화면을 모두 연결한 것은 아니다. 패치노트 prefix는 읽기만, 승인 이벤트 prefix는 필요한 쓰기만 허용하며 `ground_truth/`는 명시 거부한다. 앱 담당의 Athena 함수 연결은 별도다.

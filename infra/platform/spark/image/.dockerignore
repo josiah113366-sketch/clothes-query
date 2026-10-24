@@ -1,6 +1,7 @@
 *
 !Dockerfile
 !pom.xml
+!requirements-pipelines.txt
 !install_jars.py
 !Dockerfile.smoke
 !smoke.py

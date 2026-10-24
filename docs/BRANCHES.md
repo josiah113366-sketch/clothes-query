@@ -27,7 +27,6 @@
 | `gold-b` | `pipelines/gold_b/` | Gold B(관제용) 잡 | 시작 전 |
 | `dashboard` | `dashboard/` | 대시보드 앱(Streamlit, 상품 관리·데이터 관리 Role). 배포 소스는 `infra/platform/dashboard/`(infra 영역) | 사용 중 |
 | `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 시작 전 |
-| `agent` | `agent/` | 탐지 규칙, 이상 이력, 조사 에이전트, 승인 | 사용 중 |
 | `ci` | `.github/` | GitHub Actions | 시작 전 |
 | `api` | `api/` | 업무 API(WAS, FastAPI). 시뮬레이터 → API → RDS·Kafka(clickstream). 설계: `docs/design/api.md` | 시작 전 |
 
@@ -97,7 +96,6 @@ gitGraph
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
 | `sim/sink-pause` | [sim-sink-pause.md](tasks/sim-sink-pause.md) | 진행 중 | |
 | `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
-| `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 머지됨 | 2026-10-22 (#60) |
 | `sim/console` | `docs/tasks/sim-console.md` | 머지됨 | |
 
 ### docs
@@ -113,14 +111,28 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `infra/applied-state-sync` | [infra-applied-state-sync.md](tasks/infra-applied-state-sync.md) | 적용 후속·draft 보존·#100 반영·Gold B 연결 기반 검증 완료, 공유 브랜치 | |
+| `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 적용·조회 검증 완료, applied-state-sync에 통합·원본 보존 | |
+| `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | 실행 기반 적용·첫 업무 실행 확인, applied-state-sync에 통합·원본 보존 | |
+| `infra/agent-bedrock-catalog` | [infra-agent-bedrock-catalog.md](tasks/infra-agent-bedrock-catalog.md) | JP Haiku·agent 설정 적용, applied-state-sync에 통합·원본 보존 | |
+| `infra/bronze-v2-lag-collector` | [infra-bronze-v2-lag-collector.md](tasks/infra-bronze-v2-lag-collector.md) | v2 실제 수집 검증, applied-state-sync에 통합·원본 보존 | |
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
 | `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |
+| `infra/incident-readiness` | [infra-incident-readiness.md](tasks/infra-incident-readiness.md) | 복구 절차·읽기 점검·기존 경보 보강 및 승인된 인프라 이메일 연결, 새 노드 없음 | |
+| `infra/kafka-retention-week` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 업무·heartbeat 7일 보관, alias 충돌 수정·실제 복구 확인 | |
+| `infra/operations-tools-share` | [infra-operations-tools-share.md](tasks/infra-operations-tools-share.md) | 모니터링·Argo CD 통합 공유, 승인·머지 대기 | |
+| `infra/monitoring-baseline` | [infra-monitoring-baseline.md](tasks/infra-monitoring-baseline.md) | WAS 노드 설치·수집 검증·2분 실측 완료, 로컬 보관 | |
+| `infra/argocd-runtime` | [infra-argocd-runtime.md](tasks/infra-argocd-runtime.md) | WAS 노드 설치·로그인·저장소·권한 검증 완료, 앱 등록 전 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
 | `infra/agent-development-access` | [infra-agent-development-access.md](tasks/infra-agent-development-access.md) | 실제 적용·PR #49 검토 대기 | |
 | `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
 | `infra/gold-b-access-prep` | [infra-gold-b-access-prep.md](tasks/infra-gold-b-access-prep.md) | 조회 기반 적용·실제 Pod 접근 검증 완료 | |
 | `infra/agent-data-write` | [infra-agent-data-write.md](tasks/infra-agent-data-write.md) | 실제 적용·PR #50 검토 대기 | |
+| `infra/data-runtime-share` | [infra-data-runtime-share.md](tasks/infra-data-runtime-share.md) | Airflow·카탈로그·점검·현황 통합 공유, 승인·머지 대기 | |
+| `infra/agent-runtime-connections` | [infra-agent-runtime-connections.md](tasks/infra-agent-runtime-connections.md) | Git DAG·dashboard 권한/인증 적용·검증, 담당자 입력 대기 | |
+| `infra/gold-b-catalog` | [infra-gold-b-catalog.md](tasks/infra-gold-b-catalog.md) | Glue DB·Athena 표 5개 실제 등록/검증 완료 | |
+| `infra/live-code-audit` | [infra-live-code-audit.md](tasks/infra-live-code-audit.md) | 배포·main / DAG 공급 / RDS·Kafka 1~3단계 읽기 전용 점검 완료 | |
 | `infra/ready` | [infra-ready.md](tasks/infra-ready.md) | 머지됨 (PR #11) | 2026-10-16 |
 | `infra/rds-first` | [infra-rds-first.md](tasks/infra-rds-first.md) | 머지됨 (infra/ready에 통합) | 2026-10-16 |
 | `infra/deploy-result` | [infra-deploy-result.md](tasks/infra-deploy-result.md) | 머지됨 | 2026-10-16 |
@@ -132,7 +144,12 @@ gitGraph
 | `infra/sagemaker-model-release` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (점수화 SSM 을 릴리스 묶음 기준으로. `dashboard/model-benchmark`에 머지해 함께 올림) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
-| `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 비활성 Spark 기반 통합 공유, 업무 명세·배포 대기 | |
+| `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 기반 공유 #75 머지됨. 후속 로컬 변경은 spark-runtime-followup으로 분리 | |
+| `infra/spark-runtime-followup` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | ECR·거래 커미터 권한·패키지 후속, 최신 main 반영. AWS 미적용 | |
+| `infra/spark-nodepool-enable` | [infra-spark-nodepool-enable.md](tasks/infra-spark-nodepool-enable.md) | 첫 실행 PASS·노드 자동 종료 확인, applied-state-sync에 통합·원본 보존 | |
+| `infra/airflow-log-access-restore` | [로그 복구](tasks/infra-airflow-log-access-restore.md), [Gold B 뷰 배포](tasks/infra-gold-b-view-deploy.md) | 로그·기존 뷰 조회 검증, applied-state-sync에 통합·원본 보존 | |
+| `infra/dashboard-runtime-connect` | [infra-dashboard-runtime-connect.md](tasks/infra-dashboard-runtime-connect.md) | 승인 신원·인증·패치노트 검증, applied-state-sync에 통합·원본 보존 | |
+| `infra/common-cpu-diet` | [infra-common-cpu-diet.md](tasks/infra-common-cpu-diet.md) | 공용 노드 2→1 통합 검증, applied-state-sync에 통합·원본 보존 | |
 | `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
 

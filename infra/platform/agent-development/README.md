@@ -33,6 +33,22 @@ docker push "${registry}/clothes-query-dev/detection-job:${imageTag}"
 
 PR #46 Dockerfile 기준 build context는 `agent/detect`이고 ENTRYPOINT는 `python run_job.py`다. 위 명령은 해당 PR 파일을 받은 뒤 실행하며 아직 실제 빌드 성공을 뜻하지 않는다. 태그는 immutable이므로 덮어쓰지 말고 새 SHA를 사용한다. push 후 repository/tag/digest와 필요한 환경변수·자원·실행 명령을 인프라 담당에게 전달한다. 이번 준비에서 Docker를 시작하거나 이미지를 빌드하지 않는다.
 
+2026-10-22 확인: 조사 PR #54의 `agent/investigator/Dockerfile`은 `agent/`가 build context다. 저장소 루트에서 `docker build --platform linux/amd64 -f agent/investigator/Dockerfile -t "${registry}/clothes-query-dev/investigation-agent:${imageTag}" agent` 후 push한다. `COPY detect/...`, `COPY tools/...`를 함께 사용하기 때문이다. 현재 main의 판정 Dockerfile은 여전히 agent/detect 기준이므로 같은 context를 그대로 사용할 수 없다. 판정도 agent 기준으로 바꾸려면 담당자가 COPY와 실행 경로를 수정한 Dockerfile을 제출해야 한다. 인프라는 업무 Dockerfile을 대신 수정하지 않는다.
+
+기존 개발자 역할 IAM simulation에서 두 저장소 PutImage/InitiateLayerUpload 허용 4건·타 저장소 차단 2건·ECR 토큰 발급 허용을 확인했다. 이는 담당자 본인 AWS 세션의 실제 Docker build/push 완료를 의미하지 않는다.
+
+## DAG 공급 계약
+
+원본은 이 저장소 main의 `infra/platform/airflow/dags/`다. 동료가 DAG를 작성해 PR을 올리고 인프라는 배포 경로·권한·자원·Secret 참조만 검토한다. 자동 머지는 하지 않는다. Airflow의 GitDagBundle이 60초 간격으로 main을 확인하며 실행별 Git 버전을 기록한다. 현재 이미지에 Git provider 0.5.0과 git이 있어 sidecar·새 노드·추가 PVC 없이 연결한다. Python 의존성은 Git 동기화로 설치되지 않으므로 새 패키지는 Airflow 이미지 공급과 별도 검토한다. 업무 코드는 agent 이미지의 별도 Pod에서 실행한다.
+
+5분 일정·DAG ID·재시도·중복 실행 방지·입력 conf는 담당자 코드 계약이다. 현재 본체 parallelism=1을 유지하며 업무 Pod 자원은 실제 이미지 요구량을 받은 뒤 배치·노드 추가 여부를 확인한다. 합성 DAG 성공은 업무 5분 SLA가 아니다.
+
+## Bedrock 확정 입력
+
+도쿄 발신 조회에서 `apac.amazon.nova-lite-v1:0`와 `jp.anthropic.claude-haiku-4-5-20251001-v1:0` 프로필이 ACTIVE였다. 전자는 도쿄·오사카·서울·뭄바이·싱가포르·시드니, 후자는 도쿄·오사카 모델로 라우팅된다. 도쿄 endpoint 호출과 도쿄 내 추론은 다르다. 모델 담당자가 최종 프로필을 정하면 gold-b-access의 investigation_bedrock_profiles에 해당 프로필 ARN과 조회된 목적지 모델 ARN만 넣는다. 현재 값은 비어 있어 호출 권한을 추가하지 않는다.
+
+Converse는 IAM의 bedrock:InvokeModel로 제어한다. 프로필과 목적지 foundation-model에 모두 권한이 필요하며 목적지 모델 허용은 bedrock:InferenceProfileArn 조건으로 해당 프로필에 묶는다. 와일드카드 모델·전체 리전·streaming·모델 선택 로직을 추가하지 않는다. 이번에 유료 모델 호출은 하지 않았다.
+
 ## Airflow 승인 API
 
 현재 개발 Airflow는 3.3.2 / Simple Auth Manager다. 승인 백엔드는 EKS 내부 Airflow Service에 `POST /auth/token`으로 JSON `{"username":"approval","password":"<Secret에서 읽은 값>"}`을 보내고 반환된 `access_token`을 `Authorization: Bearer ...`로 사용한다. 그 다음 `POST /api/v2/dags/{dag_id}/dagRuns`를 호출한다. 토큰 만료 시 다시 발급하고 비밀번호·JWT는 브라우저/로그/Git에 넣지 않는다. 서버는 TLS를 종단하는 외부 ALB가 아니라 내부 Service로 준비돼 있으며 실제 접속 값은 비공개 전달한다.
