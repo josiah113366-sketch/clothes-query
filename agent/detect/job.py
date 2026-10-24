@@ -60,9 +60,10 @@ WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)}{_
 
 
 def _replaced_filter(query, cfg, tick):
-    """최근 5분 안에 교체가 끝난 시간대(LEDGER_REPLACED)의 줄 중, 교체 때 적재된 줄(loaded_at <= 교체 기록 시각)을 빼는 조건."""
+    """최근 5분 안에 Gold B 원장 교체(source가 KAFKA·BRONZE·비어 있음, SILVER 제외)가 끝난 시간대의 줄 중, 교체 때 적재된 줄(loaded_at <= 교체 기록 시각)을 빼는 조건."""
     events = query(f"""SELECT window_start, window_end, "at" AS replaced_at FROM gold_b.reprocess_events
-WHERE step = 'LEDGER_REPLACED' AND "at" >= {_ts(tick - timedelta(minutes=STEP_MIN), cfg)}""")
+WHERE step = 'LEDGER_REPLACED' AND (source IS NULL OR source IN ('KAFKA', 'BRONZE'))
+  AND "at" >= {_ts(tick - timedelta(minutes=STEP_MIN), cfg)}""")
     parts = []
     for e in events:
         ws, we, at = (datetime.fromisoformat(str(e[k]).replace("T", " ")) for k in ("window_start", "window_end", "replaced_at"))
