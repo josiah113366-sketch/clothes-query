@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-format-check
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #84까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨, `pipelines/gold-b-compact` 머지 뒤) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
+> 상태: 완료 (#91, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-format-check` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #84까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess`는 #84로 머지됨, `pipelines/gold-b-compact` 머지 뒤) · 다음 작업: 적재 잡 연결 (`pipelines/gold-b-ingest`)
 
 ## 목표
 

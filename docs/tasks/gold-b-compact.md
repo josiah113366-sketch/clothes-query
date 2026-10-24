@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-compact
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-compact` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 남은 일: DAG (재영 님)
+> 상태: 완료 (#88, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-compact` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 최신 `main` #78까지 포함) · main 대상 PR 제출 (`pipelines/gold-b-reprocess` 머지 뒤) · 남은 일: DAG (재영 님)
 
 ## 목표
 

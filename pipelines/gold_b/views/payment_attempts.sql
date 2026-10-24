@@ -8,10 +8,5 @@ SELECT payment_id, order_id, attempt_no, pg, status, failure_code,
          WHEN status = 'FAILED' THEN 'UNKNOWN'
        END AS failure_cause,
        completed_at, loaded_at
-FROM (
-  SELECT e.*, ROW_NUMBER() OVER (PARTITION BY payment_id
-                                 ORDER BY loaded_at, kafka_partition, kafka_offset) AS rn
-  FROM gold_b.payment_events e
-  WHERE NOT EXISTS (SELECT 1 FROM gold_b.payment_conflicts c WHERE c.payment_id = e.payment_id)
-)
-WHERE rn = 1;
+FROM gold_b.payment_states
+WHERE hold_reason IS NULL;

@@ -191,11 +191,15 @@ gitGraph
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
 | `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
 | `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 머지됨 (#78) | 2026-10-23 |
-
 | `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 머지됨 (#84) | 2026-10-23 |
-| `pipelines/gold-b-format-check` | [gold-b-format-check.md](tasks/gold-b-format-check.md) | 검토 대기 (`pipelines/gold-b-compact` 머지 뒤) | |
-| `pipelines/gold-b-compact` | [gold-b-compact.md](tasks/gold-b-compact.md) | 검토 대기 (`pipelines/gold-b-reprocess` 머지 뒤) | |
-| `pipelines/gold-b-ingest` | [gold-b-ingest.md](tasks/gold-b-ingest.md) | 검토 대기 (`pipelines/gold-b-format-check`·`pipelines/gold-b-compact` 머지 뒤) | |
+| `pipelines/gold-b-format-check` | [gold-b-format-check.md](tasks/gold-b-format-check.md) | 머지됨 (#91) | 2026-10-23 |
+| `pipelines/gold-b-compact` | [gold-b-compact.md](tasks/gold-b-compact.md) | 머지됨 (#88) | 2026-10-23 |
+| `pipelines/gold-b-ingest` | [gold-b-ingest.md](tasks/gold-b-ingest.md) | 머지됨 (#92) | 2026-10-23 |
+| `pipelines/gold-b-payment-update` | [gold-b-payment-update.md](tasks/gold-b-payment-update.md) | 머지됨 (#95) | 2026-10-23 |
+| `pipelines/gold-b-image` | [gold-b-image.md](tasks/gold-b-image.md) | 머지됨 (#98) | 2026-10-24 |
+| `pipelines/gold-b-reprocess-by-message` | [gold-b-reprocess-by-message.md](tasks/gold-b-reprocess-by-message.md) | 머지됨 (#99) | 2026-10-24 |
+| `pipelines/gold-b-dags` | [gold-b-dags.md](tasks/gold-b-dags.md) | 검토 대기 | |
+| `pipelines/gold-b-bronze-reprocess` | [gold-b-bronze-reprocess.md](tasks/gold-b-bronze-reprocess.md) | 검토 대기 | |
 
 ### gold-a
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

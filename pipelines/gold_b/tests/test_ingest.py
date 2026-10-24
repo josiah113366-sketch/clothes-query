@@ -92,14 +92,14 @@ def test_config_file():
 # ---------- 형식 검사기 연결과 실행 입구 ----------
 
 def test_batch_with_the_format_checker(tmp_path):
-    """실제 형식 검사기로 샘플 묶음을 쓰면 ② 31줄, ① 9줄, ④는 샘플 기대 오류 수다 (재처리 잡과 같은 검사기)."""
+    """실제 형식 검사기로 샘플 묶음을 쓰면 ② 31줄, ① 10줄, ④는 샘플 기대 오류 수다 (재처리 잡과 같은 검사기)."""
     pytest.importorskip("yaml")
     from pipelines.gold_b.format_check import FormatChecker
 
     checker = FormatChecker()
     summary = write_batch(sample_messages(), checker=checker, store=LocalStore(tmp_path), loaded_at=LOADED_AT)
     assert summary["rows"]["topic_messages"] == len(load_samples()) == 31
-    assert summary["rows"]["payment_events"] == sum(s["expected"]["payment_events"] for s in load_samples()) == 9
+    assert summary["rows"]["payment_events"] == sum(s["expected"]["payment_events"] for s in load_samples()) == 10
     assert summary["rows"]["malformed_events"] == sum(len({e["field"] for e in s["expected"]["malformed"]})
                                                       for s in load_samples())
     assert {row["rule_version"] for row in all_rows(LocalStore(tmp_path), "malformed_events")} == {checker.rule_version}

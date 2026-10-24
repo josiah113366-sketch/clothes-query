@@ -193,3 +193,63 @@
 - 사전 검증 자료·최종 main 전용 빌드 절차는 Git 제외 pipelines/gold_a/.local/pr82-image-prep-20261023/에 있다. 보완 후보 code_ref는 c8f798f 전체 SHA에 +image-prep를 붙여 미커밋 준비 변경임을 구분했다.
 - 최종 발행은 인프라 기본 ECR digest·업무 저장소 확인, PR 리뷰·main 머지 후 해당 main 코드로 재빌드한다. ECR push·인프라 변경·EKS 실행은 하지 않았다.
 - JAR 재사용 보완 후에도 소스 16파일·팀 연결 JAR 체크섬·패키지·필수 클래스·합성 합계 45 검증을 통과했다. 실제 거래 검증은 최적화 전 동일 업무 소스 후보에서 수행했으며 보완 뒤 전체 거래 재실행으로 표기하지 않는다. 상세 report.json에 구분했다. git diff --check 통과.
+
+### Glue·Athena 공개 명세 정리 (2026-10-23) · 문서 검수 대기
+
+- docs/contracts/silver-gold-a-publication.md에 DB/표 이름 제안, run_id 파티션과 S3 LOCATION, 실제 거래 물리 스키마, Gold 지표·refresh_holds 동일 실행 조회, 완료 공개 절차와 역할별 권한을 정리했다. 실행 ID 고정 조회 방식은 결정이며 날짜 LOCATION 교체나 Gold A Iceberg 전환을 구현하지 않는다.
+- R6 silver_runs/order_amount_checks, COMPLETED와 품질 상태 분리, completed_at 순서 조건, 미처리 실행 순차 조회와 행 부재 미해소 기준을 정리했다. 완료 목록·completed_at·직렬 공개·판정 잡 순차 소비는 아직 미구현이다.
+- 현재 TIMESTAMP_MICROS 출력과 Athena Engine 3 정밀도 제약을 구분했다. 공개용 TIMESTAMP_MILLIS/원본 UTC 문자열 투영은 제안이며 실제 Athena 읽기 검증 전 DDL 확정을 보류한다. 원본·지문 정밀도를 변경하지 않았다.
+- 최신 모델 Iceberg 뷰의 리뷰별 모델 선택과 현재 단일 모델 파일 입력 구현의 차이도 명시했다. 어댑터뿐 아니라 버전별 그룹/출처 고정 연결이 필요하다.
+- 이번 작업은 문서 3파일만 변경했다. 원본 데이터·실행 코드·YAML·인프라 리소스·권한·Athena/Glue는 변경하지 않았고 DDL 실행·커밋·push는 하지 않았다.
+
+### 팀 메시지 수신 및 후속 요청 (2026-10-23)
+
+#### 재영 · Spark 기본 이미지 발행 완료
+
+- 전달된 환경: Spark 4.2.0 / Python 3.10.12 / Java 21, linux/amd64.
+- `pipelines/Dockerfile` 빌드의 `SPARK_IMAGE`에 아래 digest 고정 주소를 사용한다.
+
+```text
+827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/spark-base@sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f
+```
+
+- 업무 이미지 발행 대상: `827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/silver-gold-a`.
+- 요청된 태그는 업무 코드의 커밋 해시이며, 발행 후 최종 이미지 digest를 재영에게 전달한다.
+- 이전 기록의 기본 이미지 주소 대기 사항은 이번 메시지로 해소됐다. 전달된 digest의 실제 pull·빌드·검증 및 업무 이미지 push는 아직 수행하지 않았다.
+
+#### 주현 · R6 및 Silver 재처리 시연 일정 확인
+
+- 발표일: 2026-10-27. 시연 방식 결정일: 2026-10-25(일).
+- 회신 요청 ①: `silver_runs`와 `order_amount_checks`를 Athena에서 읽을 수 있게 되는 예상 날짜.
+- 회신 요청 ②: 승인 화면에서 Silver 재처리 DAG를 호출할 수 있게 되는 예상 날짜.
+- 2026-10-25 오전까지 준비가 어렵다면 시연 B(R5 기반 재처리·재판정)로 진행할 예정이라고 전달받았다. 정확한 오전 마감 시각은 제시되지 않았다.
+- 현재 공개 명세는 문서 검수 단계이며 R6 완료 목록·Athena 공개와 Silver 재처리 DAG 연결은 미완료다. 제공 가능한 날짜는 아직 확답하지 않았다.
+
+#### 후속 체크리스트
+
+- [ ] 발행된 기본 이미지 digest로 linux/amd64 업무 이미지를 빌드하고 필수 패키지·JAR·거래 실행을 검증한다.
+- [ ] 검수된 코드 커밋 해시 태그로 업무 이미지를 발행하고 최종 digest를 전달한다.
+- [ ] R6 완료 목록·결과의 Athena 공개와 승인 화면→Silver 재처리 DAG 연결에 필요한 잔여 작업을 확인한다.
+- [ ] 두 기능의 제공 예상 날짜와 10/25 오전 시연 가능 여부를 주현에게 회신한다. 미완료 기능을 사용 가능하다고 안내하지 않는다.
+
+이 절은 수신 내용과 후속 요청 기록이다. 팀 회신·ECR 발행·운영 배포 완료 기록이 아니다.
+
+### 인프라 자원 프로필 대조 및 정렬 (2026-10-23) · 검수 대기
+
+- fetch 후 origin/main의 `infra/platform/spark/runtime.py` dedicated 프로필과 업무 DAG를 비교했다. 인프라 파일 자체는 변경하지 않았다.
+- 업무 DAG의 Driver heap 1g→512m, Executor CPU 요청 600m→500m, shuffle 파티션 8→4를 인프라 값으로 맞췄다. Driver CPU는 같은 값인 0.25를 250m으로 표기 통일하고 Driver cores=1을 명시했다.
+- 제출기 요청을 CPU 250m/메모리 512Mi, 제한을 CPU 500m/메모리 1Gi로 맞췄다. 인프라 제출기와 동일하게 SPARK_DRIVER_MEMORY=512m을 설정했다. 기존 ephemeral-storage 제한은 유지했다.
+- Executor heap 1g·overhead 512m, Driver overhead 512m, Executor 초기/최소 1·최대 2는 기존부터 일치했다. README의 shuffle 설정 예시도 4로 맞췄다.
+- 네트워크를 끈 로컬 Airflow 이미지에서 실제 DAG 파싱·Pod 렌더링을 실행했다. Spark 설정을 인프라 생성 함수 출력과 비교하고, 제출기 CPU/메모리·환경 변수 및 toleration/template 연결 일치를 확인했다. 인프라의 executor.instances=1은 동적 할당 initial/min=1 설정을 사용하므로 중복 추가하지 않았다.
+- 변경 DAG Ruff(py310)·git diff --check 통과. 업무 집계 로직은 변경하지 않았고 전체 Spark 집계 재시험은 수행하지 않았다. EKS 실행·이미지 빌드·push·커밋은 하지 않았다.
+- 대기 50분/DAG 1시간, 자동 재시도 0회, 입력 크기 한도는 이번 자원 정렬과 별개의 기존 업무 기본값으로 남는다. 인프라가 확정한 값이라고 간주하지 않는다.
+
+### 발행된 기본 이미지 결합 및 업무 이미지 검증 (2026-10-23)
+
+- PR #82가 2026-10-23 머지됐음을 확인했다. 이후 로컬 자원 정렬·공개 명세 커밋은 아직 원격 반영 전이므로, 업무 소스 커밋 `19027bb219427f04d7f1f8105babd10cc62cb01b`로 후보 이미지를 빌드했다. main 최신 코드로 발행했다고 표시하지 않는다.
+- SPARK_IMAGE는 재영이 발행한 spark-base digest `sha256:9548d0949843699f8722a4eb78551129ab718a340a618a06f088483c0ac7985f`로 고정했다. 플랫폼은 linux/amd64, 로컬 태그는 `clothes-query-pipelines:19027bb`다.
+- 코드·규칙·요구 패키지 파일 18개 SHA-256, code_ref, UID 185, Python 3.10.12/Spark 4.2.0/Java 21, 패키지 고정값, 연결 JAR 체크섬·필수 클래스 로딩과 합계 45를 확인했다. 기존 JAR 4개는 재사용하고 spark-hadoop-cloud 4.2.0만 추가했다.
+- 같은 이미지 내부 업무 코드로 읽기 전용 고정 거래 입력을 처리했다. Driver heap 512m, local[2]에서 정상 주문 1건·성공 금액 7,900원·판매 수량 1개가 독립 기대값과 일치했다. Silver/Gold PASS, 금액 검사 PASS 1건, 보류 0건이다. EKS 분산 실행·실제 S3 쓰기·운영 메모리 제한 검증은 아니다.
+- 최초 네트워크 격리 검사에서는 컨테이너 호스트 이름 해석 실패로 Spark가 시작되지 않았다. 검사 환경에 SPARK_LOCAL_IP=127.0.0.1을 지정한 재실행은 통과했다. 운영 코드·이미지 설정을 변경한 것은 아니다.
+- 로컬 이미지 식별자는 `sha256:e82e13dfc0adee1c13784339a52fab29a356f5a63e78002f67274b55c1747dbf`, 크기는 2,143,589,083바이트다. 이 값은 아직 업무 ECR에 발행·확인한 digest가 아니다.
+- 증거는 Git 제외 `pipelines/gold_a/.local/image-19027bb/`의 build.log, preflight.log, trade-normal.log, image-inspect.json, result/normal-validation.json에 보관했다. 원격 코드 push·ECR 업무 이미지 push·EKS 실행은 하지 않았다. 원격 코드 반영과 발행 승인이 후속이다.
