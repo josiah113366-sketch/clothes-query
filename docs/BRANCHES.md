@@ -151,13 +151,19 @@ gitGraph
 | `agent/skeleton` | [agent-skeleton.md](tasks/agent-skeleton.md) | 머지됨 (PR #42) | 2026-10-21 |
 | `agent/review-fixes` | [agent-review-fixes.md](tasks/agent-review-fixes.md) | 머지됨 (PR #48) | 2026-10-21 |
 | `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
-| `agent/eval-score` | [agent-eval-score.md](tasks/agent-eval-score.md) | 검토 대기 | |
+| `agent/eval-score` | [agent-eval-score.md](tasks/agent-eval-score.md) | 머지됨 (PR #96) | 2026-10-24 |
 
 | `agent/ddl` | [agent-ddl.md](tasks/agent-ddl.md) | 머지됨 (PR #53) | 2026-10-22 |
 | `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
 | `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
-| `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
-| `agent/silver-conf` | [agent-silver-conf.md](tasks/agent-silver-conf.md) | 진행 중 | |
+| `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 머지됨 (PR #64) | 2026-10-23 |
+| `agent/approval` | [agent-approval.md](tasks/agent-approval.md) | 머지됨 (PR #66) | 2026-10-23 |
+| `agent/followups` | [agent-followups.md](tasks/agent-followups.md) | 머지됨 (PR #71) | 2026-10-23 |
+| `agent/folder-filter` | `agent-folder-filter.md` 없음(작은 변경, PR #72 본문 참고) | 머지됨 (PR #72) | 2026-10-23 |
+| `agent/conclusion-check` | [agent-conclusion-check.md](tasks/agent-conclusion-check.md) | 머지됨 (PR #76) | 2026-10-23 |
+| `agent/silver-source` | `agent-silver-source.md` 없음(작은 변경, PR #80 본문 참고) | 머지됨 (PR #80) | 2026-10-23 |
+| `agent/rules-doc` | [agent-rules-doc.md](tasks/agent-rules-doc.md) | 검토 대기 | |
+| `agent/silver-conf` | [agent-silver-conf.md](tasks/agent-silver-conf.md) | 머지됨 (PR #108) | 2026-10-24 |
 
 
 ### dashboard
