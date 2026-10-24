@@ -13,7 +13,14 @@ run "review_queries_are_driver_only_and_iceberg_is_read_only" {
       aws_iam_role_policy_attachment.review_driver[0].role == aws_iam_role.this["driver"].name &&
       !strcontains(aws_iam_policy.review_s3[0].policy, "athena:") &&
       !strcontains(aws_iam_policy.review_s3[0].policy, "review_aspect_scores_iceberg") &&
-      !strcontains(aws_iam_policy.review_s3[0].policy, "bronze_v2/reviews") &&
+      toset([for s in jsondecode(aws_iam_policy.review_s3[0].policy).Statement : s if s.Sid == "ReviewInputRead"][0].Resource) == toset([
+        "arn:aws:s3:::test-trade-bucket/bronze_v2/reviews/*", "arn:aws:s3:::test-trade-bucket/bronze_v2/reviews",
+        "arn:aws:s3:::test-trade-bucket/bronze/reviews/*", "arn:aws:s3:::test-trade-bucket/bronze/reviews",
+        "arn:aws:s3:::test-trade-bucket/pipelines/input-manifests/review-scores/*"
+      ]) &&
+      [for s in jsondecode(aws_iam_policy.review_s3[0].policy).Statement : s if s.Sid == "ReviewInputRead"][0].Action == ["s3:GetObject"] &&
+      contains([for s in jsondecode(aws_iam_policy.review_s3[0].policy).Statement : s if s.Sid == "ReviewListing"][0].Condition.StringLike["s3:prefix"], "bronze_v2/reviews/*") &&
+      !strcontains(aws_iam_policy.review_s3[0].policy, "ground_truth") &&
       [for s in jsondecode(aws_iam_policy.review_driver[0].policy).Statement : s if s.Sid == "ReadOnlyScoreIceberg"][0].Action == ["s3:GetObject"] &&
       !strcontains(aws_iam_policy.review_driver[0].policy, "glue:UpdateTable") &&
       !strcontains(aws_iam_policy.review_driver[0].policy, "glue:CreateTable") &&

@@ -164,7 +164,8 @@ resource "aws_eks_pod_identity_association" "this" {
 locals {
   review_enabled = var.enabled && var.enable_review_access
   review_outputs = ["silver/runtime/reviews/", "gold_a/runtime/reviews/"]
-  review_input   = "bronze/reviews/"
+  # V2 is the compatible superset; retain legacy reads during migration only.
+  review_inputs  = ["bronze_v2/reviews/", "bronze/reviews/"]
   review_scores  = "pipelines/input-manifests/review-scores/"
   review_results = "athena-results/review-score/"
   review_iceberg = "silver/review_aspect_scores_iceberg/"
@@ -178,10 +179,10 @@ resource "aws_iam_policy" "review_s3" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat([
-      { Sid = "ReviewInputRead", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/${local.review_input}*", "${var.bucket_arn}/${trimsuffix(local.review_input, "/")}", "${var.bucket_arn}/${local.review_scores}*"] },
+      { Sid = "ReviewInputRead", Effect = "Allow", Action = ["s3:GetObject"], Resource = concat(flatten([for p in local.review_inputs : ["${var.bucket_arn}/${p}*", "${var.bucket_arn}/${trimsuffix(p, "/")}"]]), ["${var.bucket_arn}/${local.review_scores}*"]) },
       { Sid = "ReviewOutputs", Effect = "Allow", Action = local.object_actions, Resource = [for p in local.review_outputs : "${var.bucket_arn}/${p}*"] },
       { Sid = "ReviewOutputDirectoryProbes", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in local.review_outputs : "${var.bucket_arn}/${trimsuffix(p, "/")}"] },
-      { Sid = "ReviewListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = flatten([for p in concat([local.review_input, local.review_scores], local.review_outputs) : ["${p}*", trimsuffix(p, "/")]]) } } },
+      { Sid = "ReviewListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = flatten([for p in concat(local.review_inputs, [local.review_scores], local.review_outputs) : ["${p}*", trimsuffix(p, "/")]]) } } },
       { Sid = "ReviewMagicCleanup", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in local.review_outputs : "${var.bucket_arn}/${p}runs/*/*/__magic_job-*/*"] }
       ], length(var.review_rollback_run_ids) > 0 ? [
       { Sid = "ApprovedReviewParquetRollback", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = flatten([for p in local.review_outputs : [for id in sort(tolist(var.review_rollback_run_ids)) : "${var.bucket_arn}/${p}runs/${id}/*/part-*.parquet"]]) }

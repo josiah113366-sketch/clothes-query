@@ -1,6 +1,6 @@
 # Handoff contract only. Not loaded by runtime.py or the business application.
 # Historical handoff template, not live deployment state.
-# Trade inputs use Bronze v2; reviews still use bronze/reviews/.
+# Trade and new review inputs use Bronze v2; legacy review reads remain during migration.
 # Operational permissions: infra/stacks/spark-access.
 # null = awaiting values for a new handoff; no permissions or workloads are created.
 confirmed_developer_access:

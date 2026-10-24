@@ -16,12 +16,12 @@ Driver의 namespace pods/configmaps deletecollection은 앞선 [퍼널 보완](i
 
 | 역할 | 추가 범위 |
 |---|---|
-| Driver·Executor | `bronze/reviews/` 읽기·목록, 리뷰 Silver/Gold 출력 읽기·쓰기·멀티파트·목록·magic 임시 파일 정리, 고정 점수 파일 읽기 |
+| Driver·Executor | `bronze_v2/reviews/` 및 전환 기간의 `bronze/reviews/` 읽기·목록, 리뷰 Silver/Gold 출력 읽기·쓰기·멀티파트·목록·magic 임시 파일 정리, 고정 점수 파일 읽기 |
 | Driver만 | 기존 리뷰 Athena workgroup 실행·상태·결과·취소, 최신 뷰와 기반 표의 Glue 조회, 점수 Iceberg 데이터·메타데이터 읽기, Athena 결과·고정 점수 prefix 읽기/쓰기, 리뷰 Gold 표 2개 조회·파티션 등록 |
 
 확정 경로와 workgroup은 다음과 같다.
 
-- 운영 원문: `bronze/reviews/`. `bronze_v2/reviews/`로 변경하지 않는다.
+- 운영 원문: 최신 계약에 따라 `bronze_v2/reviews/`로 전환한다. v2는 기존 데이터에 컬럼을 추가한 완전 상위호환 저장소다. 전환 검증 동안 `bronze/reviews/` 읽기도 유지한다. 아래 초기 읽기 검증은 구 경로 기준이며 v2 실제 DAG 성공을 뜻하지 않는다.
 - 출력: `silver/runtime/reviews/`, `gold_a/runtime/reviews/`. control/current/completed를 포함하되 기존 정상 결과 삭제를 허용하지 않는다.
 - 최신 뷰: `clothes_query_dev_review_score.review_aspect_scores_latest`, 기반 표 `review_aspect_scores`.
 - Iceberg 읽기: `silver/review_aspect_scores_iceberg/`. Put/Delete·Glue 스키마 변경은 허용하지 않는다.

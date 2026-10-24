@@ -1,5 +1,7 @@
 # Silver·Gold A Spark data access
 
+2026-10-24 리뷰 입력 계약 변경: `bronze_v2/reviews/`는 기존 데이터에 컬럼을 추가한 완전 상위호환 경로다. 새 입력은 v2를 사용하며 아래 초기 적용 기록의 `bronze/reviews/` 읽기는 전환 검증 동안만 함께 유지한다. Bronze 쓰기·삭제는 추가하지 않는다. 생성기 배포와 고정 실행 요청의 경로 전환은 각각 실제 배포·검증해야 한다.
+
 기존 workload-access bindings를 교체하지 않는 별도 opt-in 모듈이다. namespace 확정 전 enabled=false로 IAM·Pod Identity를 만들지 않는다. 제출기는 Kubernetes 제출 권한만 쓰고 Driver/Executor만 각 AWS 역할을 사용한다.
 
 Bronze 거래 3개·요청/입력 manifest는 읽기, 거래 출력은 읽기·쓰기 및 multipart 조회/중단을 허용한다. 기본 DeleteObject는 출력의 runs/<run_id>/<dataset>/__magic_job-*/ 아래 작업 객체만 허용한다. rollback_run_ids를 명시하면 해당 실행의 part-*.parquet에 한해 실패 복구 삭제를 추가한다. manifest·완료 기록·current.json 삭제는 허용하지 않는다. reference_object_arns는 확인된 상품 스냅샷 두 객체만 허용하며 기본은 비어 있다. funnels/reviews·Glue 권한을 추정하지 않는다.
