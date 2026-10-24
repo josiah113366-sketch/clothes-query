@@ -85,6 +85,12 @@ def resources(placement="dedicated", *, namespace="spark", name_prefix="spark", 
             {"apiGroups": [""], "resources": ["pods", "services", "configmaps"], "verbs": ["create", "get", "list", "watch", "patch", "update", "delete"]},
             {"apiGroups": [""], "resources": ["pods/log", "events"], "verbs": ["get", "list", "watch"]},
         ]))
+        if name == "driver":
+            # Spark shutdown removes executor pods and generated configuration in this namespace.
+            objects[-1]["rules"].append({
+                "apiGroups": [""], "resources": ["pods", "configmaps"],
+                "verbs": ["deletecollection"],
+            })
         if name == "submitter":
             # Spark 4.2's NetworkPolicyFeatureStep applies an executor ingress policy.
             objects[-1]["rules"].append({

@@ -30,7 +30,7 @@ def access_plan(contract):
     bucket = contract['supplied_contract']['bucket']
     reads = [prefix(pending['inputs'][key]['uri'], bucket) for key in ['orders', 'order_items', 'payments']]
     writes = [prefix(pending['outputs'][key], bucket) for key in ['silver_uri', 'gold_a_uri']]
-    if any(not path.startswith(expected) for path, expected in zip(reads, ['bronze/orders/', 'bronze/order-items/', 'bronze/payments/'])):
+    if any(not path.startswith(expected) for path, expected in zip(reads, ['bronze_v2/orders/', 'bronze_v2/order-items/', 'bronze_v2/payments/'])):
         raise ValueError('Inputs must remain within the three supplied Bronze roots')
     if not writes[0].startswith('silver/runtime/trade/') or not writes[1].startswith('gold_a/runtime/trade/'):
         raise ValueError('Writes must remain within the supplied trade output roots')
@@ -38,6 +38,7 @@ def access_plan(contract):
     return {'bucket': bucket, 'read_prefixes': reads, 'read_write_prefixes': writes,
             'delete_permissions': False, 'missing_binding_inputs': missing,
             'complete_job_policy': False, 'applied': False,
+            'operational_policy_owner': 'infra/stacks/spark-access',
             'remaining_job_contract': ['Remote business code and exact magic cleanup settings', 'business image digest and fixed request object',
                                        'fixed test inputs', 'Glue schemas/publication', 'namespace sharing']}
 
@@ -52,9 +53,8 @@ def merged_bindings(contract, existing):
     if len(name_prefix) > 23:
         raise ValueError('Use a prefix of at most 23 characters for workload-access binding keys')
     config_prefix = prefix(pending['config_request_prefix_uri'], plan['bucket'])
-    if config_prefix.startswith(('bronze/', 'silver/', 'gold_a/')) and not any(
-            config_prefix.startswith(p) for p in plan['read_prefixes'] + plan['read_write_prefixes']):
-        raise ValueError('Configuration input cannot widen the supplied data prefixes')
+    if not config_prefix.startswith('pipelines/requests/'):
+        raise ValueError('Configuration input cannot widen access beyond pipelines/requests/')
     # Keep input files credential-free and preserve all supported existing stack inputs.
     if set(existing) - {'expected_account_id', 'state_bucket', 'state_region', 'aws_region', 'bindings'}:
         raise ValueError('Unexpected existing variable: pass only workload-access stack inputs')

@@ -102,6 +102,24 @@ class RuntimeSafetyTests(unittest.TestCase):
         driver = next(x for x in objects if x['kind'] == 'Role' and x['metadata']['name'] == 'spark-driver')
         self.assertFalse(any('networkpolicies' in r['resources'] for r in driver['rules']))
 
+    def test_collection_cleanup_is_driver_only_and_bindings_remain_scoped(self):
+        objects = runtime.resources(namespace='pipelines', name_prefix='silver-gold-a', existing_namespace=True)
+        for obj in objects:
+            for rule in obj.get('rules', []):
+                if 'deletecollection' in rule['verbs']:
+                    self.assertEqual(obj['kind'], 'Role')
+                    self.assertEqual(obj['metadata'], {'name': 'silver-gold-a-driver', 'namespace': 'pipelines'})
+                    self.assertEqual(rule, {'apiGroups': [''], 'resources': ['pods', 'configmaps'], 'verbs': ['deletecollection']})
+        driver = next(o for o in objects if o['kind'] == 'Role' and o['metadata']['name'] == 'silver-gold-a-driver')
+        self.assertTrue(any('deletecollection' in r['verbs'] for r in driver['rules']))
+        for binding in (o for o in objects if o['kind'] == 'RoleBinding'):
+            self.assertEqual(len(binding['subjects']), 1)
+            subject = binding['subjects'][0]
+            self.assertEqual(subject['kind'], 'ServiceAccount')
+            expected = ('airflow', 'airflow-scheduler') if binding['metadata']['name'].startswith('airflow-') else ('pipelines', binding['metadata']['name'])
+            self.assertEqual((subject['namespace'], subject['name']), expected)
+            self.assertEqual(binding['roleRef']['name'], binding['metadata']['name'])
+
     def test_shared_cpu_math_includes_the_waiting_submitter(self):
         sizing = yaml.safe_load((Path(__file__).parent / "cpu-sizing-candidates.yaml").read_text())
         saved = sum(v["current_m"] - v["candidate_m"] for v in sizing["candidates"].values())
