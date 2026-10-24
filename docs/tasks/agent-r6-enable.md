@@ -15,5 +15,6 @@
 ## 완료 확인
 
 - [x] `test_athena_io.py`, `test_job.py`, `test_r6.py` 통과
-- [ ] 현지 님 표의 열 이름이 R6이 읽는 열(`run_id, check_name, checked_at, order_id, status, order_total_amount, item_total_amount, amount_difference, check_version, source_manifest`)과 같은지 확인
+- [x] 현지 님 표(`silver.order_amount_checks`)에 R6이 읽는 열(`run_id, check_name, checked_at, order_id, status, order_total_amount, item_total_amount, amount_difference, check_version, source_manifest`)이 모두 있음 (DESCRIBE로 확인, 10/24)
+- [ ] 표의 `check_name` 실제 값이 R6 기본값(`order_item_total_match`)과 다르면 `R6_CHECK_NAME`으로 맞춤
 - [ ] 재영 님이 판정 DAG 설정(ConfigMap)에 환경 변수와 `silver` 데이터베이스 읽기 권한을 추가
