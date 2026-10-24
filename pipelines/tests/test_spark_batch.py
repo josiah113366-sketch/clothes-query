@@ -1,6 +1,7 @@
 """spark-submit으로 실행하는 실제 Spark 4.2 거래·Parquet 비교 검증."""
 
 import json
+import re
 import tempfile
 import unittest
 from copy import deepcopy
@@ -36,6 +37,16 @@ def canonical(rows):
     # Parquet의 고정 스키마 NULL은 Python 딕셔너리의 선택 필드 부재와 비교한다.
     return sorted([{k: str(v) if hasattr(v, "isoformat") else v for k, v in row.items() if v is not None}
                    for row in rows], key=lambda row: json.dumps(row, default=str, sort_keys=True))
+
+
+def check_gold_ddl(manifest):
+    from pipelines.gold_publication import TYPES
+    sql = (Path(__file__).resolve().parents[1] / "gold_a/tables.sql").read_text(encoding="utf-8")
+    for name, schema in manifest["schemas"].items():
+        body = re.search(r"gold_a\." + name + r"_runs\s*\((.*?)\)\s*PARTITIONED", sql, re.DOTALL)[1]
+        expected = [tuple(token.strip().lower().split()) for token in body.split(",")]
+        actual = [(field["name"], TYPES[field["type"]]) for field in schema["fields"]]
+        assert actual == expected, name
 
 
 class SparkTradeTest(unittest.TestCase):
@@ -98,6 +109,76 @@ class SparkTradeTest(unittest.TestCase):
             finally:
                 for frame in silver["_cache"] + catalog["_cache"]:
                     frame.unpersist()
+
+    def test_10_payment_update_historical_error_matches_reference(self):
+        data = deepcopy(self.base)
+        first = data["payments"][0]
+        trace = {"kafka_topic": "payments", "kafka_partition": 0,
+                 "kafka_timestamp": "2026-10-21T00:00:00.000Z", "kafka_timestamp_type": "CreateTime", "__op": "u"}
+        data["payments"][0] = {**first, **trace, "kafka_offset": 10, "__source_ts_ms": 1000, "amount": "bad"}
+        data["payments"].append({**first, **trace, "kafka_offset": 11, "__source_ts_ms": 1001, "pg": "PG_B"})
+        reference = build_silver(data["orders"], data["order_items"], data["payments"], True)
+        with tempfile.TemporaryDirectory() as work:
+            _, raw, _ = self.prepare(Path(work), data)
+            actual = build_trade(raw, input_complete=True)
+            try:
+                self.assertEqual(self.rows(actual["payment_attempts"]), canonical(reference["payment_attempts"]))
+                issues = self.rows(actual["quarantined_records"])
+                self.assertEqual(len(issues), 1)
+                self.assertFalse(issues[0]["active"])
+                self.assertEqual(actual["dq_results"].filter("status <> 'PASS'").count(), 0)
+            finally:
+                for frame in actual["_cache"]:
+                    frame.unpersist()
+
+    def test_09_partial_reprocess_preserves_other_orders_and_recovers_mismatch(self):
+        from pipelines.reprocess import read_json
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            data = deepcopy(self.base)
+            inputs = {}
+            for name, records in data.items():
+                path = root / (name + ".jsonl")
+                path.write_text("".join(json.dumps(row) + "\n" for row in records), encoding="utf-8")
+                inputs[name] = [str(path)]
+            output = str(root / "output")
+            config = {"job": "trade", "input_complete": True, "inputs": inputs, "output_root": output}
+            baseline = execute(self.spark, {**config, "run_id": "baseline"})
+            check_gold_ddl(baseline)
+            old, _ = read_json(baseline["silver_manifest"])
+            target, other = data["orders"][0]["order_id"], data["orders"][1]["order_id"]
+            other_amount = data["orders"][1]["total_amount"]
+
+            def scoped(run):
+                current, _ = read_json(output + "/silver/runtime/trade/current.json")
+                uri = output + "/silver/runtime/trade/runs/" + current["run_id"] + "/manifest.json"
+                _, digest = read_json(uri)
+                current_gold, _ = read_json(output + "/gold_a/runtime/trade/current.json")
+                return {**config, "run_id": run, "reprocess_scope": {"order_ids": [target],
+                    "window_start": "2026-10-18T00:00:00Z", "window_end": "2026-10-20T00:00:00Z",
+                    "previous_silver": uri, "previous_sha256": digest, "previous_gold_run_id": current_gold["run_id"]}}
+
+            data["orders"][0]["total_amount"] += 10000
+            data["orders"][1]["total_amount"] += 777  # 승인 밖 변경은 이번 결과에 섞이지 않아야 한다.
+            Path(inputs["orders"][0]).write_text("".join(json.dumps(row) + "\n" for row in data["orders"]), encoding="utf-8")
+            partial = execute(self.spark, scoped("partial"))
+            self.assertEqual(partial["status"], "PARTIAL")
+            patched, _ = read_json(partial["silver_manifest"])
+            checks = self.rows(self.spark.read.parquet(patched["outputs"]["order_amount_checks"]))
+            self.assertEqual(next(r for r in checks if r["order_id"] == target)["status"], "MISMATCH")
+            self.assertEqual(next(r for r in checks if r["order_id"] == other)["order_total_amount"], other_amount)
+            self.assertTrue(all(r["run_id"] == "partial" for r in checks))
+            self.assertEqual(patched["actual_scope"]["order_ids"], [target])
+            self.assertEqual(old["run_id"], "baseline")
+            data["orders"][0]["total_amount"] -= 10000
+            Path(inputs["orders"][0]).write_text("".join(json.dumps(row) + "\n" for row in data["orders"]), encoding="utf-8")
+            recovered = execute(self.spark, scoped("recovered"))
+            self.assertEqual(recovered["status"], "PASS")
+            self.assertEqual(recovered["held_scopes"], [])
+            restored, _ = read_json(recovered["silver_manifest"])
+            checks = self.rows(self.spark.read.parquet(restored["outputs"]["order_amount_checks"]))
+            self.assertEqual(next(r for r in checks if r["order_id"] == target)["status"], "PASS")
+            self.assertEqual(next(r for r in checks if r["order_id"] == other)["order_total_amount"], other_amount)
 
     def test_02_cross_order_conflict_and_unknown_item_error_match_reference(self):
         for mode in ("cross-order", "unknown-item", "amount-mismatch"):
@@ -233,6 +314,7 @@ class SparkTradeTest(unittest.TestCase):
             config = {"job": "funnels", "run_id": "funnel1", "input_complete": True,
                       "inputs": paths, "output_root": str(root / "output")}
             result = execute(self.spark, config)
+            check_gold_ddl(result)
             actual = {name: self.rows(self.spark.read.parquet(path)) for name, path in result["outputs"].items()}
             again = execute(self.spark, {**config, "run_id": "funnel2"})
             for name, path in again["outputs"].items():
