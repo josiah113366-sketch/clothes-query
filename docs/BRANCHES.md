@@ -166,6 +166,7 @@ gitGraph
 | `dashboard/deploy` | [dashboard-deploy.md](tasks/dashboard-deploy.md) (대시보드 EKS 배포 파일, ECR 스택, 공유 ALB 템플릿) | 진행 중 | |
 | `dashboard/model-benchmark` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (감성분석 모델 화면, 패치노트, 릴리스 묶음·되돌림, 점수화 SSM. `review-model/release`·`infra/sagemaker-model-release` 포함, 세 영역 통합 예외) | 진행 중 | |
 | `dashboard/approval-page` | [dashboard-approval-page.md](tasks/dashboard-approval-page.md) | 검토 대기 | |
+| `dashboard/gold-b-data` | [dashboard-gold-b-data.md](tasks/dashboard-gold-b-data.md) (Gold B 결제·형식 오류·재처리 화면 실데이터 연결, TODO B1. `dashboard/decorator`(#107) 위) | 진행 중 | |
 
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.

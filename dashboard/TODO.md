@@ -33,7 +33,7 @@
 
 | # | 할 일 | 선행 조건 | 담당 영역 | 담당자 | 상태 | 메모 |
 |---|---|---|---|---|---|---|
-| B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | | 대기 | 시각은 UTC 저장. `bronze_lag_snapshots` 조회는 2026-10-24 등록(workgroup 환경변수가 있을 때만) |
+| B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | 은서 | 진행 중 | 시각은 UTC 저장. `bronze_lag_snapshots` 조회는 2026-10-24 등록(workgroup 환경변수가 있을 때만). 결제·형식 오류·재처리 조회는 `dashboard/gold-b-data` |
 | B2 | `gold_b.anomaly` 컬럼 확정 후 이상탐지 화면 맞춤 | 탐지 담당의 표 정의 | `agent` | | 대기 | 지금 컬럼은 임시 |
 | B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | | 대기 | |
 | B4 | 파이프라인 상태의 "평소 범위" 기준(`NORMAL_MAX_SEC`, 현재 1,020초)과 경고 규칙 확정 | 실측 지연 분포 | `gold-b` / `agent` | | 대기 | 15분 파일 주기 톱니 |
