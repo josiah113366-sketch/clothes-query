@@ -29,6 +29,9 @@
 | `region` | 필수 | AWS 리전 |
 | `bedrock_model_id` | 필수 | 모델(프로필) ID. 현재 결정: Claude Haiku 4.5의 `jp.` 프로필 |
 | `investigate_max` | 선택 | 한 번에 조사할 이상 수(기본 3, 비용 상한) |
+| `silver_checks_table` | 선택 | R6 검사 결과 표(예: `silver.order_amount_checks`). 있어야 R6이 돈다. 판정 Pod의 `SILVER_CHECKS_TABLE`로 전달 |
+| `silver_runs_table` | 선택 | Silver 실행 목록 표(예: `silver.silver_runs`). 완료된 실행만 읽고 품질 PASS일 때만 해소. `SILVER_RUNS_TABLE`로 전달 |
+| `r6_check_name` | 선택 | 읽을 검사 이름(기본 `order_item_total_match`). `R6_CHECK_NAME`로 전달 |
 | `hostname` | 선택 | 새 노드가 생기지 않게 Pod를 기존 노드에 고정하고 싶을 때만 |
 
 빠진 키가 있으면 DAG 파일을 불러올 때 **빠진 키 이름을 모두 적은 오류**가 나서 Airflow 화면의 import 오류로 보인다.

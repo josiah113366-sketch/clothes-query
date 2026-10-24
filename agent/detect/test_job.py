@@ -219,6 +219,15 @@ regular_run(q2, w2, CFG, at(17, 5))
 r5 = q2("SELECT observed_value, evidence_ref FROM gold_b.anomaly WHERE rule_id = 'R5_DUPLICATE_SUCCESS'")
 check("재처리 직후 순찰: 교체로 다시 적재된 중복(o9)은 안 세고, 교체 뒤 새 중복(o10)만 셈", (len(r5), r5[0]["observed_value"], '"sample_order_ids": ["o10"]' in r5[0]["evidence_ref"]), (1, 1, True))
 
+# 3-1. Silver 재처리(source=SILVER)의 교체 기록은 Gold B 원장 줄을 빼지 않는다 (원장은 안 바뀌었으므로 중복을 그대로 센다)
+q2, w2, c2 = blank()
+c2.execute(ins, ("n11", "o11", 1, "PG_B", "SUCCESS", None, None, "2026-10-20 15:20:00", "2026-10-20 15:21:00"))
+c2.execute(ins, ("d11", "o11", 2, "PG_B", "SUCCESS", None, None, "2026-10-20 15:20:02", "2026-10-20 17:02:00"))
+replaced(c2, "rq-s", "2026-10-20 15:00:00", "2026-10-20 16:00:00", "2026-10-20 17:03:00")
+c2.execute("UPDATE gold_b.reprocess_events SET source = 'SILVER' WHERE request_id = 'rq-s'")
+regular_run(q2, w2, CFG, at(17, 5))
+check("SILVER 교체 기록은 R5 순찰 제외 조건을 만들지 않음 (o11 중복을 셈)", len(q2("SELECT * FROM gold_b.anomaly WHERE rule_id = 'R5_DUPLICATE_SUCCESS'")), 1)
+
 # 4. 기본 설정값: 정상 톱니(900초)에서는 안 울리고, 실제 토픽 5개를 본다
 d = Config()
 check("기본 토픽은 실제 배포된 5개 (members-events 포함, reviews.raw 없음)", (len(d.topics), "members-events" in d.topics, "reviews.raw" in d.topics), (5, True, False))
@@ -307,5 +316,14 @@ yaml = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "format_rule
 if yaml.exists():
     m = re.search(r'^version:\s*"?([0-9][^"\s]*)"?', yaml.read_text(encoding="utf-8"), re.M)
     check("R4 기본 규칙 버전이 공통 형식 규칙 YAML의 version과 같음", (m.group(1) if m else None, Config().format_rule_version), (Config().format_rule_version, Config().format_rule_version))
+# 교체 구간이 여러 개 쌓여 있어도 한 번 실행에서는 하나만 재판정한다(작업 제한 시간 보호). 남은 것은 다음 실행이 이어서 한다
+event("rq-cap", "LEDGER_REPLACED", at(10, 0), at(11, 0))
+event("rq-cap", "LEDGER_REPLACED", at(11, 0), at(12, 0))
+before_cap = len([x for x in pending_replacements(query) if x["request_id"] == "rq-cap"])
+s1 = run_once(query, write, CFG, at(16, 40))
+left1 = len([x for x in pending_replacements(query) if x["request_id"] == "rq-cap"])
+s2 = run_once(query, write, CFG, at(16, 45))
+left2 = len([x for x in pending_replacements(query) if x["request_id"] == "rq-cap"])
+check("교체 구간 2개: 한 번 실행에 하나만 재판정하고 나머지는 다음 실행이 함", (before_cap, left1, left2, len(s1["redetected"]), len(s2["redetected"])), (2, 1, 0, 1, 1))
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

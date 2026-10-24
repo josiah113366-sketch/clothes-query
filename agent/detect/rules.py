@@ -21,6 +21,7 @@ class Config:
     r5_min_orders: int = 1                # R5: 성공 결제가 2건 이상인 주문이 몇 개 이상 (평소 0이어야 하는 값이라 1로 둠, 제안)
     silver_checks_table: str = None       # R6: Silver 주문 총액 검사 결과 표 이름 (예: silver.order_total_checks). None이면 R6을 돌리지 않는다. 표 위치는 Silver·인프라 담당과 확정 전
     r6_check_name: str = "order_item_total_match"   # R6: 읽을 검사 이름 (Silver 제공안)
+    silver_runs_table: str = None         # R6: Silver 실행 목록 표 이름 (예: silver.silver_runs). 있으면 status=COMPLETED인 실행만, (completed_at, run_id) 순서로 가장 최근 것을 읽고, quality_status가 PASS인 실행에서만 해소한다. None이면 검사 시각이 가장 최근인 실행을 읽는다(옛 방식)
     ratio_wait_min: int = 3               # 비율 규칙은 구간이 끝난 지 몇 분 지난 것만 본다 (Gold B 문서)
     format_rule_version: str = "0.2.0"    # 깨진 메시지를 셀 때 쓰는 형식 검사 규칙 버전 (현재 버전만 센다). Gold B는 공통 형식 규칙 YAML(docs/contracts/format_rules.yaml)의 version 값을 그대로 쓴다(현재 0.2.0). YAML 버전이 바뀌면 같이 바꾼다(test_job.py가 두 값이 같은지 확인한다). 다르면 R4가 0건으로 나온다
     pgs: tuple = ("PG_A", "PG_B")
