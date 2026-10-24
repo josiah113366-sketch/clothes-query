@@ -2,7 +2,7 @@ import copy
 import unittest
 import yaml
 
-from prepare import foundation, pending_runtime, shared_spark_conf, workload_bindings
+from prepare import foundation, pending_ingest, pending_runtime, shared_spark_conf, workload_bindings
 
 
 class GoldBPreparationTest(unittest.TestCase):
@@ -32,7 +32,12 @@ class GoldBPreparationTest(unittest.TestCase):
         for bad in ["gold_b/", "ground_truth/", "gold_b/_checkpoints/*/", "gold_b/_checkpoints/../"]:
             with self.subTest(prefix=bad), self.assertRaises(ValueError):
                 workload_bindings({}, bad)
+            with self.subTest(runtime_prefix=bad), self.assertRaises(ValueError):
+                pending_ingest(bad)
         p = "gold_b/_checkpoints/streaming_ingest/"
+        self.assertIsNone(pending_ingest()["env"]["GOLD_B_CHECKPOINT"])
+        self.assertEqual(pending_ingest(p)["env"]["GOLD_B_CHECKPOINT"],
+                         "s3a://clothes-query-datalake/" + p)
         bindings = workload_bindings({}, p)["bindings"]
         self.assertIn("s3:DeleteObject", bindings["gold-b-ingest-driver"]["s3_access"][p])
         self.assertNotIn(p, bindings["gold-b-ledger-jobs"]["s3_access"])

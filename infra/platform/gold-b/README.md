@@ -12,7 +12,7 @@ Gold B 상시 Spark 적재와 Python 재처리·합치기의 실행 신원을 �
 
 어느 역할에도 `ground_truth/`, `agent/`, Silver·Gold A 접근을 추가하지 않는다. 기존 workload-access bindings는 보존하며 같은 이름의 다른 설정은 덮어쓰지 않는다. namespace 공유와 Pod 생성 권한 때문에 ServiceAccount 분리가 강한 보안 격리는 아니며 팀원 namespace 운영 권한도 함께 관리해야 한다.
 
-체크포인트는 제안 경로만 있고 최종 확정 전이다. 기본 생성 결과에는 checkpoint 권한을 **넣지 않는다**. 확정된 뒤 `--checkpoint-prefix gold_b/_checkpoints/<확정 이름>/`를 지정하면 적재 Driver·Executor 역할에 해당 하위 prefix의 읽기·쓰기·삭제·멀티파트 정리만 추가된다. 체크포인트 삭제는 처리 위치를 초기화할 수 있으므로 운영 중 임의 정리하지 않는다.
+2026-10-24 사용자가 체크포인트를 `s3a://clothes-query-datalake/gold_b/_checkpoints/streaming_ingest/`로 확정했다. 공유 workload-access 입력에 해당 prefix를 반영했다. 생성 도구는 기본값으로 checkpoint 권한을 **넣지 않는다**. `--checkpoint-prefix gold_b/_checkpoints/streaming_ingest/`를 지정하면 적재 Driver·Executor 역할에 해당 하위 prefix의 읽기·쓰기·삭제·멀티파트 정리와 적재 환경변수 `GOLD_B_CHECKPOINT`를 함께 반영한다. 체크포인트 삭제는 처리 위치를 초기화할 수 있으므로 운영 중 임의 정리하지 않는다.
 
 ## 준비 파일 생성
 
@@ -26,7 +26,7 @@ python -m unittest discover -s infra/platform/gold-b -v
 - `foundation.json`: 계정 4개, namespace RBAC, Spark ConfigMap, KafkaUser 2개, Kafka ingress 정책. 실행 workload·Namespace·공유 quota·Secret은 생성하지 않는다.
 - `workload-access.tfvars.json`: 기존 bindings와 Gold B 3개 역할을 합친 입력. 실제 적용 시 다른 로컬 var-file이 bindings 전체를 덮어쓰지 않는지 plan을 확인한다.
 - `runtime.pending.json`: 재처리·합치기용 `AIRFLOW_GOLD_B_RUNTIME` 초안. 이미지가 null이므로 이 상태로 ConfigMap/환경변수에 공급하지 않는다. `bronze_root` 소비는 #101 머지·해당 코드가 들어간 최종 이미지가 필요하다.
-- `ingest.pending.json`: 적재 제출 계정·이미지 내 진입점·환경변수 초안. image와 GOLD_B_CHECKPOINT가 null이므로 실행할 수 없다.
+- `ingest.pending.json`: 적재 제출 계정·이미지 내 진입점·환경변수 초안. image는 null이며 GOLD_B_CHECKPOINT는 명시적으로 지정한 경우에만 채운다. 불변 이미지와 실행 설정을 최종 반영하기 전에는 실행할 수 없다.
 - `batch-shared-spark-conf.json`: 시험한 단일 노드 공유 후보. 기존 Silver·Gold A 설정에 자동 적용하지 않는다. 적용하려면 기존 AIRFLOW_PIPELINE_RUNTIME의 신원·이미지·템플릿은 보존하고 spark_conf에 병합한다.
 
 ## Kafka와 배치

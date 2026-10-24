@@ -120,12 +120,15 @@ def pending_runtime():
             "bronze_root": "s3://" + BUCKET + "/bronze_v2", "node_selector": {"karpenter.sh/nodepool": NODE_POOL}}
 
 
-def pending_ingest():
+def pending_ingest(checkpoint_prefix=None):
+    if checkpoint_prefix is not None:
+        workload_bindings({}, checkpoint_prefix)
     return {"image": None, "namespace": NS, "submitter_service_account": INGEST + "-submitter",
             "driver_service_account": INGEST + "-driver", "executor_service_account": INGEST + "-executor",
             "runtime_configmap": INGEST + "-runtime",
             "application": "local:///opt/gold_b/pipelines/gold_b/jobs/streaming_ingest.py",
-            "env": {"GOLD_B_LEDGER_ROOT": "s3://" + BUCKET + "/gold_b", "GOLD_B_CHECKPOINT": None,
+            "env": {"GOLD_B_LEDGER_ROOT": "s3://" + BUCKET + "/gold_b",
+                    "GOLD_B_CHECKPOINT": "s3a://" + BUCKET + "/" + checkpoint_prefix if checkpoint_prefix else None,
                     "KAFKA_BOOTSTRAP": "clothes-query-dev-kafka-kafka-bootstrap.kafka.svc.cluster.local:9093",
                     "KAFKA_SECURITY_PROTOCOL": "SSL", "KAFKA_SSL_CA_FILE": "/opt/kafka-tls/ca.crt",
                     "KAFKA_SSL_CERT_FILE": "/opt/kafka-tls/user.crt", "KAFKA_SSL_KEY_FILE": "/opt/kafka-tls/user.key"}}
@@ -140,7 +143,7 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=False)
     (args.output_dir / "foundation.json").write_text(json.dumps({"apiVersion": "v1", "kind": "List", "items": foundation()}, indent=2), encoding="utf-8")
     (args.output_dir / "runtime.pending.json").write_text(json.dumps(pending_runtime(), indent=2), encoding="utf-8")
-    (args.output_dir / "ingest.pending.json").write_text(json.dumps(pending_ingest(), indent=2), encoding="utf-8")
+    (args.output_dir / "ingest.pending.json").write_text(json.dumps(pending_ingest(args.checkpoint_prefix), indent=2), encoding="utf-8")
     (args.output_dir / "batch-shared-spark-conf.json").write_text(json.dumps(shared_spark_conf("batch"), indent=2), encoding="utf-8")
     if args.existing_vars:
         values = json.loads(args.existing_vars.read_text(encoding="utf-8-sig"))
