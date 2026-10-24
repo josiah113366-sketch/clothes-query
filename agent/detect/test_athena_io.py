@@ -6,7 +6,7 @@ from datetime import datetime
 
 import athena_io
 from athena_io import AthenaError, AthenaIO
-from run_job import main as run_main
+from run_job import main as run_main, config_from_env
 
 ok = True
 
@@ -147,5 +147,9 @@ try:
     check("int 컬럼: 문자는 거부", "통과됨", "거부")
 except ValueError:
     check("int 컬럼: 문자는 거부", "거부", "거부")
+c0 = config_from_env({})
+c1 = config_from_env({"SILVER_CHECKS_TABLE": "silver.order_amount_checks", "R6_CHECK_NAME": "order_total_match"})
+check("환경 변수가 없으면 R6 표는 비어 있음(R6 안 돎), 있으면 설정됨", (c0.silver_checks_table, c1.silver_checks_table, c1.r6_check_name), (None, "silver.order_amount_checks", "order_total_match"))
+
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

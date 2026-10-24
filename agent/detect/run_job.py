@@ -18,6 +18,16 @@ from job import run_once
 from rules import Config
 
 
+def config_from_env(env):
+    """환경 변수로 바꿀 수 있는 설정. SILVER_CHECKS_TABLE이 비어 있으면 R6은 돌지 않는다(기본)."""
+    extra = {}
+    if env.get("SILVER_CHECKS_TABLE"):
+        extra["silver_checks_table"] = env["SILVER_CHECKS_TABLE"]
+    if env.get("R6_CHECK_NAME"):
+        extra["r6_check_name"] = env["R6_CHECK_NAME"]
+    return Config(dialect="athena", **extra)
+
+
 def main(env=None, io=None, now=None):
     env = os.environ if env is None else env
     workgroup = env.get("ATHENA_WORKGROUP")
@@ -30,7 +40,7 @@ def main(env=None, io=None, now=None):
     if tick:
         tick = datetime.fromisoformat(tick.replace("Z", "+00:00"))
         tick = tick.astimezone(timezone.utc).replace(tzinfo=None) if tick.tzinfo else tick
-    summary = run_once(io.query, io.write, Config(dialect="athena"), now, tick or None)
+    summary = run_once(io.query, io.write, config_from_env(env), now, tick or None)
     print(json.dumps(summary, ensure_ascii=False, default=str))
     return summary
 
