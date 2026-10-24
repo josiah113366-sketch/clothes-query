@@ -1,6 +1,6 @@
 # 작업 지시서: dashboard/gold-b-data
 
-> 상태: 검토 대기 · 브랜치: `dashboard/gold-b-data` (민혁 님 `dashboard/decorator`(#107) 끝 `e3d27d3`에서 만듦. #107 다음에 머지) · 담당: 은서 (`dashboard/TODO.md` B1) · 다음 작업: PR (사용자, #107 머지 뒤), 뷰 읽기 권한 (재영 님), 배포 (민혁 님) (2026-10-24 사용자: "일단 대시보드 연결부터 완성해줘")
+> 상태: 검토 대기 (PR #110) · 브랜치: `dashboard/gold-b-data` (민혁 님 `dashboard/decorator`(#107) 끝 `e3d27d3`에서 만들고, #107 머지 뒤 최신 `main` 병합) · 담당: 은서 (`dashboard/TODO.md` B1) · 다음 작업: 리뷰·머지 (사용자), 뷰 읽기 권한 (재영 님), 배포 (민혁 님) (2026-10-24 사용자: "일단 대시보드 연결부터 완성해줘")
 
 ## 목표
 
@@ -76,6 +76,7 @@
 - `python test_gold_b_data.py` 30개, `python test_approval_page.py` 28개 통과 (로컬 Python 3.12, streamlit 1.59.2).
 - 코드를 일부러 틀리게 바꾼 8가지(결제 목록 `copies`, 시각 변환 두 곳 빠짐, `at` 따옴표 빠짐, 시간 폴더 조건 빠짐, 재처리 등록 빠짐, 더미 안내 항상/안 보임)를 시험이 모두 잡았다.
 - 실제 Athena (은서 님 AWS 자격, 대시보드 workgroup, SELECT만): `payment_attempts` 뷰 474줄(10-20~21 시험 적재분, 성공 430·실패 44, 실패 원인 고객 39·PG 5), `malformed_events` 0줄, `reprocess_events` 0줄, 지연 150줄. 세 SQL 모두 문법·칸·형식이 맞다.
+- #107 머지(`23e7009`, 한 커밋으로 합침) 뒤 최신 `main` 병합 (2026-10-24): 이 브랜치가 바꾸지 않은 파일은 `main` 그대로, 바꾼 9개 파일은 `main` 위에 이 브랜치 변경을 얹었다. 병합한 트리에서 `python test_gold_b_data.py` 30개, `python test_approval_page.py` 28개, `python -m pytest -q test_gold_a_io.py` 19개(#106 시험)가 통과했다. 이 PC에는 `streamlit_echarts`가 없어서 Gold A 시험은 저장소 밖 가짜 모듈을 `PYTHONPATH`에 두고 돌렸다.
 - 대시보드 역할 권한 (IAM 시뮬레이션): 원장 `payment_events`·`malformed_events`·`reprocess_events`와 그 S3 폴더는 허용, 뷰 `payment_attempts`·`payment_states`는 거부.
 
 ### 알아 둘 것
@@ -86,5 +87,5 @@
 ### 다음 할 일
 
 - 재영 님: 대시보드 역할에 뷰 `gold_b.payment_states`·`gold_b.payment_attempts`의 `glue:GetTable` 추가 (`pipeline-status-read-only` 정책).
-- 사용자: #107 머지 뒤 이 브랜치 PR (최신 `main` 병합이 필요하면 그때 함).
+- 사용자: PR #110 리뷰·머지 (#107 머지 뒤 최신 `main` 병합은 끝냄).
 - 민혁 님: 머지 뒤 대시보드 이미지 재배포.
