@@ -1,5 +1,24 @@
 # Gold B 실행 기반
 
+## 상시 실행 (2026-10-24)
+
+사용자 승인으로 `persistent.py`가 기존 runtime ConfigMap에서 상시 실행용 내부 headless Service와 단일 Driver Deployment를 생성한다. 업무 이미지·S3 checkpoint·Kafka TLS·Driver/Executor 계정·전용 노드 selector는 유지한다. Driver 350m/2GiB, Executor 1개 500m/1.25GiB를 사용하고 별도 대기 제출기는 두지 않는다.
+
+Driver는 client mode로 같은 Pod 안에서 실행한다. Kubernetes가 컨테이너/Pod 종료 시 다시 시작하고 기존 체크포인트를 사용한다. Deployment는 replicas=1·Recreate이며 수동 복제나 같은 checkpoint를 쓰는 별도 잡 제출은 금지한다. 장시간 네트워크 분리 시 단일 writer fencing까지 보장하는 HA 구조는 아니다.
+
+Spark 풀의 기존 t3a.large 한 대분 한도는 유지한다. 상시 Driver/Executor가 남으므로 이 노드는 유휴 축소되지 않으며 비용도 계속 발생한다. Silver·Gold A 기본 최대 배치와의 동시 수용은 보장하지 않으며 자원 부족 시 Pending일 수 있다. 기존 배치 자원이나 노드 한도를 임의로 늘리지 않는다.
+
+```powershell
+python infra/platform/gold-b/persistent.py --runtime-json .cache/gold-b-runtime.private.json --output .cache/gold-b-persistent.private.yaml
+# 생성 파일과 기존 활성 인스턴스를 확인한 후에만 배포한다.
+kubectl apply -f .cache/gold-b-persistent.private.yaml
+kubectl get deployment gold-b-ingest -n pipelines
+# 운영 중지: checkpoint를 삭제하지 않고 Driver 수를 0으로 내린다.
+kubectl scale deployment gold-b-ingest -n pipelines --replicas=0
+```
+
+Readiness는 Driver RPC 소켓만 확인한다. 실제 적재 성공은 로그의 처리 묶음·S3 체크포인트 커밋·원장 쓰기로 별도 확인한다. 장애 복구·재시작 중복 방지의 장시간 검증은 후속이다. [Spark client mode 및 Driver 네트워크 공식 문서](https://spark.apache.org/docs/4.2.0/running-on-kubernetes.html#client-mode).
+
 Gold B 상시 Spark 적재와 Python 재처리·합치기의 실행 신원을 분리한다. `prepare.py`는 파일만 생성하며 AWS/kubectl/Helm을 호출하거나 Pod·Job·노드를 시작하지 않는다. CI 실패 수정과 #101 머지는 이 작업 범위가 아니다.
 
 ## 실행 신원과 데이터 경계
