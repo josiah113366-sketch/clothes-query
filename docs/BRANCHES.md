@@ -162,8 +162,9 @@ gitGraph
 | `agent/folder-filter` | `agent-folder-filter.md` 없음(작은 변경, PR #72 본문 참고) | 머지됨 (PR #72) | 2026-10-23 |
 | `agent/conclusion-check` | [agent-conclusion-check.md](tasks/agent-conclusion-check.md) | 머지됨 (PR #76) | 2026-10-23 |
 | `agent/silver-source` | `agent-silver-source.md` 없음(작은 변경, PR #80 본문 참고) | 머지됨 (PR #80) | 2026-10-23 |
-| `agent/rules-doc` | [agent-rules-doc.md](tasks/agent-rules-doc.md) | 검토 대기 | |
+| `agent/rules-doc` | [agent-rules-doc.md](tasks/agent-rules-doc.md) | 머지됨 (PR #85) | 2026-10-24 |
 | `agent/silver-conf` | [agent-silver-conf.md](tasks/agent-silver-conf.md) | 머지됨 (PR #108) | 2026-10-24 |
+| `agent/test-anomaly` | [agent-test-anomaly.md](tasks/agent-test-anomaly.md) | 머지됨 (PR #105) | 2026-10-24 |
 
 
 ### dashboard
