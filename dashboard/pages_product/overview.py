@@ -13,6 +13,7 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("trade", "funnels", "reviews")
 
 st.title("통합 조회")
 st.caption("같은 시기에 함께 변한 지표는 조사 단서입니다. 원인으로 단정하지 마세요.")
@@ -28,53 +29,61 @@ st.subheader("판매")
 ui.date_note("sales")
 sales = ui.last_days(data.get_product_sales_daily(), "sales_date_kst", days)
 sales = sales[sales.article_id.isin(art)]
-m1, m2 = st.columns(2)
-m1.metric("판매 수량", f"{int(sales.sold_quantity.sum()):,}")
-m2.metric("상품 판매 금액(원)", f"{int(sales.item_sales_amount.sum()):,}")
-st.line_chart(sales.set_index("sales_date_kst")[["sold_quantity"]])
+if ui.has_rows(sales):
+    m1, m2 = st.columns(2)
+    m1.metric("판매 수량", f"{int(sales.sold_quantity.sum()):,}")
+    m2.metric("상품 판매 금액(원)", f"{int(sales.item_sales_amount.sum()):,}")
+    st.line_chart(sales.set_index("sales_date_kst")[["sold_quantity"]])
 
 # ---- 구매 흐름 (첫 조회일) ----
 st.subheader("구매 흐름")
 ui.date_note("funnel")
 fn = ui.last_days(data.get_funnel_daily(), "funnel_date_kst", days)
 fn = fn[fn.article_id.isin(art)]
-v = fn[["view_sessions", "cart_sessions", "order_sessions", "paid_sessions"]].sum()
-f1, f2, f3, f4 = st.columns(4)
-f1.metric("조회", f"{int(v.view_sessions):,}")
-f2.metric("담기", f"{int(v.cart_sessions):,}")
-f3.metric("주문", f"{int(v.order_sessions):,}")
-f4.metric("결제", f"{int(v.paid_sessions):,}")
-# 기간 전환율은 일별 비율의 평균이 아니라 합계끼리 다시 나눈다 (분모 0 이면 계산 불가)
-st.caption(
-    f"조회→결제 전환율: {ui.pct(v.paid_sessions / v.view_sessions if v.view_sessions else float('nan'))}"
-)
+if ui.has_rows(fn):
+    v = fn[["view_sessions", "cart_sessions", "order_sessions", "paid_sessions"]].sum()
+    f1, f2, f3, f4 = st.columns(4)
+    f1.metric("조회", f"{int(v.view_sessions):,}")
+    f2.metric("담기", f"{int(v.cart_sessions):,}")
+    f3.metric("주문", f"{int(v.order_sessions):,}")
+    f4.metric("결제", f"{int(v.paid_sessions):,}")
+    # 기간 전환율은 일별 비율의 평균이 아니라 합계끼리 다시 나눈다 (분모 0 이면 계산 불가)
+    st.caption(
+        f"조회→결제 전환율: {ui.pct(v.paid_sessions / v.view_sessions if v.view_sessions else float('nan'))}"
+    )
 
 # ---- 리뷰 (작성일) ----
 st.subheader("리뷰")
 ui.date_note("review")
 rv = ui.last_days(data.get_review_product_daily(), "review_date_kst", days)
 rv = rv[rv.article_id.isin(art)]
-cnt, rs, low = rv.review_count.sum(), rv.rating_sum.sum(), rv.low_rating_count.sum()
-r1, r2, r3 = st.columns(3)
-r1.metric("리뷰 수", f"{int(cnt):,}")
-r2.metric("평균 별점", "계산 불가" if cnt == 0 else f"{rs / cnt:.2f}")  # 합계/합계로 재계산
-r3.metric("낮은 별점(1~2점) 비율", ui.pct(low / cnt if cnt else float("nan")))
-st.caption("낮은 별점은 별점 기준이며 AI가 판정한 부정 감성과 다릅니다.")
+if ui.has_rows(rv):
+    cnt, rs, low = rv.review_count.sum(), rv.rating_sum.sum(), rv.low_rating_count.sum()
+    r1, r2, r3 = st.columns(3)
+    r1.metric("리뷰 수", f"{int(cnt):,}")
+    r2.metric("평균 별점", "계산 불가" if cnt == 0 else f"{rs / cnt:.2f}")  # 합계/합계로 재계산
+    r3.metric("낮은 별점(1~2점) 비율", ui.pct(low / cnt if cnt else float("nan")))
+    st.caption("낮은 별점은 별점 기준이며 AI가 판정한 부정 감성과 다릅니다.")
 
 # ---- 불만 범주 (작성일) ----
 st.subheader("불만 범주")
 asp = ui.last_days(data.get_review_aspect_daily(), "review_date_kst", days)
 asp = asp[asp.article_id.isin(art)]
-g = asp.groupby("aspect", as_index=False)[["mentioned_review_count", "negative_review_count"]].sum()
-g["negative_rate"] = data.safe_div(g.negative_review_count, g.mentioned_review_count)
-st.dataframe(g.sort_values("negative_rate", ascending=False), hide_index=True, width="stretch")
-st.caption(
-    "속성별 리뷰 수는 합쳐서 전체 리뷰 수로 쓰지 않습니다(리뷰 하나가 여러 속성을 언급). "
-    "모델 버전: " + ", ".join(data.MODEL_VERSIONS)
-)
+if ui.has_rows(asp):
+    asp = ui.select_model(asp, "ov_model")
+    g = asp.groupby("aspect", as_index=False)[
+        ["mentioned_review_count", "negative_review_count"]
+    ].sum()
+    g["negative_rate"] = data.safe_div(g.negative_review_count, g.mentioned_review_count)
+    st.dataframe(g.sort_values("negative_rate", ascending=False), hide_index=True, width="stretch")
+    st.caption(
+        "속성별 리뷰 수는 합쳐서 전체 리뷰 수로 쓰지 않습니다(리뷰 하나가 여러 속성을 언급). "
+        "모델 버전: " + ", ".join(asp.model_version.dropna().unique())
+    )
 
 # ---- 관련 장애 (Gold B 기록, 같은 기간) ----
 st.subheader("관련 장애")
+st.caption("이 영역은 기존 관제 미리보기 데이터입니다.")
 an = data.get_anomalies().copy()
 an["detected_at(KST)"] = data.to_kst(an.detected_at)
 st.dataframe(an.drop(columns="detected_at"), hide_index=True, width="stretch")
@@ -84,6 +93,7 @@ st.caption(
 
 # ---- 데이터 상태 ----
 st.subheader("데이터 상태")
+st.caption("아래 처리 현황은 미리보기이며, 실제 Gold A 실행·보류 정보는 화면 상단을 확인하세요.")
 st.dataframe(data.get_data_status(), hide_index=True, width="stretch")
 st.caption("처리 완료 범위 밖의 낮은 값은 판매 감소가 아니라 데이터 지연일 수 있습니다.")
 ui.dummy_note()
