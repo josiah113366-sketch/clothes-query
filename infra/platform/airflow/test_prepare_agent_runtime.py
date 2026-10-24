@@ -38,6 +38,18 @@ class RuntimeTest(unittest.TestCase):
             with self.subTest(image=image), self.assertRaises(ValueError):
                 render(dict(self.config, detect_image=image), self.base)
 
+    def test_r6_preserves_existing_config_and_requires_both_confirmed_tables(self):
+        tables = {"silver_checks_table": "silver.order_amount_checks", "silver_runs_table": "silver.silver_runs"}
+        cm, _ = render(dict(self.config, **tables), self.base)
+        actual = json.loads(cm['data']['config'])
+        for key, value in dict(self.config, **tables).items():
+            self.assertEqual(actual[key], value)
+        for change in [{"silver_checks_table": "silver.order_amount_checks"},
+                       dict(tables, silver_checks_table="other.order_amount_checks"),
+                       dict(tables, silver_runs_table="silver.other")]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                render(dict(self.config, **change), self.base)
+
     def test_rejects_secret_or_node_pins_or_unconfirmed_model(self):
         for change in [{"hostname": "some-node"}, {"password": "not-a-secret"}, {"bedrock_model_id": "amazon.nova-lite-v1:0"}]:
             with self.subTest(change=change), self.assertRaises(ValueError):

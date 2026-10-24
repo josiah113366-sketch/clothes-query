@@ -13,6 +13,8 @@ MODEL = "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
 CONFIG_KEYS = {"detect_image", "investigate_image", "detect_workgroup", "investigate_workgroup",
                "region", "bedrock_model_id", "investigate_max"}
 REQUIRED = CONFIG_KEYS - {"investigate_max"}
+R6_TABLES = {"silver_checks_table": "silver.order_amount_checks", "silver_runs_table": "silver.silver_runs"}
+CONFIG_KEYS |= R6_TABLES.keys()
 CM_NAME = "airflow-agent-runtime"
 ENV_NAME = "AIRFLOW_AGENT_CONFIG"
 BUNDLE_NAME = "agent-dags"
@@ -24,6 +26,9 @@ def render(config, base):
     if not isinstance(config, dict) or REQUIRED - config.keys() or config.keys() - CONFIG_KEYS:
         raise ValueError("Supply only documented agent settings; all six required keys must be present")
     config = copy.deepcopy(config)
+    supplied_r6 = config.keys() & R6_TABLES.keys()
+    if supplied_r6 and (supplied_r6 != R6_TABLES.keys() or any(config[key] != value for key, value in R6_TABLES.items())):
+        raise ValueError("R6 requires both confirmed Silver tables; do not widen database/table access")
     if config["region"] != REGION or config["bedrock_model_id"] != MODEL:
         raise ValueError("Use the confirmed Tokyo region and JP Haiku profile")
     for key, repo in [("detect_image", "detection-job"), ("investigate_image", "investigation-agent")]:
