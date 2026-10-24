@@ -64,7 +64,7 @@ Gold B는 Kafka에서 필요한 것만 정제해 **1분마다 원장에 쌓고**
 | Bronze 파일 전환 주기 | 성철 님께 확인 | `rotate.schedule.interval.ms = 900000` (15분), `flush.size = 10000` | 정상 지연 기준선 후보는 15분. 성철 님 확인은 유지 |
 | S3 Sink 커넥터 이름 | 성철 님께 확인 | `bronze-s3-sink` (Strimzi `KafkaConnector`, 네임스페이스 `kafka`). 소비자 그룹은 Connect 기본 규칙상 `connect-bronze-s3-sink`로 예상 | 수집기 단계에서 실제 그룹 이름 확인 |
 | Bronze 대상 토픽 | 6개 | 5개 (`clickstream`, `members-events`, `orders`, `order-items`, `payments`). `reviews.raw`는 없음 | 아래 「입력」 참고 |
-| Bronze의 Kafka 위치 | 성철 님께 확인 | 파일에는 메시지 값만 있다. 파일 이름에 파티션과 시작 offset만 있음 (`<토픽>+<파티션>+<시작offset>.json`) | 보관 기간(7일)이 지난 구간을 Bronze로 재처리하는 방법은 7단계 전에 정함 |
+| Bronze의 Kafka 위치 | 성철 님께 확인 | 파일에는 메시지 값만 있다. 파일 이름에 파티션과 시작 offset만 있음 (`<토픽>+<파티션>+<시작offset>.json`) | Bronze v2(#89, 2026-10-23)가 줄마다 Kafka 위치·시각(`kafka_*`)을 남긴다. 보관 기간(7일)이 지난 구간은 Bronze v2로 재처리 (2026-10-24, 아래 「재실행·재처리 설계와 검증」) |
 | 오류 토픽(DLQ) | 성철 님께 확인 | S3 Sink에 `errors.tolerance`·DLQ 설정 없음 | 성철 님 확인 유지 |
 | 리뷰 | `reviews.raw` 토픽 | 운영 흐름은 리뷰 시뮬레이터가 S3 `bronze/reviews/`에 바로 쓴다. `reviews.raw`는 실험용 토픽 | 대상 토픽 목록(설정값)에 넣되, 운영에서 비어 있을 수 있음. 민혁 님 확인 |
 | 형식 규칙 파일 | `common/format_rules.yaml` | `docs/contracts/format_rules.yaml`과 읽는 코드 `pipelines/format_rules.py`가 PR #26으로 머지됨 (주문·주문상품·결제만, Silver가 읽음) | 2단계에서 이 파일을 같이 쓰는 방법을 현지 님과 정함 |
@@ -637,7 +637,7 @@ GROUP BY 1, 2;
 | --- | --- | --- | --- |
 | 평소 | Kafka 토픽 | 상시 실행 적재 잡 (Spark Structured Streaming, 1분 트리거) | 원장에 추가 |
 | 재처리 (Kafka 보관 7일 안) | Kafka의 해당 위치부터 다시 읽기 | Airflow로 실행하는 재처리 잡 | 대상 메시지의 옛 결과를 새 결과로 바꿈 (메시지 단위) |
-| 재처리 (보관 기간 넘음) | Bronze의 해당 시간 구간 | 위와 같음 | 위와 같음 |
+| 재처리 (보관 기간 넘음) | Bronze v2의 해당 시간 폴더 (줄마다 Kafka 위치·시각) | 위와 같음 | 위와 같음 |
 
 **재처리하는 경우와 안 하는 경우**
 
@@ -664,7 +664,8 @@ GROUP BY 1, 2;
 - **옛 결과·새 결과의 위치:** 원장을 뒤지지 않고 메시지로 정한다. ②④는 Kafka 시각 폴더, ①은 결제 시각(`completed_at`) 폴더다. 결제 시각 폴더가 승인 범위 밖이면(예: 다음 날 들어온 결제 수정) 그 폴더에서도 대상 메시지의 줄만 바꾸고 `LEDGER_REPLACED`(detail `outside_window`)를 남긴다. 범위 밖 폴더는 결과가 바뀌는 결제가 있을 때만 고친다: 새 통과 줄과 같은 ① 줄이 없을 때(복구), 새 결과가 오류인데 옛 ① 줄이 있을 때(보류). 같은 통과 줄이 이미 있으면(예: 시간 경계에 걸린 결제를 같은 결과로 다시 검사) 건드리지 않는다. 그 시간대도 재판정되므로 꼭 필요한 만큼만 고친다 (2026-10-24 주현 님). 판정 잡은 교체 시간대를 결제 시각으로 보므로(재판정, R5가 재처리 줄을 빼는 조건) 그 시간대도 재판정된다. 앞뒤 여유 시간은 더 읽지 않는다 (예전에는 10분씩 더 읽었다).
 - **쓰는 순서:** (가) 검사 결과(①·④)의 새 줄을 모든 폴더에 먼저 더하고, (나) 시간 순서로 폴더마다 대상 메시지의 옛 결과를 지우고 파일 하나로 정리한다. ②`topic_messages`는 먼저 더하지 않고 (나)에서 바로 바꾼다. 먼저 더하면 판정이 세는 유입량·R4 분모와 신뢰성 점검의 "같은 위치 두 번"이 정리 전까지 늘어 보인다 (2026-10-24 주현 님). 중간에 멈춰도 결과가 사라지지 않는다 (같은 위치에 옛·새 결과가 함께 있으면 뷰가 더 늦게 쌓인 새 결과를 고름). 다시 돌리면 정리된다.
 - **Kafka 보관 기간:** 7일이다 (2026-10-23 #86으로 3일에서 늘어남, 업무 토픽 `retention.ms` 604800000). 7일 안에 잡아서 고친 구간은 Kafka를 다시 읽고, 그보다 오래된 구간(늦게 발견, 백필)은 Bronze로 다시 채운다.
-- **Bronze에 필요한 것:** 보관 기간(7일)이 지난 구간을 Bronze로 같은 결과로 다시 만들려면 Bronze에 Kafka 위치·시각(`topic`, `partition`, `offset`, `timestamp`)과 깨진 메시지 원본이 있어야 한다. 현재 Bronze 파일에는 메시지 값만 있고(파일 이름에 파티션·시작 offset), S3 Sink에 오류 토픽 설정이 없다. Silver·Gold A를 고칠 때도 이 원본이 필요하다.
+- **Bronze에서 읽기 (2026-10-24):** Bronze v2(`connectors/bronze-s3-sink-v2.yaml`, #89)는 줄마다 메시지 값과 Kafka 위치·시각(`kafka_topic`, `kafka_partition`, `kafka_offset`, `kafka_timestamp`, `kafka_timestamp_type`)을 남긴다. 재처리는 승인 범위의 시간 폴더마다 원본을 고른다: 폴더 시작 - 10분이 지금 - 7일보다 앞이면 Bronze v2, 아니면 Kafka (한 요청에 섞여도 됨). Bronze 줄에서 `kafka_*` 칸을 떼어 메시지를 되돌리고, 같은 위치가 두 번 있으면(Sink 재시작) 하나만 쓴다. `LEDGER_REPLACED`의 `source`는 그 폴더를 다시 읽은 곳(`BRONZE`·`KAFKA`)이다.
+- **Bronze로 다시 만들 수 없는 것:** 빈 값과 JSON 객체가 아닌 값(깨진 메시지 원본)은 Sink가 쓰지 않고 S3 Sink에 오류 토픽 설정도 없어서 Bronze에 없다. 그 메시지는 대상이 아니라서 옛 줄이 그대로 남는다. `reviews.raw`도 Bronze에 없다. 옛 `bronze/` 파일(줄마다 위치·시각 없음)과 Bronze v2가 생기기 전 구간은 다시 만들 수 없다 (그 날 파일이 없으면 재시도 없이 `FAILED`). Silver·Gold A를 고칠 때도 같은 한계가 있다.
 - **교체 후 재판정:** 재처리 잡은 시간 폴더 정리가 끝날 때마다(승인 범위 밖 결제 시각 폴더 포함) `reprocess_events`에 `LEDGER_REPLACED`와 실제 범위를 남기고, 마지막에 전체 교체 범위를 결과로 넘긴다. 재처리 DAG는 판정을 직접 부르지 않고, 주현 님 판정 잡이 정해진 주기(미정, 제안 5분)마다 이 줄을 읽어 재판정한다. 교체가 끝나지 않은 폴더는 `LEDGER_REPLACED`가 없으므로 재판정되지 않는다.
 - **자동 재시도:** 재처리 잡이 일시적으로 실패하면(`FAILED`의 `retryable`이 참이거나 중간에 멈춤) 5분 뒤 다음 DAG 실행에서 poller가 같은 요청을 다시 고른다. 한 요청은 처음 1번 + 자동 재시도 2번까지 돈다 (Airflow 재시도는 0. 두면 같은 실행이 바로 다시 돌고 그것도 횟수에 들어감). 교체는 처음부터 다시 해도 결과가 같아서 안전하다. 계속 실패하면 `FAILED`로 멈추고 사람이 다시 승인한다. 범위가 바뀌면 새로 승인받는다.
 - **한 번에 하나씩:** 같은 시간 폴더를 두 재처리가 동시에 건드리지 않도록 재처리는 한 번에 하나씩 돌린다. 재처리는 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서 파일 합치기와도 같은 시간에 돌리지 않는다. 같은 시간대를 순서대로 두 번 재처리하면 재판정도 두 번 되고, 이상 이력은 회차별로 쌓여 문제없다.
@@ -744,7 +745,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 성철 | 파일 전환 주기 | 정상일 때의 지연 기준선 | 저장소상 15분. 확인 필요 |
 | 성철 | Kafka Connect REST 주소 | 커넥터 상태 조회 | 필요 |
 | 성철 | 오류 토픽(DLQ) 이름과 S3 저장 여부 | 깨진 원본이 있어야 오래된 구간과 Silver를 고칠 수 있음 | 저장소상 설정 없음. 필요 |
-| 성철 | Bronze에 Kafka 위치·시각 저장 여부, 저장 형식(JSON/Parquet) | 보관 기간(7일) 넘은 구간을 Bronze로 재처리할 때 필요 | 저장소상 값만 JSON으로 저장. 필요 |
+| 성철 | Bronze에 Kafka 위치·시각 저장 여부, 저장 형식(JSON/Parquet) | 보관 기간(7일) 넘은 구간을 Bronze로 재처리할 때 필요 | 완료: Bronze v2(#89, 2026-10-23)가 JSON 줄마다 `kafka_*` 5칸을 남김 |
 | 성철 | 결제 데이터 계약(결과를 바로잡는 UPDATE 허용, 2026-10-23 팀 합의), 결과 시각을 정하면 바로 저장, `payments` 메시지 키(`payment_id`)와 파티션 수 유지 | 재시도 구분, 늦은 데이터 방지, offset 순서의 전제 | 필요 |
 | 성철 | 시나리오별 시연 모드(3배·10배), 평소 변동 | 탐지 기준과 허용 지연 | 필요 |
 | 성철 | 시나리오 3 정답표 (토픽, 필드, 이름 변경인지 누락인지, 시작·끝 시각) | 시나리오 3 검증과 재처리 시연 | 필요 |
@@ -763,6 +764,7 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 재영 | Athena 접근 경로(NAT 또는 VPC 엔드포인트)와 권한 (주현 님, 대시보드 포함) | 탐지·에이전트·대시보드가 조회하려면 필요 | 필요 |
 | 재영 | 규칙 파일 배포 방식 (이미지 포함 / S3) | 규칙 변경을 적재 잡에 반영 | 필요 |
 | 재영 | Airflow DAG 위치, 재시도 2번, 같은 시간대 한 번에 하나씩 (재판정은 DAG로 잇지 않음, `team-inputs.md`와 같음). 재처리와 파일 합치기는 같은 시간에 돌리지 않음 (2026-10-23, 재처리가 범위 밖 결제 시각 폴더도 고침). 2026-10-24 DAG를 `infra/platform/airflow/dags/gold_b.py`로 만듦 (꺼진 채로). 켜려면 실행 설정 `AIRFLOW_GOLD_B_RUNTIME`·pool·Kafka 인증서 Secret·실행 신원 권한 (`infra/platform/airflow/dags/README.md`) | 재처리 흐름 | 필요 |
+| 재영 | Bronze 재처리 배포 (2026-10-24): 재처리 실행 신원에 S3 `bronze_v2/` 읽기, 실행 설정 `bronze_root` (`infra/platform/airflow/dags/README.md`) | 보관 기간(7일)이 지난 시간대 재처리 | 머지 뒤 |
 | 재영 | 결제 UPDATE 처리 배포 (2026-10-23): Glue `gold_b.payment_events`·`malformed_events` 칸 추가(`ALTER TABLE`), 뷰를 `payment_states` → `payment_conflicts`·`payment_attempts` 순서로 다시 만들기 (`views/README.md`) | Athena 표·뷰를 코드와 맞추기 | 머지 뒤 |
 | 민혁 | `reviews.raw` 리뷰 컬럼, 운영에서 이 토픽을 쓰는지 | 형식 검사 규칙, 대상 토픽 목록 | 필요 |
 | 민혁 | 대시보드(#31)의 Gold B 컬럼: `bronze_lag_snapshots`는 `kafka_partition`, `payment_attempts`에는 `copies`가 없음, `payment_conflicts` 표시 (2026-10-23부터 보류 목록: `conflict_fields` 대신 `hold_reason`) | 실데이터 연결 때 화면이 깨지지 않게 | 필요 |
@@ -895,7 +897,8 @@ pipelines/gold_b/
 
 - [x]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
 - [x]  승인 범위를 시간 폴더 단위로 넓히기
-- [ ]  원본 선택: 보관 기간(7일) 안은 Kafka(해당 offset부터), 넘으면 Bronze (Kafka는 완료. Bronze는 Bronze에 Kafka 위치·시각을 남기는 방법을 성철 님과 정한 뒤)
+- [x]  원본 선택: 보관 기간(7일) 안은 Kafka(해당 offset부터), 넘으면 Bronze v2 (폴더마다 시각으로 고름, `pipelines/gold-b-bronze-reprocess`)
+- [ ]  실제 Bronze v2로 보관 기간이 지난 시간대 재처리 확인 (재영 님 `bronze_v2/` 읽기 권한·실행 설정 뒤)
 - [x]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
 - [x]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
 - [x]  메시지 단위 재처리 (`pipelines/gold-b-reprocess-by-message`, #99, 2026-10-24): 승인 범위 메시지만 다시 읽어 옛 결과를 새 결과로, 범위 밖 결제 시각 폴더도 고치고 `LEDGER_REPLACED`(`outside_window`), 새 결과를 먼저 더하고 정리
