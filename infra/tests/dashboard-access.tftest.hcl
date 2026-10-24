@@ -23,6 +23,24 @@ run "isolated_approval_writer" {
     error_message = "Approval writer must remain scoped to reprocess events, its own workgroup and dashboard identity."
   }
 }
+run "review_v2_is_read_only_and_exactly_scoped" {
+  command = plan
+  module { source = "../modules/dashboard-access" }
+  assert {
+    condition = (
+      [for s in jsondecode(aws_iam_role_policy.dashboard.policy).Statement : s if s.Sid == "DashboardSourceReads"][0].Action == ["s3:GetObject"] &&
+      contains([for s in jsondecode(aws_iam_role_policy.dashboard.policy).Statement : s if s.Sid == "DashboardSourceReads"][0].Resource,
+      "arn:aws:s3:::test-dashboard-bucket/bronze_v2/reviews/*") &&
+      contains([for s in jsondecode(aws_iam_role_policy.dashboard.policy).Statement : s if s.Sid == "ScopedListing"][0].Condition.StringLike["s3:prefix"], "bronze_v2/reviews/*") &&
+      alltrue([for s in jsondecode(aws_iam_role_policy.dashboard.policy).Statement :
+        !contains(s.Action, "s3:PutObject") && !contains(s.Action, "s3:DeleteObject") || !anytrue([for r in s.Resource : strcontains(r, "bronze_v2/")])
+      ]) &&
+      !strcontains(aws_iam_role_policy.dashboard.policy, "bronze_v2/*") &&
+      !strcontains(aws_iam_role_policy.dashboard.policy, "bronze/reviews/")
+    )
+    error_message = "Dashboard may read/list only the requested v2 reviews prefix, without new source writes/deletes or broad Bronze access."
+  }
+}
 run "pipeline_status_is_opt_in_and_read_only" {
   command = plan
   module { source = "../modules/dashboard-access" }
