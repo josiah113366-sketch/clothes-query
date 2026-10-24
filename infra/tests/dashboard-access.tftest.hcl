@@ -17,9 +17,32 @@ run "isolated_approval_writer" {
       aws_athena_workgroup.dashboard.configuration[0].enforce_workgroup_configuration &&
       aws_athena_workgroup.dashboard.configuration[0].bytes_scanned_cutoff_per_query == 1073741824 &&
       aws_eks_pod_identity_association.dashboard.namespace == "dashboard" &&
-      aws_eks_pod_identity_association.dashboard.service_account == "approval-dashboard"
+      aws_eks_pod_identity_association.dashboard.service_account == "approval-dashboard" &&
+      length(aws_iam_role_policy.pipeline_status) == 0
     )
     error_message = "Approval writer must remain scoped to reprocess events, its own workgroup and dashboard identity."
+  }
+}
+run "pipeline_status_is_opt_in_and_read_only" {
+  command = plan
+  module { source = "../modules/dashboard-access" }
+  variables { enable_pipeline_status_reads = true }
+  assert {
+    condition = (
+      alltrue(flatten([for s in jsondecode(aws_iam_role_policy.pipeline_status[0].policy).Statement : [for a in s.Action : contains([
+        "glue:GetDatabase", "glue:GetTable", "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition", "s3:GetObject", "s3:ListBucket"
+      ], a)]])) &&
+      toset([for s in jsondecode(aws_iam_role_policy.pipeline_status[0].policy).Statement : s if s.Sid == "PipelineStatusMetadata"][0].Resource) == toset(concat([
+        "arn:aws:glue:ap-northeast-1:000000000000:catalog"
+        ], [for db in ["gold_b", "silver", "gold_a"] : "arn:aws:glue:ap-northeast-1:000000000000:database/${db}"], [for table in [
+          "gold_b/bronze_lag_snapshots", "gold_b/topic_messages", "gold_b/payment_events", "gold_b/malformed_events", "silver/silver_runs", "gold_a/gold_runs"
+      ] : "arn:aws:glue:ap-northeast-1:000000000000:table/${table}"])) &&
+      contains([for s in jsondecode(aws_iam_role_policy.pipeline_status[0].policy).Statement : s if s.Sid == "PipelineStatusObjects"][0].Resource,
+      "arn:aws:s3:::test-dashboard-bucket/gold_a/runtime/trade/catalog/completed/*") &&
+      !strcontains(aws_iam_role_policy.pipeline_status[0].policy, "ground_truth") &&
+      !strcontains(aws_iam_role_policy.pipeline_status[0].policy, "review_aspect_scores_iceberg")
+    )
+    error_message = "Pipeline dashboard status must grant only named metadata and completion/ledger reads, preserving source write isolation."
   }
 }
 run "reject_shared_results" {

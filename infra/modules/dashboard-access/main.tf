@@ -8,6 +8,33 @@ locals {
   bucket     = trimprefix(var.bucket_arn, "arn:${local.partition}:s3:::")
   cluster    = "arn:${local.partition}:eks:ap-northeast-1:${local.account}:cluster/${var.cluster_name}"
   data_paths = ["gold_b/anomaly/", "gold_b/reprocess_events/", "agent/investigation_reports/", var.model_registry_prefix]
+  pipeline_status_tables = [
+    "gold_b/bronze_lag_snapshots", "gold_b/topic_messages", "gold_b/payment_events", "gold_b/malformed_events",
+    "silver/silver_runs", "gold_a/gold_runs"
+  ]
+  pipeline_status_paths = concat([
+    "gold_b/bronze_lag_snapshots/", "gold_b/topic_messages/", "gold_b/payment_events/", "gold_b/malformed_events/",
+    "silver/runtime/trade/catalog/completed/", "gold_a/catalog/"
+  ], [for channel in ["trade", "funnels", "reviews"] : "gold_a/runtime/${channel}/catalog/completed/"])
+}
+
+resource "aws_iam_role_policy" "pipeline_status" {
+  count = var.enable_pipeline_status_reads ? 1 : 0
+  name  = "pipeline-status-read-only"
+  role  = aws_iam_role.dashboard.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "PipelineStatusMetadata", Effect = "Allow"
+        Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition"]
+        Resource = concat(["${local.glue}:catalog"], [for db in ["gold_b", "silver", "gold_a"] : "${local.glue}:database/${db}"],
+        [for table in local.pipeline_status_tables : "${local.glue}:table/${table}"])
+      },
+      { Sid = "PipelineStatusObjects", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in local.pipeline_status_paths : "${var.bucket_arn}/${p}*"] },
+      { Sid = "PipelineStatusListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in local.pipeline_status_paths : "${p}*"] } } }
+    ]
+  })
 }
 
 resource "aws_athena_workgroup" "dashboard" {

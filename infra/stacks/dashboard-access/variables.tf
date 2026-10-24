@@ -6,6 +6,10 @@ variable "expected_account_id" {
   }
 }
 variable "state_bucket" { type = string }
+variable "enable_pipeline_status_reads" {
+  type    = bool
+  default = false
+}
 variable "model_registry_prefix" {
   type    = string
   default = "review-score/model-registry/releases/"

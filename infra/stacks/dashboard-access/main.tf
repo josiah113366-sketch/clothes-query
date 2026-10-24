@@ -12,6 +12,7 @@ module "dashboard_access" {
   bucket_arn                     = data.terraform_remote_state.storage.outputs.bucket_arn
   namespace                      = var.namespace
   service_account                = var.service_account
+  enable_pipeline_status_reads   = var.enable_pipeline_status_reads
   model_registry_prefix          = var.model_registry_prefix
   workgroup_name                 = var.workgroup_name
   results_prefix                 = var.results_prefix

@@ -1,4 +1,9 @@
 variable "cluster_name" { type = string }
+variable "enable_pipeline_status_reads" {
+  description = "Read-only dashboard access to the six confirmed pipeline status tables and their data."
+  type        = bool
+  default     = false
+}
 variable "model_registry_prefix" {
   description = "Read-only model release notes prefix in the existing data bucket."
   type        = string

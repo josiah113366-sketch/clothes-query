@@ -14,6 +14,8 @@
 
 2026-10-23 실제 승인 연결: ServiceAccount는 `dashboard/approval-dashboard`, workgroup은 `clothes-query-dev-dashboard`다. 기존 Secret `dashboard/airflow-api-client`의 `username`·`password`를 사용한다. 기존 역할과 전용 workgroup은 [dashboard-access](../../stacks/dashboard-access/README.md)에서 관리한다. 실제 Pod의 승인 조회·S3 패치노트·Airflow 인증을 확인했다. 재처리 DAG 등록과 실제 승인·재처리 시험은 구분하며 최신 Silver 정상 실행 결과는 [공개 연결 기록](../../../docs/tasks/infra-silver-publication.md)을 따른다. [기존 배포·검증 기록](../../../docs/tasks/infra-dashboard-runtime-connect.md)도 보존한다.
 
+2026-10-24 파이프라인 상태 화면을 위해 같은 역할에 Gold B 원장 4개·Silver/Gold 완료 목록의 Glue/S3 읽기를 추가했다. 기존 전용 workgroup을 그대로 쓰며 새 원본 쓰기·삭제는 허용하지 않는다. `gold_a.gold_runs`의 실제 파티션이 가리키는 채널별 완료 목록도 읽는다. 화면 코드 배포와 데이터 조회 권한 적용은 별개다. [대상과 확인 기록](../../../docs/tasks/infra-dashboard-status-read.md)을 따른다.
+
 ## 스크립트로 배포 (처음 한 번 준비가 끝난 뒤)
 저장소 루트에서 실행한다. Docker Desktop 실행, AWS 로그인, kubeconfig(`infra/EKS_ACCESS.md`)가 필요하다. `KUBECONFIG` 가 없으면 `.cache\eks-kubeconfig.private` 를 쓴다.
 ```powershell
