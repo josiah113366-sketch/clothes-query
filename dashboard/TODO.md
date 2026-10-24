@@ -33,7 +33,7 @@
 
 | # | 할 일 | 선행 조건 | 담당 영역 | 담당자 | 상태 | 메모 |
 |---|---|---|---|---|---|---|
-| B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | | 대기 | 시각은 UTC 저장 |
+| B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | | 대기 | 시각은 UTC 저장. `bronze_lag_snapshots` 조회는 2026-10-24 등록(workgroup 환경변수가 있을 때만) |
 | B2 | `gold_b.anomaly` 컬럼 확정 후 이상탐지 화면 맞춤 | 탐지 담당의 표 정의 | `agent` | | 대기 | 지금 컬럼은 임시 |
 | B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | | 대기 | |
 | B4 | 파이프라인 상태의 "평소 범위" 기준(`NORMAL_MAX_SEC`, 현재 1,020초)과 경고 규칙 확정 | 실측 지연 분포 | `gold-b` / `agent` | | 대기 | 15분 파일 주기 톱니 |
@@ -41,6 +41,7 @@
 | B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `review_aspect_scores_latest` 조회를 `_REAL`에 등록 (`get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_runs`, 그리고 `get_model_registry`의 분석 현황 열 `last_analyzed_at`·`analyzed_reviews`·`unscored_reviews`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 대기 | 버전·패치노트는 연결됨(B7). 점수 현황은 더미 |
 | B7 | 감성분석 모델 화면의 파싱 실패 건수와 Job 결과를 읽을 곳 확정 (오류 prefix, Airflow 기록) | Airflow 연동 | `review-model` / `gold-b` | | 대기 | 평가 지표·패치노트는 결정·연결됨(2026-10-23): `review-analysis/releases/*.yaml` → S3 `review-score/model-registry/releases/` → `MODEL_REGISTRY_URI` |
 | B8 | **감성분석 모델 화면 후기 원문**: `get_review_texts`를 Silver 리뷰 표의 review_id 조회로 `_REAL`에 등록 (점수 차가 큰 후기 표의 원문 열) | Silver 리뷰 표 위치·Athena 권한 | `dashboard` | | 대기 | 2026-10-24 원문 표시 결정(팀 내부 공유). 지금은 직접 지은 더미 문장 |
+| B9 | **파이프라인 상태 › 데이터 흐름 탭** 미연결 단계 연결: CDC 커넥터 상태(수집기 확장), Silver 회원·클릭·상품·리뷰 완료 기록, `gold_b.anomaly`, Bronze 리뷰 최신 폴더, 감성 점수 로그 | 각 단계의 완료 기록, F3 | `dashboard` / `gold-b` / `review-model` | | 대기 | 2026-10-24 탭 추가. 더미 없음: 읽는 곳이 없으면 회색 "미연결". 지금 읽는 곳은 `bronze_lag_snapshots`, `silver.silver_runs`, `gold_a.gold_runs`, Gold B 원장 3개 (`DASHBOARD_ATHENA_WORKGROUP` 있을 때) |
 
 ## 3. 원인 리포트 / 승인
 
@@ -77,7 +78,7 @@
 |---|---|---|---|---|---|---|
 | F1 | 이미지 빌드·ECR 등록, Dockerfile 작성 | 네임스페이스·ECR 저장소 확정 | `infra` | | 대기 | 초안: 프로젝트 파일 `dashboard-deploy-draft/` |
 | F2 | Deployment/Service/Ingress(ALB) 작성 | F1, EKS 담당자와 방식(YAML 또는 Terraform) 합의 | `infra` | | 대기 | EKS는 노드 1대(24GiB 한도), Auto Mode |
-| F3 | Athena/S3 읽기용 Pod Identity 역할 (읽기 전용, `gold_a/`·`gold_b/`·`review-score/model-registry/releases/`만. `ground_truth/` 접근 금지) | A1, B1 | `infra` | | 대기 | 모델 패치노트는 `s3:GetObject` 만 필요 |
+| F3 | Athena/S3 읽기용 Pod Identity 역할 (읽기 전용, `gold_a/`·`gold_b/`·`review-score/model-registry/releases/`만. `ground_truth/` 접근 금지) | A1, B1 | `infra` | | 대기 | 모델 패치노트는 `s3:GetObject` 만 필요. 데이터 흐름 탭은 `silver/runtime/trade/catalog/`·`gold_a/catalog/`도 읽는다 |
 | F4 | 환경변수·Secret 주입 (`AUTH_MODE=local`, `LOCAL_ACCOUNTS_FILE`, `DATA_SOURCE`, `MODEL_REGISTRY_URI`) | E1 | `infra` | | 대기 | `MODEL_REGISTRY_URI` 는 `deployment.yaml`에 채워 둠 |
 
 ## 7. 품질·운영

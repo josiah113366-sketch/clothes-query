@@ -501,3 +501,153 @@ def rank(
         ],
     }
     return st_echarts(options=opt, height=height or f"{max(len(items) * 42, 80)}px", key=key)
+
+
+# 흐름도 상태 색. 회색 두 가지는 정상으로 칠하지 않는 상태다
+#   off     = 미연결: 대시보드가 아직 그 단계를 읽는 곳이 없다
+#   unknown = 확인 불가: 읽으려 했지만 실패했거나 판단할 값이 없다
+STATUS_COLOR = {"ok": GOOD, "warn": WARN, "bad": BAD, "unknown": "#6b7080", "off": "#4a4e58"}
+STATUS_LABEL = {
+    "ok": "정상",
+    "warn": "지연",
+    "bad": "멈춤·실패",
+    "unknown": "확인 불가",
+    "off": "미연결",
+}
+_GRAY = ("unknown", "off")
+
+
+def pipeline_flow(
+    nodes: list[dict],
+    edges: list[tuple],
+    *,
+    key: str,
+    groups: list[dict] | None = None,
+    height: str = "520px",
+):
+    """데이터 흐름도. 단계(원)를 격자 좌표에 놓고 화살표 위로 점이 흐르게 그린다.
+
+    nodes: [{"id", "name", "x", "y", "status", "value", "detail"}, ...]
+        x, y   : 격자 좌표 (x 는 왼쪽→오른쪽 단계 순서, y 는 줄. 0 이 맨 위). 소수도 된다.
+        status : "ok" / "warn" / "bad" / "unknown" / "off" -> 원 테두리 색 (STATUS_COLOR)
+        value  : 원 아래에 적는 대표 값 한 줄 (예: "지연 873초")
+        detail : 마우스를 올렸을 때 더 보여 줄 값 (여러 줄은 \\n)
+    edges: [(시작 id, 끝 id, 속도), ...]
+        속도  : 점 흐름 빠르기 (1 = 기본, 클수록 빠름). 처리량을 대충 나타낸다. 0 이면 점이 멈춘다.
+        화살표 색은 끝 단계의 상태를 따른다 (그 단계로 들어가는 데서 막혔다고 읽는다).
+        양 끝 중 하나라도 회색(미연결·확인 불가)이면 점이 흐르지 않는다 (흐르는지 모르기 때문).
+    groups: [{"name", "x0", "y0", "x1", "y1"}, ...]  단계 묶음(Silver, Gold A ...)을 감싸는 옅은 상자.
+        좌표는 nodes 와 같은 격자 단위이고, 이름은 상자 왼쪽 위에 적는다.
+    """
+    # 격자 한 칸 크기. 단계가 늘면 X_STEP 을 줄이거나 height 를 늘린다
+    x_step, y_step = 140, 120
+    pos = {n["id"]: (n["x"] * x_step, -n["y"] * y_step) for n in nodes}
+    status = {n["id"]: n["status"] for n in nodes}
+    # 화면 범위 = 단계 + 묶음 상자 전체
+    xs = [p[0] for p in pos.values()] + [g[k] * x_step for g in groups or [] for k in ("x0", "x1")]
+    ys = [p[1] for p in pos.values()] + [-g[k] * y_step for g in groups or [] for k in ("y0", "y1")]
+    data_nodes = [
+        {
+            "name": n["name"],
+            "value": list(pos[n["id"]]),
+            "v": n.get("value") or "",
+            "d": (n.get("detail") or "").replace("\n", "<br/>"),
+            "s": STATUS_LABEL[n["status"]],
+            "itemStyle": {
+                "color": "#1f2229" if n["status"] != "off" else "#191b20",
+                "borderColor": STATUS_COLOR[n["status"]],
+                "borderWidth": 2,
+                # 미연결은 점선 테두리 + 흐린 글씨로 '아직 안 붙은 단계'임을 바로 보이게 한다
+                "borderType": "dashed" if n["status"] == "off" else "solid",
+                "shadowBlur": 0 if n["status"] in _GRAY else 14,
+                "shadowColor": STATUS_COLOR[n["status"]] + "66",
+            },
+        }
+        for n in nodes
+    ]
+    for d, n in zip(data_nodes, nodes):
+        if n["status"] == "off":
+            d["label"] = {"rich": {"n": {"color": "#7d818a"}, "v": {"color": "#5d616a"}}}
+    data_lines = []
+    for a, b, speed in edges:
+        c = STATUS_COLOR[status[b]]
+        moving = speed > 0 and status[b] not in (*_GRAY, "bad") and status[a] not in _GRAY
+        data_lines.append(
+            {
+                "coords": [list(pos[a]), list(pos[b])],
+                "lineStyle": {"color": c + ("99" if status[b] == "bad" else "55")},
+                # period: 점 하나가 화살표를 지나는 초. 속도가 클수록 짧게
+                "effect": {
+                    "show": moving,
+                    "color": c,
+                    "period": max(6 / max(speed, 0.1), 0.8),
+                    "symbolSize": 4,
+                },
+            }
+        )
+    opt = {
+        "grid": {"left": 40, "right": 60, "top": 30, "bottom": 50},
+        "xAxis": {"show": False, "min": min(xs) - 20, "max": max(xs) + 20},
+        "yAxis": {"show": False, "min": min(ys) - 20, "max": max(ys) + 20},
+        "tooltip": {
+            "trigger": "item",
+            "confine": True,
+            "formatter": JsCode(
+                "(p) => p.seriesType !== 'scatter' ? '' : '<b>' + p.name + '</b> · ' + p.data.s"
+                " + '<br/>' + p.data.v + (p.data.d ? '<br/>' + p.data.d : '')"
+            ),
+        },
+        "series": [
+            {
+                "type": "lines",
+                "coordinateSystem": "cartesian2d",
+                "zlevel": 1,
+                "silent": True,
+                "data": data_lines,
+                "lineStyle": {"width": 1.5, "type": "dashed", "curveness": 0.15},
+                "effect": {"show": True, "trailLength": 0.3, "symbol": "circle", "loop": True},
+            },
+            {
+                "type": "scatter",
+                "zlevel": 2,
+                "symbolSize": 40,
+                "data": data_nodes,
+                "markArea": {
+                    "silent": True,
+                    "itemStyle": {
+                        "color": "rgba(255,255,255,0.025)",
+                        "borderColor": "#2a2e36",
+                        "borderWidth": 1,
+                    },
+                    "label": {
+                        "position": "insideTopLeft",
+                        "color": "#8b9099",
+                        "fontSize": 11,
+                        "fontWeight": "bold",
+                    },
+                    "data": [
+                        [
+                            {
+                                "name": g["name"],
+                                "xAxis": g["x0"] * x_step,
+                                "yAxis": -g["y0"] * y_step,
+                            },
+                            {"xAxis": g["x1"] * x_step, "yAxis": -g["y1"] * y_step},
+                        ]
+                        for g in groups or []
+                    ],
+                },
+                "label": {
+                    "show": True,
+                    "position": "bottom",
+                    "distance": 6,
+                    "formatter": JsCode("(p) => '{n|' + p.name + '}\\n{v|' + p.data.v + '}'"),
+                    "rich": {
+                        "n": {"fontSize": 12, "fontWeight": "bold", "color": "#e6e7ea"},
+                        "v": {"fontSize": 11, "color": "#a7abb3", "padding": [3, 0, 0, 0]},
+                    },
+                },
+            },
+        ],
+    }
+    return st_echarts(options=opt, height=height, key=key)
