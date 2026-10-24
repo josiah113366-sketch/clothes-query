@@ -46,7 +46,9 @@ with t_lag:
     )
     bad = latest_t[(latest_t.connector_state != "RUNNING") | (latest_t.lag_sec > NORMAL_MAX_SEC)]
     # 1분 추이: 지연은 토픽·파티션 중 최대, 밀린 메시지는 전체 합계
-    per_min = lag.groupby("collected_at_kst").agg(lag_sec=("lag_sec", "max"), lag_msgs=("lag_msgs", "sum"))
+    per_min = lag.groupby("collected_at_kst").agg(
+        lag_sec=("lag_sec", "max"), lag_msgs=("lag_msgs", "sum")
+    )
     ui.kpis(
         [
             {
@@ -87,7 +89,9 @@ with t_lag:
 
     with ui.panel("토픽별 Bronze 적재 지연", "1분 측정 · KST · 초"):
         # pivot 대신 pivot_table(max): 같은 시각·토픽에 파티션 행이 여러 개라 가장 느린 파티션 값을 쓴다
-        pv = lag.pivot_table(index="collected_at_kst", columns="topic", values="lag_sec", aggfunc="max")
+        pv = lag.pivot_table(
+            index="collected_at_kst", columns="topic", values="lag_sec", aggfunc="max"
+        )
         pv = pv[sorted(pv.columns)]  # 토픽 이름 순서 = 색 순서 (고정)
         charts.line(
             pv,
@@ -133,14 +137,15 @@ STAGES = [
         "name": "RDS",
         "x": 0,
         "y": 3.4,
-        "hint": "RDS 를 직접 재는 곳이 없음. 지금은 Kafka 유입으로 간접 확인",
+        "hint": _NEED_ATHENA + ". 연결되면 CDC 토픽 유입으로 추정",
     },
     {
         "id": "cdc",
         "name": "CDC",
         "x": 1,
         "y": 3.4,
-        "hint": "지연 수집기가 CDC 커넥터 상태도 기록하도록 확장 필요",
+        "hint": _NEED_ATHENA
+        + ". 연결되면 CDC 토픽 유입으로 추정 (커넥터 상태를 직접 보려면 수집기 확장 필요)",
     },
     {"id": "kafka", "name": "Kafka", "x": 2, "y": 3.4, "hint": _NEED_ATHENA},
     {"id": "sink", "name": "S3 Sink v2", "x": 3, "y": 3.4, "hint": _NEED_ATHENA},
@@ -174,7 +179,7 @@ STAGES = [
         "name": "Bronze 리뷰",
         "x": 4,
         "y": 6.6,
-        "hint": "S3 bronze/reviews/ 최신 날짜 폴더 읽기 필요 (대시보드 S3 읽기 권한, TODO F3)",
+        "hint": "대시보드 S3 읽기 권한 필요 (bronze/reviews/ 목록)",
     },
     {"id": "r_silver", "name": "Silver 리뷰", "x": 5.6, "y": 6.1, "hint": _NEED_SILVER_RUNS},
     {

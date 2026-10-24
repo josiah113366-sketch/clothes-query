@@ -1059,7 +1059,9 @@ def get_model_runs(days: int = 14) -> pd.DataFrame:
 ATHENA_WORKGROUP = os.getenv("DASHBOARD_ATHENA_WORKGROUP") or os.getenv(
     "APPROVAL_ATHENA_WORKGROUP", ""
 )
-if ATHENA_WORKGROUP.startswith("<"):  # deployment.yaml 의 자리표시("<대시보드용 workgroup>")는 미설정으로 본다
+if ATHENA_WORKGROUP.startswith(
+    "<"
+):  # deployment.yaml 의 자리표시("<대시보드용 workgroup>")는 미설정으로 본다
     ATHENA_WORKGROUP = ""
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
 
@@ -1071,6 +1073,11 @@ FLOW_COLLECTOR_WARN, FLOW_COLLECTOR_BAD = 120, 300  # 수집기는 1분마다 �
 FLOW_NO_INFLOW_MIN = 10  # Kafka 유입이 이만큼(분) 없으면 지연
 FLOW_GOLD_B_WARN = 10 * 60  # Gold B 적재 잡은 1분마다 쌓는다
 FLOW_BATCH_WARN = 26 * 3600  # 하루 1회 배치(Silver·Gold A): 마지막 완료가 26시간보다 오래되면 지연
+FLOW_REVIEW_WARN = 26 * 3600  # 리뷰 시뮬레이터는 하루 1번(UTC 00:30) S3 에 바로 쓴다
+# CDC 커넥터(connectors/cdc-source.yaml)가 RDS 표를 옮겨 쓰는 토픽. clickstream 은 CDC 가 아니라서 뺀다
+_CDC_TOPICS = ("members-events", "orders", "order-items", "payments")
+# 데이터 레이크 버킷 (리뷰 Bronze 목록 조회용). 저장소에 적어도 되는 이름이라 기본값으로 둔다
+DATALAKE_BUCKET = os.getenv("DATALAKE_BUCKET", "clothes-query-datalake")
 
 
 def _athena(sql: str) -> pd.DataFrame:
@@ -1155,7 +1162,13 @@ def _kst_hm(ts: pd.Timestamp) -> str:
 
 
 def _flow_from_lag(now: pd.Timestamp) -> dict:
-    """지연 수집기 표 하나로 Kafka · S3 Sink · Bronze · 수집기 네 단계를 판정한다."""
+    """지연 수집기 표 하나로 RDS · CDC · Kafka · S3 Sink · Bronze · 수집기 여섯 단계를 판정한다.
+
+    RDS 와 CDC 는 직접 재지 않는다(대시보드는 RDS 에 접속하지 않고, 커넥터 상태도 수집기가 기록하지 않는다).
+    대신 CDC 커넥터가 쓰는 토픽(_CDC_TOPICS)의 end_offset 이 늘어나는지로 '추정'한다:
+      늘어남      -> RDS 쓰기와 CDC 둘 다 돌고 있다 (정상, 값 앞에 '추정')
+      10분간 그대로 -> CDC 는 지연, RDS 는 원인이 RDS 인지 CDC 인지 알 수 없어 '확인 불가'
+    """
     lag = _real_bronze_lag(70)  # 최근 1시간 + 여유
     if lag.empty:
         return {
@@ -1177,7 +1190,9 @@ def _flow_from_lag(now: pd.Timestamp) -> dict:
     if st_c == "bad":
         # 측정이 멈추면 아래 세 단계는 판단할 근거가 없다. 정상으로 칠하지 않는다
         why = "지연 수집기 측정이 멈춰 판단할 수 없습니다"
-        return out | {k: ("unknown", "확인 불가", why) for k in ("kafka", "sink", "bronze")}
+        return out | {
+            k: ("unknown", "확인 불가", why) for k in ("rds", "cdc", "kafka", "sink", "bronze")
+        }
 
     latest = lag[lag.collected_at == last]
     # Kafka: 토픽별 end_offset 증가량. 최근 10분과 1시간 평균 분당 유입
@@ -1202,6 +1217,26 @@ def _flow_from_lag(now: pd.Timestamp) -> dict:
             f"분당 {inflow_10 / FLOW_NO_INFLOW_MIN:,.1f}건",
             detail,
         )
+    # RDS · CDC: CDC 토픽들의 최근 10분 유입으로 추정 (위 Kafka 계산과 같은 표를 쓴다)
+    cdc_cols = [t for t in recent.columns if t in _CDC_TOPICS]
+    if len(recent) > 1 and cdc_cols:
+        cdc_in = float((recent[cdc_cols].iloc[-1] - recent[cdc_cols].iloc[0]).clip(lower=0).sum())
+        why = f"CDC 토픽({', '.join(cdc_cols)})의 최근 {FLOW_NO_INFLOW_MIN}분 유입으로 추정. 커넥터 상태를 직접 읽지는 않습니다"
+        if cdc_in > 0:
+            per_min = f"추정 · 분당 {cdc_in / FLOW_NO_INFLOW_MIN:,.1f}건"
+            out["cdc"] = ("ok", per_min, why)
+            out["rds"] = ("ok", "추정 · 쓰기 있음", why)
+        else:
+            out["cdc"] = (
+                "warn",
+                f"{FLOW_NO_INFLOW_MIN}분간 유입 없음",
+                why + "\nKafka Connect 의 CDC 커넥터 상태를 확인",
+            )
+            out["rds"] = (
+                "unknown",
+                "확인 불가",
+                "CDC 토픽 유입이 멈춰 RDS 쓰기가 멈춘 것인지 CDC 가 멈춘 것인지 알 수 없습니다",
+            )
     # S3 Sink v2: 커넥터 상태 + 지연 초
     states = sorted(set(latest.connector_state.dropna()))
     max_lag = float(latest.lag_sec.max())
@@ -1340,9 +1375,45 @@ def _flow_from_gold_b(now: pd.Timestamp) -> dict:
     return out
 
 
+def _flow_from_review_bronze(now: pd.Timestamp) -> dict:
+    """S3 bronze/reviews/year=/month=/day=/ (UTC 날짜 폴더) 에서 가장 최근 도착 파일을 찾는다.
+    리뷰는 Kafka 를 거치지 않으므로 지연 수집기로는 알 수 없고, Glue 표도 없어 S3 목록을 직접 본다.
+    오늘부터 3일 전까지만 본다 (목록 요청 4번 안쪽)."""
+    import boto3  # 실데이터를 쓸 때만 필요하다
+
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    for back in range(4):
+        d = now - pd.Timedelta(days=back)
+        prefix = f"bronze/reviews/year={d:%Y}/month={d:%m}/day={d:%d}/"
+        objs = []
+        for page in s3.get_paginator("list_objects_v2").paginate(
+            Bucket=DATALAKE_BUCKET, Prefix=prefix
+        ):
+            objs += page.get("Contents", [])
+        if objs:
+            last = max(pd.Timestamp(o["LastModified"]) for o in objs)
+            age = (now - last).total_seconds()
+            size = sum(o["Size"] for o in objs) / 1024
+            return {
+                "r_bronze": (
+                    "warn" if age > FLOW_REVIEW_WARN else "ok",
+                    f"{_kst_hm(last)} 도착",
+                    f"{prefix} · 파일 {len(objs)}개 · {size:,.0f}KB · 하루 1번(UTC 00:30) 생성",
+                )
+            }
+    return {
+        "r_bronze": (
+            "warn",
+            "4일간 도착 없음",
+            "bronze/reviews/ 최근 4일 날짜 폴더가 비어 있습니다",
+        )
+    }
+
+
 # 단계 묶음별 조회 함수. 한 묶음이 실패해도 다른 묶음은 그린다
 _FLOW_READERS = [
-    (_flow_from_lag, ["collector", "kafka", "sink", "bronze"]),
+    (_flow_from_lag, ["rds", "cdc", "collector", "kafka", "sink", "bronze"]),
+    (_flow_from_review_bronze, ["r_bronze"]),
     (_flow_from_silver, ["s_trade"]),
     (_flow_from_gold_a, list(_GOLD_A_STAGES)),
     (_flow_from_gold_b, ["b_ledger", "b_pay", "b_malformed"]),
