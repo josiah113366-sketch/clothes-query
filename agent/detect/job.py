@@ -85,7 +85,20 @@ def _r6(query, cfg, run_id, now):
         return []
     if not _TABLE_NAME.match(table) or not _ID.match(cfg.r6_check_name):
         raise ValueError("silver_checks_table 또는 r6_check_name 형식이 맞지 않습니다")
-    latest = query(f"""SELECT run_id, MAX(checked_at) AS checked_at FROM {table}
+    quality = None
+    if cfg.silver_runs_table:   # 완료된 실행만, 완료 시각 순서로 가장 최근 것 (Silver 담당 합의). 검사 시각과 완료 시각은 별개다
+        if not _TABLE_NAME.match(cfg.silver_runs_table):
+            raise ValueError("silver_runs_table 형식이 맞지 않습니다")
+        done = query(f"""SELECT r.run_id, r.quality_status FROM {cfg.silver_runs_table} r
+WHERE r.status = 'COMPLETED' AND EXISTS (SELECT 1 FROM {table} c WHERE c.run_id = r.run_id AND c.check_name = '{cfg.r6_check_name}')
+ORDER BY r.completed_at DESC, r.run_id DESC LIMIT 1""")
+        if not done:
+            return []
+        quality = done[0]["quality_status"]
+        when = query(f"""SELECT MAX(checked_at) AS checked_at FROM {table} WHERE run_id = '{done[0]["run_id"]}' AND check_name = '{cfg.r6_check_name}'""")
+        latest = [{"run_id": done[0]["run_id"], "checked_at": when[0]["checked_at"]}] if when and when[0]["checked_at"] is not None else []
+    else:
+        latest = query(f"""SELECT run_id, MAX(checked_at) AS checked_at FROM {table}
 WHERE check_name = '{cfg.r6_check_name}' GROUP BY run_id ORDER BY MAX(checked_at) DESC LIMIT 1""")
     if not latest:
         return []
@@ -98,7 +111,7 @@ WHERE check_name = '{cfg.r6_check_name}' GROUP BY run_id ORDER BY MAX(checked_at
     cols = "order_id, status, order_total_amount, item_total_amount, amount_difference, check_version, source_manifest"
     mismatches = query(f"SELECT {cols} {base} AND status = 'MISMATCH'")
     passes = []
-    ids = sorted(o for o in opened if _ID.match(str(o)))
+    ids = sorted(o for o in opened if _ID.match(str(o))) if (quality is None or quality == 'PASS') else []   # 품질이 PASS가 아닌 실행(INCOMPLETE 등)은 해소로 치지 않는다
     for i in range(0, len(ids), 200):      # 열려 있는 주문 중 PASS가 된 것만 확인한다 (정상 주문 전체를 읽지 않는다)
         chunk = ", ".join(f"'{o}'" for o in ids[i:i + 200])
         passes += query(f"SELECT {cols} {base} AND status = 'PASS' AND order_id IN ({chunk})")

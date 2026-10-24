@@ -39,6 +39,7 @@ def build():
     CREATE TABLE gold_b.anomaly (run_id, anomaly_id, rule_id, rule_version, anomaly_type, source_table, window_start, window_end, scope_type, scope_key,
                                  metric, observed_value, baseline_value, baseline_kind, sample_size, episode_start, episode_end, evidence_ref, status, detected_at);
     CREATE TABLE gold_b.detection_runs (run_id, kind, request_id, judged_from, judged_to, started_at, anomaly_count);
+    CREATE TABLE silver.silver_runs (run_id, completed_at, status, quality_status);
     CREATE TABLE silver.order_total_checks (run_id, checked_at, order_id, check_name, check_version, status, order_total_amount, item_total_amount, amount_difference, source_manifest);
     """)
     return con
@@ -127,5 +128,34 @@ for bad in (Config(dialect="sqlite", silver_checks_table="silver.x; DROP TABLE y
         check("잘못된 표 이름·검사 이름은 거절", "통과됨", "오류")
     except ValueError:
         check("잘못된 표 이름·검사 이름은 거절", "오류", "오류")
+# --- Silver 실행 목록 표를 쓰면: 완료된 실행만, 완료 시각 순서. 품질이 PASS가 아니면 해소하지 않는다 ---
+con = build()
+CFG2 = Config(dialect="sqlite", silver_checks_table=TABLE, silver_runs_table="silver.silver_runs", lag_sec=60.0, format_rule_version="v1.0")
+
+
+def silver_run_row(run, completed, status, quality):
+    con.execute("INSERT INTO silver.silver_runs VALUES (?,?,?,?)", (run, completed, status, quality))
+
+
+silver("R-A", "2026-10-21 14:00:00", [("o1", "MISMATCH", 30000, 20000), ("o2", "MISMATCH", 50000, 40000)])
+silver_run_row("R-A", "2026-10-21 14:05:00", "COMPLETED", "INCOMPLETE")
+regular_run(query, write, CFG2, at(14, 12))
+check("실행 목록 표: 완료된 실행의 불일치 2건이 이상으로 기록됨", [(x["scope_key"], x["observed_value"]) for x in r6()], [("orders", 2)])
+
+silver("R-B", "2026-10-21 15:00:00", [("o1", "MISMATCH", 30000, 20000), ("o2", "PASS", 50000, 50000)])   # 검사는 있지만 아직 완료 표시가 없는 실행
+silver_run_row("R-B", "2026-10-21 15:05:00", "RUNNING", None)
+regular_run(query, write, CFG2, at(15, 12))
+check("완료되지 않은 실행(RUNNING)은 읽지 않음", len(r6()), 1)
+
+silver_run_row("R-B", "2026-10-21 15:06:00", "COMPLETED", "INCOMPLETE")
+regular_run(query, write, CFG2, at(15, 27))
+check("품질이 INCOMPLETE인 실행에서는 PASS 줄이 있어도 해소하지 않음", [x["scope_key"] for x in r6()], ["orders"])
+
+con.execute("UPDATE silver.silver_runs SET quality_status = 'PASS' WHERE run_id = 'R-B'")
+silver("R-B", "2026-10-21 15:00:00", [], check="order_item_total_match")
+regular_run(query, write, CFG2, at(15, 32))
+check("품질이 PASS인 실행에서는 PASS가 된 o2가 해소됨", sorted((x["scope_key"], json.loads(x["evidence_ref"]).get("resolved_orders")) for x in r6() if x["status"] == "RESOLVED"), [("orders-resolved", ["o2"])])
+
+
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)

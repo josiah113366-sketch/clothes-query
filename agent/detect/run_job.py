@@ -23,6 +23,8 @@ def config_from_env(env):
     extra = {}
     if env.get("SILVER_CHECKS_TABLE"):
         extra["silver_checks_table"] = env["SILVER_CHECKS_TABLE"]
+    if env.get("SILVER_RUNS_TABLE"):
+        extra["silver_runs_table"] = env["SILVER_RUNS_TABLE"]
     if env.get("R6_CHECK_NAME"):
         extra["r6_check_name"] = env["R6_CHECK_NAME"]
     return Config(dialect="athena", **extra)
