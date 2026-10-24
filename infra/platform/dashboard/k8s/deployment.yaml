@@ -26,7 +26,7 @@ spec:
       containers:
         - name: dashboard
           # 태그보다 digest(@sha256:...)로 고정한다.
-          image: 827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/dashboard@sha256:a210cc9c652525589d011e33599a8b4be9a04ebe5ff8d3af44d089283c255e00
+          image: 827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/dashboard@sha256:9c847871431183ca77840963dbea7e6c04e3fe3d1575d0cf9b7f38cabf0603da
           ports:
             - name: http
               containerPort: 8501
