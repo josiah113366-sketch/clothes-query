@@ -22,7 +22,7 @@ spec:
         runAsUser: 10001
         seccompProfile: {type: RuntimeDefault}
       # Athena/S3 읽기가 필요해지면 Pod Identity 를 연결한 ServiceAccount 를 만든 뒤 주석을 푼다.
-      # serviceAccountName: dashboard
+      serviceAccountName: approval-dashboard
       containers:
         - name: dashboard
           # 태그보다 digest(@sha256:...)로 고정한다.
@@ -43,13 +43,13 @@ spec:
             # 재처리 승인 화면: APPROVAL_ATHENA_WORKGROUP 이 없으면 연습 모드(가짜 저장소, 바깥에 아무것도 쓰지 않음)로 돈다.
             # 실제 연결(진짜 Athena 읽기·쓰기, Airflow DAG 호출)은 대시보드용 workgroup, Pod Identity 권한, Airflow 접속 Secret 이 생긴 뒤 주석을 푼다.
             # 실제 모드에서는 이메일 아이디 계정(make_test_accounts.py --add)으로 로그인해야 승인할 수 있다.
-            # - {name: APPROVAL_ATHENA_WORKGROUP, value: "<대시보드용 workgroup>"}
-            # - {name: AWS_REGION, value: "ap-northeast-1"}
-            # - {name: AIRFLOW_API_URL, value: "http://airflow-api-server.airflow.svc.cluster.local:8080"}
-            # - name: AIRFLOW_API_USER
-            #   valueFrom: {secretKeyRef: {name: dashboard-airflow, key: user}}
-            # - name: AIRFLOW_API_PASSWORD
-            #   valueFrom: {secretKeyRef: {name: dashboard-airflow, key: password}}
+            - {name: APPROVAL_ATHENA_WORKGROUP, value: "<대시보드용 workgroup>"}
+            - {name: AWS_REGION, value: "ap-northeast-1"}
+            - {name: AIRFLOW_API_URL, value: "http://airflow-api-server.airflow.svc.cluster.local:8080"}
+            - name: AIRFLOW_API_USER
+              valueFrom: {secretKeyRef: {name: airflow-api-client, key: username}}
+            - name: AIRFLOW_API_PASSWORD
+              valueFrom: {secretKeyRef: {name: airflow-api-client, key: password}}
           volumeMounts:
             - {name: accounts, mountPath: /etc/dashboard, readOnly: true}
           readinessProbe:
