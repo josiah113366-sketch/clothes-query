@@ -14,8 +14,9 @@ NODE_SELECTOR = RUNTIME.get("node_selector", {"karpenter.sh/nodepool": "clothes-
 TEMPLATE_DIR = "/opt/spark/infra"
 
 
-@dag(
-    dag_id="silver_gold_a_batch",
+def build_dag(channel):
+    return dag(
+    dag_id="silver_gold_a_" + channel,
     schedule=None,
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
@@ -25,13 +26,26 @@ TEMPLATE_DIR = "/opt/spark/infra"
     dagrun_timeout=timedelta(hours=1),
     default_args={"retries": 0},
     tags=["pipelines", "manual"],
-)
-def silver_gold_a_batch():
+    )(lambda: silver_gold_a_batch(channel))()
+
+
+def silver_gold_a_batch(channel):
+    reprocess = channel == "reprocess"
+    job = "trade" if reprocess else channel
+    reprocess_runtime = RUNTIME.get("reprocess", {})
+    config_uri = (reprocess_runtime.get("output_root", "unconfigured").rstrip("/") +
+                  "/pipelines/requests/reprocess/{{ dag_run.conf['request_id'] }}-{{ dag_run.conf.get('attempt', 1) }}.json"
+                  if reprocess else "{{ dag_run.conf['config_uri'] }}")
     @task
     def check_request():
-        uri = get_current_context()["dag_run"].conf.get("config_uri")
-        if not isinstance(uri, str) or not re.fullmatch(r"s3://[^/]+/.+\.json", uri):
-            raise ValueError("dag_run.conf.config_uri에 고정 Spark 실행 요청 JSON의 S3 경로가 필요합니다")
+        request = get_current_context()["dag_run"].conf
+        if reprocess:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request.get("request_id", "")) or not reprocess_runtime:
+                raise ValueError("재처리 승인 요청과 reprocess 실행 설정이 필요합니다")
+        else:
+            uri = request.get("config_uri")
+            if not isinstance(uri, str) or not re.fullmatch(r"s3://[^/]+/.+\.json", uri):
+                raise ValueError("dag_run.conf.config_uri에 고정 Spark 실행 요청 JSON의 S3 경로가 필요합니다")
         if (not re.fullmatch(r".+@sha256:[0-9a-f]{64}", RUNTIME.get("image", ""))
                 or not RUNTIME.get("namespace") or not all(RUNTIME.get(k) for k in (
                     "submitter_service_account", "driver_service_account", "executor_service_account"))):
@@ -40,6 +54,8 @@ def silver_gold_a_batch():
             raise ValueError("기존 agent·Kafka 실행 신원을 재사용하지 마세요")
         if not re.fullmatch(r"[a-z][a-z0-9_]*", RUNTIME.get("silver_database", "")):
             raise ValueError("AIRFLOW_PIPELINE_RUNTIME.silver_database에 배포된 R6 Glue DB를 지정하세요")
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", RUNTIME.get("gold_database", "")):
+            raise ValueError("AIRFLOW_PIPELINE_RUNTIME.gold_database에 배포된 Gold A Glue DB를 지정하세요")
         return True
 
     checked = check_request()
@@ -82,7 +98,8 @@ def silver_gold_a_batch():
                  "--deploy-mode", "cluster"]
     for key, value in conf.items():
         arguments.extend(["--conf", key + "=" + str(value)])
-    arguments.extend(["local:///opt/pipelines/pipelines/spark_batch.py", "--config-uri", "{{ dag_run.conf['config_uri'] }}"])
+    arguments.extend(["local:///opt/pipelines/pipelines/spark_batch.py", "--config-uri", config_uri,
+                      "--expected-job", job])
     worker = KubernetesPodOperator(
         task_id="submit_spark",
         name="silver-gold-a-submit",
@@ -112,18 +129,18 @@ def silver_gold_a_batch():
         startup_timeout_seconds=300,
     )
     checked >> worker
-    publish = KubernetesPodOperator(
-        task_id="publish_r6",
-        name="silver-r6-publish",
+    def python_pod(task_id, module, arguments, trigger="all_success"):
+        return KubernetesPodOperator(
+        task_id=task_id,
+        name="silver-gold-a-" + task_id.replace("_", "-"),
         namespace=RUNTIME.get("namespace", "unconfigured"),
         service_account_name=RUNTIME.get("driver_service_account", "unconfigured"),
         image=RUNTIME.get("image", "unconfigured"),
         in_cluster=True,
-        cmds=["python3", "-m", "pipelines.r6_publication"],
-        arguments=["--config-uri", "{{ dag_run.conf['config_uri'] }}",
-                   "--database", RUNTIME.get("silver_database", "unconfigured")],
+        cmds=["python3", "-m", module],
+        arguments=arguments,
         # Gold A가 실패해도 완료된 Silver 품질 결과는 제공한다. 최종 실패는 아래 watcher가 유지한다.
-        trigger_rule="all_done",
+        trigger_rule=trigger,
         node_selector=NODE_SELECTOR,
         tolerations=[k8s.V1Toleration(key="clothes-query/dedicated", operator="Equal",
                                     value="spark", effect="NoSchedule")],
@@ -137,7 +154,27 @@ def silver_gold_a_batch():
         on_finish_action="delete_pod",
         startup_timeout_seconds=300,
     )
-    worker >> publish
+    all_tasks = [checked, worker]
+    if reprocess:
+        prepared = python_pod("prepare_input_manifest", "pipelines.reprocess", ["prepare",
+            "--request-json", "{{ dag_run.conf | tojson }}", "--runtime-json", json.dumps(reprocess_runtime)])
+        checked >> prepared >> worker
+        all_tasks.append(prepared)
+    if job != "reviews":
+        publish = python_pod("publish_r6", "pipelines.r6_publication", ["--config-uri", config_uri,
+            "--database", RUNTIME.get("silver_database", "unconfigured")], "all_done")
+        worker >> publish
+        all_tasks.append(publish)
+    gold = python_pod("publish_gold", "pipelines.gold_publication", ["--config-uri", config_uri,
+        "--database", RUNTIME.get("gold_database", "unconfigured")])
+    worker >> gold
+    all_tasks.append(gold)
+    if reprocess:
+        finished = python_pod("record_reprocess_result", "pipelines.reprocess", ["finish",
+            "--request-json", "{{ dag_run.conf | tojson }}", "--runtime-json", json.dumps(reprocess_runtime)], "all_done")
+        gold >> finished
+        publish >> finished
+        all_tasks.append(finished)
 
     @task(trigger_rule="one_failed", retries=0)
     def report_failure():
@@ -145,9 +182,11 @@ def silver_gold_a_batch():
         raise RuntimeError("요청 검사·Spark 처리·R6 공개 중 실패가 있습니다")
 
     failed = report_failure()
-    checked >> failed
-    worker >> failed
-    publish >> failed
+    for task_node in all_tasks:
+        task_node >> failed
 
 
-batch_dag = silver_gold_a_batch()
+trade_dag = build_dag("trade")
+funnels_dag = build_dag("funnels")
+reviews_dag = build_dag("reviews")
+reprocess_dag = build_dag("reprocess")
