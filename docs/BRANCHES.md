@@ -174,11 +174,13 @@ gitGraph
 | `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
 | `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
 | `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
+| `agent/silver-conf` | [agent-silver-conf.md](tasks/agent-silver-conf.md) | 진행 중 | |
 
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `dashboard/gold-a-athena` | [dashboard-gold-a-athena.md](tasks/dashboard-gold-a-athena.md) (Gold A 완료 실행·보류 목록 Athena 조회 및 상품 관리 화면 연결) | 검토 대기 | |
 | `dashboard/baseline` | [dashboard-baseline.md](tasks/dashboard-baseline.md) | 진행 중 | |
 | `dashboard/deploy` | [dashboard-deploy.md](tasks/dashboard-deploy.md) (대시보드 EKS 배포 파일, ECR 스택, 공유 ALB 템플릿) | 진행 중 | |
 | `dashboard/model-benchmark` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (감성분석 모델 화면, 패치노트, 릴리스 묶음·되돌림, 점수화 SSM. `review-model/release`·`infra/sagemaker-model-release` 포함, 세 영역 통합 예외) | 진행 중 | |

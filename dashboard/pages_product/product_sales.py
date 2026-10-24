@@ -12,6 +12,7 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("trade")
 
 st.title("상품 판매")
 ui.date_note("sales")
@@ -23,7 +24,8 @@ with c2:
 
 df = ui.last_days(data.get_product_sales_daily(), "sales_date_kst", days)
 df = df[df.article_id.isin(arts)]
-names = data.PRODUCTS.set_index("article_id")["name"]
+ui.require_rows(df)
+names = data.product_options().drop_duplicates("article_id").set_index("article_id")["name"]
 
 metric = st.radio(
     "지표",
