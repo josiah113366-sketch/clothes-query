@@ -11,11 +11,11 @@
 
 ## 만드는 것
 
-- `agent/detect/run_job.py`(`config_from_env`), `agent/detect/rules.py`(`silver_runs_table`), `agent/detect/job.py`(`_r6`), `agent/detect/test_athena_io.py`, `agent/detect/test_r6.py`
+- `agent/dags/agent_common.py`(R6 설정 키를 판정 Pod 환경 변수로 전달), `agent/dags/README.md`, `agent/dags/test_dags.py`, `agent/detect/run_job.py`(`config_from_env`), `agent/detect/rules.py`(`silver_runs_table`), `agent/detect/job.py`(`_r6`), `agent/detect/test_athena_io.py`, `agent/detect/test_r6.py`
 
 ## 완료 확인
 
 - [x] `test_athena_io.py`, `test_job.py`, `test_r6.py` 통과
 - [x] 현지 님 표(`silver.order_amount_checks`)에 R6이 읽는 열(`run_id, check_name, checked_at, order_id, status, order_total_amount, item_total_amount, amount_difference, check_version, source_manifest`)이 모두 있음 (DESCRIBE로 확인, 10/24)
 - [x] 표의 `check_name` 실제 값은 `order_item_total_match`로 R6 기본값과 같음 (`R6_CHECK_NAME` 불필요)
-- [ ] 재영 님이 판정 DAG 설정(ConfigMap)에 `SILVER_CHECKS_TABLE`, `SILVER_RUNS_TABLE`과 `silver` 데이터베이스 읽기 권한을 추가
+- [ ] 재영 님이 업무용 ConfigMap(`AIRFLOW_AGENT_CONFIG` JSON)에 `silver_checks_table`, `silver_runs_table` 키와 `silver` 데이터베이스 읽기 권한을 추가 (DAG 코드는 이 키를 판정 Pod 환경 변수로 넘김)
