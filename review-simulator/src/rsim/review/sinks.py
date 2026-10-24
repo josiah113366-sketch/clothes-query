@@ -85,12 +85,12 @@ class LakeSink:
       <root>/reviews/year=2026/month=10/day=08/part-00000.jsonl              리뷰 (실제 쇼핑몰 리뷰 모양, 정답 없음)
       <truth_root>/reviews_truth/year=2026/month=10/day=08/part-00000.jsonl  정답 (학습·채점용, 운영 흐름과 분리)
 
-    예) LAKE_ROOT=s3://<버킷>/bronze
-        → s3://<버킷>/bronze/reviews/year=2026/month=10/day=08/part-00000.jsonl (버킷 이름은 .env 에만)
+    예) LAKE_ROOT=s3://<버킷>/bronze_v2
+        → s3://<버킷>/bronze_v2/reviews/year=2026/month=10/day=08/part-00000.jsonl (버킷 이름은 .env 에만)
         파티션 이름은 Hive 형식 year=YYYY/month=MM/day=DD (2026-10-16 lemin 결정, 이전 dt=YYYY-MM-DD 대체).
         Glue 크롤러·Athena 가 year, month, day 를 파티션 컬럼으로 바로 인식한다. 월·일은 두 자리(01~12, 01~31).
         LAKE_TRUTH_ROOT 기본값은 로컬 .local/lake 다. 정답 라벨은 실제 운영 데이터에 없는 값이라
-        운영 레이크(bronze)에 섞지 않는다. 정답도 S3 에 두려면 bronze 가 아닌 별도 경로를 준다.
+        운영 레이크(bronze_v2)에 섞지 않는다. 정답도 S3 에 두려면 bronze_v2 가 아닌 별도 경로를 준다.
 
     - root 는 로컬 폴더 또는 s3://버킷/접두사. S3 는 boto3 의 기본 자격 증명(aws configure sso, 환경변수,
       ECS 태스크 역할 등)을 쓴다. Bedrock API 키와는 별개다.

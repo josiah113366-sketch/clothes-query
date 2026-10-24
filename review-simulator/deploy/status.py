@@ -100,7 +100,7 @@ def recent_stops(logs, group: str, days: int = 7, limit: int = 5) -> list[dict]:
 
 
 def last_partition(s3, lake_root: str) -> str | None:
-    """bronze/reviews/ 의 마지막 날짜 파티션 (year=/month=/day= 를 차례로 가장 큰 값으로 내려간다)."""
+    """bronze_v2/reviews/ 의 마지막 날짜 파티션 (year=/month=/day= 를 차례로 가장 큰 값으로 내려간다)."""
     bucket, prefix = split_s3(lake_root)
     prefix = f"{prefix.rstrip('/')}/reviews/"
     for _ in ("year", "month", "day"):

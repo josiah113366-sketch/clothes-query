@@ -9,7 +9,7 @@
   2) 태스크 정의의 주문 입력이 rds 가 아니면 rds 로 바꾼 새 리비전을 등록한다 (switch.py --orders rds 와 같음)
      → 이후 예약 실행(켜 두었다면)도 RDS 주문을 쓴다. 되돌리기: python deploy/switch.py --orders fake
   3) ECS 태스크를 한 번 실행한다. 가짜 문장이 아니라 Bedrock 으로 리뷰를 쓴다(LLM=bedrock 을 이번 실행에 고정)
-     → S3 bronze/reviews/year=/month=/day= 그 날짜 파티션을 덮어쓴다
+     → S3 bronze_v2/reviews/year=/month=/day= 그 날짜 파티션을 덮어쓴다
 
 비용: 리뷰 수 ≈ 그날 리뷰 시각인 RDS 주문 항목 수 x REVIEW_RATE. Bedrock 1,000건당 약 $0.21(docs/examples-scorecard.md).
 RDS 에 그날 리뷰 시각(배송완료 후 0~7일, 0.3.2)인 주문이 없으면 리뷰 0건으로 정상 종료한다(비용 거의 0).

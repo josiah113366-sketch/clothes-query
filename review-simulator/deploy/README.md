@@ -11,7 +11,7 @@ deploy.py ──▶ ECR 이미지 + 태스크 정의(새 리비전) ◀── sw
    onoff.py once / run_incident.py / run_inject.py ──▶ 한 번 실행
                          │
                          ▼
-   ECS 태스크: entrypoint.sh → rsim orders-fake → rsim run --source orders --sink lake → S3 bronze/reviews/
+   ECS 태스크: entrypoint.sh → rsim orders-fake → rsim run --source orders --sink lake → S3 bronze_v2/reviews/
                          │
    status.py, CloudWatch 대시보드 ◀── 로그·종료 기록
 ```

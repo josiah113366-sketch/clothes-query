@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  RDS 주문으로 실제 리뷰(Bedrock)를 지금 한 번 만든다 → S3 bronze 날짜 파티션(덮어쓰기). (2026-10-21, v0.3.0)
+  RDS 주문으로 실제 리뷰(Bedrock)를 지금 한 번 만든다 → S3 bronze_v2 날짜 파티션(덮어쓰기). (2026-10-21, v0.3.0)
 .DESCRIPTION
   1) RDS 접속 주소 secret 확인 (비어 있으면 .\scripts\secret.ps1 -OrdersDb 먼저)
   2) 주문 입력이 rds 가 아니면 rds 로 바꾼 새 리비전 등록 (되돌리기: .\scripts\switch.ps1 -Orders fake)

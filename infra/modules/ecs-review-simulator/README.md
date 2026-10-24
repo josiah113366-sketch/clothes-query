@@ -9,7 +9,7 @@
 | `name` | 이름 접두사 (기본 `clothes-query-dev-ecs-review-simulator`) |
 | `region`, `vpc_id`, `subnet_ids` | network 스택 output (app subnet, NAT 경유) |
 | `bucket_name`, `bucket_arn` | storage 스택 output (민감 값) |
-| `lake_prefix`, `input_prefix` | 쓰기 `bronze/reviews/*`, 읽기 `sim-input/review-simulator/*` |
+| `lake_prefix`, `input_prefix` | 쓰기 `bronze_v2/reviews/*`, 읽기 `sim-input/review-simulator/*` |
 | `cpu`, `memory` | 태스크 크기 (기본 512 / 1024, 스크립트가 태스크 정의 등록 때 사용) |
 | `schedule_expression` | 예약 실행 시각 (`schedule_timezone` 기준, 기본 매일 00:00) |
 | `schedule_timezone` | 예약 실행 시간대 (기본 `Asia/Seoul`, 2026-10-23 lemin: KST 0시 실행) |

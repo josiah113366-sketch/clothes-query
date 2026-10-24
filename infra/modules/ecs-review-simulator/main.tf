@@ -185,7 +185,7 @@ resource "aws_iam_role_policy" "execution_secret" {
 }
 
 # ------------------------------------------------------------------ IAM: 태스크 역할 (시뮬레이터 코드가 씀)
-# - bronze/reviews/ 에 리뷰 파티션 쓰기 (rsim run --sink lake, rsim inject)
+# - bronze_v2/reviews/ 에 리뷰 파티션 쓰기 (rsim run --sink lake, rsim inject)
 # - sim-input/review-simulator/ 에서 입력 읽기 (incidents JSON, 직접 쓴 리뷰 CSV/JSONL)
 # 정답 라벨(reviews_truth) S3 저장은 2026-10-18 lemin 결정으로 차후 개선이라 권한을 주지 않는다(컨테이너 안에만 쓰고 버려짐).
 # Bedrock 은 API 키로 호출하므로 IAM 권한이 필요 없다.
@@ -274,7 +274,7 @@ resource "aws_iam_role_policy" "scheduler" {
 # 스크립트가 바꾸는 두 값(state, 태스크 정의 ARN)은 Terraform 이 되돌리지 않게 ignore_changes 로 둔다.
 resource "aws_scheduler_schedule" "daily" {
   name                         = "${var.name}-daily"
-  description                  = "review-simulator: yesterday reviews to S3 bronze (runs 00:00 KST)"
+  description                  = "review-simulator: yesterday reviews to S3 bronze_v2 (runs 00:00 KST)"
   schedule_expression          = var.schedule_expression
   schedule_expression_timezone = var.schedule_timezone
   state                        = "DISABLED"

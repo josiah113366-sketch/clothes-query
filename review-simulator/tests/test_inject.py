@@ -95,7 +95,7 @@ def test_inject_reads_and_writes_s3(workdir, monkeypatch) -> None:
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
-    monkeypatch.setenv("LAKE_ROOT", "s3://test-lake/bronze")
+    monkeypatch.setenv("LAKE_ROOT", "s3://test-lake/bronze_v2")
     with moto.mock_aws():
         s3 = boto3.client("s3", region_name="ap-northeast-1")
         s3.create_bucket(
@@ -107,4 +107,4 @@ def test_inject_reads_and_writes_s3(workdir, monkeypatch) -> None:
         res = runner.invoke(app, ["inject", "--file", "s3://test-lake/sim-input/manual/t1.csv"])
         assert res.exit_code == 0, res.output
         keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket="test-lake")["Contents"])
-        assert "bronze/reviews/year=2026/month=10/day=08/part-manual-t1.jsonl" in keys
+        assert "bronze_v2/reviews/year=2026/month=10/day=08/part-manual-t1.jsonl" in keys

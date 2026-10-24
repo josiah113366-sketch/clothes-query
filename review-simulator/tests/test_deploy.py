@@ -74,7 +74,7 @@ def aws(monkeypatch):
             "events_log_group": "/aws/events/rsim",
             "schedule_name": "rsim-daily",
             "schedule_group": "default",
-            "lake_root": f"s3://{BUCKET}/bronze",
+            "lake_root": f"s3://{BUCKET}/bronze_v2",
             "input_root": f"s3://{BUCKET}/sim-input/review-simulator",
             "dashboard": "rsim",
         }
@@ -105,7 +105,7 @@ def test_first_revision_has_defaults_and_secret(aws):
     sess, cfg = aws
     td = _register(sess, cfg)
     env = aws_common.env_of(td)
-    assert env["LAKE_ROOT"] == f"s3://{BUCKET}/bronze"
+    assert env["LAKE_ROOT"] == f"s3://{BUCKET}/bronze_v2"
     assert env["REVIEW_RATE"] == "0.1"  # 처음에는 low
     assert env["EXAMPLES_VERSION"] == "ex-v1"
     c = td["containerDefinitions"][0]
@@ -297,7 +297,7 @@ def test_status_parses_run_logs_and_partition(aws, capsys):
     assert status.price_of("google.gemma-3-12b-it") == (0.11, 0.35)
     s3 = sess.client("s3")
     for day in ("year=2026/month=10/day=16", "year=2026/month=10/day=17"):
-        s3.put_object(Bucket=BUCKET, Key=f"bronze/reviews/{day}/part-00000.jsonl", Body=b"{}")
+        s3.put_object(Bucket=BUCKET, Key=f"bronze_v2/reviews/{day}/part-00000.jsonl", Body=b"{}")
     assert status.last_partition(s3, cfg["lake_root"]) == "year=2026/month=10/day=17"
     _register(sess, cfg)
     status.main([])

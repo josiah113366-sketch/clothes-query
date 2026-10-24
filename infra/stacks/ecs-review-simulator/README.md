@@ -9,7 +9,7 @@
   (태스크 실행·태스크·스케줄러), Bedrock API 키 Secret(값 없음), 예약 실행(**DISABLED**), 로그 그룹 2개, 오류 지표,
   CloudWatch 대시보드, 스크립트용 SSM 파라미터. 선택: 실패 알림 SNS·알람, 월 예산.
 - 태스크 정의는 만들지 않는다. `deploy/deploy.py`·`switch.py` 가 리비전을 등록한다(이미지 태그·실행 비율이 자주 바뀜).
-- 태스크 역할 권한: `bronze/reviews/*` PutObject, `sim-input/review-simulator/*` GetObject 만. `ground_truth/`·`gold_b/` 권한 없음.
+- 태스크 역할 권한: `bronze_v2/reviews/*` PutObject, `sim-input/review-simulator/*` GetObject 만. `ground_truth/`·`gold_b/` 권한 없음.
 - 비용: 만들어 두기만 하면 거의 0 (Secret $0.40/월, 로그·대시보드 몇 센트. 대시보드 3개까지 무료). 실행 비용은 deploy README 참고.
 - 출력: `ecr_repository_url`, `cluster_name`, `task_family`, `security_group_id`(RDS 스택 `database_clients` 에 전달, 2026-10-21 `--source rds`),
   `secret_name`, `orders_db_secret_name`(값은 `deploy/secret.py --orders-db`), `schedule_name`, `config_parameter_name`, `dashboard_name`.

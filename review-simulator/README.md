@@ -136,8 +136,8 @@ rsim run --source rds --llm fake --sink stdout --date 2026-10-21
 `.env` 에 레이크 경로를 넣으면 같은 명령이 S3 에 쓴다(버킷 이름은 공개 저장소에 넣지 않고 `.env` 에만 둔다).
 
 ```
-LAKE_ROOT=s3://<버킷이름>/bronze          # → s3://<버킷이름>/bronze/reviews/year=YYYY/month=MM/day=DD/part-00000.jsonl
-LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze)에 섞지 않는다. S3 에 두려면 bronze 밖의 경로
+LAKE_ROOT=s3://<버킷이름>/bronze_v2          # → s3://<버킷이름>/bronze_v2/reviews/year=YYYY/month=MM/day=DD/part-00000.jsonl
+LAKE_TRUTH_ROOT=.local/lake               # 정답은 운영 레이크(bronze_v2)에 섞지 않는다. S3 에 두려면 bronze_v2 밖의 경로
 ```
 
 - AWS 자격 증명은 boto3 기본 방식(`aws configure sso`, 환경변수, ECS 태스크 역할)을 쓴다. Bedrock API 키와는 별개다.
@@ -213,7 +213,7 @@ docker compose --profile sim up --build simulator
 ## ECS 에서 실행 (2026-10-18, v0.2.0)
 
 로컬과 같은 이미지·같은 `rsim` 명령을 ECS Fargate 에서 돌린다(기능 차이 없음). 하루치 실행은
-`rsim orders-fake`(가짜 주문) → `rsim run --source orders --sink lake` 이고 결과는 팀 S3 `bronze/reviews/` 날짜 파티션이다.
+`rsim orders-fake`(가짜 주문) → `rsim run --source orders --sink lake` 이고 결과는 팀 S3 `bronze_v2/reviews/` 날짜 파티션이다.
 AWS 리소스는 `infra/stacks/ecs-review-simulator`(Terraform, 담당자가 apply), 배포·운영은 `deploy/*.py` 스크립트다.
 예약 실행은 꺼진 상태로 만들어 두었다(2026-10-18 lemin: 계속 실행은 보류).
 

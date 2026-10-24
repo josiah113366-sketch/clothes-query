@@ -30,9 +30,9 @@ variable "bucket_arn" {
 }
 
 variable "lake_prefix" {
-  description = "Bronze prefix; reviews go to <bucket>/<lake_prefix>/reviews/year=/month=/day=/."
+  description = "Bronze v2 prefix; reviews go to <bucket>/<lake_prefix>/reviews/year=/month=/day=/."
   type        = string
-  default     = "bronze"
+  default     = "bronze_v2"
 }
 
 variable "input_prefix" {

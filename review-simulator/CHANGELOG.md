@@ -55,7 +55,7 @@
 로컬과 같은 기능을 AWS ECS Fargate 에서 돌린다. **리뷰를 만드는 방식은 0.1.0 과 같다** (지시서 특례: 기능 변경 없음).
 
 - 실행 환경: ECS Fargate 태스크로 하루치 실행. 가짜 주문(`rsim orders-fake`) → 어제(UTC) 리뷰(`rsim run --source orders --sink lake`)
-  → 팀 S3 `bronze/reviews/year=/month=/day=/`. 진입점 `deploy/container/entrypoint.sh`.
+  → 팀 S3 `bronze_v2/reviews/year=/month=/day=/`. 진입점 `deploy/container/entrypoint.sh`.
   가짜 주문은 고정 시작일(2026-10-01)부터 만들어서 같은 날짜를 다시 돌려도 같은 주문·같은 리뷰 ID 로 덮어쓴다.
 - 실행 환경: AWS 리소스(ECR, ECS 클러스터, IAM 역할, Secret, 꺼진 예약 실행, 로그, 대시보드)는 `infra/stacks/ecs-review-simulator`.
 - 추가: 배포·운영 스크립트 `deploy/` (secret, deploy, onoff, switch, status, run_incident, run_inject, check_access).

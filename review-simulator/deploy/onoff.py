@@ -5,7 +5,7 @@
     python deploy/onoff.py once                  # 지금 한 번: 어제(KST 달력) 리뷰
     python deploy/onoff.py once --date 2026-10-17 --fake   # 날짜 지정, 가짜 문장(Bedrock 비용 0원)
 
-예약 실행 = 매일 00:00 KST 에 어제(KST 달력) 리뷰를 만들어 S3 bronze 날짜 파티션에 덮어쓴다.
+예약 실행 = 매일 00:00 KST 에 어제(KST 달력) 리뷰를 만들어 S3 bronze_v2 날짜 파티션에 덮어쓴다.
 (2026-10-23 lemin: 00:30 UTC → 00:00 KST. 주문 시뮬레이터가 KST 시각을 UTC 처럼 넣어서 날짜 D = KST 날짜 D)
 2026-10-18 lemin: 계속 실행은 보류라 Terraform 은 꺼진 상태로 만든다. 켜는 것은 이 스크립트로만 한다.
 같은 날짜를 다시 실행하면 그날 파티션(part-00000.jsonl)을 덮어쓴다. 직접 넣은 리뷰(part-manual-*)는 그대로 남는다.

@@ -134,7 +134,7 @@ def test_lake_sink_writes_s3_with_fake_bucket(monkeypatch) -> None:
     # .env 에 AWS_PROFILE= 빈 값이 남아 있어도 멈추지 않아야 한다 (2026-10-14 ProfileNotFound)
     monkeypatch.setenv("AWS_PROFILE", "")
     with moto.mock_aws():
-        LakeSink("s3://test-lake/bronze", ".", "ap-northeast-1")._client()
+        LakeSink("s3://test-lake/bronze_v2", ".", "ap-northeast-1")._client()
         s3 = boto3.client("s3", region_name="ap-northeast-1")
         s3.create_bucket(
             Bucket="test-lake",
@@ -142,13 +142,13 @@ def test_lake_sink_writes_s3_with_fake_bucket(monkeypatch) -> None:
         )
         review = {"review_id": "R-1", "created_at": "2026-10-08T23:30:00+09:00", "text": "좋아요"}
         for _ in range(2):
-            sink = LakeSink("s3://test-lake/bronze", "s3://test-lake/sim-truth", "ap-northeast-1")
+            sink = LakeSink("s3://test-lake/bronze_v2", "s3://test-lake/sim-truth", "ap-northeast-1")
             sink.send(review, {"review_id": "R-1"})
             sink.close()
         keys = sorted(o["Key"] for o in s3.list_objects_v2(Bucket="test-lake")["Contents"])
         # KST 10월 8일 23:30 = UTC 10월 8일 14:30 → year=2026/month=10/day=08
         assert keys == [
-            "bronze/reviews/year=2026/month=10/day=08/part-00000.jsonl",
+            "bronze_v2/reviews/year=2026/month=10/day=08/part-00000.jsonl",
             "sim-truth/reviews_truth/year=2026/month=10/day=08/part-00000.jsonl",
         ]
         body = s3.get_object(Bucket="test-lake", Key=keys[0])["Body"].read().decode("utf-8")
