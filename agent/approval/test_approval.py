@@ -220,7 +220,10 @@ check("POLLER: 승인하면 APPROVED 줄만 쓰고 Airflow는 부르지 않음",
 res = approve(rp, ME, T0 + timedelta(minutes=3), query, write, lambda *a: polled.append(a) or 200, DEFAULT)
 check("POLLER: 다시 승인해도 승인 줄이 늘지 않고 호출도 없음", (steps(rp), res["airflow"], polled), (["REQUESTED", "APPROVED"], "POLLER", []))
 old = request_reprocess(dict(R1, anomaly_id="p2", window_start="2026-10-10 10:00:00", window_end="2026-10-10 10:15:00"), "rep-p2", ME, T0, query, write, DEFAULT)
-check("Kafka 보관 기간(3일)을 넘긴 구간은 경고(요청은 받음)", old["warnings"], ["OUTSIDE_KAFKA_RETENTION"])
+check("Kafka 보관 기간(7일)을 넘긴 구간은 경고(요청은 받음)", old["warnings"], ["OUTSIDE_KAFKA_RETENTION"])
+five = request_reprocess(dict(R1, anomaly_id="p5", window_start="2026-10-17 10:00:00", window_end="2026-10-17 10:15:00"), "rep-p5", ME, T0, query, write, DEFAULT)
+check("5일 전 구간은 7일 보관 안이라 경고 없음", five["warnings"], [])
+check("기본 보관 기간은 7일", DEFAULT.kafka_retention_days, 7)
 check("최근 구간의 R1은 경고 없음", request_reprocess(dict(R1, anomaly_id="p3"), "rep-p3", ME, T0, query, write, DEFAULT)["warnings"], [])
 check("Silver(R6)는 보관 기간 경고가 없고 재처리로 안 풀릴 수 있다는 경고만", request_reprocess(dict(R6, anomaly_id="p6"), "rep-p6", ME, T0, query, write, DEFAULT)["warnings"], ["UNFIXABLE_BY_REPROCESS"])
 

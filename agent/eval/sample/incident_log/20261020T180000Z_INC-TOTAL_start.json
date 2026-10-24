@@ -1,0 +1,1 @@
+{"schema_version": 1, "incident_id": "INC-TOTAL", "phase": "start", "type": "DATA_POLLUTION", "at": "2026-10-20T18:00:00Z", "params": {"kind": "ORDER_TOTAL_MISMATCH", "requested_count": 30, "available_count": 300}}

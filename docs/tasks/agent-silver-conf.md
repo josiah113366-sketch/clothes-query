@@ -1,6 +1,6 @@
 # 작업 지시서: agent/silver-conf
 
-> 상태: 진행 중 · 브랜치: `agent/silver-conf` · 다음 작업: 현지 님 `silver_gold_a_reprocess` 실제 연결 시험
+> 상태: 완료 · 브랜치: `agent/silver-conf` · 다음 작업: 현지 님 `silver_gold_a_reprocess` 실제 연결 시험
 
 ## 목표
 
