@@ -15,7 +15,9 @@
 - `auth.py` 로그인/Role 판정 (`AUTH_MODE=dev|local|oidc`)
 - `make_test_accounts.py` 테스트 계정 3개 생성 (local 모드용)
 - `data.py` 데이터 조회 함수(지금은 더미, 테이블/컬럼 이름은 노션 설계 그대로). **실연결 때 함수 본문만 Athena 조회로 교체**
-- `ui.py` 공통 선택 위젯(상품·기간)과 표시 도우미(비율 NaN 처리, 날짜 기준 안내)
+- `ui.py` 공통 선택 위젯(상품·기간)과 표시 도우미(비율 NaN 처리, 날짜 기준 안내), 지표 카드(`kpis`)·패널(`panel`)·앱 CSS
+- `charts.py` 차트 도우미(streamlit-echarts): 선·막대·흐름·링 게이지·진행 막대. 색 규칙은 파일 맨 위
+- `.streamlit/config.toml` 다크 테마와 차트 계열 색. `streamlit run`을 이 폴더에서 해야 적용된다
 - `approval_io.py` 재처리 승인 화면의 연결·조회(진짜 Athena/Airflow 또는 연습용 가짜 저장소). 설명은 파일 맨 위, 작업 기록은 `docs/tasks/dashboard-approval-page.md`
 - `pages_product/`, `pages_data/` 화면 파일
 
@@ -90,6 +92,11 @@ streamlit run app.py
 - 이메일은 대소문자 구분 없이 비교한다. `ROLES_JSON` 형식이 깨지면 아무도 들어가지 못한다(열어두는 쪽으로 실패하지 않음).
 - 로그인 로직(이메일 -> Role) 자체는 로그인 없이도 `AUTH_MODE=dev`(Role 직접 선택)로 화면별 접근 제어를 먼저 확인할 수 있다.
 - 구글 대신 사내 공급자(Cognito 등)를 쓸 때는 `[auth]`의 `client_id`, `client_secret`, `server_metadata_url`만 바꾼다.
+
+## 화면 꾸미기 (2026-10-24)
+- 차트는 `st.line_chart`/`st.bar_chart` 대신 `charts.py`(Apache ECharts)를 쓴다. 새 화면도 `charts.line(df, key=...)`처럼 같은 함수를 쓴다. `key`는 화면 안에서 차트마다 달라야 한다.
+- 숫자 요약은 `st.metric` 대신 `ui.kpis([...])` 카드를 쓴다(증감 배지, 작은 추이선). 섹션은 `with ui.panel("제목", "설명"):`로 감싼다. 아직 `st.metric`을 쓰는 화면도 CSS로 카드 모양이 된다.
+- 색을 바꿀 때는 `.streamlit/config.toml`(바탕·계열 색), `charts.py`(PALETTE·상태 색), `ui.py`(`_CSS`) 세 곳을 같이 본다. 계열 색 순서는 색약 구분 검사를 통과한 순서라 바꾸면 다시 검사한다.
 
 ## 배포 (EKS, `infra/platform/dashboard/`)
 배포 파일과 순서는 [`infra/platform/dashboard/README.md`](../infra/platform/dashboard/README.md), 외부 접속(ALB)은 [`infra/platform/ingress/README.md`](../infra/platform/ingress/README.md)에 있다. 이 앱 쪽에서 알아둘 것만 적는다.

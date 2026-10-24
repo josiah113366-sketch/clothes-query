@@ -8,6 +8,7 @@
 import pandas as pd
 import streamlit as st
 
+import charts
 import data
 import ui
 from auth import require_role
@@ -18,19 +19,56 @@ st.title("주문·매출")
 ui.date_note("hour")
 days = ui.pick_period("ord", max_days=7, default=3)  # 더미는 7일치
 
-df = data.get_order_sales_hourly(7)
-df = df[df.hour_start_kst > df.hour_start_kst.max() - pd.Timedelta(days=days)]
-
-a, b, c = st.columns(3)
-a.metric("주문 수", f"{int(df.order_count.sum()):,}")
-b.metric("결제 성공 주문 수", f"{int(df.paid_order_count.sum()):,}")
-c.metric("승인 금액(원)", f"{int(df.approved_amount.sum()):,}")
-
+all_hours = data.get_order_sales_hourly(7)
+df = all_hours[all_hours.hour_start_kst > all_hours.hour_start_kst.max() - pd.Timedelta(days=days)]
+# 직전 같은 길이 기간 (카드의 증감 배지). 더미가 7일치라 days 가 4 이상이면 비교 기간이 짧아진다.
+prev = ui.prev_days(all_hours, "hour_start_kst", days)
 d = df.set_index("hour_start_kst")
-st.subheader("주문 수 vs 결제 성공 주문 수")
-st.line_chart(d[["order_count", "paid_order_count"]])
-st.subheader("승인 금액")
-st.bar_chart(d["approved_amount"])
+note = f"직전 {days}일 대비"
+ui.kpis(
+    [
+        {
+            "label": "주문 수",
+            "value": f"{int(df.order_count.sum()):,}",
+            "unit": "건",
+            "delta": ui.delta(df.order_count.sum(), prev.order_count.sum()),
+            "good": "up",
+            "sub": note,
+            "spark": d.order_count,
+        },
+        {
+            "label": "결제 성공 주문 수",
+            "value": f"{int(df.paid_order_count.sum()):,}",
+            "unit": "건",
+            "delta": ui.delta(df.paid_order_count.sum(), prev.paid_order_count.sum()),
+            "good": "up",
+            "sub": note,
+            "spark": d.paid_order_count,
+        },
+        {
+            "label": "승인 금액",
+            "value": f"{int(df.approved_amount.sum()):,}",
+            "unit": "원",
+            "delta": ui.delta(df.approved_amount.sum(), prev.approved_amount.sum()),
+            "good": "up",
+            "sub": note,
+            "spark": d.approved_amount,
+        },
+    ]
+)
+
+with ui.panel("주문 수 vs 결제 성공 주문 수", "KST 1시간 단위 · 건"):
+    # 결제 성공은 점선: '보낸 것 vs 받은 것' 처럼 같은 흐름의 앞뒤를 겹쳐 본다
+    charts.line(
+        d[["order_count", "paid_order_count"]],
+        key="ord_cnt",
+        labels={"order_count": "주문", "paid_order_count": "결제 성공 주문"},
+        dashed=("paid_order_count",),
+    )
+with ui.panel("승인 금액", "KST 1시간 단위"):
+    charts.bar(
+        d[["approved_amount"]], key="ord_amt", fmt="won", labels={"approved_amount": "승인 금액"}
+    )
 st.caption(
     "주문은 유지되는데 결제 성공·승인 금액만 줄었다면 Gold B 결제 기록(데이터 관리)에서 PG 실패를 함께 확인하세요."
 )

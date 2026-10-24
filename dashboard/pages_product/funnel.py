@@ -10,6 +10,7 @@
 
 import streamlit as st
 
+import charts
 import data
 import ui
 from auth import require_role
@@ -30,30 +31,61 @@ s = df[
     ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions", "cart_order_sessions"]
 ].sum()
 
-# 단계별 방문 수 (기간 합계)
-st.subheader("단계별 도달 방문 수")
-st.bar_chart(s[["view_sessions", "cart_sessions", "order_sessions", "paid_sessions"]])
-
 
 # 기간 전환율은 일별 비율을 평균내지 않고 합계끼리 나눈다
 def rate(n, d):
     return float("nan") if d == 0 else n / d
 
 
-r = st.columns(5)
-r[0].metric("조회→담기", ui.pct(rate(s.cart_sessions, s.view_sessions)))
-r[1].metric("조회→주문", ui.pct(rate(s.order_sessions, s.view_sessions)))
-r[2].metric("조회→결제", ui.pct(rate(s.paid_sessions, s.view_sessions)))
-r[3].metric("담기→주문", ui.pct(rate(s.cart_order_sessions, s.cart_sessions)))
-r[4].metric("주문→결제", ui.pct(rate(s.paid_sessions, s.order_sessions)))
-st.caption(
-    f"담기 후 이탈 방문 수 = {int(s.cart_sessions - s.cart_order_sessions):,} (cart_sessions - cart_order_sessions)"
-)
+# 단계별 방문 수 (기간 합계). 단계 사이 글자 = 앞 단계 대비 비율
+with ui.panel("단계별 도달 방문 수", "첫 조회일(KST) 기준 · 기간 합계"):
+    charts.flow(
+        [
+            ("조회", s.view_sessions, f"{int(s.view_sessions):,}"),
+            ("담기", s.cart_sessions, f"{int(s.cart_sessions):,}"),
+            ("주문", s.order_sessions, f"{int(s.order_sessions):,}"),
+            ("결제", s.paid_sessions, f"{int(s.paid_sessions):,}"),
+        ],
+        notes=[
+            f"조회의 {ui.pct(rate(s.cart_sessions, s.view_sessions))}",
+            f"담기의 {ui.pct(rate(s.cart_order_sessions, s.cart_sessions))} 주문",
+            f"주문의 {ui.pct(rate(s.paid_sessions, s.order_sessions))}",
+        ],
+        key="fn_flow",
+    )
+    st.caption(
+        "담기→주문 비율은 담은 뒤 주문한 방문(cart_order_sessions) 기준입니다. 장바구니 없이 바로 주문한 방문이 있어 담기 수보다 주문 수가 클 수 있습니다."
+    )
 
-st.subheader("일별 조회→결제 전환율")
 daily = df.groupby("funnel_date_kst")[["paid_sessions", "view_sessions"]].sum()
 daily["view_to_paid_rate"] = data.safe_div(daily.paid_sessions, daily.view_sessions)
-st.line_chart(daily["view_to_paid_rate"])
+ui.kpis(
+    [
+        {"label": "조회→담기", "value": ui.pct(rate(s.cart_sessions, s.view_sessions))},
+        {"label": "조회→주문", "value": ui.pct(rate(s.order_sessions, s.view_sessions))},
+        {
+            "label": "조회→결제",
+            "value": ui.pct(rate(s.paid_sessions, s.view_sessions)),
+            "spark": daily.view_to_paid_rate,
+            "sub": "일별 추이",
+        },
+        {
+            "label": "담기→주문",
+            "value": ui.pct(rate(s.cart_order_sessions, s.cart_sessions)),
+            "sub": f"담기 후 이탈 {int(s.cart_sessions - s.cart_order_sessions):,} 방문",
+        },
+        {"label": "주문→결제", "value": ui.pct(rate(s.paid_sessions, s.order_sessions))},
+    ]
+)
+
+with ui.panel("일별 조회→결제 전환율", "첫 조회일(KST) 기준"):
+    charts.line(
+        daily[["view_to_paid_rate"]],
+        key="fn_rate",
+        fmt="pct",
+        labels={"view_to_paid_rate": "조회→결제 전환율"},
+        height="260px",
+    )
 
 # 근거 상세: 방문별로 어디까지 진행했는지
 with st.expander("근거: 방문별 진행 단계 (funnel_session_product)"):

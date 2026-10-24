@@ -7,6 +7,7 @@
 
 import streamlit as st
 
+import charts
 import data
 import ui
 from auth import require_role
@@ -21,9 +22,35 @@ with c1:
 with c2:
     days = ui.pick_period("ps")
 
-df = ui.last_days(data.get_product_sales_daily(), "sales_date_kst", days)
-df = df[df.article_id.isin(arts)]
+all_df = data.get_product_sales_daily()
+all_df = all_df[all_df.article_id.isin(arts)]
+df = ui.last_days(all_df, "sales_date_kst", days)
+prev = ui.prev_days(all_df, "sales_date_kst", days)
 names = data.PRODUCTS.set_index("article_id")["name"]
+dd = df.groupby("sales_date_kst")[["sold_quantity", "item_sales_amount"]].sum()
+note = f"직전 {days}일 대비 · 고른 상품 {len(arts)}개"
+ui.kpis(
+    [
+        {
+            "label": "판매 수량",
+            "value": f"{int(df.sold_quantity.sum()):,}",
+            "unit": "개",
+            "delta": ui.delta(df.sold_quantity.sum(), prev.sold_quantity.sum()),
+            "good": "up",
+            "sub": note,
+            "spark": dd.sold_quantity,
+        },
+        {
+            "label": "판매 금액",
+            "value": f"{int(df.item_sales_amount.sum()):,}",
+            "unit": "원",
+            "delta": ui.delta(df.item_sales_amount.sum(), prev.item_sales_amount.sum()),
+            "good": "up",
+            "sub": note,
+            "spark": dd.item_sales_amount,
+        },
+    ]
+)
 
 metric = st.radio(
     "지표",
@@ -31,8 +58,18 @@ metric = st.radio(
     horizontal=True,
     format_func={"sold_quantity": "판매 수량", "item_sales_amount": "판매 금액(원)"}.get,
 )
-pv = df.pivot(index="sales_date_kst", columns="article_id", values=metric).rename(columns=names)
-st.line_chart(pv)
+pv = df.pivot(index="sales_date_kst", columns="article_id", values=metric)
+# 색은 상품 목록 순서로 고정한다 (선택을 바꿔도 같은 상품은 같은 색). 7개 이상이면 색이 반복된다.
+order = list(data.PRODUCTS.article_id)
+pv = pv[[a for a in order if a in pv.columns]]
+with ui.panel("상품별 추이", "결제일(KST) 기준"):
+    charts.line(
+        pv.rename(columns=names),
+        key="ps_trend",
+        fmt="won" if metric == "item_sales_amount" else None,
+        colors=[charts.color(order.index(a)) for a in pv.columns],
+        area=False,
+    )
 
 st.subheader("상품별 합계")
 tot = df.groupby(["article_id", "product_code"], as_index=False)[

@@ -12,7 +12,9 @@
 import pandas as pd
 import streamlit as st
 
+import charts
 import data
+import ui
 from auth import require_role
 
 require_role("data")
@@ -25,20 +27,88 @@ df["completed_at_kst"] = data.to_kst(df.completed_at)
 df = df[df.completed_at > df.completed_at.max() - pd.Timedelta(hours=hours)]
 
 fail = df[df.status == "FAILED"]
-m = st.columns(4)
-m[0].metric("결제 시도", f"{len(df):,}")
-m[1].metric("실패", f"{len(fail):,}")
-m[2].metric("PG 원인 실패", f"{int((fail.failure_cause == 'PG').sum()):,}")
-m[3].metric("고객 원인 실패", f"{int((fail.failure_cause == 'CUSTOMER').sum()):,}")
+pgf = df.assign(
+    bucket=df.completed_at_kst.dt.floor("10min"),
+    pg_fail=(df.failure_cause == "PG"),
+    failed=(df.status == "FAILED"),
+)
+by10 = pgf.groupby("bucket")[["pg_fail", "failed"]].agg(["sum", "count"])
+ui.kpis(
+    [
+        {
+            "label": "결제 시도",
+            "value": f"{len(df):,}",
+            "unit": "건",
+            "sub": f"최근 {hours}시간",
+            "spark": by10[("failed", "count")],
+        },
+        {
+            "label": "실패",
+            "value": f"{len(fail):,}",
+            "unit": "건",
+            "sub": "실패율 " + ui.pct(len(fail) / len(df) if len(df) else float("nan")),
+            "spark": by10[("failed", "sum")],
+        },
+        {
+            "label": "PG 원인 실패",
+            "value": f"{int((fail.failure_cause == 'PG').sum()):,}",
+            "unit": "건",
+            "sub": "PG_TIMEOUT · PG_ERROR",
+            "spark": by10[("pg_fail", "sum")],
+        },
+        {
+            "label": "고객 원인 실패",
+            "value": f"{int((fail.failure_cause == 'CUSTOMER').sum()):,}",
+            "unit": "건",
+            "sub": "장애 아님 (잔액·한도·거절)",
+        },
+    ]
+)
 
-st.subheader("PG별 PG 원인 실패 비율 (10분 단위)")
-pgf = df.assign(bucket=df.completed_at_kst.dt.floor("10min"), pg_fail=(df.failure_cause == "PG"))
-rate = pgf.groupby(["bucket", "pg"]).pg_fail.mean().unstack("pg")
-st.line_chart(rate)
-st.caption("고객 원인 실패는 제외하고 PG 원인 실패만 비율로 봅니다.")
+left, right = st.columns([1.6, 1])
+with left, ui.panel("PG별 PG 원인 실패 비율", "10분 단위 · KST"):
+    rate = pgf.groupby(["bucket", "pg"]).pg_fail.mean().unstack("pg")
+    # PG 색은 PG 이름 순서로 고정 (조회 기간을 바꿔도 같은 PG 는 같은 색)
+    pgs = sorted(df.pg.unique())
+    charts.line(
+        rate[[p for p in pgs if p in rate.columns]],
+        key="pay_rate",
+        fmt="pct",
+        colors=[charts.color(pgs.index(p)) for p in pgs if p in rate.columns],
+    )
+    st.caption("고객 원인 실패는 제외하고 PG 원인 실패만 비율로 봅니다.")
+with right:
+    by_pg = pgf.groupby("pg").pg_fail.mean()
+    worst = float(by_pg.max()) if len(by_pg) else None
+    # 상태 색 기준(임시): 5% 미만 정상, 15% 미만 주의, 그 이상 위험.
+    # 탐지 규칙의 기준이 아니라 화면 색 구분용이다.
+    tone = (
+        charts.GOOD
+        if worst is None or worst < 0.05
+        else charts.WARN
+        if worst < 0.15
+        else charts.BAD
+    )
+    with ui.panel("가장 높은 PG 원인 실패 비율", f"최근 {hours}시간"):
+        charts.gauge(worst, key="pay_gauge", label=by_pg.idxmax() if len(by_pg) else "", tone=tone)
+    with ui.panel("PG별 PG 원인 실패 비율", f"최근 {hours}시간 · 시도 수"):
+        cnt = pgf.groupby("pg").size()
+        charts.rank(
+            [
+                (f"{p} ({int(cnt[p]):,}건)", float(by_pg[p]), charts.color(pgs.index(p)))
+                for p in pgs
+            ],
+            key="pay_rank",
+            max_value=max(worst or 0, 0.01),
+        )
 
-st.subheader("실패 원인별 건수")
-st.bar_chart(fail.groupby(["pg", "failure_cause"]).size().unstack("failure_cause").fillna(0))
+with ui.panel("실패 원인별 건수", "PG별 · 원인 쌓기"):
+    charts.bar(
+        fail.groupby(["pg", "failure_cause"]).size().unstack("failure_cause").fillna(0),
+        key="pay_cause",
+        stacked=True,
+        height="260px",
+    )
 
 with st.expander("실패 결제 목록"):
     st.dataframe(

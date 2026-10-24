@@ -707,7 +707,7 @@ def get_rca_reports() -> pd.DataFrame:
 #     review_score_log       후기별 점수 로그 (속성이 0개인 후기도 n_aspects = 0 으로 한 줄)
 #     review_aspect_scores_latest 뷰   Gold 가 읽는 값 (후기마다 model_version_no 가 가장 큰 결과)
 #   점수는 -2 ~ +2, '미언급'은 행이 없다. 시각 컬럼(analyzed_at)은 UTC 로 가정하고 화면에서 KST 로 바꾼다.
-#   ※ 아래 모델 이름·숫자는 모두 더미다. 후기 원문은 이 데이터에 없다 (review_id 만).
+#   ※ 아래 모델 이름·숫자는 모두 더미다. 후기 원문은 점수 데이터에 없고(review_id 만) get_review_texts 로 따로 읽는다.
 # =====================================================================
 # (모델 이름, model_version_no). 번호 규칙: 평가 모델/로직이 바뀌면 메이저, 작은 수정이면 마이너를 올린다.
 _MODELS = [("2.3_score_s2c", 0.0), ("2.4b_score_s2c", 1.0)]
@@ -931,7 +931,7 @@ def get_model_score_daily(days: int = 30) -> pd.DataFrame:
 @dataset(_TTL_A)
 def get_model_score_diff(model_a: str, model_b: str) -> pd.DataFrame:
     """같은 후기·속성에 대한 두 버전의 점수 비교. 컬럼: review_id, aspect, score_a, score_b.
-    두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 있다. 후기 원문은 없다."""
+    두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 있다. 후기 원문은 get_review_texts 로 따로 읽는다."""
     rng = np.random.default_rng(_SEED + 22 + zlib.crc32(f"{model_a}|{model_b}".encode()) % 1000)
     n = 900
     a = rng.choice(SCORES, n, p=[0.06, 0.14, 0.2, 0.36, 0.24])
@@ -946,6 +946,54 @@ def get_model_score_diff(model_a: str, model_b: str) -> pd.DataFrame:
             "score_b": b,
         }
     )
+
+
+# 더미 후기 문장 재료. 속성마다 (좋은 말, 나쁜 말). 실제 후기에서 가져온 문장이 아니다(직접 지은 예시).
+_DUMMY_PHRASES = {
+    "사이즈·핏": ("정사이즈로 잘 맞아요", "생각보다 한 치수 작게 나왔어요"),
+    "품질·내구성": ("박음질이 꼼꼼해요", "두 번 입었는데 보풀이 일어나요"),
+    "재질·촉감": ("촉감이 부드러워요", "까슬까슬해서 안에 받쳐 입어야 해요"),
+    "색상": ("화면이랑 색이 똑같아요", "사진보다 색이 많이 어두워요"),
+    "디자인": ("디자인이 깔끔해서 자주 입어요", "실물은 핏이 좀 밋밋해요"),
+    "가격": ("이 가격이면 만족해요", "가격에 비해 아쉬워요"),
+    "배송": ("배송이 빨랐어요", "배송이 일주일 넘게 걸렸어요"),
+    "포장": ("포장이 깔끔했어요", "포장이 뜯겨서 왔어요"),
+    "세탁·관리": ("세탁해도 줄지 않아요", "한 번 빨았는데 늘어났어요"),
+    "활용성·사용감": ("여기저기 잘 어울려요", "막상 입을 일이 별로 없네요"),
+}
+_DUMMY_TAILS = [
+    "",
+    " 재구매 의사 있어요.",
+    " 그래도 쓸 만해요.",
+    " 다른 색도 살까 고민 중이에요.",
+    " 교환할까 해요.",
+]
+
+
+@dataset(_TTL_A)
+def get_review_texts(review_ids: tuple[str, ...]) -> pd.DataFrame:
+    """후기 원문. 컬럼: review_id, review_text, rating(별점 1~5).
+
+    감성분석 모델 화면에서 '점수 차가 큰 후기'를 사람이 직접 읽고 어느 버전이 맞는지 판단하는 데 쓴다.
+    실데이터: Silver 리뷰 표에서 review_id 로 조회해 _REAL["get_review_texts"] 에 등록한다 (TODO.md B8).
+    review_ids 는 캐시 키가 되도록 tuple 로 받는다.
+    ※ 원문은 팀 내부용이다 (대시보드는 허용 IP·로그인 뒤에서만 열린다). 외부 서비스로 보내거나 Git 에 넣지 않는다.
+    ※ 더미 문장은 직접 지은 예시 문장이며 실제 후기가 아니다. 앞에 [더미] 를 붙인다.
+    """
+    keys = [a for a in ASPECTS if a in _DUMMY_PHRASES]
+    rows = []
+    for rid in review_ids:
+        rng = np.random.default_rng(_SEED + zlib.crc32(rid.encode()))
+        picked = rng.choice(keys, size=int(rng.integers(1, 4)), replace=False)
+        parts = [_DUMMY_PHRASES[a][int(rng.random() < 0.45)] for a in picked]
+        text = (
+            "[더미] "
+            + ", ".join(parts)
+            + "."
+            + _DUMMY_TAILS[int(rng.integers(0, len(_DUMMY_TAILS)))]
+        )
+        rows.append((rid, text, int(rng.integers(1, 6))))
+    return pd.DataFrame(rows, columns=["review_id", "review_text", "rating"])
 
 
 @dataset(_TTL_B)

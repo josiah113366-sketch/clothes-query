@@ -8,6 +8,7 @@
 
 import streamlit as st
 
+import charts
 import data
 import ui
 from auth import require_role
@@ -23,46 +24,99 @@ with c1:
 with c2:
     days = ui.pick_period("ov")
 
-# ---- 판매 (결제일) ----
-st.subheader("판매")
-ui.date_note("sales")
-sales = ui.last_days(data.get_product_sales_daily(), "sales_date_kst", days)
-sales = sales[sales.article_id.isin(art)]
-m1, m2 = st.columns(2)
-m1.metric("판매 수량", f"{int(sales.sold_quantity.sum()):,}")
-m2.metric("상품 판매 금액(원)", f"{int(sales.item_sales_amount.sum()):,}")
-st.line_chart(sales.set_index("sales_date_kst")[["sold_quantity"]])
+# ---- 판매 (결제일) · 리뷰 (작성일) 요약 카드 ----
+# 영역마다 날짜 기준이 달라 같은 줄에 두되 카드 아래 설명에 기준을 적는다.
+all_sales = data.get_product_sales_daily()
+all_sales = all_sales[all_sales.article_id.isin(art)]
+sales = ui.last_days(all_sales, "sales_date_kst", days)
+ps = ui.prev_days(all_sales, "sales_date_kst", days)
+s_daily = sales.groupby("sales_date_kst")[["sold_quantity", "item_sales_amount"]].sum()
+
+all_rv = data.get_review_product_daily()
+all_rv = all_rv[all_rv.article_id.isin(art)]
+rv = ui.last_days(all_rv, "review_date_kst", days)
+prv = ui.prev_days(all_rv, "review_date_kst", days)
+cnt, rs, low = rv.review_count.sum(), rv.rating_sum.sum(), rv.low_rating_count.sum()
+pcnt, prs = prv.review_count.sum(), prv.rating_sum.sum()
+r_daily = rv.groupby("review_date_kst")[["review_count", "rating_sum"]].sum()
+note = f"직전 {days}일 대비"
+ui.kpis(
+    [
+        {
+            "label": "판매 수량",
+            "value": f"{int(sales.sold_quantity.sum()):,}",
+            "unit": "개",
+            "delta": ui.delta(sales.sold_quantity.sum(), ps.sold_quantity.sum()),
+            "good": "up",
+            "sub": "결제일 기준 · " + note,
+            "spark": s_daily.sold_quantity,
+        },
+        {
+            "label": "상품 판매 금액",
+            "value": f"{int(sales.item_sales_amount.sum()):,}",
+            "unit": "원",
+            "delta": ui.delta(sales.item_sales_amount.sum(), ps.item_sales_amount.sum()),
+            "good": "up",
+            "sub": "결제일 기준 · " + note,
+            "spark": s_daily.item_sales_amount,
+        },
+        {
+            "label": "리뷰 수",
+            "value": f"{int(cnt):,}",
+            "unit": "건",
+            "delta": ui.delta(cnt, pcnt),
+            "good": None,
+            "sub": "작성일 기준 · " + note,
+            "spark": r_daily.review_count,
+        },
+        # 기간 평균 별점 = 합계/합계 (일별 평균의 평균이 아님)
+        {
+            "label": "평균 별점",
+            "value": "계산 불가" if cnt == 0 else f"{rs / cnt:.2f}",
+            "unit": "/ 5",
+            "delta": ui.delta(rs / cnt if cnt else None, prs / pcnt if pcnt else None),
+            "good": "up",
+            "sub": "낮은 별점(1~2점) " + ui.pct(low / cnt if cnt else float("nan")),
+            "spark": data.safe_div(r_daily.rating_sum, r_daily.review_count),
+        },
+    ]
+)
+st.caption("낮은 별점은 별점 기준이며 AI가 판정한 부정 감성과 다릅니다.")
+
+left, right = st.columns([1.5, 1])
+with left, ui.panel("판매 수량", "결제일(KST) 기준 · 개"):
+    charts.line(
+        s_daily[["sold_quantity"]],
+        key="ov_sales",
+        labels={"sold_quantity": "판매 수량"},
+        height="260px",
+    )
 
 # ---- 구매 흐름 (첫 조회일) ----
-st.subheader("구매 흐름")
-ui.date_note("funnel")
 fn = ui.last_days(data.get_funnel_daily(), "funnel_date_kst", days)
 fn = fn[fn.article_id.isin(art)]
 v = fn[["view_sessions", "cart_sessions", "order_sessions", "paid_sessions"]].sum()
-f1, f2, f3, f4 = st.columns(4)
-f1.metric("조회", f"{int(v.view_sessions):,}")
-f2.metric("담기", f"{int(v.cart_sessions):,}")
-f3.metric("주문", f"{int(v.order_sessions):,}")
-f4.metric("결제", f"{int(v.paid_sessions):,}")
-# 기간 전환율은 일별 비율의 평균이 아니라 합계끼리 다시 나눈다 (분모 0 이면 계산 불가)
-st.caption(
-    f"조회→결제 전환율: {ui.pct(v.paid_sessions / v.view_sessions if v.view_sessions else float('nan'))}"
-)
-
-# ---- 리뷰 (작성일) ----
-st.subheader("리뷰")
-ui.date_note("review")
-rv = ui.last_days(data.get_review_product_daily(), "review_date_kst", days)
-rv = rv[rv.article_id.isin(art)]
-cnt, rs, low = rv.review_count.sum(), rv.rating_sum.sum(), rv.low_rating_count.sum()
-r1, r2, r3 = st.columns(3)
-r1.metric("리뷰 수", f"{int(cnt):,}")
-r2.metric("평균 별점", "계산 불가" if cnt == 0 else f"{rs / cnt:.2f}")  # 합계/합계로 재계산
-r3.metric("낮은 별점(1~2점) 비율", ui.pct(low / cnt if cnt else float("nan")))
-st.caption("낮은 별점은 별점 기준이며 AI가 판정한 부정 감성과 다릅니다.")
+with right, ui.panel("구매 흐름", "첫 조회일(KST) 기준 · 방문 수"):
+    charts.rank(
+        [
+            ("조회", int(v.view_sessions), charts.color(0)),
+            ("담기", int(v.cart_sessions), charts.color(1)),
+            ("주문", int(v.order_sessions), charts.color(2)),
+            ("결제", int(v.paid_sessions), charts.color(3)),
+        ],
+        key="ov_funnel",
+        max_value=max(int(v.view_sessions), 1),
+        fmt=None,
+        height="200px",
+    )
+    # 기간 전환율은 일별 비율의 평균이 아니라 합계끼리 다시 나눈다 (분모 0 이면 계산 불가)
+    st.caption(
+        f"조회→결제 전환율: {ui.pct(v.paid_sessions / v.view_sessions if v.view_sessions else float('nan'))}"
+    )
 
 # ---- 불만 범주 (작성일) ----
 st.subheader("불만 범주")
+ui.date_note("review")
 asp = ui.last_days(data.get_review_aspect_daily(), "review_date_kst", days)
 asp = asp[asp.article_id.isin(art)]
 g = asp.groupby("aspect", as_index=False)[["mentioned_review_count", "negative_review_count"]].sum()

@@ -40,6 +40,7 @@
 | B5 | 형식 오류 화면의 현재 `rule_version` 선택 방식 확정 | 공통 규칙 YAML 버전 운영 방식 | `gold-b` | | 대기 | |
 | B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `review_aspect_scores_latest` 조회를 `_REAL`에 등록 (`get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_runs`, 그리고 `get_model_registry`의 분석 현황 열 `last_analyzed_at`·`analyzed_reviews`·`unscored_reviews`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 대기 | 버전·패치노트는 연결됨(B7). 점수 현황은 더미 |
 | B7 | 감성분석 모델 화면의 파싱 실패 건수와 Job 결과를 읽을 곳 확정 (오류 prefix, Airflow 기록) | Airflow 연동 | `review-model` / `gold-b` | | 대기 | 평가 지표·패치노트는 결정·연결됨(2026-10-23): `review-analysis/releases/*.yaml` → S3 `review-score/model-registry/releases/` → `MODEL_REGISTRY_URI` |
+| B8 | **감성분석 모델 화면 후기 원문**: `get_review_texts`를 Silver 리뷰 표의 review_id 조회로 `_REAL`에 등록 (점수 차가 큰 후기 표의 원문 열) | Silver 리뷰 표 위치·Athena 권한 | `dashboard` | | 대기 | 2026-10-24 원문 표시 결정(팀 내부 공유). 지금은 직접 지은 더미 문장 |
 
 ## 3. 원인 리포트 / 승인
 
