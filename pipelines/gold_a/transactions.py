@@ -26,7 +26,7 @@ def build_gold(silver: dict[str, list[dict]], products: list[dict] | None = None
                _scoped: bool = False) -> dict[str, list[dict]]:
     """같은 Silver 입력은 언제 실행해도 같은 Gold 결과를 돌려준다."""
     checks = silver.get("dq_results")
-    if not _scoped and (not checks or any(row.get("status") != "PASS" or row.get("quarantined_count") != 0 for row in checks)):
+    if not _scoped and (not checks or any(row.get("status") != "PASS" or row.get("active_error_count", row.get("quarantined_count")) != 0 for row in checks)):
         raise ValueError("Silver 품질 결과가 불완전하므로 Gold A 계산을 중단합니다")
     catalog = None if products is None else product_index(products)
     orders = {row["order_id"]: row for row in silver["orders_current"]}

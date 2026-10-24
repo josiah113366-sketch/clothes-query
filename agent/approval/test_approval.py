@@ -107,9 +107,9 @@ res = approve(rid1, ME, T0 + timedelta(minutes=10), query, write, trigger_ok, CF
 check("승인: APPROVED 줄이 쌓이고 DAG를 한 번 부름", (steps(rid1), res["airflow"], len(calls)), (["REQUESTED", "APPROVED"], "TRIGGERED", 1))
 dag_id, run_id, conf = calls[0]
 check("승인: dag_run_id가 request_id, DAG ID는 요청 때 정한 것", (dag_id, run_id), ("gold_b_reprocess", rid1))
-check("승인: 호출 입력(conf)에 요청 id·시간대·규칙 버전·이상 id·리포트 id가 있고, R1에는 주문 id 목록이 없음",
+check("승인: 호출 입력(conf)에 요청 id·시간대(UTC ISO)·규칙 버전·이상 id·리포트 id가 있고, R1에는 주문 id 목록이 없음",
       ({k: conf[k] for k in ("request_id", "window_start", "window_end", "rule_version", "anomaly_id", "report_id")}, "order_ids" in conf),
-      ({"request_id": rid1, "window_start": "2026-10-22 15:00:00", "window_end": "2026-10-22 16:00:00", "rule_version": "0.2.0", "anomaly_id": "a1", "report_id": "rep-1"}, False))
+      ({"request_id": rid1, "window_start": "2026-10-22T15:00:00Z", "window_end": "2026-10-22T16:00:00Z", "rule_version": "0.2.0", "anomaly_id": "a1", "report_id": "rep-1"}, False))
 check("승인 줄에 승인자가 남음", json.loads(fetch_rows(query, rid1)[-1]["detail"])["approved_by"], ME)
 
 
@@ -220,7 +220,10 @@ check("POLLER: 승인하면 APPROVED 줄만 쓰고 Airflow는 부르지 않음",
 res = approve(rp, ME, T0 + timedelta(minutes=3), query, write, lambda *a: polled.append(a) or 200, DEFAULT)
 check("POLLER: 다시 승인해도 승인 줄이 늘지 않고 호출도 없음", (steps(rp), res["airflow"], polled), (["REQUESTED", "APPROVED"], "POLLER", []))
 old = request_reprocess(dict(R1, anomaly_id="p2", window_start="2026-10-10 10:00:00", window_end="2026-10-10 10:15:00"), "rep-p2", ME, T0, query, write, DEFAULT)
-check("Kafka 보관 기간(3일)을 넘긴 구간은 경고(요청은 받음)", old["warnings"], ["OUTSIDE_KAFKA_RETENTION"])
+check("Kafka 보관 기간(7일)을 넘긴 구간은 경고(요청은 받음)", old["warnings"], ["OUTSIDE_KAFKA_RETENTION"])
+five = request_reprocess(dict(R1, anomaly_id="p5", window_start="2026-10-17 10:00:00", window_end="2026-10-17 10:15:00"), "rep-p5", ME, T0, query, write, DEFAULT)
+check("5일 전 구간은 7일 보관 안이라 경고 없음", five["warnings"], [])
+check("기본 보관 기간은 7일", DEFAULT.kafka_retention_days, 7)
 check("최근 구간의 R1은 경고 없음", request_reprocess(dict(R1, anomaly_id="p3"), "rep-p3", ME, T0, query, write, DEFAULT)["warnings"], [])
 check("Silver(R6)는 보관 기간 경고가 없고 재처리로 안 풀릴 수 있다는 경고만", request_reprocess(dict(R6, anomaly_id="p6"), "rep-p6", ME, T0, query, write, DEFAULT)["warnings"], ["UNFIXABLE_BY_REPROCESS"])
 

@@ -81,7 +81,7 @@ if flash:
 
 WARNING_TEXT = {
     "UNFIXABLE_BY_REPROCESS": "이 규칙(R5·R6)은 원본이 그대로면 재처리해도 해소되지 않을 수 있습니다. 원본을 먼저 고쳤는지 확인하세요.",
-    "OUTSIDE_KAFKA_RETENTION": "Kafka 보관 기간(3일)을 넘긴 구간이라 Kafka로 다시 만들 수 없을 수 있습니다.",
+    "OUTSIDE_KAFKA_RETENTION": f"Kafka 보관 기간({b.cfg.kafka_retention_days}일)을 넘긴 구간이라 Kafka로 다시 만들 수 없을 수 있습니다.",
 }
 STATE_TEXT = {"REQUESTED": "승인 대기", "APPROVED": "승인됨", "REJECTED": "거절됨", "STARTED": "재처리 중", "LEDGER_REPLACED": "교체 완료",
               "REDETECTED": "재판정 완료", "VERIFIED": "검증 완료", "FAILED": "실패", "EXPIRED_REQUEST": "요청 만료", "EXPIRED_APPROVAL": "승인 만료"}
