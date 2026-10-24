@@ -361,21 +361,27 @@ def build_aspects(spark, reviews, documents, model_version):
             raise ValueError("분석 결과의 키·속성·모델 버전 오류")
         if row["aspect"] not in ASPECTS or type(row.get("score")) is not int or row["score"] not in SCORE_FIELDS:
             raise ValueError("모델 속성 또는 -2~2 정수 점수 오류")
-        return row["review_id"], row["aspect"], row["model_version"], row["score"]
+        number = row.get("model_version_no")
+        if model_version is None and (not isinstance(number, str) or not re.fullmatch(r"[0-9]{1,3}\.[0-9]", number)):
+            raise ValueError("최신 점수의 모델 번호가 없습니다")
+        return row["review_id"], row["aspect"], row["model_version"], number, row["score"]
 
     all_rows = spark.createDataFrame(documents.map(validate),
-        "review_id string, aspect string, model_version string, score long").persist()
+        "review_id string, aspect string, model_version string, model_version_no string, score long").persist()
     try:
-        selected = all_rows.filter(F.col("model_version") == model_version)
+        selected = all_rows if model_version is None else all_rows.filter(F.col("model_version") == model_version)
+        if model_version is None and selected.groupBy("review_id").agg(
+                F.countDistinct(F.struct("model_version", "model_version_no")).alias("n")).filter("n > 1").limit(1).count():
+            raise ValueError("최신 점수 입력에 한 리뷰의 여러 모델 버전이 섞여 있습니다")
         if all_rows.limit(1).count() and not selected.limit(1).count():
             raise ValueError("요청한 모델 버전 결과가 없습니다")
         if selected.join(reviews.select("review_id"), "review_id", "left_anti").limit(1).count():
             raise ValueError("분석 결과에 Silver 범위 밖 리뷰 ID가 있습니다")
         if selected.groupBy("review_id", "aspect").agg(F.countDistinct("score").alias("n")).filter("n > 1").limit(1).count():
             raise ValueError("동일 리뷰·속성·모델 버전의 분석 내용 충돌")
-        selected = selected.dropDuplicates(["review_id", "aspect", "model_version"])
+        selected = selected.dropDuplicates(["review_id", "aspect", "model_version", "model_version_no"])
         linked = selected.join(reviews.select("review_id", "review_date_kst", "article_id", "product_code"), "review_id")
-        daily = linked.groupBy("review_date_kst", "article_id", "product_code", "aspect", "model_version").agg(
+        daily = linked.groupBy("review_date_kst", "article_id", "product_code", "aspect", "model_version", "model_version_no").agg(
             F.count("review_id").alias("scored_review_count"), F.sum("score").alias("score_sum"),
             *[F.sum(F.when(F.col("score") == score, 1).otherwise(0)).alias(field) for score, field in SCORE_FIELDS.items()])
         daily = daily.withColumn("average_score", F.round(F.col("score_sum").cast("decimal(30,0)") /
@@ -393,6 +399,8 @@ def build_aspects(spark, reviews, documents, model_version):
 
 
 def execute_reviews(spark, config):
+    from pyspark.sql import functions as F
+
     from pipelines.silver.reviews import build_reviews_spark
     from pipelines.spark_batch import (
         _spark_uri,
@@ -404,7 +412,7 @@ def execute_reviews(spark, config):
         save_tables,
     )
 
-    allowed = {"job", "run_id", "inputs", "output_root", "input_complete", "start_date", "end_date", "model_version", "max_key_rows"}
+    allowed = {"job", "run_id", "inputs", "output_root", "input_complete", "start_date", "end_date", "model_version", "max_key_rows", "analysis_view"}
     if set(config) - allowed or config.get("input_complete") is not True:
         raise ValueError("지원하지 않는 리뷰 설정 또는 입력 준비 미확인")
     start, end = (date.fromisoformat(config[k]).isoformat() for k in ("start_date", "end_date"))
@@ -414,6 +422,8 @@ def execute_reviews(spark, config):
     if not {"reviews", "designs", "variants"} <= set(inputs) or set(inputs) - {"reviews", "designs", "variants", "analysis", "mapping"}:
         raise ValueError("리뷰·상품 스냅샷 입력이 필요합니다")
     version = config.get("model_version")
+    if "analysis_view" in config and ("analysis" in inputs or version is not None):
+        raise ValueError("최신 점수 뷰와 파일·단일 모델 버전 입력을 함께 지정하지 마세요")
     if "analysis" in inputs and (not isinstance(version, str) or not version.strip()):
         raise ValueError("모델 점수 입력에는 model_version이 필요합니다")
     limit = config.get("max_key_rows", 10000)
@@ -425,7 +435,7 @@ def execute_reviews(spark, config):
     run_id = config.get("run_id", "reviews-" + uuid4().hex)
     if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", run_id):
         raise ValueError("run_id 형식 오류")
-    if any(part in {"bronze", "ground_truth"} for part in output.replace("\\", "/").split("/")):
+    if any(part in {"bronze", "bronze_v2", "ground_truth"} for part in output.replace("\\", "/").split("/")):
         raise ValueError("원천·정답표 아래에는 결과를 쓸 수 없습니다")
     for locations in inputs.values():
         if not isinstance(locations, list) or not locations:
@@ -470,17 +480,41 @@ def execute_reviews(spark, config):
             mapping = spark.createDataFrame(docs.map(mapping_row), "product_id string, article_id string")
         linked = connect_products(stored, products, mapping)
         gold_tables = {"review_product_daily": build_product_daily(linked)}
-        coverage = None
-        if "analysis" in paths:
-            daily, coverage, score_cache = build_aspects(spark, linked,
-                read_documents(spark, paths["analysis"], "analysis", version), version)
+        coverage, score_snapshot, versions = None, None, []
+        if "analysis_view" in config:
+            import boto3
+
+            from pipelines.review_scores import snapshot_scores
+
+            score_snapshot = snapshot_scores(output, run_id, start, end, config["analysis_view"],
+                boto3.client("athena", region_name="ap-northeast-1"), boto3.client("s3", region_name="ap-northeast-1"))
+            inventory.extend(score_snapshot["objects"])
+            score_paths = [_spark_uri(item["uri"]) for item in score_snapshot["objects"]]
+            scores = (spark.read.parquet(*score_paths) if score_paths else spark.createDataFrame([],
+                "review_id string, aspect string, score long, model_version string, model_version_no string, review_date date"))
+            if scores.filter(F.col("review_date").isNull()).limit(1).count():
+                raise ValueError("모델 점수의 KST 리뷰 날짜가 없습니다")
+            # KST 일자와 Silver 리뷰의 일자가 다르면 조용히 합치지 않는다.
+            if scores.join(linked.select("review_id", "review_date_kst"), "review_id").filter(
+                    F.col("review_date").cast("string") != F.col("review_date_kst")).limit(1).count():
+                raise ValueError("모델 점수와 Silver 리뷰의 KST 날짜가 다릅니다")
+            selected_versions = scores.select("model_version", "model_version_no").distinct().limit(1001).collect()
+            if len(selected_versions) > 1000:
+                raise ValueError("한 실행의 모델 버전 수가 1000개를 초과했습니다")
+            versions = sorted([r.asDict() for r in selected_versions], key=lambda r: str(r))
+            documents = scores.toJSON()
+        elif "analysis" in paths:
+            documents = read_documents(spark, paths["analysis"], "analysis", version)
+        if "analysis_view" in config or "analysis" in paths:
+            daily, coverage, score_cache = build_aspects(spark, linked, documents, version)
             gold_tables["review_aspect_daily"] = daily
         gold_base = output.rstrip("/") + "/gold_a/runtime/reviews/runs/" + run_id
         gold = save_tables(gold_tables, gold_base, run_id, checked)
         gold.pop("format_rules", None)
         gold.update(status="PASS", silver_manifest=base + "/manifest.json", products_manifest=base + "/products/manifest.json",
                     start_date_kst=start, end_date_kst=end, model_version=version, score_schema="score.v1",
-                    review_scores="PROVIDED" if "analysis" in paths else "NOT_REQUESTED", analysis_coverage=coverage,
+                    review_scores="PROVIDED" if "analysis" in paths or score_snapshot else "NOT_REQUESTED", analysis_coverage=coverage,
+                    score_snapshot=score_snapshot, model_versions=versions,
                     code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"))
         publish(output, "gold_a", gold_base, gold, inventory)
         return gold

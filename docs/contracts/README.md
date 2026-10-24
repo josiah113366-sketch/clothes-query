@@ -1,5 +1,7 @@
 # Silver・Gold A・Gold B 공통 데이터 계약
 
+결과 조회·운영 공개: [Silver·Gold A Glue·Athena 공개 명세](silver-gold-a-publication.md) — 실행 ID 고정 조회는 결정, DB·표·완료 공개 목록·권한은 검토안이며 연결 전.
+
 상태: 제안 — 원천에서 확인한 규칙과 경로 간 합의할 규칙을 구분한다.
 
 ## 1. 이 문서와 YAML의 차이

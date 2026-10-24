@@ -13,7 +13,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 VIEWS = HERE.parent / "views"
 DESIGN = HERE.parents[2] / "docs" / "design" / "gold-b" / "README.md"
-NAMES = ("payment_conflicts", "payment_attempts", "malformed_messages")
+NAMES = ("payment_states", "payment_conflicts", "payment_attempts", "malformed_messages")
 
 
 def design_sql() -> dict[str, str]:
@@ -46,3 +46,34 @@ def test_malformed_messages_keeps_time_folders():
     for column in ("dt", "hour"):
         assert re.search(rf"\b{column}\b", select), column
         assert re.search(rf"\b{column}\b", group_by), column
+
+
+def select_columns(sql: str) -> list[str]:
+    """맨 바깥 SELECT의 칸 이름 (AS 뒤 이름 또는 칸 이름)."""
+    select = sql.split("SELECT", 1)[1].rsplit("FROM", 1)[0]
+    depth, parts, current = 0, [], ""
+    for char in select:
+        depth += char == "("
+        depth -= char == ")"
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
+    return [re.split(r"\s+AS\s+|\s+", part.strip())[-1] for part in parts]
+
+
+def test_payment_attempts_keeps_columns_for_detection():
+    """판정 잡이 읽는 payment_attempts의 칸은 결제 UPDATE 처리 뒤에도 같다 (2026-10-23). 판정 SQL을 바꾸지 않아도 된다."""
+    assert select_columns(design_sql()["payment_attempts"]) == [
+        "payment_id", "order_id", "attempt_no", "pg", "status", "failure_code", "failure_cause",
+        "completed_at", "loaded_at"]
+
+
+def test_payment_views_read_one_state_view():
+    """보류 판단은 payment_states 한 곳에서 하고, 두 뷰가 나눠 읽는다 (같은 판단을 따로 계산해 어긋나지 않게)."""
+    sql = design_sql()
+    assert "FROM gold_b.payment_states" in sql["payment_attempts"] and "hold_reason IS NULL" in sql["payment_attempts"]
+    assert "FROM gold_b.payment_states" in sql["payment_conflicts"] and "hold_reason IS NOT NULL" in sql["payment_conflicts"]
+    assert "gold_b.payment_events" not in sql["payment_attempts"] + sql["payment_conflicts"]

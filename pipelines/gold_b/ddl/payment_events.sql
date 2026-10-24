@@ -1,5 +1,6 @@
--- ① 결제 시도 한 건 = 한 줄. payments 토픽에서 형식 검사를 통과하고 __op가 c 또는 r인 메시지.
--- 시간 폴더는 completed_at(UTC) 기준. 중복 제거·충돌 분리·원인 분류는 뷰에서 한다.
+-- ① 결제 이벤트 하나 = 한 줄. payments 토픽에서 형식 검사를 통과하고 __op가 c·r·u인 메시지.
+-- 결제가 수정되면(u) 변경 전후 이벤트를 모두 남긴다. 최신 상태·보류·원인 분류는 뷰에서 한다.
+-- 시간 폴더는 completed_at(UTC) 기준.
 -- amount·method·requested_at은 컬럼으로 두지 않고 결제 내용 지문(payment_content_hash)에만 들어간다.
 CREATE EXTERNAL TABLE IF NOT EXISTS gold_b.payment_events (
   payment_id      STRING    COMMENT '결제 시도 고유 번호. 중복 제거 기준',
@@ -13,7 +14,10 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gold_b.payment_events (
   fingerprint_version  STRING COMMENT '지문 규칙 버전 (pipelines/payment_fingerprint.py). 같은 버전끼리만 비교',
   kafka_partition INT       COMMENT 'payments 토픽 파티션',
   kafka_offset    BIGINT    COMMENT '파티션 안 위치',
-  loaded_at       TIMESTAMP COMMENT '원장에 쌓은 시각 (UTC)'
+  loaded_at       TIMESTAMP COMMENT '원장에 쌓은 시각 (UTC). 같은 메시지를 여러 번 검사했을 때 결과의 순서',
+  cdc_op          STRING    COMMENT 'CDC 변경 종류 (c, r, u)',
+  source_ts_ms    BIGINT    COMMENT '원본 DB에서 바뀐 시각 (__source_ts_ms, 밀리초). 순서 이상 확인용',
+  rule_version    STRING    COMMENT '이 줄을 만든 형식 검사 규칙표 버전'
 )
 PARTITIONED BY (dt STRING, hour STRING)
 STORED AS PARQUET

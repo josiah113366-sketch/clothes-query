@@ -1,11 +1,18 @@
-# 컨텍스트는 dashboard/ 폴더다. 계정 파일과 비밀값은 이미지에 절대 넣지 않는다.
-.local/
-.streamlit/secrets.toml
-.venv/
-.ruff_cache/
-__pycache__/
-*.pyc
-.git
-make_test_accounts.py
-TODO.md
-README.md
+# 컨텍스트는 저장소 루트다. 전부 제외한 뒤 이미지에 필요한 것만 다시 허용한다.
+# 계정 파일과 비밀값은 이미지에 절대 넣지 않는다.
+*
+!dashboard/
+!agent/approval/approval.py
+!agent/detect/athena_io.py
+
+# dashboard/ 안에서도 빼는 것
+dashboard/.local/
+dashboard/.streamlit/secrets.toml
+dashboard/.venv/
+dashboard/.ruff_cache/
+dashboard/**/__pycache__/
+dashboard/**/*.pyc
+dashboard/make_test_accounts.py
+dashboard/test_*.py
+dashboard/TODO.md
+dashboard/README.md

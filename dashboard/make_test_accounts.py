@@ -5,6 +5,9 @@
 - `--same-as-id`: 비밀번호를 아이디와 똑같이 만든다(팀 합의로 쓰는 약한 비밀번호). 아이디가 코드에 공개돼 있으므로
   접속 보호는 허용 IP와 로그인 실패 잠금에만 의지한다.
 - 이미 파일이 있으면 덮어쓰지 않는다 (--force 로 새로 만들기).
+- `--add <이메일> [--roles data,product]`: 기존 파일의 계정은 그대로 두고 이메일 아이디 계정 하나를 더한다(Role 기본 data).
+  재처리 승인은 로그인 아이디가 이메일(@ 포함)이어야 하므로 승인할 사람마다 이렇게 만든다(공용 3계정은 승인 불가).
+  --same-as-id 를 같이 주면 비밀번호도 이메일과 같다. 같은 이메일이 이미 있으면 멈춘다(--force 면 그 계정만 다시 만든다).
 - 로컬 시험 전용이다. 실서비스 로그인(OIDC)을 대신하지 않는다.
 """
 
@@ -22,15 +25,58 @@ ACCOUNTS = [
 ]
 
 
+def _arg(flag: str) -> str | None:
+    """--flag 값 형식의 인자를 읽는다. 없으면 None."""
+    if flag not in sys.argv:
+        return None
+    i = sys.argv.index(flag)
+    if i + 1 >= len(sys.argv) or sys.argv[i + 1].startswith("--"):
+        sys.exit(f"{flag} 뒤에 값이 필요합니다")
+    return sys.argv[i + 1]
+
+
+def _new_account(password: str, roles: list) -> dict:
+    salt = secrets.token_hex(16)
+    return {"salt": salt, "hash": hash_password(password, salt), "roles": roles}
+
+
+def add_email_account(email: str) -> None:
+    """기존 계정 파일에 이메일 아이디 계정 하나를 더한다."""
+    email = email.strip()
+    # 승인 백엔드(agent/approval/approval.py check_actor)는 '@'가 있는 아이디만 승인자로 받는다
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        sys.exit(f"이메일 형식이 아닙니다: {email}")
+    roles = [r.strip() for r in (_arg("--roles") or "data").split(",") if r.strip()]
+    bad = [r for r in roles if r not in ("product", "data")]
+    if bad:
+        sys.exit(f"Role 은 product, data 중에서 고릅니다: {bad}")
+    out = (
+        json.loads(LOCAL_ACCOUNTS_FILE.read_text(encoding="utf-8"))
+        if LOCAL_ACCOUNTS_FILE.exists()
+        else {}
+    )
+    if email in out and "--force" not in sys.argv:
+        sys.exit(f"{email} 계정이 이미 있습니다. 다시 만들려면 --force 를 붙이세요.")
+    password = email if "--same-as-id" in sys.argv else secrets.token_urlsafe(9)
+    out[email] = _new_account(password, roles)
+    LOCAL_ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LOCAL_ACCOUNTS_FILE.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    print(f"저장: {LOCAL_ACCOUNTS_FILE} (계정 {len(out)}개)\n(비밀번호는 지금만 보입니다)")
+    print(f"  아이디 {email} 비밀번호 {password} Role {roles}")
+
+
 def main() -> None:
+    email = _arg("--add")
+    if email:
+        add_email_account(email)
+        return
     if LOCAL_ACCOUNTS_FILE.exists() and "--force" not in sys.argv:
         sys.exit(f"{LOCAL_ACCOUNTS_FILE} 가 이미 있습니다. 새로 만들려면 --force 를 붙이세요.")
     out, shown = {}, []
     for name, roles in ACCOUNTS:
         # 기본은 12자 안팎의 무작위 비밀번호. --same-as-id 이면 아이디와 같게 한다.
         password = name if "--same-as-id" in sys.argv else secrets.token_urlsafe(9)
-        salt = secrets.token_hex(16)
-        out[name] = {"salt": salt, "hash": hash_password(password, salt), "roles": roles}
+        out[name] = _new_account(password, roles)
         shown.append((name, password, roles))
     LOCAL_ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     LOCAL_ACCOUNTS_FILE.write_text(json.dumps(out, indent=2), encoding="utf-8")

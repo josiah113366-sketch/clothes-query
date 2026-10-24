@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-ingest
 
-> 상태: 완료 · 브랜치: `pipelines/gold-b-ingest` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 2026-10-23 `pipelines/gold-b-format-check` 병합) · PR은 형식 검사·파일 합치기 브랜치가 머지된 뒤 · 다음 작업: Gold B 이미지(팀 기본 Spark 이미지 위)와 배포 (재영 님), EKS에서 Spark 실행 확인
+> 상태: 완료 (#92, 2026-10-23 머지) · 브랜치: `pipelines/gold-b-ingest` (`pipelines/gold-b-reprocess` 위에서 갈라짐, 2026-10-23 `pipelines/gold-b-format-check` 병합) · PR은 형식 검사·파일 합치기 브랜치가 머지된 뒤 · 다음 작업: Gold B 이미지(팀 기본 Spark 이미지 위)와 배포 (재영 님), EKS에서 Spark 실행 확인
 
 ## 목표
 

@@ -23,6 +23,7 @@ TABLE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
         ("status", "STRING"), ("failure_code", "STRING"), ("completed_at", "TIMESTAMP"),
         ("payment_content_hash", "STRING"), ("fingerprint_version", "STRING"),
         ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"), ("loaded_at", "TIMESTAMP"),
+        ("cdc_op", "STRING"), ("source_ts_ms", "BIGINT"), ("rule_version", "STRING"),
     ),
     "topic_messages": (
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
@@ -37,6 +38,7 @@ TABLE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
         ("kafka_timestamp", "TIMESTAMP"), ("field", "STRING"), ("reason", "STRING"),
         ("raw_sample", "STRING"), ("rule_version", "STRING"), ("loaded_at", "TIMESTAMP"),
+        ("record_key", "STRING"), ("source_ts_ms", "BIGINT"),
     ),
     "reprocess_events": (
         ("request_id", "STRING"), ("step", "STRING"), ("at", "TIMESTAMP"), ("actor", "STRING"),
@@ -57,8 +59,8 @@ HOUR = timedelta(hours=1)
 
 # 형식 검사가 결제 메시지에서 돌려주는 업무 칼럼과 오류 하나의 칸
 PAYMENT_FIELDS = ("payment_id", "order_id", "attempt_no", "pg", "status", "failure_code",
-                  "completed_at", "payment_content_hash", "fingerprint_version")
-ERROR_FIELDS = ("field", "reason", "raw_sample")
+                  "completed_at", "payment_content_hash", "fingerprint_version", "cdc_op", "source_ts_ms")
+ERROR_FIELDS = ("field", "reason", "raw_sample", "record_key", "source_ts_ms")
 
 
 # ---------- 시각과 시간 폴더 ----------
@@ -130,7 +132,8 @@ def message_rows(message: KafkaMessage, judgement: Judgement, rule_version: str,
         if not isinstance(payment["completed_at"], datetime):
             raise ValueError("결제 줄에 completed_at이 없다 (시간 폴더를 정할 수 없음)")
         payment["completed_at"] = utc_naive(payment["completed_at"])
-        rows["payment_events"].append({**payment, **where, "loaded_at": loaded_at})
+        # rule_version: 같은 메시지를 여러 규칙 버전으로 검사한 이력을 ①에서도 추적한다 (④와 같음)
+        rows["payment_events"].append({**payment, **where, "loaded_at": loaded_at, "rule_version": rule_version})
     fields_seen: set[object] = set()
     for error in judgement.errors:
         # 설계 「중복 제거」: (토픽, 파티션, offset, rule_version, field)가 같으면 한 줄만. 같은 필드의 첫 오류를 남긴다
@@ -155,6 +158,7 @@ class Store(Protocol):
 
     def files(self, folder: str, any_name: bool = False) -> list[str]: ...
     def read(self, path: str, table: str) -> list[dict]: ...
+    def read_bytes(self, path: str) -> bytes: ...   # 원장이 아닌 파일 그대로 (예: Bronze JSON)
     def write(self, path: str, table: str, rows: Sequence[Mapping],
               metadata: Mapping[str, str] | None = None) -> None: ...
     def metadata(self, path: str) -> dict[str, str]: ...
@@ -218,6 +222,9 @@ class LocalStore:
     def read(self, path: str, table: str) -> list[dict]:
         return from_arrow(table, pq.read_table(self._root / path))
 
+    def read_bytes(self, path: str) -> bytes:
+        return (self._root / path).read_bytes()
+
     def write(self, path: str, table: str, rows: Sequence[Mapping],
               metadata: Mapping[str, str] | None = None) -> None:
         target = self._root / path
@@ -265,8 +272,10 @@ class S3Store:
         return sorted(found)
 
     def read(self, path: str, table: str) -> list[dict]:
-        body = self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
-        return from_arrow(table, pq.read_table(pa.BufferReader(body)))
+        return from_arrow(table, pq.read_table(pa.BufferReader(self.read_bytes(path))))
+
+    def read_bytes(self, path: str) -> bytes:
+        return self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
 
     def write(self, path: str, table: str, rows: Sequence[Mapping],
               metadata: Mapping[str, str] | None = None) -> None:

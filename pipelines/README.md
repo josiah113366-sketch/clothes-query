@@ -159,6 +159,8 @@ manifest에도 held_scopes·held_context·held_click_context·previous_run_id·p
 
 #### Athena 조회 대상 갱신 — 고려사항·연결 미구현
 
+아래 날짜별 LOCATION 교체는 이전 검토안이다. 현재 선택한 운영 공개 방식은 [실행 ID 고정 조회 명세](../docs/contracts/silver-gold-a-publication.md)이며, 두 방식을 동시에 적용하지 않는다. 카탈로그 연결은 아직 미구현이다.
+
 current.json은 Spark 후속 처리의 공개 참조다. 이것을 교체해도 Glue/Athena의 테이블·파티션 위치는 바뀌지 않는다. Athena를 통한 공개 완료는 별도로 확인해야 한다.
 
 - 제안: 일반 파티션을 직접 등록하는 테이블은 저장·검증이 끝난 실행의 데이터셋/날짜 경로로 파티션 LOCATION을 갱신한다. 파일 이동이 아니라 조회 주소 변경이다. 새 날짜는 파티션 등록도 필요하다. 실제 출력의 날짜 폴더·파티션 컬럼을 먼저 확인하며 설명용 dt 경로를 그대로 적용하지 않는다.
@@ -185,7 +187,7 @@ current.json은 Spark 후속 처리의 공개 참조다. 이것을 교체해도 
   "executor_service_account": "<Executor-SA>",
   "runtime_configmap": "silver-gold-a-runtime",
   "node_selector": {"karpenter.sh/nodepool": "clothes-query-dev-compute-spark"},
-  "spark_conf": {"spark.sql.shuffle.partitions": "8"}
+  "spark_conf": {"spark.sql.shuffle.partitions": "4"}
 }
 ```
 
@@ -285,3 +287,49 @@ Gold A #67 main 반영, ECR 업로드·digest 고정, namespace·세 실행 신�
 - Gold B의 관제용 원장 DDL과 후속 구현 범위는 `pipelines/gold_b/README.md`를 따른다.
 
 공통 YAML 검사기는 `pipelines/format_rules.py`, 규칙 원본은 `docs/contracts/format_rules.yaml`이다. 실행 의존성은 `python -m pip install -r pipelines/requirements.txt`로 설치한다. 거래·회원·클릭 Silver가 연결돼 있으며 실행별 규칙 버전·내용 해시와 격리 rule_id를 기록한다. 리뷰·상품은 자체 검사를 유지한다. Gold B 실행 연결은 별도 담당 범위다.
+## 최종 실행 연결 (구현 후보 · 운영 배포 전)
+
+- DAG: `silver_gold_a_trade`, `silver_gold_a_funnels`, `silver_gold_a_reviews`, `silver_gold_a_reprocess`. 현재는 모두 수동·신규 일시정지이며 실행 주기를 임의로 정하지 않는다. 이전 `silver_gold_a_batch`는 새 실행에 사용하지 않는다.
+- 앞의 세 DAG 입력은 `{"config_uri":"s3://clothes-query-datalake/pipelines/requests/<run>.json"}`다. 요청의 job과 DAG 업무가 다르면 Spark 제출 후 업무 처리 전에 거부한다.
+- 거래·퍼널·재처리는 `silver/runtime/trade/control/processing.json` 조건부 쓰기로 동시에 실행되지 않는다. 강제 종료 때 이전 Driver/Executor 종료를 확인하고 `spark_batch.py --recover-stopped-owner <owner>`로 명시적으로 재개한다. TTL로 잠금을 빼앗지 않는다.
+- `AIRFLOW_PIPELINE_RUNTIME`의 기존 이미지·계정 설정에 `silver_database: silver`, `gold_database: gold_a`와 아래 재처리 입력 설정이 필요하다. IAM/플랫폼 적용은 인프라 담당자가 수행한다.
+
+```json
+{
+  "reprocess": {
+    "output_root": "s3://clothes-query-datalake",
+    "inputs": {
+      "orders": ["s3://clothes-query-datalake/bronze_v2/orders/"],
+      "order_items": ["s3://clothes-query-datalake/bronze_v2/order-items/"],
+      "payments": ["s3://clothes-query-datalake/bronze_v2/payments/"],
+      "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
+      "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"]
+    }
+  }
+}
+```
+
+## 주문 상태 부분 재처리
+
+- 승인 화면의 `request_id`, `window_start/end`, `order_ids`(최대 500), `rule_version`, `source=SILVER`, `attempt`를 DAG conf로 받는다. 기존 화면의 시간대 없는 `YYYY-MM-DD HH:MM:SS`는 UTC로 해석한다. 원천 업무 시각 파서 정책은 바꾸지 않는다.
+- 첫 태스크가 원본 객체·ETag와 이전 완료 실행을 `pipelines/input-manifests/reprocess/<request_id>-<attempt>.json`에 고정하고 실행 요청을 `pipelines/requests/reprocess/`에 생성한다. 승인 화면은 원본 목록을 보내지 않는다.
+- 먼저 새 코드로 정상 거래 배치를 한 번 완료해야 한다. `dq_order_results`가 없는 이전 이미지 결과는 부분 교체의 기준으로 삼지 않는다. 기준 Silver와 Gold의 실행이 다르거나 입력 고정 후 기준 실행이 바뀌면 중단한다.
+- 입력은 대상 주문의 앞선 변경·상품·결제를 찾기 위해 확보된 전체 이력을 읽는다. 출력은 **대상 주문 상태만 교체하고 대상 밖 상태는 이전 실행에서 보존한 새 전체 스냅샷**이다. 전량 최신화나 과거 실행 파일 덮어쓰기가 아니다.
+- 주문 ID가 없으면 승인 Kafka 시각 구간 `[start,end)`에 연결되는 주문을 선택한다. 결제가 다른 주문으로 이동한 경우 이전·현재 연결 주문까지 범위를 확장해 `actual_scope`에 기록한다. 500개 초과, 대상 이력 없음, 주문을 식별하지 못하는 오류, 상품 기준정보 변경은 부분 교체를 중단한다.
+- `dq_order_results`로 대상 밖 품질 집계도 보존한다. 새 manifest의 `state_base_manifest`와 해시가 보존된 상태의 출처다. 원본 전체를 읽었다는 사실이 전체 Kafka 입력 완전성을 뜻하지 않으며 coverage는 계속 UNVERIFIED다.
+- `STARTED` → 결과 공개 후 `LEDGER_REPLACED` 또는 `FAILED`를 `gold_b/reprocess_events/`에 추가한다. source는 SILVER, detail은 status/실행 ID/actual_scope/held_scopes/실패 이유와 manifest 참조다. PARTIAL은 열린 상태로 남긴다. 이 DAG는 탐지를 직접 부르거나 VERIFIED를 쓰지 않는다.
+- 원본 금액 복구 SQL은 별도 검수·실행 대상이다. 복구 후 CDC가 Bronze v2에 도착했는지 확인한 뒤 입력을 고정한다. 15분 대기 자체를 적재 완료로 보지 않는다. 복구 전 재처리는 MISMATCH가 유지될 수 있다.
+
+## 결제 UPDATE와 품질 기록
+
+- Bronze v2는 `r/c/u`를 수용하고 동일 결제의 단일 파티션에서 가장 큰 offset 상태를 채택한다. 여러 파티션·잘못된 위치·최신 오류·원천 시각 역행은 보류한다. 같은 원천 시각은 허용한다. legacy는 기존 중복·충돌 정책을 유지한다.
+- 정상 결제에는 선택된 Kafka 위치·CDC 종류·원천 시각과 기존 지문을 남긴다. 지문 알고리즘과 공통 YAML은 변경하지 않는다.
+- 과거 오류는 quarantine의 `active=false`로 보존하고 현재 Gold 보류와 구분한다. `active_error_count`가 현재 품질을 결정한다. 입력 건수 = accepted + duplicate + quarantined + superseded이며 과거 정상 행은 superseded다.
+
+## 리뷰 최신 모델과 Gold 공개
+
+- 운영 리뷰 요청은 `analysis_view: {"workgroup":"<인프라에서 허용한 작업그룹>"}`를 사용한다. 고정 뷰는 `clothes_query_dev_review_score.review_aspect_scores_latest`, 날짜는 KST review_date다. 파일/단일 model_version과 동시 지정하지 않는다.
+- Athena UNLOAD의 실행별 Parquet 결과와 QueryExecutionId·ETag를 `pipelines/input-manifests/review-scores/<run_id>/`에 고정한다. 실패한 조회의 부분 파일을 정상 입력으로 읽거나 기존 Iceberg 파일을 수정·삭제하지 않는다. QueryExecutionId를 Iceberg snapshot_id로 표시하지 않는다.
+- 리뷰별 최신 모델이 다를 수 있으므로 집계에 model_version/model_version_no를 함께 보존하고 manifest에 실제 버전 집합을 남긴다. 점수 0건과 미요청을 구분하고 결과 없는 리뷰를 임의로 0점으로 세지 않는다.
+- Gold DDL은 `pipelines/gold_a/tables.sql`, 공개 코드는 `pipelines.gold_publication`이다. Spark 결과를 검증하고 필요한 모든 run_id 파티션을 등록한 다음 `gold_runs` 완료 목록에 공개한다. 지표와 refresh_holds는 같은 channel/run_id로 읽는다. 등록된 지표만 전체 조회하면 완료 전 파티션이 보일 수 있으므로 완료 목록과 연결해야 한다.
+- Driver에는 기존 S3 권한 외에 Gold Glue GetTable/GetPartition/CreatePartition, 제어 기록 쓰기, 리뷰 Athena 조회/취소/결과 manifest 읽기와 뷰·결과 prefix 권한, Silver 재처리 이벤트 읽기·추가 쓰기가 필요하다. DB/테이블 생성·변경은 배포 권한으로 분리한다.
