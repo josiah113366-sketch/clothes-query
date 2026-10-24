@@ -38,6 +38,8 @@ def silver_gold_a_batch():
             raise ValueError("AIRFLOW_PIPELINE_RUNTIME에 digest 이미지·namespace·제출기/Driver/Executor 실행 신원을 설정하세요")
         if RUNTIME["namespace"] in {"agent", "kafka", "kube-system"}:
             raise ValueError("기존 agent·Kafka 실행 신원을 재사용하지 마세요")
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", RUNTIME.get("silver_database", "")):
+            raise ValueError("AIRFLOW_PIPELINE_RUNTIME.silver_database에 배포된 R6 Glue DB를 지정하세요")
         return True
 
     checked = check_request()
@@ -58,12 +60,12 @@ def silver_gold_a_batch():
         "spark.dynamicAllocation.minExecutors": "1",
         "spark.dynamicAllocation.initialExecutors": "1",
         "spark.dynamicAllocation.maxExecutors": "2",
-        "spark.driver.memory": "1g", "spark.executor.memory": "1g",
+        "spark.driver.memory": "512m", "spark.executor.memory": "1g",
         "spark.driver.memoryOverhead": "512m", "spark.executor.memoryOverhead": "512m",
-        "spark.kubernetes.driver.request.cores": "0.25",
-        "spark.kubernetes.executor.request.cores": "0.6",
+        "spark.kubernetes.driver.request.cores": "250m",
+        "spark.kubernetes.executor.request.cores": "500m",
         "spark.kubernetes.driver.limit.cores": "1", "spark.kubernetes.executor.limit.cores": "1",
-        "spark.executor.cores": "1", "spark.sql.shuffle.partitions": "8",
+        "spark.driver.cores": "1", "spark.executor.cores": "1", "spark.sql.shuffle.partitions": "4",
     }
     # 실제 자원 값은 인프라 공급 설정으로 조정하되 실행 신원·완료 대기는 고정한다.
     overrides = RUNTIME.get("spark_conf", {})
@@ -91,6 +93,7 @@ def silver_gold_a_batch():
         cmds=["python3", "-m", "pipelines.submit_spark"],
         arguments=["--namespace", RUNTIME.get("namespace", "unconfigured"),
                    "--template-dir", TEMPLATE_DIR, "--timeout-seconds", "3000", "--", *arguments],
+        env_vars={"SPARK_DRIVER_MEMORY": "512m"},
         node_selector=NODE_SELECTOR,
         tolerations=[k8s.V1Toleration(key="clothes-query/dedicated", operator="Equal",
                                     value="spark", effect="NoSchedule")],
@@ -98,8 +101,8 @@ def silver_gold_a_batch():
             name=RUNTIME.get("runtime_configmap", "silver-gold-a-runtime")))],
         volume_mounts=[k8s.V1VolumeMount(name="spark-runtime", mount_path=TEMPLATE_DIR, read_only=True)],
         container_resources=k8s.V1ResourceRequirements(
-            requests={"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "256Mi"},
-            limits={"cpu": "500m", "memory": "768Mi", "ephemeral-storage": "1Gi"},
+            requests={"cpu": "250m", "memory": "512Mi", "ephemeral-storage": "256Mi"},
+            limits={"cpu": "500m", "memory": "1Gi", "ephemeral-storage": "1Gi"},
         ),
         get_logs=True,
         log_pod_spec_on_failure=False,
@@ -108,6 +111,42 @@ def silver_gold_a_batch():
         startup_timeout_seconds=300,
     )
     checked >> worker
+    publish = KubernetesPodOperator(
+        task_id="publish_r6",
+        name="silver-r6-publish",
+        namespace=RUNTIME.get("namespace", "unconfigured"),
+        service_account_name=RUNTIME.get("driver_service_account", "unconfigured"),
+        image=RUNTIME.get("image", "unconfigured"),
+        in_cluster=True,
+        cmds=["python3", "-m", "pipelines.r6_publication"],
+        arguments=["--config-uri", "{{ dag_run.conf['config_uri'] }}",
+                   "--database", RUNTIME.get("silver_database", "unconfigured")],
+        # Gold A가 실패해도 완료된 Silver 품질 결과는 제공한다. 최종 실패는 아래 watcher가 유지한다.
+        trigger_rule="all_done",
+        node_selector=NODE_SELECTOR,
+        tolerations=[k8s.V1Toleration(key="clothes-query/dedicated", operator="Equal",
+                                    value="spark", effect="NoSchedule")],
+        container_resources=k8s.V1ResourceRequirements(
+            requests={"cpu": "250m", "memory": "512Mi"},
+            limits={"cpu": "500m", "memory": "1Gi"},
+        ),
+        get_logs=True,
+        log_pod_spec_on_failure=False,
+        do_xcom_push=False,
+        on_finish_action="delete_pod",
+        startup_timeout_seconds=300,
+    )
+    worker >> publish
+
+    @task(trigger_rule="one_failed", retries=0)
+    def report_failure():
+        # all_done 공개 태스크가 성공해도 상위 Spark 실패를 DAG 성공으로 숨기지 않는다.
+        raise RuntimeError("요청 검사·Spark 처리·R6 공개 중 실패가 있습니다")
+
+    failed = report_failure()
+    checked >> failed
+    worker >> failed
+    publish >> failed
 
 
 batch_dag = silver_gold_a_batch()
