@@ -21,4 +21,6 @@
 - [ecs-simulator](ecs-simulator/README.md): 거래·회원 시뮬레이터 Fargate 태스크 1개(컨테이너 3개)
 - [team-access](team-access/README.md): 기존 EKS 이후 동료 WAS 배포 접근과 namespace 준비
 
+- [cost-budget](cost-budget/README.md): 도쿄 월 $200, 10~100% 단계별·월말 예상 초과 이메일. 독립 state, 금액은 공유 변수·수신자는 비공개 입력.
+
 설정과 검증 절차는 [전체 실행 안내](../IMPLEMENTATION.md)를 따른다. platform(Kafka/Spark/Airflow)은 후속 작업이다.

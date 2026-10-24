@@ -20,4 +20,6 @@
 - [ecs-simulator](ecs-simulator/README.md): 시뮬레이터 ECR·ECS 클러스터·서비스·IAM·SG
 - [team-access](team-access/README.md): 동료 EKS 신원을 애플리케이션 namespace 배포 권한에 연결
 
+- [cost-budget](cost-budget/README.md): 도쿄 월 비용의 10% 단계별 이메일 알림. 기존 RDS 경보와 별도이며 자동 종료 없음.
+
 입출력은 각 모듈의 variables.tf/outputs.tf 및 README를 참고한다. terraform-docs가 로컬에 없어 표를 수동 작성했다.
