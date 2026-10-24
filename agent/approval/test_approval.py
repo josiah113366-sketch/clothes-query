@@ -107,9 +107,9 @@ res = approve(rid1, ME, T0 + timedelta(minutes=10), query, write, trigger_ok, CF
 check("승인: APPROVED 줄이 쌓이고 DAG를 한 번 부름", (steps(rid1), res["airflow"], len(calls)), (["REQUESTED", "APPROVED"], "TRIGGERED", 1))
 dag_id, run_id, conf = calls[0]
 check("승인: dag_run_id가 request_id, DAG ID는 요청 때 정한 것", (dag_id, run_id), ("gold_b_reprocess", rid1))
-check("승인: 호출 입력(conf)에 요청 id·시간대·규칙 버전·이상 id·리포트 id가 있고, R1에는 주문 id 목록이 없음",
+check("승인: 호출 입력(conf)에 요청 id·시간대(UTC ISO)·규칙 버전·이상 id·리포트 id가 있고, R1에는 주문 id 목록이 없음",
       ({k: conf[k] for k in ("request_id", "window_start", "window_end", "rule_version", "anomaly_id", "report_id")}, "order_ids" in conf),
-      ({"request_id": rid1, "window_start": "2026-10-22 15:00:00", "window_end": "2026-10-22 16:00:00", "rule_version": "0.2.0", "anomaly_id": "a1", "report_id": "rep-1"}, False))
+      ({"request_id": rid1, "window_start": "2026-10-22T15:00:00Z", "window_end": "2026-10-22T16:00:00Z", "rule_version": "0.2.0", "anomaly_id": "a1", "report_id": "rep-1"}, False))
 check("승인 줄에 승인자가 남음", json.loads(fetch_rows(query, rid1)[-1]["detail"])["approved_by"], ME)
 
 
