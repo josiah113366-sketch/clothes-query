@@ -1494,7 +1494,7 @@ def _flow_from_gold_b(now: pd.Timestamp) -> dict:
 
 
 def _flow_from_review_bronze(now: pd.Timestamp) -> dict:
-    """S3 bronze/reviews/year=/month=/day=/ (UTC 날짜 폴더) 에서 가장 최근 도착 파일을 찾는다.
+    """S3 bronze_v2/reviews/year=/month=/day=/ (UTC 날짜 폴더) 에서 가장 최근 도착 파일을 찾는다.
     리뷰는 Kafka 를 거치지 않으므로 지연 수집기로는 알 수 없고, Glue 표도 없어 S3 목록을 직접 본다.
     오늘부터 3일 전까지만 본다 (목록 요청 4번 안쪽)."""
     import boto3  # 실데이터를 쓸 때만 필요하다
@@ -1502,7 +1502,9 @@ def _flow_from_review_bronze(now: pd.Timestamp) -> dict:
     s3 = boto3.client("s3", region_name=AWS_REGION)
     for back in range(4):
         d = now - pd.Timedelta(days=back)
-        prefix = f"bronze/reviews/year={d:%Y}/month={d:%m}/day={d:%d}/"
+        # 리뷰 원문은 bronze_v2/reviews/ 로 옮겨 가는 중이다(기존 데이터 + 컬럼 추가, 상위호환).
+        # 대시보드 역할은 v2 경로만 읽을 수 있다 (infra PR #111). 옛 bronze/reviews/ 는 읽지 않는다
+        prefix = f"bronze_v2/reviews/year={d:%Y}/month={d:%m}/day={d:%d}/"
         objs = []
         for page in s3.get_paginator("list_objects_v2").paginate(
             Bucket=DATALAKE_BUCKET, Prefix=prefix
@@ -1523,7 +1525,7 @@ def _flow_from_review_bronze(now: pd.Timestamp) -> dict:
         "r_bronze": (
             "warn",
             "4일간 도착 없음",
-            "bronze/reviews/ 최근 4일 날짜 폴더가 비어 있습니다",
+            "bronze_v2/reviews/ 최근 4일 날짜 폴더가 비어 있습니다",
         )
     }
 

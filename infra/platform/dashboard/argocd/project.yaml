@@ -1,0 +1,20 @@
+# 대시보드 전용 Argo CD 프로젝트. WAS 용 was 프로젝트(infra/platform/argocd/projects.yaml)와 분리해 서로의 범위를 넓히지 않는다.
+# 허용: 이 저장소 하나 -> dashboard namespace 의 Deployment·Service 두 종류만. 클러스터 리소스(Namespace 등)는 금지.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: dashboard
+  namespace: argocd
+spec:
+  description: Streamlit dashboard app resources only (dashboard namespace)
+  sourceRepos:
+    - https://github.com/josiah113366-sketch/clothes-query.git
+  destinations:
+    - namespace: dashboard
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: apps, kind: Deployment}
+    - {group: '', kind: Service}
+  orphanedResources:
+    warn: false

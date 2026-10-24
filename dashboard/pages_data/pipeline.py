@@ -179,7 +179,7 @@ STAGES = [
         "name": "Bronze 리뷰",
         "x": 4,
         "y": 6.6,
-        "hint": "대시보드 S3 읽기 권한 필요 (bronze/reviews/ 목록)",
+        "hint": "대시보드 S3 읽기 권한 필요 (bronze_v2/reviews/ 목록)",
     },
     {"id": "r_silver", "name": "Silver 리뷰", "x": 5.6, "y": 6.1, "hint": _NEED_SILVER_RUNS},
     {

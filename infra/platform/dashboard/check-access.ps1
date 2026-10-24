@@ -62,6 +62,10 @@ wg = os.getenv("DASHBOARD_ATHENA_WORKGROUP") or os.getenv("APPROVAL_ATHENA_WORKG
 bucket = "clothes-query-datalake"
 now = dt.datetime.now(dt.timezone.utc)
 d, h = now.strftime("%Y-%m-%d"), now.strftime("%H")
+# Gold B 화면 3개(PR #110)가 실제로 쓰는 기간과 같게 맞춘다: 결제 관제·형식 오류는 최근 6시간, 재처리 이력은 최근 7일
+t6 = (now - dt.timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S")   # Athena TIMESTAMP 리터럴 (UTC)
+d6 = (now - dt.timedelta(hours=6)).strftime("%Y-%m-%d")            # malformed_events 파티션(dt) 하한
+t7d = (now - dt.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
 
 print("역할:", boto3.client("sts", region_name=region).get_caller_identity()["Arn"])
 print("workgroup:", wg or "(없음)")
@@ -70,7 +74,7 @@ print("workgroup:", wg or "(없음)")
 s3 = boto3.client("s3", region_name=region)
 for p in ["gold_b/bronze_lag_snapshots/", "gold_b/topic_messages/", "gold_b/payment_events/",
           "gold_b/malformed_events/", "silver/runtime/trade/catalog/completed/", "gold_a/catalog/",
-          "gold_b/anomaly/", "bronze/reviews/"]:
+          "gold_b/anomaly/", "bronze_v2/reviews/"]:
     try:
         n = s3.list_objects_v2(Bucket=bucket, Prefix=p, MaxKeys=1).get("KeyCount", 0)
         print(f"  S3 OK    {p}  ({'파일 있음' if n else '비어 있음'})")
@@ -85,6 +89,13 @@ checks = {
     "gold_b.malformed_events": f"SELECT 1 FROM gold_b.malformed_events WHERE dt='{d}' LIMIT 1",
     "silver.silver_runs": "SELECT 1 FROM silver.silver_runs LIMIT 1",
     "gold_a.gold_runs": "SELECT 1 FROM gold_a.gold_runs LIMIT 1",
+    # --- Gold B 화면 3개 (data.py 의 _real_payment_attempts / _real_malformed_events / _real_reprocess_events 와 같은 조건) ---
+    # 결제 관제: payment_attempts 는 Glue 뷰다. 뷰 자체(Glue 테이블)와 뷰가 읽는 원본 표 둘 다 정책에 있어야 OK 가 나온다
+    "gold_b.payment_attempts 뷰 (결제 관제, 최근 6시간)": f"SELECT 1 FROM gold_b.payment_attempts WHERE completed_at >= TIMESTAMP '{t6}' LIMIT 1",
+    # 형식 오류: dt 파티션으로 먼저 줄이고 kafka_timestamp(UTC)로 6시간을 자른다
+    "gold_b.malformed_events (형식 오류, 최근 6시간)": f"SELECT 1 FROM gold_b.malformed_events WHERE dt >= '{d6}' AND kafka_timestamp >= TIMESTAMP '{t6}' LIMIT 1",
+    # 재처리 이력: "at" 은 예약어라 큰따옴표로 감싼다
+    "gold_b.reprocess_events (재처리 이력, 최근 7일)": f"SELECT 1 FROM gold_b.reprocess_events WHERE \"at\" >= TIMESTAMP '{t7d}' LIMIT 1",
     "gold_b.anomaly_current (비교용)": "SELECT 1 FROM gold_b.anomaly_current LIMIT 1",
 }
 if not wg or wg.startswith("<"):
