@@ -29,7 +29,9 @@
 - `make_test_accounts.py` 테스트 계정 3개 생성 (local 모드용)
 - `data.py` 데이터 조회 함수. Gold A Athena 경로와 기존 미리보기·모델 조회를 분리한다.
 - `gold_a_io.py` 완료 실행을 고정해 읽는 Athena 어댑터. 시험: `python -m pytest dashboard/test_gold_a_io.py -q` (저장소 루트에서)
-- `ui.py` 공통 선택 위젯(상품·기간)과 표시 도우미(비율 NaN 처리, 날짜 기준 안내)
+- `ui.py` 공통 선택 위젯(상품·기간)과 표시 도우미(비율 NaN 처리, 날짜 기준 안내, Gold A 결과 없음 안내), 지표 카드(`kpis`)·패널(`panel`)·앱 CSS
+- `charts.py` 차트 도우미(streamlit-echarts): 선·막대·흐름·링 게이지·진행 막대. 색 규칙은 파일 맨 위
+- `.streamlit/config.toml` 다크 테마와 차트 계열 색. `streamlit run`을 이 폴더에서 해야 적용된다
 - `approval_io.py` 재처리 승인 화면의 연결·조회(진짜 Athena/Airflow 또는 연습용 가짜 저장소). 설명은 파일 맨 위, 작업 기록은 `docs/tasks/dashboard-approval-page.md`
 - `pages_product/`, `pages_data/` 화면 파일
 
@@ -105,12 +107,18 @@ streamlit run app.py
 - 로그인 로직(이메일 -> Role) 자체는 로그인 없이도 `AUTH_MODE=dev`(Role 직접 선택)로 화면별 접근 제어를 먼저 확인할 수 있다.
 - 구글 대신 사내 공급자(Cognito 등)를 쓸 때는 `[auth]`의 `client_id`, `client_secret`, `server_metadata_url`만 바꾼다.
 
+## 화면 꾸미기 (2026-10-24)
+- 차트는 `st.line_chart`/`st.bar_chart` 대신 `charts.py`(Apache ECharts)를 쓴다. 새 화면도 `charts.line(df, key=...)`처럼 같은 함수를 쓴다. `key`는 화면 안에서 차트마다 달라야 한다.
+- 숫자 요약은 `st.metric` 대신 `ui.kpis([...])` 카드를 쓴다(증감 배지, 작은 추이선). 섹션은 `with ui.panel("제목", "설명"):`로 감싼다. 아직 `st.metric`을 쓰는 화면도 CSS로 카드 모양이 된다.
+- 색을 바꿀 때는 `.streamlit/config.toml`(바탕·계열 색), `charts.py`(PALETTE·상태 색), `ui.py`(`_CSS`) 세 곳을 같이 본다. 계열 색 순서는 색약 구분 검사를 통과한 순서라 바꾸면 다시 검사한다.
+
 ## 배포 (EKS, `infra/platform/dashboard/`)
 배포 파일과 순서는 [`infra/platform/dashboard/README.md`](../infra/platform/dashboard/README.md), 외부 접속(ALB)은 [`infra/platform/ingress/README.md`](../infra/platform/ingress/README.md)에 있다. 이 앱 쪽에서 알아둘 것만 적는다.
 1. 로그인은 `AUTH_MODE=local`이다. 계정 파일(`accounts.json`)을 `python make_test_accounts.py --force`(필요하면 `--same-as-id`)로 만들어 Secret으로 마운트하고 `LOCAL_ACCOUNTS_FILE`로 가리킨다. 이미지에는 넣지 않는다.
 2. ALB는 HTTP이고 허용 IP만 접속한다. 운영 전에 도메인과 HTTPS로 바꾼다(위 "실서비스에서 local 로그인 쓸 때" 참고).
 3. Athena/S3 읽기 권한(Pod Identity 역할)을 붙인 뒤 `data.py`의 `_REAL`에 조회 함수를 등록하고 `DATA_SOURCE=auto`로 바꾼다. 그 전에는 `dummy`.
 4. 모델 버전·패치노트(감성분석 모델 화면): `MODEL_REGISTRY_URI=s3://<버킷>/review-score/model-registry/releases/`와 그 경로 읽기 권한을 주고 `DATA_SOURCE=auto`면 S3의 `index.json`·`<버전>.json`을 읽는다. 값이 없거나 읽기에 실패하면 더미로 대체한다. 로컬에서 확인하려면 AWS 자격증명이 있는 셸에서 `MODEL_REGISTRY_URI=... streamlit run app.py`.
+5. 파이프라인 상태 › 데이터 흐름 탭: `DASHBOARD_ATHENA_WORKGROUP`(없으면 `APPROVAL_ATHENA_WORKGROUP`)과 `AWS_REGION`이 있으면 Athena에서 `gold_b.bronze_lag_snapshots`, `silver.silver_runs`, `gold_a.gold_runs`, Gold B 원장 3개를 60초마다 읽는다. 이 탭은 **더미로 대체하지 않는다.** workgroup이 없거나 읽는 곳이 아직 없는 단계는 회색 "미연결", 조회가 실패한 단계는 회색 "확인 불가"로 그린다. 같은 환경변수가 있으면 지연·점검 탭의 지연 측정도 실데이터를 읽는다.
 
 ## 추후 할 일
 baseline 이후 영역별 할 일(담당자·상태 기록용)은 [`TODO.md`](TODO.md)에 정리한다. 아래는 그중 핵심.

@@ -11,9 +11,12 @@ import streamlit as st
 
 import auth
 import data
+import ui
 from auth import current_user
 
 st.set_page_config(page_title="리뷰·상품 대시보드", layout="wide")
+# 지표 카드·패널 모양 (ui.py _CSS). 색 테마는 .streamlit/config.toml
+ui.style()
 
 # Role별 화면 목록. st.Page(파일경로, title=메뉴 이름, icon=아이콘)
 PRODUCT_PAGES = [

@@ -16,6 +16,7 @@
 import pandas as pd
 import streamlit as st
 
+import charts
 import data
 import ui
 from auth import require_role
@@ -144,7 +145,12 @@ with t_aspect:
     m1.metric("분석한 후기 수", f"{total:,}")
     m2.metric("속성이 0개인 후기", f"{zero:,}")
     m3.metric("속성 0개 비율", ui.pct(zero / total if total else float("nan")))
-    st.line_chart(rd.set_index("review_date")[["analyzed_review_count"]])
+    charts.line(
+        rd.set_index("review_date")[["analyzed_review_count"]],
+        key="mdl_daily",
+        labels={"analyzed_review_count": "분석한 후기 수"},
+        height="240px",
+    )
 
     st.subheader("속성별 점수")
     sc = sc.assign(weighted=sc.score * sc.review_count)
@@ -165,7 +171,13 @@ with t_aspect:
         width="stretch",
         column_config={"평균 점수": st.column_config.NumberColumn(format="%.2f")},
     )
-    st.bar_chart(g.set_index("aspect")[["mean_score"]])
+    # 평균 점수는 -2~+2 라 0 기준 위아래로 뻗는다
+    charts.bar(
+        g.set_index("aspect")[["mean_score"]],
+        key="mdl_aspect",
+        labels={"mean_score": "평균 점수"},
+        height="280px",
+    )
     st.caption(
         "점수는 -2~+2, 언급하지 않은 속성은 행이 없습니다. 속성별 언급 후기 수를 합쳐 전체 후기 수로 쓰지 않습니다. "
         "버전을 바꿔 가며 비교하되 서로 다른 버전의 값을 더하지 않습니다."
@@ -221,17 +233,65 @@ with t_compare:
                 width="stretch",
             )
 
-            st.subheader("점수 차가 큰 후기(|차| ≥ 2)")
-            big = df[df["diff"].abs() >= 2].sort_values("diff", key=lambda s: -s.abs()).head(20)
-            st.dataframe(
-                big[["review_id", "aspect", "score_a", "score_b", "diff"]],
-                hide_index=True,
-                width="stretch",
-            )
-            st.caption(
-                "두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 비교합니다. 한쪽에만 있는 속성은 제외합니다. "
-                "후기 원문은 표시하지 않으며 review_id로 별도 확인합니다."
-            )
+            # 점수 차가 큰 후기: 원문을 같이 보여 줘 사람이 어느 버전 판정이 맞는지 읽고 판단한다.
+            # 원문은 팀 내부용이다 (허용 IP·로그인 뒤에서만 열림). 캡처해 외부로 보내지 않는다.
+            # BIG_DIFF_LIMIT: 표에 보여줄 최대 행 수. 차가 큰 순서로 자른다.
+            BIG_DIFF_LIMIT = 100
+            big = df[df["diff"].abs() >= 2].sort_values("diff", key=lambda s: -s.abs())
+            big = big.head(BIG_DIFF_LIMIT)
+            texts = data.get_review_texts(tuple(big.review_id.unique()))
+            big = big.merge(texts, on="review_id", how="left")
+            with ui.panel(
+                "점수 차가 큰 후기(|차| ≥ 2)",
+                f"{len(big):,}쌍 · 차가 큰 순 · 최대 {BIG_DIFF_LIMIT}",
+            ):
+                st.dataframe(
+                    big[["review_id", "aspect", "score_a", "score_b", "diff", "review_text"]],
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "review_id": "후기",
+                        "aspect": "속성",
+                        "score_a": st.column_config.NumberColumn(f"A ({va})", format="%+d"),
+                        "score_b": st.column_config.NumberColumn(f"B ({vb})", format="%+d"),
+                        "diff": st.column_config.NumberColumn("차(B-A)", format="%+d"),
+                        "review_text": st.column_config.TextColumn("후기 원문", width="large"),
+                    },
+                )
+                # 한 후기를 골라 원문 전체와 모든 속성의 A/B 점수를 나란히 본다
+                if len(big):
+                    rid = st.selectbox(
+                        "후기 자세히 보기", list(big.review_id.unique()), key="mdl_big_rid"
+                    )
+                    row = (
+                        texts.set_index("review_id").loc[rid]
+                        if rid in set(texts.review_id)
+                        else None
+                    )
+                    if row is None or pd.isna(row.review_text):
+                        st.warning("이 후기의 원문을 찾지 못했습니다.")
+                    else:
+                        st.markdown(f"**별점 {int(row.rating)}점**")
+                        st.info(row.review_text)
+                    one = df[df.review_id == rid].copy()
+                    one["aspect"] = pd.Categorical(
+                        one.aspect, categories=data.ASPECTS, ordered=True
+                    )
+                    st.dataframe(
+                        one.sort_values("aspect")[["aspect", "score_a", "score_b", "diff"]],
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "aspect": "속성",
+                            "score_a": st.column_config.NumberColumn(f"A ({va})", format="%+d"),
+                            "score_b": st.column_config.NumberColumn(f"B ({vb})", format="%+d"),
+                            "diff": st.column_config.NumberColumn("차(B-A)", format="%+d"),
+                        },
+                    )
+                st.caption(
+                    "두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 비교합니다. 한쪽에만 있는 속성은 제외합니다. "
+                    "후기 원문은 팀 내부용입니다. 캡처해서 외부(메신저 밖, 외부 서비스)로 보내지 않습니다."
+                )
 
 # ---- 4) 일별 분석 현황 ---------------------------------------------------
 with t_runs:
@@ -269,7 +329,12 @@ with t_runs:
         width="stretch",
         column_config={"소요(분)": st.column_config.NumberColumn(format="%.1f")},
     )
-    st.bar_chart(runs.set_index("run_date")[["input_reviews", "parse_failed"]])
+    charts.bar(
+        runs.set_index("run_date")[["input_reviews", "parse_failed"]],
+        key="mdl_runs",
+        labels={"input_reviews": "입력 후기", "parse_failed": "파싱 실패"},
+        height="260px",
+    )
     st.caption(
         "입력은 '아직 점수가 없는 후기'만이고, 0건이면 Job을 띄우지 않습니다(SKIPPED_NO_INPUT). "
         "파싱에 실패한 후기는 점수 로그에 넣지 않아 다음 실행에서 다시 시도됩니다. 시각은 KST로 변환했습니다."

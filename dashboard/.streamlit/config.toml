@@ -1,0 +1,24 @@
+# 대시보드 테마 (2026-10-24). streamlit run 을 이 폴더(dashboard/)에서 해야 적용된다 (컨테이너는 /app = dashboard/).
+# 색을 바꿀 때 같이 볼 곳: charts.py (PALETTE, GOOD/WARN/BAD, TRACK), ui.py (_CSS 의 카드·패널 색)
+# 비밀값은 이 파일이 아니라 secrets.toml 에 둔다 (Git 제외).
+
+[theme]
+# 어두운 바탕 고정. 사용자가 메뉴에서 라이트로 바꿀 수 있지만 카드 CSS 는 어두운 색 기준이다.
+base = "dark"
+# 버튼·선택·토글 강조색 (초록)
+primaryColor = "#1aa874"
+# 페이지 바탕 / 패널·입력칸 바탕
+backgroundColor = "#0f1115"
+secondaryBackgroundColor = "#16181d"
+textColor = "#e6e7ea"
+# 패널·표·입력칸 테두리
+borderColor = "#262a31"
+# 모서리 둥글기 (none / small / medium / large / full)
+baseRadius = "large"
+# 차트 계열 색 순서. charts.PALETTE 와 같은 값·순서여야 한다.
+# 어두운 바탕에서 색약 구분 검사(인접 쌍)를 통과한 순서라 순서를 바꾸면 다시 검사한다.
+chartCategoricalColors = ["#1e9bc6", "#8b6cf0", "#1aa874", "#c08400", "#3b82f6", "#e8455f"]
+
+[theme.sidebar]
+backgroundColor = "#13151a"
+secondaryBackgroundColor = "#1a1d23"

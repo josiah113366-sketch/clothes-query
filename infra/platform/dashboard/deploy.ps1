@@ -191,11 +191,12 @@ if ($SkipBuild) {
         Write-Cmd "docker build --platform linux/amd64 -f infra/platform/dashboard/Dockerfile -t $image ."
         Write-Cmd "docker push $image"
     } else {
-        $pw = Get-Output aws @("ecr", "get-login-password", "--region", $Region)
-        if (-not $pw) { throw "ECR 로그인 토큰을 받지 못했습니다." }
-        $pw | & docker login --username AWS --password-stdin $registry
-        if ($LASTEXITCODE -ne 0) { throw "docker login 실패 (Docker Desktop 이 켜져 있는지 확인)" }
-        Remove-Variable pw
+        # 토큰을 변수에 담았다가 넘기면 400 Bad Request 로 거절되는 경우가 있어(2026-10-24 lemin PC),
+        # 손으로 칠 때와 똑같이 aws 출력을 docker 로 바로 파이프한다.
+        & aws ecr get-login-password --region $Region | & docker login --username AWS --password-stdin $registry
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker login 실패. aws sts get-caller-identity 로 자격증명(만료·계정)을 먼저 확인한다. Docker Desktop 이 꺼져 있어도 실패한다."
+        }
         Push-Location $RepoRoot
         try {
             # 노드가 x86(t3a)이라 linux/amd64 로 고정한다. ARM PC 에서 빌드해도 노드에서 돈다.

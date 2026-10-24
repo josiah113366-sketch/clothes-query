@@ -11,6 +11,7 @@
 
 import streamlit as st
 
+import charts
 import data
 import ui
 from auth import require_role
@@ -27,24 +28,59 @@ with c2:
     days = ui.pick_period("rv")
 
 # ---- 별점 ----
-st.subheader("리뷰 수 · 별점")
-rv = ui.last_days(data.get_review_product_daily(), "review_date_kst", days)
-rv = rv[rv.article_id.isin(arts)]
+# 직전 같은 길이 기간(카드의 증감 배지)까지 쓰려고 2배 기간을 한 번에 읽는다
+all_rv = data.get_review_product_daily(days * 2)
+all_rv = all_rv[all_rv.article_id.isin(arts)]
+rv = ui.last_days(all_rv, "review_date_kst", days)
 ui.require_rows(rv)
+prv = ui.prev_days(all_rv, "review_date_kst", days)
 cnt, rs, low = rv.review_count.sum(), rv.rating_sum.sum(), rv.low_rating_count.sum()
-m = st.columns(3)
-m[0].metric("리뷰 수", f"{int(cnt):,}")
-m[1].metric("평균 별점", "계산 불가" if cnt == 0 else f"{rs / cnt:.2f}")
-m[2].metric("낮은 별점(1~2점) 비율", ui.pct(low / cnt if cnt else float("nan")))
+pcnt, prs, plow = prv.review_count.sum(), prv.rating_sum.sum(), prv.low_rating_count.sum()
 daily = rv.groupby("review_date_kst")[["review_count", "rating_sum", "low_rating_count"]].sum()
 daily["average_rating"] = data.safe_div(daily.rating_sum, daily.review_count)
-st.line_chart(daily[["review_count"]])
+daily["low_rate"] = data.safe_div(daily.low_rating_count, daily.review_count)
+note = f"직전 {days}일 대비"
+ui.kpis(
+    [
+        {
+            "label": "리뷰 수",
+            "value": f"{int(cnt):,}",
+            "unit": "건",
+            "delta": ui.delta(cnt, pcnt),
+            "good": None,
+            "sub": note,
+            "spark": daily.review_count,
+        },
+        {
+            "label": "평균 별점",
+            "value": "계산 불가" if cnt == 0 else f"{rs / cnt:.2f}",
+            "unit": "/ 5",
+            "delta": ui.delta(rs / cnt if cnt else None, prs / pcnt if pcnt else None),
+            "good": "up",
+            "sub": note,
+            "spark": daily.average_rating,
+        },
+        {
+            "label": "낮은 별점(1~2점) 비율",
+            "value": ui.pct(low / cnt if cnt else float("nan")),
+            "delta": ui.delta(low / cnt if cnt else None, plow / pcnt if pcnt else None),
+            "good": "down",
+            "sub": note,
+            "spark": daily.low_rate,
+        },
+    ]
+)
+with ui.panel("일별 리뷰 수", "작성일(KST) 기준 · 건"):
+    charts.bar(
+        daily[["review_count"]], key="rv_cnt", labels={"review_count": "리뷰 수"}, height="240px"
+    )
 
 # ---- 속성 ----
-st.subheader("속성별 부정 비율")
 asp = ui.last_days(data.get_review_aspect_daily(), "review_date_kst", days)
 asp = asp[asp.article_id.isin(arts)]
 asp = ui.select_model(asp, "rv_model")
+# 고른 모델 버전 이름 (패널 제목에 표시). select_model 이 버전 하나만 남긴 표를 돌려준다
+ver = asp["model_key" if "model_key" in asp else "model_version"].iloc[0]
 g = asp.groupby("aspect", as_index=False)[
     [
         "mentioned_review_count",
@@ -54,9 +90,18 @@ g = asp.groupby("aspect", as_index=False)[
     ]
 ].sum()
 g["negative_rate"] = data.safe_div(g.negative_review_count, g.mentioned_review_count)
-st.bar_chart(g.set_index("aspect")["negative_rate"])
-st.dataframe(g.sort_values("negative_rate", ascending=False), hide_index=True, width="stretch")
-st.caption("속성별 리뷰 수는 합쳐서 전체 리뷰 수로 쓰지 않습니다.")
+g = g.sort_values("negative_rate", ascending=False)
+with ui.panel("속성별 부정 비율", f"모델 버전 {ver} · 부정 비율 높은 순"):
+    # 부정 비율 높은 순 진행 막대. 색은 한 가지(상태색이 아니라 계열 1색)로 크기만 비교한다.
+    # 막대 끝 = 가장 높은 속성의 비율 (100% 가 아니다). 정확한 값은 막대 오른쪽 숫자로 읽는다.
+    charts.rank(
+        [(a, r, charts.color(0)) for a, r in zip(g.aspect, g.negative_rate, strict=True)],
+        key="rv_neg",
+        max_value=max(float(g.negative_rate.fillna(0).max()), 0.01),
+    )
+    with st.expander("표로 보기"):
+        st.dataframe(g, hide_index=True, width="stretch")
+    st.caption("속성별 리뷰 수는 합쳐서 전체 리뷰 수로 쓰지 않습니다.")
 
 # ---- 속성 추이 ----
 one = st.selectbox("추이를 볼 속성", sorted(asp.aspect.dropna().unique()))
@@ -66,7 +111,14 @@ tr = (
     .sum()
 )
 tr["negative_rate"] = data.safe_div(tr.negative_review_count, tr.mentioned_review_count)
-st.line_chart(tr[["negative_rate"]])
+with ui.panel(f"{one} 부정 비율 추이", f"모델 버전 {ver} · 작성일(KST) 기준"):
+    charts.line(
+        tr[["negative_rate"]],
+        key="rv_trend",
+        fmt="pct",
+        labels={"negative_rate": "부정 비율"},
+        height="260px",
+    )
 
 st.info("근거 리뷰 원문 목록과 LLM 요약은 원문 조회 방식이 정해지면 이 아래에 추가합니다 (내부용).")
 ui.dummy_note()

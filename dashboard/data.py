@@ -771,7 +771,7 @@ def get_rca_reports() -> pd.DataFrame:
 #     review_score_log       후기별 점수 로그 (속성이 0개인 후기도 n_aspects = 0 으로 한 줄)
 #     review_aspect_scores_latest 뷰   Gold 가 읽는 값 (후기마다 model_version_no 가 가장 큰 결과)
 #   점수는 -2 ~ +2, '미언급'은 행이 없다. 시각 컬럼(analyzed_at)은 UTC 로 가정하고 화면에서 KST 로 바꾼다.
-#   ※ 아래 모델 이름·숫자는 모두 더미다. 후기 원문은 이 데이터에 없다 (review_id 만).
+#   ※ 아래 모델 이름·숫자는 모두 더미다. 후기 원문은 점수 데이터에 없고(review_id 만) get_review_texts 로 따로 읽는다.
 # =====================================================================
 # (모델 이름, model_version_no). 번호 규칙: 평가 모델/로직이 바뀌면 메이저, 작은 수정이면 마이너를 올린다.
 _MODELS = [("2.3_score_s2c", 0.0), ("2.4b_score_s2c", 1.0)]
@@ -995,7 +995,7 @@ def get_model_score_daily(days: int = 30) -> pd.DataFrame:
 @dataset(_TTL_A)
 def get_model_score_diff(model_a: str, model_b: str) -> pd.DataFrame:
     """같은 후기·속성에 대한 두 버전의 점수 비교. 컬럼: review_id, aspect, score_a, score_b.
-    두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 있다. 후기 원문은 없다."""
+    두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 있다. 후기 원문은 get_review_texts 로 따로 읽는다."""
     rng = np.random.default_rng(_SEED + 22 + zlib.crc32(f"{model_a}|{model_b}".encode()) % 1000)
     n = 900
     a = rng.choice(SCORES, n, p=[0.06, 0.14, 0.2, 0.36, 0.24])
@@ -1010,6 +1010,54 @@ def get_model_score_diff(model_a: str, model_b: str) -> pd.DataFrame:
             "score_b": b,
         }
     )
+
+
+# 더미 후기 문장 재료. 속성마다 (좋은 말, 나쁜 말). 실제 후기에서 가져온 문장이 아니다(직접 지은 예시).
+_DUMMY_PHRASES = {
+    "사이즈·핏": ("정사이즈로 잘 맞아요", "생각보다 한 치수 작게 나왔어요"),
+    "품질·내구성": ("박음질이 꼼꼼해요", "두 번 입었는데 보풀이 일어나요"),
+    "재질·촉감": ("촉감이 부드러워요", "까슬까슬해서 안에 받쳐 입어야 해요"),
+    "색상": ("화면이랑 색이 똑같아요", "사진보다 색이 많이 어두워요"),
+    "디자인": ("디자인이 깔끔해서 자주 입어요", "실물은 핏이 좀 밋밋해요"),
+    "가격": ("이 가격이면 만족해요", "가격에 비해 아쉬워요"),
+    "배송": ("배송이 빨랐어요", "배송이 일주일 넘게 걸렸어요"),
+    "포장": ("포장이 깔끔했어요", "포장이 뜯겨서 왔어요"),
+    "세탁·관리": ("세탁해도 줄지 않아요", "한 번 빨았는데 늘어났어요"),
+    "활용성·사용감": ("여기저기 잘 어울려요", "막상 입을 일이 별로 없네요"),
+}
+_DUMMY_TAILS = [
+    "",
+    " 재구매 의사 있어요.",
+    " 그래도 쓸 만해요.",
+    " 다른 색도 살까 고민 중이에요.",
+    " 교환할까 해요.",
+]
+
+
+@dataset(_TTL_A)
+def get_review_texts(review_ids: tuple[str, ...]) -> pd.DataFrame:
+    """후기 원문. 컬럼: review_id, review_text, rating(별점 1~5).
+
+    감성분석 모델 화면에서 '점수 차가 큰 후기'를 사람이 직접 읽고 어느 버전이 맞는지 판단하는 데 쓴다.
+    실데이터: Silver 리뷰 표에서 review_id 로 조회해 _REAL["get_review_texts"] 에 등록한다 (TODO.md B8).
+    review_ids 는 캐시 키가 되도록 tuple 로 받는다.
+    ※ 원문은 팀 내부용이다 (대시보드는 허용 IP·로그인 뒤에서만 열린다). 외부 서비스로 보내거나 Git 에 넣지 않는다.
+    ※ 더미 문장은 직접 지은 예시 문장이며 실제 후기가 아니다. 앞에 [더미] 를 붙인다.
+    """
+    keys = [a for a in ASPECTS if a in _DUMMY_PHRASES]
+    rows = []
+    for rid in review_ids:
+        rng = np.random.default_rng(_SEED + zlib.crc32(rid.encode()))
+        picked = rng.choice(keys, size=int(rng.integers(1, 4)), replace=False)
+        parts = [_DUMMY_PHRASES[a][int(rng.random() < 0.45)] for a in picked]
+        text = (
+            "[더미] "
+            + ", ".join(parts)
+            + "."
+            + _DUMMY_TAILS[int(rng.integers(0, len(_DUMMY_TAILS)))]
+        )
+        rows.append((rid, text, int(rng.integers(1, 6))))
+    return pd.DataFrame(rows, columns=["review_id", "review_text", "rating"])
 
 
 @dataset(_TTL_B)
@@ -1061,3 +1109,399 @@ def get_model_runs(days: int = 14) -> pd.DataFrame:
             "finished_at",
         ],
     )
+
+
+# =====================================================================
+# 데이터 흐름도 (파이프라인 상태 > 데이터 흐름)  ※ 더미 없음
+# =====================================================================
+# 이 화면은 더미로 그리지 않는다 (lemin 2026-10-24). 다른 get_* 와 달리 @dataset 을 쓰지 않으므로
+# 실데이터를 못 읽으면 더미로 바꾸지 않고, 그 단계를 회색(미연결 / 확인 불가)으로 둔다.
+#
+# Athena 접속: DASHBOARD_ATHENA_WORKGROUP (없으면 승인 화면의 APPROVAL_ATHENA_WORKGROUP), AWS_REGION.
+#   workgroup 이 없으면 Athena 로 읽는 단계 전부가 '미연결'이다.
+#   읽기 권한(Athena + S3 gold_b/ · silver/runtime/ · gold_a/catalog/ + Glue)은 대시보드 Pod Identity 가 필요하다 (TODO F3).
+ATHENA_WORKGROUP = os.getenv("DASHBOARD_ATHENA_WORKGROUP") or os.getenv(
+    "APPROVAL_ATHENA_WORKGROUP", ""
+)
+if ATHENA_WORKGROUP.startswith(
+    "<"
+):  # deployment.yaml 의 자리표시("<대시보드용 workgroup>")는 미설정으로 본다
+    ATHENA_WORKGROUP = ""
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+
+# 판정 기준(초). 운영하며 조정한다.
+FLOW_SINK_LAG_WARN = (
+    900 + 120
+)  # S3 Sink 는 15분마다 파일을 쓴다. 파이프라인 탭 NORMAL_MAX_SEC 과 같은 값
+FLOW_COLLECTOR_WARN, FLOW_COLLECTOR_BAD = 120, 300  # 수집기는 1분마다 잰다
+FLOW_NO_INFLOW_MIN = 10  # Kafka 유입이 이만큼(분) 없으면 지연
+FLOW_GOLD_B_WARN = 10 * 60  # Gold B 적재 잡은 1분마다 쌓는다
+FLOW_BATCH_WARN = 26 * 3600  # 하루 1회 배치(Silver·Gold A): 마지막 완료가 26시간보다 오래되면 지연
+FLOW_REVIEW_WARN = 26 * 3600  # 리뷰 시뮬레이터는 하루 1번(UTC 00:30) S3 에 바로 쓴다
+# CDC 커넥터(connectors/cdc-source.yaml)가 RDS 표를 옮겨 쓰는 토픽. clickstream 은 CDC 가 아니라서 뺀다
+_CDC_TOPICS = ("members-events", "orders", "order-items", "payments")
+# 데이터 레이크 버킷 (리뷰 Bronze 목록 조회용). 저장소에 적어도 되는 이름이라 기본값으로 둔다
+DATALAKE_BUCKET = os.getenv("DATALAKE_BUCKET", "clothes-query-datalake")
+
+
+def _athena(sql: str) -> pd.DataFrame:
+    """Athena 에 SELECT 를 한 번 보내고 결과를 문자열 DataFrame 으로 돌려준다. 실패하면 예외.
+    값 형변환은 부르는 쪽에서 한다 (컬럼이 몇 개 안 돼서 그쪽이 더 읽기 쉽다)."""
+    import time
+
+    import boto3  # 실데이터를 쓸 때만 필요하다
+
+    if not ATHENA_WORKGROUP:
+        raise RuntimeError("Athena workgroup 환경변수가 없습니다")
+    client = boto3.client("athena", region_name=AWS_REGION)
+    qid = client.start_query_execution(QueryString=sql, WorkGroup=ATHENA_WORKGROUP)[
+        "QueryExecutionId"
+    ]
+    deadline = time.monotonic() + 30  # 화면이 오래 멈추지 않게 30초에서 끊는다
+    while True:
+        st_ = client.get_query_execution(QueryExecutionId=qid)["QueryExecution"]["Status"]
+        if st_["State"] == "SUCCEEDED":
+            break
+        if st_["State"] in ("FAILED", "CANCELLED"):
+            raise RuntimeError(st_.get("StateChangeReason", st_["State"]))
+        if time.monotonic() > deadline:
+            client.stop_query_execution(QueryExecutionId=qid)
+            raise TimeoutError("Athena 조회 30초 초과")
+        time.sleep(0.5)
+    rows, cols = [], None
+    for page in client.get_paginator("get_query_results").paginate(QueryExecutionId=qid):
+        rs = page["ResultSet"]
+        if cols is None:
+            cols = [c["Name"] for c in rs["ResultSetMetadata"]["ColumnInfo"]]
+            data_rows = rs["Rows"][1:]  # 첫 줄은 컬럼 이름
+        else:
+            data_rows = rs["Rows"]
+        rows += [[d.get("VarCharValue") for d in r["Data"]] for r in data_rows]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _utc(s: pd.Series) -> pd.Series:
+    return pd.to_datetime(s, utc=True, errors="coerce")
+
+
+def _hour_partitions(start: pd.Timestamp, end: pd.Timestamp) -> str:
+    """UTC dt/hour 파티션 조건. projection 표라서 이 조건이 있어야 스캔량이 KB 단위로 끝난다."""
+    hours = pd.date_range(start.floor("h"), end.floor("h"), freq="h")
+    return " OR ".join(f"(dt = '{h:%Y-%m-%d}' AND hour = '{h:%H}')" for h in hours)
+
+
+def _real_bronze_lag(minutes: int = 180) -> pd.DataFrame:
+    """gold_b.bronze_lag_snapshots 최근 minutes 분. 컬럼 이름 kafka_partition 은 화면 규칙(partition)으로 바꾼다."""
+    now = pd.Timestamp.now(tz="UTC")
+    start = now - pd.Timedelta(minutes=minutes)
+    df = _athena(
+        "SELECT collected_at, topic, kafka_partition, end_offset, committed_offset, lag_msgs, lag_sec,"
+        " connector_state FROM gold_b.bronze_lag_snapshots"
+        f" WHERE ({_hour_partitions(start, now)})"
+        f" AND collected_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # collected_at 은 UTC
+    ).rename(columns={"kafka_partition": "partition"})
+    df["collected_at"] = _utc(df.collected_at)
+    for c in ["partition", "end_offset", "committed_offset", "lag_msgs", "lag_sec"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+
+if ATHENA_WORKGROUP:
+    # 파이프라인 상태 > 지연·점검 탭도 실데이터를 쓰게 한다 (못 읽으면 그 탭은 기존처럼 더미로 대체)
+    _REAL["get_bronze_lag"] = _real_bronze_lag
+
+
+def _ago(sec: float) -> str:
+    """'n초 전 / n분 전 / n시간 전' 문구."""
+    if sec < 120:
+        return f"{sec:,.0f}초 전"
+    if sec < 2 * 3600:
+        return f"{sec / 60:,.0f}분 전"
+    return f"{sec / 3600:,.1f}시간 전"
+
+
+def _kst_hm(ts: pd.Timestamp) -> str:
+    """UTC 시각을 화면용 KST 'MM-DD HH:MM' 으로."""
+    return ts.tz_convert("Asia/Seoul").strftime("%m-%d %H:%M")
+
+
+def _flow_from_lag(now: pd.Timestamp) -> dict:
+    """지연 수집기 표 하나로 RDS · CDC · Kafka · S3 Sink · Bronze · 수집기 여섯 단계를 판정한다.
+
+    RDS 와 CDC 는 직접 재지 않는다(대시보드는 RDS 에 접속하지 않고, 커넥터 상태도 수집기가 기록하지 않는다).
+    대신 CDC 커넥터가 쓰는 토픽(_CDC_TOPICS)의 end_offset 이 늘어나는지로 '추정'한다:
+      늘어남      -> RDS 쓰기와 CDC 둘 다 돌고 있다 (정상, 값 앞에 '추정')
+      10분간 그대로 -> CDC 는 지연, RDS 는 원인이 RDS 인지 CDC 인지 알 수 없어 '확인 불가'
+    """
+    lag = _real_bronze_lag(70)  # 최근 1시간 + 여유
+    if lag.empty:
+        return {
+            "collector": (
+                "bad",
+                "측정 없음",
+                "최근 70분 동안 bronze_lag_snapshots 에 쌓인 행이 없습니다",
+            )
+        }
+    out = {}
+    last = lag.collected_at.max()
+    age = (now - last).total_seconds()
+    st_c = "bad" if age > FLOW_COLLECTOR_BAD else "warn" if age > FLOW_COLLECTOR_WARN else "ok"
+    out["collector"] = (
+        st_c,
+        _ago(age) + " 측정",
+        f"마지막 측정 {_kst_hm(last)} KST · 1분마다 측정",
+    )
+    if st_c == "bad":
+        # 측정이 멈추면 아래 세 단계는 판단할 근거가 없다. 정상으로 칠하지 않는다
+        why = "지연 수집기 측정이 멈춰 판단할 수 없습니다"
+        return out | {
+            k: ("unknown", "확인 불가", why) for k in ("rds", "cdc", "kafka", "sink", "bronze")
+        }
+
+    latest = lag[lag.collected_at == last]
+    # Kafka: 토픽별 end_offset 증가량. 최근 10분과 1시간 평균 분당 유입
+    per_topic = lag.groupby(["collected_at", "topic"]).end_offset.sum().unstack().sort_index()
+    recent = per_topic[per_topic.index >= last - pd.Timedelta(minutes=FLOW_NO_INFLOW_MIN)]
+    inflow_10 = (
+        float((recent.iloc[-1] - recent.iloc[0]).clip(lower=0).sum()) if len(recent) > 1 else np.nan
+    )
+    span_min = max((per_topic.index[-1] - per_topic.index[0]).total_seconds() / 60, 1)
+    inflow_hr = float((per_topic.iloc[-1] - per_topic.iloc[0]).clip(lower=0).sum()) / span_min
+    quiet = [
+        t for t in recent.columns if len(recent) > 1 and recent[t].iloc[-1] <= recent[t].iloc[0]
+    ]
+    detail = f"최근 1시간 평균 분당 {inflow_hr:,.1f}건 · 토픽 {per_topic.shape[1]}개"
+    if quiet:
+        detail += f"\n{FLOW_NO_INFLOW_MIN}분간 유입 없음: {', '.join(quiet)}"
+    if np.isnan(inflow_10):
+        out["kafka"] = ("unknown", "확인 불가", "측정이 2회 미만입니다")
+    else:
+        out["kafka"] = (
+            "warn" if inflow_10 == 0 else "ok",
+            f"분당 {inflow_10 / FLOW_NO_INFLOW_MIN:,.1f}건",
+            detail,
+        )
+    # RDS · CDC: CDC 토픽들의 최근 10분 유입으로 추정 (위 Kafka 계산과 같은 표를 쓴다)
+    cdc_cols = [t for t in recent.columns if t in _CDC_TOPICS]
+    if len(recent) > 1 and cdc_cols:
+        cdc_in = float((recent[cdc_cols].iloc[-1] - recent[cdc_cols].iloc[0]).clip(lower=0).sum())
+        why = f"CDC 토픽({', '.join(cdc_cols)})의 최근 {FLOW_NO_INFLOW_MIN}분 유입으로 추정. 커넥터 상태를 직접 읽지는 않습니다"
+        if cdc_in > 0:
+            per_min = f"추정 · 분당 {cdc_in / FLOW_NO_INFLOW_MIN:,.1f}건"
+            out["cdc"] = ("ok", per_min, why)
+            out["rds"] = ("ok", "추정 · 쓰기 있음", why)
+        else:
+            out["cdc"] = (
+                "warn",
+                f"{FLOW_NO_INFLOW_MIN}분간 유입 없음",
+                why + "\nKafka Connect 의 CDC 커넥터 상태를 확인",
+            )
+            out["rds"] = (
+                "unknown",
+                "확인 불가",
+                "CDC 토픽 유입이 멈춰 RDS 쓰기가 멈춘 것인지 CDC 가 멈춘 것인지 알 수 없습니다",
+            )
+    # S3 Sink v2: 커넥터 상태 + 지연 초
+    states = sorted(set(latest.connector_state.dropna()))
+    max_lag = float(latest.lag_sec.max())
+    detail = f"커넥터 {', '.join(states) or '-'} · 밀린 메시지 {int(latest.lag_msgs.sum()):,}건"
+    if any(s != "RUNNING" for s in states):
+        out["sink"] = ("bad", " / ".join(states), detail)
+    else:
+        out["sink"] = (
+            "warn" if max_lag > FLOW_SINK_LAG_WARN else "ok",
+            f"지연 {max_lag:,.0f}초",
+            detail,
+        )
+    # Bronze: committed_offset 이 마지막으로 올라간 시각 = 마지막으로 Bronze 파일이 써진 시각
+    committed = lag.groupby("collected_at").committed_offset.sum().sort_index()
+    moved = committed.index[committed.diff() > 0]
+    if len(moved):
+        age_b = (now - moved.max()).total_seconds()
+        out["bronze"] = (
+            "warn" if age_b > FLOW_SINK_LAG_WARN else "ok",
+            _ago(age_b) + " 적재",
+            f"committed offset 이 마지막으로 늘어난 측정 {_kst_hm(moved.max())} KST",
+        )
+    else:
+        out["bronze"] = (
+            "warn",
+            "1시간 적재 없음",
+            "최근 70분 동안 committed offset 이 늘지 않았습니다",
+        )
+    return out
+
+
+def _flow_from_silver(now: pd.Timestamp) -> dict:
+    """silver.silver_runs (거래 Silver 완료 기록) 마지막 한 줄."""
+    df = _athena(
+        "SELECT run_id, completed_at, status, quality_status, row_count FROM silver.silver_runs"
+        " ORDER BY completed_at DESC LIMIT 1"
+    )
+    if df.empty:
+        return {"s_trade": ("warn", "완료 기록 없음", "silver.silver_runs 에 행이 없습니다")}
+    r = df.iloc[0]
+    at = _utc(pd.Series([r.completed_at])).iloc[0]
+    age = (now - at).total_seconds()
+    detail = f"run {r.run_id} · 품질 {r.quality_status} · {int(float(r.row_count or 0)):,}행"
+    if r.status != "COMPLETED":
+        status = "bad"
+    elif age > FLOW_BATCH_WARN or r.quality_status != "PASS":
+        status = "warn"
+    else:
+        status = "ok"
+    return {"s_trade": (status, f"{_kst_hm(at)} 완료", detail)}
+
+
+# Gold A channel(실행 단위) -> 흐름도 단계. 표 이름은 pipelines/gold_publication.py METRICS 와 같다
+_GOLD_A_STAGES = {
+    "a_sales": ("trade", ["order_sales_hourly"]),
+    "a_prod": ("trade", ["product_sales_daily"]),
+    "a_funnel": ("funnels", ["funnel_daily", "funnel_session_product"]),
+    "a_rprod": ("reviews", ["review_product_daily"]),
+    "a_raspect": ("reviews", ["review_aspect_daily"]),
+}
+
+
+def _flow_from_gold_a(now: pd.Timestamp) -> dict:
+    """gold_a.gold_runs 에서 channel 별 마지막 완료 한 줄. available_tables_json = {표 이름: 행 수}."""
+    df = _athena(
+        "SELECT channel, run_id, completed_at, status, quality_status, available_tables_json FROM ("
+        " SELECT *, row_number() OVER (PARTITION BY channel ORDER BY completed_at DESC) AS rn"
+        " FROM gold_a.gold_runs) WHERE rn = 1"
+    )
+    last = {r.channel: r for r in df.itertuples()}
+    out = {}
+    for stage, (channel, tables) in _GOLD_A_STAGES.items():
+        r = last.get(channel)
+        if r is None:
+            out[stage] = (
+                "warn",
+                "완료 기록 없음",
+                f"gold_a.gold_runs 에 channel={channel} 행이 없습니다",
+            )
+            continue
+        at = _utc(pd.Series([r.completed_at])).iloc[0]
+        try:
+            counts = json.loads(r.available_tables_json or "{}")
+        except ValueError:
+            counts = {}
+        missing = [t for t in tables if t not in counts]
+        rows_ = sum(int(counts.get(t) or 0) for t in tables)
+        detail = f"channel {channel} · run {r.run_id} · 품질 {r.quality_status}\n{', '.join(tables)} {rows_:,}행"
+        if missing:
+            detail += f"\n이번 실행에 없음: {', '.join(missing)}"
+        if r.status != "COMPLETED":
+            status = "bad"
+        elif missing or r.quality_status != "PASS" or (now - at).total_seconds() > FLOW_BATCH_WARN:
+            status = "warn"
+        else:
+            status = "ok"
+        out[stage] = (status, f"{_kst_hm(at)} 완료", detail)
+    return out
+
+
+def _flow_from_gold_b(now: pd.Timestamp) -> dict:
+    """Gold B 원장 3개의 마지막 적재 시각(loaded_at). 오늘·어제 UTC 파티션만 읽는다."""
+    days = f"dt IN ('{now:%Y-%m-%d}', '{now - pd.Timedelta(days=1):%Y-%m-%d}')"
+    today = f"dt = '{now:%Y-%m-%d}'"
+    df = _athena(
+        " UNION ALL ".join(
+            f"SELECT '{t}' AS t, max(loaded_at) AS last_at, count_if({today}) AS today_n"
+            f" FROM gold_b.{t} WHERE {days}"
+            for t in ("topic_messages", "payment_events", "malformed_events")
+        )
+    ).set_index("t")
+    out = {}
+    for stage, t in (("b_ledger", "topic_messages"), ("b_pay", "payment_events")):
+        at = _utc(pd.Series([df.at[t, "last_at"]])).iloc[0]
+        n = int(float(df.at[t, "today_n"] or 0))
+        if pd.isna(at):
+            out[stage] = (
+                "warn",
+                "이틀간 적재 없음",
+                f"gold_b.{t} 오늘·어제 파티션이 비어 있습니다",
+            )
+            continue
+        age = (now - at).total_seconds()
+        out[stage] = (
+            "warn" if age > FLOW_GOLD_B_WARN else "ok",
+            _ago(age) + " 적재",
+            f"오늘(UTC) {n:,}행 · gold_b.{t}",
+        )
+    # 형식 오류는 '있으면 문제'가 아니라 건수를 보여 주는 단계다. 자세한 건 형식 오류 화면에서 본다
+    n = int(float(df.at["malformed_events", "today_n"] or 0))
+    out["b_malformed"] = (
+        "ok",
+        f"오늘 {n:,}건",
+        "gold_b.malformed_events · 원인은 형식 오류 화면에서 확인",
+    )
+    return out
+
+
+def _flow_from_review_bronze(now: pd.Timestamp) -> dict:
+    """S3 bronze/reviews/year=/month=/day=/ (UTC 날짜 폴더) 에서 가장 최근 도착 파일을 찾는다.
+    리뷰는 Kafka 를 거치지 않으므로 지연 수집기로는 알 수 없고, Glue 표도 없어 S3 목록을 직접 본다.
+    오늘부터 3일 전까지만 본다 (목록 요청 4번 안쪽)."""
+    import boto3  # 실데이터를 쓸 때만 필요하다
+
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    for back in range(4):
+        d = now - pd.Timedelta(days=back)
+        prefix = f"bronze/reviews/year={d:%Y}/month={d:%m}/day={d:%d}/"
+        objs = []
+        for page in s3.get_paginator("list_objects_v2").paginate(
+            Bucket=DATALAKE_BUCKET, Prefix=prefix
+        ):
+            objs += page.get("Contents", [])
+        if objs:
+            last = max(pd.Timestamp(o["LastModified"]) for o in objs)
+            age = (now - last).total_seconds()
+            size = sum(o["Size"] for o in objs) / 1024
+            return {
+                "r_bronze": (
+                    "warn" if age > FLOW_REVIEW_WARN else "ok",
+                    f"{_kst_hm(last)} 도착",
+                    f"{prefix} · 파일 {len(objs)}개 · {size:,.0f}KB · 하루 1번(UTC 00:30) 생성",
+                )
+            }
+    return {
+        "r_bronze": (
+            "warn",
+            "4일간 도착 없음",
+            "bronze/reviews/ 최근 4일 날짜 폴더가 비어 있습니다",
+        )
+    }
+
+
+# 단계 묶음별 조회 함수. 한 묶음이 실패해도 다른 묶음은 그린다
+_FLOW_READERS = [
+    (_flow_from_lag, ["rds", "cdc", "collector", "kafka", "sink", "bronze"]),
+    (_flow_from_review_bronze, ["r_bronze"]),
+    (_flow_from_silver, ["s_trade"]),
+    (_flow_from_gold_a, list(_GOLD_A_STAGES)),
+    (_flow_from_gold_b, ["b_ledger", "b_pay", "b_malformed"]),
+]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_flow_status() -> dict:
+    """흐름도 단계별 상태 {단계 id: (status, 원 아래 값, 마우스 올림 설명)} 와 조회 시각.
+
+    status: ok / warn / bad / unknown(조회 실패·판단 불가). 여기 없는 단계는 화면이 '미연결'로 그린다.
+    workgroup 이 없으면 아무것도 읽지 않는다 (= 전부 미연결).
+    """
+    now = pd.Timestamp.now(tz="UTC")
+    stages: dict = {}
+    if ATHENA_WORKGROUP:
+        for reader, ids in _FLOW_READERS:
+            try:
+                got = reader(now)
+                # 연결은 됐는데 값을 못 만든 단계는 '확인 불가'로 둔다 (미연결과 구분)
+                stages |= {i: ("unknown", "확인 불가", "판단할 값이 없습니다") for i in ids} | got
+            except Exception as e:  # noqa: BLE001  한 묶음 실패가 화면 전체를 죽이지 않게
+                _log.exception("흐름도 조회 실패: %s", reader.__name__)
+                stages |= {
+                    i: ("unknown", "조회 실패", f"{type(e).__name__}: {str(e)[:160]}") for i in ids
+                }
+    return {"checked_at": now, "stages": stages}
