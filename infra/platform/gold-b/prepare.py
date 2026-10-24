@@ -33,6 +33,9 @@ def workload_bindings(existing, checkpoint_prefix=None):
         ingest_access[checkpoint_prefix] = write + ["s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
     additions = {INGEST + "-" + role: {"namespace": NS, "service_account": INGEST + "-" + role,
                 "s3_access": copy.deepcopy(ingest_access)} for role in ("driver", "executor")}
+    if checkpoint_prefix is not None:
+        for binding in additions.values():
+            binding["s3_directory_reads"] = [checkpoint_prefix.rstrip("/")]
     jobs_access = {"gold_b/" + table + "/": write + ["s3:DeleteObject"]
                    for table in (*LEDGERS, "bronze_lag_snapshots")}
     jobs_access["gold_b/reprocess_events/"] = write.copy()

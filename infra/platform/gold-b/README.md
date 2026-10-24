@@ -43,4 +43,8 @@ Gold B DAG는 Spark 전용 풀을 node_selector로 지정하면 해당 NoSchedul
 
 최종 ECR 이미지 digest·적재 checkpoint 확정·권한 검증·runtime 공급 뒤 EKS/S3 수동 검증이 필요하다. ECR `clothes-query-dev/gold-b` 저장소 준비만으로 이미지 발행 완료가 아니며 새 팀원 publisher ARN을 추측해 권한을 추가하지 않는다. Spark 공유 자원 후보는 [시험 기록](../../../docs/operations/spark-shared-capacity-check.md)을 따른다.
 
+2026-10-24 실제 이미지 `2a8acd10`로 단독 적재·정상 종료 후 재시작 시험을 완료했다. `validate_ingest.py`는 업무 이미지의 실제 설정·검사기·build_query·저장 함수를 사용하되 지정한 묶음 수 또는 시간 뒤 스트림을 종료하는 인프라 시험 진입점이다. Kafka에 메시지를 만들거나 checkpoint를 비우지 않는다. 상시 진입점 대신 시험용 ConfigMap에 잠시 마운트해 사용하며, 시험 후 원래 Pod template을 복원하고 시험 스크립트·제한 시간을 제거한다. 상시 실행과 강제 장애 복구 검증을 대신하지 않는다.
+
+최종 `pipelines/gold-b-ingest-runtime`에는 확정 이미지·환경변수와 `ingest.config.json`이 반영됐다. `airflow/airflow-gold-b-runtime`의 `config`는 `AIRFLOW_GOLD_B_RUNTIME`으로 공급했고 재처리·합치기 DAG는 paused를 유지한다. 실제 적용·건수·정리·후속은 [검증 기록](../../../docs/tasks/infra-gold-b-checkpoint.md)을 따른다.
+
 실제 적용/검증 여부는 [현재 업무 목록](../../../docs/infra-work-queue.md)과 [이 브랜치 작업 기록](../../../docs/tasks/infra-applied-state-sync.md)을 우선 확인한다.

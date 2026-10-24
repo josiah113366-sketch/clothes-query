@@ -1,5 +1,44 @@
 mock_provider "aws" {}
 
+run "directory_probe_is_exact_and_read_only" {
+  command = plan
+  module { source = "../modules/workload-access" }
+  variables {
+    bindings = { stream = {
+      namespace          = "pipelines", service_account = "stream-driver"
+      s3_access          = { "gold_b/_checkpoints/stream/" = ["s3:GetObject", "s3:PutObject"] }
+      s3_directory_reads = ["gold_b/_checkpoints/stream"]
+    } }
+  }
+  assert {
+    condition = length([for s in jsondecode(aws_iam_role_policy.s3["stream"].policy).Statement : s
+      if s.Resource == ["arn:aws:s3:::test-data-bucket/gold_b/_checkpoints/stream"] && s.Action == ["s3:GetObject"]
+    ]) == 1
+    error_message = "Directory HEAD access must use one exact resource with GetObject only."
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(aws_iam_role_policy.s3["stream"].policy).Statement :
+      !contains(s.Action, "s3:ListBucket") || try(toset(s.Condition.StringLike["s3:prefix"]) == toset([
+        "gold_b/_checkpoints/stream/*", "gold_b/_checkpoints/stream"
+      ]), false)
+    ])
+    error_message = "Bucket listing must not expand to sibling checkpoints."
+  }
+}
+
+run "reject_directory_probe_outside_owned_prefix" {
+  command = plan
+  module { source = "../modules/workload-access" }
+  variables {
+    bindings = { stream = {
+      namespace          = "pipelines", service_account = "stream-driver"
+      s3_access          = { "gold_b/_checkpoints/stream/" = ["s3:GetObject"] }
+      s3_directory_reads = ["ground_truth"]
+    } }
+  }
+  expect_failures = [var.bindings]
+}
+
 variables {
   name         = "test-data"
   cluster_name = "test-cluster"

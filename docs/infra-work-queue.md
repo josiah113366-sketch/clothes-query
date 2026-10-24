@@ -2,6 +2,7 @@
 
 ## 2026-10-24 최신 후속
 
+- Gold B 실제 이미지로 Kafka TLS·S3 원장·checkpoint 저장과 정상 재시작을 검증했다. 3개 배치 총 59,972건, 결제 원장 474건, 메시지 위치 중복 0이며 이전 offset부터 이어 읽었다. S3A 폴더 조회 403은 두 적재 역할의 정확한 경로 읽기로 보완했다. 실행 설정·Airflow runtime을 연결했고 시험 Pod·노드를 정리해 Spark 0대로 복귀했다. 원장·checkpoint는 보존하며 상시 운영·배치 동시 실행·강제 장애 복구·재처리/합치기 실행은 아직이다. [실측 기록](tasks/infra-gold-b-checkpoint.md)을 우선한다.
 - Gold B 최종 이미지 `2a8acd10`·커밋 `7d5ebd16`의 ECR 존재와 태그 일치를 확인했다. 사용자가 확정한 `gold_b/_checkpoints/streaming_ingest/` 권한을 적재 Driver/Executor 정책 2개에 적용했고 후속 plan 변경은 0이다. 이미지·checkpoint 포함 runtime 초안을 준비했으며 상시 적재 실행·실제 체크포인트 재시작 검증은 아직이다. [적용 기록](tasks/infra-gold-b-checkpoint.md)을 따른다.
 - #105 제공 SQL로 조사 단독 시험을 완료했다. 예약 실행·실제 조사 Pod exit 0, JP Haiku 호출 4회와 리포트 1건 저장이 통과했다. 원인 층 UNKNOWN은 담당자 허용 기준이다. 같은 시험 ID에 RESOLVED를 추가하고 조사 DAG는 다시 paused로 복원했다. 승인 화면 내부 API·토큰 발급과 재처리 DAG 2개 조회도 확인했다. Sink 정지 리허설은 공동 일정 대기이며 시작하지 않았다. [시험·전달 기록](tasks/infra-investigation-trial.md)을 따른다.
 - #104 main 3d046f3과 최종 이미지 d00fdded를 반영해 Silver/Gold A DDL(DB 2·표 10), 거래 공개·재처리 설정과 권한을 적용했다. 새 이미지의 정상 거래 DAG·Driver/Executor·R6/Gold 공개·Athena 7,900원/수량 1/보류 0 및 실제 판정 역할의 Silver 읽기가 통과했다. 시험 노드는 빈 상태 확인 후 명시적으로 해제해 EC2 terminated·Spark 0대로 복귀했다. 부분 재처리·MISMATCH 복구·리뷰/퍼널 및 최종 소비자 권한은 후속이다. [정상 검증 기록](tasks/infra-silver-publication.md)을 따른다.
