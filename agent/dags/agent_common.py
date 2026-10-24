@@ -12,6 +12,8 @@ CONFIG_ENV = "AIRFLOW_AGENT_CONFIG"
 NAMESPACE = "agent"
 REQUIRED = ("detect_image", "investigate_image", "detect_workgroup", "investigate_workgroup", "region", "bedrock_model_id")
 DEFAULT_INVESTIGATE_MAX = 3
+# 판정 Pod에 선택으로 넘기는 R6 설정: (설정 JSON 키, Pod 환경 변수 이름). agent/detect/run_job.py가 읽는다
+R6_KEYS = (("silver_checks_table", "SILVER_CHECKS_TABLE"), ("silver_runs_table", "SILVER_RUNS_TABLE"), ("r6_check_name", "R6_CHECK_NAME"))
 
 # 임의 값(측정 전). 실제 실행 시간과 자원 사용량을 재영 님과 함께 확인한 뒤 조정한다
 RESOURCES = {"requests": {"cpu": "250m", "memory": "512Mi"}, "limits": {"cpu": "500m", "memory": "1Gi"}}
@@ -52,6 +54,9 @@ def pod_kwargs(config, role):
     env_vars = {"AWS_REGION": config["region"], "AWS_EC2_METADATA_DISABLED": "true"}   # Pod Identity를 쓰므로 EC2 메타데이터 조회는 끈다
     if role == "detection":
         env_vars.update({"ATHENA_WORKGROUP": config["detect_workgroup"], "JUDGE_TICK": TICK_TEMPLATE})
+        for key, name in R6_KEYS:      # R6(Silver 주문 총액 검사) 설정: 설정 JSON에 있을 때만 판정 Pod에 전달한다. 없으면 R6은 돌지 않는다
+            if str(config.get(key, "")).strip():
+                env_vars[name] = str(config[key]).strip()
         image, service_account, timeout = config["detect_image"], "detection-job", DETECT_TIMEOUT
     else:
         env_vars.update({"ATHENA_WORKGROUP": config["investigate_workgroup"], "BEDROCK_MODEL_ID": config["bedrock_model_id"],

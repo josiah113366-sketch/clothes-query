@@ -5,7 +5,6 @@
       '구매 전환율'로 표시하지 않는다 (이전 시간 주문이 나중에 결제될 수 있음).
 """
 
-import pandas as pd
 import streamlit as st
 
 import charts
@@ -14,14 +13,17 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("trade")
 
 st.title("주문·매출")
 ui.date_note("hour")
 days = ui.pick_period("ord", max_days=7, default=3)  # 더미는 7일치
 
-all_hours = data.get_order_sales_hourly(7)
-df = all_hours[all_hours.hour_start_kst > all_hours.hour_start_kst.max() - pd.Timedelta(days=days)]
-# 직전 같은 길이 기간 (카드의 증감 배지). 더미가 7일치라 days 가 4 이상이면 비교 기간이 짧아진다.
+# 직전 같은 길이 기간(카드의 증감 배지)까지 쓰려고 2배 기간을 한 번에 읽는다.
+# 실데이터(Athena)는 오늘(KST) 기준, 더미는 데이터 마지막 날 기준 (ui.last_days / ui.prev_days 가 맞춰 준다)
+all_hours = data.get_order_sales_hourly(days * 2)
+df = ui.last_days(all_hours, "hour_start_kst", days)
+ui.require_rows(df)
 prev = ui.prev_days(all_hours, "hour_start_kst", days)
 d = df.set_index("hour_start_kst")
 note = f"직전 {days}일 대비"

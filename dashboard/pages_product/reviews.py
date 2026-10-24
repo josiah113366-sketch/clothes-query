@@ -17,21 +17,22 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("reviews")
 
 st.title("리뷰·속성 분석")
 ui.date_note("review")
-c1, c2, c3 = st.columns([2, 1, 1])
+c1, c2 = st.columns([2, 1])
 with c1:
     arts = ui.pick_products("rv")
 with c2:
     days = ui.pick_period("rv")
-with c3:
-    ver = st.selectbox("모델 버전", data.MODEL_VERSIONS)
 
 # ---- 별점 ----
-all_rv = data.get_review_product_daily()
+# 직전 같은 길이 기간(카드의 증감 배지)까지 쓰려고 2배 기간을 한 번에 읽는다
+all_rv = data.get_review_product_daily(days * 2)
 all_rv = all_rv[all_rv.article_id.isin(arts)]
 rv = ui.last_days(all_rv, "review_date_kst", days)
+ui.require_rows(rv)
 prv = ui.prev_days(all_rv, "review_date_kst", days)
 cnt, rs, low = rv.review_count.sum(), rv.rating_sum.sum(), rv.low_rating_count.sum()
 pcnt, prs, plow = prv.review_count.sum(), prv.rating_sum.sum(), prv.low_rating_count.sum()
@@ -76,7 +77,10 @@ with ui.panel("일별 리뷰 수", "작성일(KST) 기준 · 건"):
 
 # ---- 속성 ----
 asp = ui.last_days(data.get_review_aspect_daily(), "review_date_kst", days)
-asp = asp[asp.article_id.isin(arts) & (asp.model_version == ver)]
+asp = asp[asp.article_id.isin(arts)]
+asp = ui.select_model(asp, "rv_model")
+# 고른 모델 버전 이름 (패널 제목에 표시). select_model 이 버전 하나만 남긴 표를 돌려준다
+ver = asp["model_key" if "model_key" in asp else "model_version"].iloc[0]
 g = asp.groupby("aspect", as_index=False)[
     [
         "mentioned_review_count",
@@ -100,7 +104,7 @@ with ui.panel("속성별 부정 비율", f"모델 버전 {ver} · 부정 비율 
     st.caption("속성별 리뷰 수는 합쳐서 전체 리뷰 수로 쓰지 않습니다.")
 
 # ---- 속성 추이 ----
-one = st.selectbox("추이를 볼 속성", data.ASPECTS)
+one = st.selectbox("추이를 볼 속성", sorted(asp.aspect.dropna().unique()))
 tr = (
     asp[asp.aspect == one]
     .groupby("review_date_kst")[["mentioned_review_count", "negative_review_count"]]

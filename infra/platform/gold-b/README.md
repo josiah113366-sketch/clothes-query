@@ -1,0 +1,69 @@
+# Gold B 실행 기반
+
+## 상시 실행 (2026-10-24)
+
+사용자 승인으로 `persistent.py`가 기존 runtime ConfigMap에서 상시 실행용 내부 headless Service와 단일 Driver Deployment를 생성한다. 업무 이미지·S3 checkpoint·Kafka TLS·Driver/Executor 계정·전용 노드 selector는 유지한다. Driver 350m/2GiB, Executor 1개 500m/1.25GiB를 사용하고 별도 대기 제출기는 두지 않는다.
+
+Driver는 client mode로 같은 Pod 안에서 실행한다. Kubernetes가 컨테이너/Pod 종료 시 다시 시작하고 기존 체크포인트를 사용한다. Deployment는 replicas=1·Recreate이며 수동 복제나 같은 checkpoint를 쓰는 별도 잡 제출은 금지한다. 장시간 네트워크 분리 시 단일 writer fencing까지 보장하는 HA 구조는 아니다.
+
+Spark 풀의 기존 t3a.large 한 대분 한도는 유지한다. 상시 Driver/Executor가 남으므로 이 노드는 유휴 축소되지 않으며 비용도 계속 발생한다. Silver·Gold A 기본 최대 배치와의 동시 수용은 보장하지 않으며 자원 부족 시 Pending일 수 있다. 기존 배치 자원이나 노드 한도를 임의로 늘리지 않는다.
+
+```powershell
+python infra/platform/gold-b/persistent.py --runtime-json .cache/gold-b-runtime.private.json --output .cache/gold-b-persistent.private.yaml
+# 생성 파일과 기존 활성 인스턴스를 확인한 후에만 배포한다.
+kubectl apply -f .cache/gold-b-persistent.private.yaml
+kubectl get deployment gold-b-ingest -n pipelines
+# 운영 중지: checkpoint를 삭제하지 않고 Driver 수를 0으로 내린다.
+kubectl scale deployment gold-b-ingest -n pipelines --replicas=0
+```
+
+Readiness는 Driver RPC 소켓만 확인한다. 실제 적재 성공은 로그의 처리 묶음·S3 체크포인트 커밋·원장 쓰기로 별도 확인한다. 장애 복구·재시작 중복 방지의 장시간 검증은 후속이다. [Spark client mode 및 Driver 네트워크 공식 문서](https://spark.apache.org/docs/4.2.0/running-on-kubernetes.html#client-mode).
+
+Gold B 상시 Spark 적재와 Python 재처리·합치기의 실행 신원을 분리한다. `prepare.py`는 파일만 생성하며 AWS/kubectl/Helm을 호출하거나 Pod·Job·노드를 시작하지 않는다. CI 실패 수정과 #101 머지는 이 작업 범위가 아니다.
+
+## 실행 신원과 데이터 경계
+
+| ServiceAccount (`pipelines`) | 권한 |
+|---|---|
+| `gold-b-ingest-submitter` | 같은 namespace에서 Spark 제출·완료 관찰. AWS 역할 없음 |
+| `gold-b-ingest-driver`, `gold-b-ingest-executor` | 별도 Pod Identity 역할. `gold_b/payment_events/`, `topic_messages/`, `malformed_events/` 읽기·쓰기. 원장 삭제 권한 없음 |
+| `gold-b-ledger-jobs` | 재처리·합치기. 위 원장 3개와 `bronze_lag_snapshots/` 읽기·쓰기·삭제. `reprocess_events/`는 읽기·쓰기만. `bronze_v2/` 업무 5개 토픽 prefix 읽기만 |
+
+어느 역할에도 `ground_truth/`, `agent/`, Silver·Gold A 접근을 추가하지 않는다. 기존 workload-access bindings는 보존하며 같은 이름의 다른 설정은 덮어쓰지 않는다. namespace 공유와 Pod 생성 권한 때문에 ServiceAccount 분리가 강한 보안 격리는 아니며 팀원 namespace 운영 권한도 함께 관리해야 한다.
+
+2026-10-24 사용자가 체크포인트를 `s3a://clothes-query-datalake/gold_b/_checkpoints/streaming_ingest/`로 확정했다. 공유 workload-access 입력에 해당 prefix를 반영했다. 생성 도구는 기본값으로 checkpoint 권한을 **넣지 않는다**. `--checkpoint-prefix gold_b/_checkpoints/streaming_ingest/`를 지정하면 적재 Driver·Executor 역할에 해당 하위 prefix의 읽기·쓰기·삭제·멀티파트 정리와 적재 환경변수 `GOLD_B_CHECKPOINT`를 함께 반영한다. 체크포인트 삭제는 처리 위치를 초기화할 수 있으므로 운영 중 임의 정리하지 않는다.
+
+## 준비 파일 생성
+
+저장소 루트에서 PyYAML이 있는 Python으로 실행한다. 결과 폴더는 새 경로여야 한다.
+
+```powershell
+python infra/platform/gold-b/prepare.py --existing-vars infra/stacks/workload-access/deployment.auto.tfvars.json --output-dir .cache/gold-b-review
+python -m unittest discover -s infra/platform/gold-b -v
+```
+
+- `foundation.json`: 계정 4개, namespace RBAC, Spark ConfigMap, KafkaUser 2개, Kafka ingress 정책. 실행 workload·Namespace·공유 quota·Secret은 생성하지 않는다.
+- `workload-access.tfvars.json`: 기존 bindings와 Gold B 3개 역할을 합친 입력. 실제 적용 시 다른 로컬 var-file이 bindings 전체를 덮어쓰지 않는지 plan을 확인한다.
+- `runtime.pending.json`: 재처리·합치기용 `AIRFLOW_GOLD_B_RUNTIME` 초안. 이미지가 null이므로 이 상태로 ConfigMap/환경변수에 공급하지 않는다. `bronze_root` 소비는 #101 머지·해당 코드가 들어간 최종 이미지가 필요하다.
+- `ingest.pending.json`: 적재 제출 계정·이미지 내 진입점·환경변수 초안. image는 null이며 GOLD_B_CHECKPOINT는 명시적으로 지정한 경우에만 채운다. 불변 이미지와 실행 설정을 최종 반영하기 전에는 실행할 수 없다.
+- `batch-shared-spark-conf.json`: 시험한 단일 노드 공유 후보. 기존 Silver·Gold A 설정에 자동 적용하지 않는다. 적용하려면 기존 AIRFLOW_PIPELINE_RUNTIME의 신원·이미지·템플릿은 보존하고 spark_conf에 병합한다.
+
+## Kafka와 배치
+
+TLS 사용자 `gold-b-ingest`, `gold-b-reprocess`는 6개 토픽의 Read/Describe와 자기 이름 접두사의 소비자 그룹 Read/Describe만 가진다. 토픽 쓰기·생성·cluster admin은 없다. Kafka namespace의 NetworkPolicy는 pipelines의 `app=gold-b-ingest` 또는 `app=gold-b-ledger-jobs` Pod에 9093만 허용한다.
+
+원본 사용자 Secret의 `user.crt`·`user.key`와 **Kafka cluster CA**를 pipelines의 `gold-b-ingest-tls`, `gold-b-reprocess-tls`로 비공개 복사한다. 사용자 Secret의 ca.crt를 서버 CA로 간주하지 않는다. 인증서 갱신 때 복사·재시작이 필요하며 자동 mirror controller는 설치하지 않는다. 실제 Secret/인증서/키/접속용 비공개 파일은 Git에 올리지 않는다.
+
+Gold B DAG는 Spark 전용 풀을 node_selector로 지정하면 해당 NoSchedule taint의 toleration을 함께 넣는다. `app=gold-b-ledger-jobs`는 Kafka 정책과 맞춘다. 적재 Driver·Executor template에도 Spark selector/toleration과 TLS 볼륨이 있다. 실제 DAG에 전달하는 Secret 기본 파일 모드는 읽기 가능해야 하며 적재 template의 fsGroup=185·0440 모드는 함께 유지한다.
+
+재처리·합치기는 **Spark를 쓰지 않는 Python 작업**이다. 두 DAG의 pool은 `gold_b_ledger`, 슬롯 1개다. 상시 Spark 적재는 이 pool을 점유하지 않는다. Airflow 전체 parallelism=1은 그대로 유지하며 DAG를 임의로 켜지 않는다. 기존 `default_pool` 슬롯 수를 변경하지 않는다.
+
+## 배포 종료 조건
+
+최종 ECR 이미지 digest·적재 checkpoint 확정·권한 검증·runtime 공급 뒤 EKS/S3 수동 검증이 필요하다. ECR `clothes-query-dev/gold-b` 저장소 준비만으로 이미지 발행 완료가 아니며 새 팀원 publisher ARN을 추측해 권한을 추가하지 않는다. Spark 공유 자원 후보는 [시험 기록](../../../docs/operations/spark-shared-capacity-check.md)을 따른다.
+
+2026-10-24 실제 이미지 `2a8acd10`로 단독 적재·정상 종료 후 재시작 시험을 완료했다. `validate_ingest.py`는 업무 이미지의 실제 설정·검사기·build_query·저장 함수를 사용하되 지정한 묶음 수 또는 시간 뒤 스트림을 종료하는 인프라 시험 진입점이다. Kafka에 메시지를 만들거나 checkpoint를 비우지 않는다. 상시 진입점 대신 시험용 ConfigMap에 잠시 마운트해 사용하며, 시험 후 원래 Pod template을 복원하고 시험 스크립트·제한 시간을 제거한다. 상시 실행과 강제 장애 복구 검증을 대신하지 않는다.
+
+최종 `pipelines/gold-b-ingest-runtime`에는 확정 이미지·환경변수와 `ingest.config.json`이 반영됐다. `airflow/airflow-gold-b-runtime`의 `config`는 `AIRFLOW_GOLD_B_RUNTIME`으로 공급했고 재처리·합치기 DAG는 paused를 유지한다. 실제 적용·건수·정리·후속은 [검증 기록](../../../docs/tasks/infra-gold-b-checkpoint.md)을 따른다.
+
+실제 적용/검증 여부는 [현재 업무 목록](../../../docs/infra-work-queue.md)과 [이 브랜치 작업 기록](../../../docs/tasks/infra-applied-state-sync.md)을 우선 확인한다.

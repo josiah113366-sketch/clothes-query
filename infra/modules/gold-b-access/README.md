@@ -1,5 +1,7 @@
 # Gold B query roles
 
+선택 입력 investigation_bedrock_profiles는 조사 역할에만 명시한 프로필의 GetInferenceProfile/InvokeModel과 목적지 모델 InvokeModel을 추가한다. 목적지 모델은 bedrock:InferenceProfileArn 조건으로 선택 프로필을 경유할 때만 허용한다. 기본 입력은 비어 있으며 wildcard·global 프로필은 거부한다. Converse 비스트리밍용으로 준비하며 streaming 호출 권한은 추가하지 않는다. [적용·검증 기록](../../../docs/tasks/infra-agent-bedrock-catalog.md)을 따른다.
+
 기존 EKS의 agent namespace에서 실행할 판정·조사 Pod 전용 IAM 역할, Pod Identity association, Athena workgroup을 준비한다. workgroup별로 기존 데이터 S3의 분리된 결과 prefix를 강제한다. 기존 Bronze Sink·개발자 사용자/그룹·Gold B DB/table은 변경하지 않는다. 선택 입력으로 별도 조사 Glue DB를 생성한다.
 
 기본 데이터 권한은 gold_b/ 읽기, Glue gold_b 메타데이터 읽기, 자기 결과 prefix 읽기·쓰기다. ground_truth/ 객체와 해당 prefix 목록은 명시적으로 Deny한다. 조사 쓰기는 investigation_write_prefixes의 agent/ 아래만, 판정 쓰기는 detection_write_prefixes의 gold_b/ 하위 명시 경로만 허용한다. 두 입력 기본값은 비어 있고 확인된 비공개 배포 입력으로 활성화한다. 조사 DB 이름도 변수이며 조사 역할에만 해당 DB 메타데이터 읽기를 추가한다. 객체 삭제·카탈로그 수정·관리자·다른 역할 AssumeRole 권한은 부여하지 않는다. Athena StartQueryExecution 자체를 SELECT-only로 제한하는 기능은 아니다.

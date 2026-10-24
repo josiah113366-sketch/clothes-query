@@ -9,7 +9,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from agent_common import CONFIG_ENV, DEFAULT_INVESTIGATE_MAX, REQUIRED, RESOURCES, TICK_TEMPLATE, load_config, pod_kwargs
+from agent_common import CONFIG_ENV, DEFAULT_INVESTIGATE_MAX, R6_KEYS, REQUIRED, RESOURCES, TICK_TEMPLATE, load_config, pod_kwargs
 
 ok = True
 HERE = Path(__file__).resolve().parent
@@ -66,6 +66,11 @@ check("두 Pod: 이미지는 각자 것, 실행 명령(cmds)은 이미지 ENTRYP
 check("두 Pod: 끝나면 Pod 삭제, 로그 가져오기, 결과 전달(xcom) 안 함", (d["on_finish_action"], d["get_logs"], d["do_xcom_push"]), ("delete_pod", True, False))
 check("두 Pod: 실행 제한 시간이 5분 주기보다 짧음(판정 3분, 조사 4분)", (d["execution_timeout"], i["execution_timeout"]), (timedelta(minutes=3), timedelta(minutes=4)))
 check("두 Pod: 재시도 1번(같은 순찰 번호라 이중 저장 안 됨)", (d["retries"], i["retries"]), (1, 1))
+r6 = pod_kwargs(load_config(env(silver_checks_table="silver.order_amount_checks", silver_runs_table="silver.silver_runs")), "detection")["env_vars"]
+check("R6 설정이 설정 JSON에 있으면 판정 Pod 환경 변수로 전달됨 (R6_CHECK_NAME은 안 줬으니 없음)",
+      (r6.get("SILVER_CHECKS_TABLE"), r6.get("SILVER_RUNS_TABLE"), "R6_CHECK_NAME" in r6), ("silver.order_amount_checks", "silver.silver_runs", False))
+check("R6 설정이 없으면 판정 Pod에 R6 환경 변수가 없음, 조사 Pod에는 항상 없음",
+      (any(n in d["env_vars"] for _, n in R6_KEYS), any(n in pod_kwargs(load_config(env(silver_checks_table="x.y")), "investigation")["env_vars"] for _, n in R6_KEYS)), (False, False))
 check("노드 고정은 hostname을 줄 때만", ("node_selector" in d, pod_kwargs(load_config(env(hostname="node-1")), "detection")["node_selector"]), (False, {"kubernetes.io/hostname": "node-1"}))
 check("자원 요구량(임의 값)", RESOURCES["requests"], {"cpu": "250m", "memory": "512Mi"})
 try:

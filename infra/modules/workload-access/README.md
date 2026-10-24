@@ -12,6 +12,8 @@
 | `s3_endpoint_actions` | network state의 endpoint 허용 작업. 기본은 기존 Get/Put/List/위치 조회 |
 | `bindings` | 서비스별 namespace, ServiceAccount, `s3_access = { "prefix/" = ["s3:GetObject", ...] }` |
 
+각 binding의 선택 항목 `s3_directory_reads`는 S3A가 폴더 경로 자체를 HEAD하는 경우에 사용한다. 예를 들어 `gold_b/_checkpoints/streaming_ingest`를 넣으면 이 정확한 객체의 GetObject와 같은 값의 ListBucket prefix 조건만 추가한다. 해당 경로에 `/`를 붙인 prefix가 이미 `s3_access`에 있고 GetObject도 허용돼야 한다. 기본값은 빈 집합이며 부모·형제 경로의 접근이나 폴더 자체 쓰기·삭제를 자동 허용하지 않는다.
+
 출력은 `service_accounts` 및 민감 표시된 `role_arns`다. 타입·검증·지원 action은 [variables.tf](variables.tf), 실제 정책은 [main.tf](main.tf)를 참고한다. [호출 스택](../../stacks/workload-access/README.md)에서 사용한다.
 
 ## 관리 경계

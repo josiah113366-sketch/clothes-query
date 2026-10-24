@@ -13,6 +13,7 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("trade")
 
 st.title("상품 판매")
 ui.date_note("sales")
@@ -22,11 +23,15 @@ with c1:
 with c2:
     days = ui.pick_period("ps")
 
-all_df = data.get_product_sales_daily()
+# 직전 같은 길이 기간(카드의 증감 배지)까지 쓰려고 2배 기간을 한 번에 읽는다
+all_df = data.get_product_sales_daily(days * 2)
 all_df = all_df[all_df.article_id.isin(arts)]
 df = ui.last_days(all_df, "sales_date_kst", days)
+ui.require_rows(df)
 prev = ui.prev_days(all_df, "sales_date_kst", days)
-names = data.PRODUCTS.set_index("article_id")["name"]
+# 상품 이름·순서는 화면 상단 상품 선택과 같은 목록 (실데이터면 공개 결과의 상품, 더미면 더미 상품)
+products = data.product_options().drop_duplicates("article_id")
+names = products.set_index("article_id")["name"]
 dd = df.groupby("sales_date_kst")[["sold_quantity", "item_sales_amount"]].sum()
 note = f"직전 {days}일 대비 · 고른 상품 {len(arts)}개"
 ui.kpis(
@@ -60,7 +65,7 @@ metric = st.radio(
 )
 pv = df.pivot(index="sales_date_kst", columns="article_id", values=metric)
 # 색은 상품 목록 순서로 고정한다 (선택을 바꿔도 같은 상품은 같은 색). 7개 이상이면 색이 반복된다.
-order = list(data.PRODUCTS.article_id)
+order = list(products.article_id)
 pv = pv[[a for a in order if a in pv.columns]]
 with ui.panel("상품별 추이", "결제일(KST) 기준"):
     charts.line(

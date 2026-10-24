@@ -1,4 +1,8 @@
-# Spark 기본 이미지 — 빌드 전 준비
+# Spark 기본 이미지와 업무 패키지 준비
+
+2026-10-23 후속: 전달받은 PyYAML 6.0.3 / boto3 1.43.71 / PyArrow 25.0.1 / tzdata 2026.3 및 실제 해결한 전이 의존성을 requirements-pipelines.txt에 고정했다. Python 3.10.12에서 설치·pip check·실제 import·메모리 Parquet 왕복·KST 시간대와 로컬 Spark 합성 계산/커넥터 클래스 로딩을 통과했다. 설치 결과는 python-dependencies.lock.json에 기록한다. 이 검사는 업무 커밋 908c252 코드 검증이나 실제 AWS 쓰기 성공을 뜻하지 않는다.
+
+2026-10-23 기본 이미지를 도쿄 ECR clothes-query-dev/spark-base에 발행했다. 실제 digest와 동료 빌드 명령은 [발행 안내](../handoff/spark-ecr-publish.md), 식별자·검증 기록은 [published.json](published.json)에 있다. linux/amd64, Spark 4.2.0 / Python 3.10.12 / Java 21 / Hadoop 3.5.0이다. 아래 2.07GB는 이전 jar-only 이미지의 크기 기록이다.
 
 사용자 선택은 Spark **4.2.0**이다. 기본 후보는 Docker Official Image의 `spark:4.2.0-scala2.13-java21-python3-ubuntu`(amd64)다. Spark 소스 POM의 Hadoop 3.5.0에 맞춰 S3A를 준비하고, Kafka SQL 커넥터는 Spark 4.2.0/Scala 2.13, PostgreSQL JDBC는 42.7.14로 고정한다. 업무 코드·인증 정보·실제 데이터 경로는 포함하지 않는다.
 
@@ -30,7 +34,7 @@ docker build --platform linux/amd64 `
 
 검증된 기본 이미지가 발행되면 팀원은 그 **digest**를 FROM으로 참조하고 업무 코드와 필요한 Python 패키지를 추가한다. 진입 파일은 예를 들어 `/opt/jobs/main.py`에 넣고 `spark-submit local:///opt/jobs/main.py`로 제출한다. 기본 이미지의 Spark entrypoint를 유지하며 Driver와 Executor에 같은 업무 이미지 digest를 사용한다. 일반 Python 코드가 자동으로 Spark 코드로 변환되지는 않는다.
 
-S3는 작업 코드에서 Hadoop S3A를 사용할지 별도 Python SDK를 쓸지 확정해야 한다. 이 이미지는 boto3를 추가하지 않는다. Pod Identity·인증서·Secret 마운트·읽기 권한은 아직 미연결이며, 연결 설정 예시 파일도 자동 소비하지 않는다. RDS 읽기 동시 연결 수와 Kafka 인증/offset 및 출력·checkpoint 계약은 팀원과 별도로 맞춘다.
+S3는 작업 코드에서 Hadoop S3A를 사용할지 별도 Python SDK를 쓸지 확정해야 한다. 발행된 이미지는 requirements-pipelines.txt에 고정한 boto3 등 Python 패키지를 포함한다. Pod Identity·인증서·Secret 마운트·읽기 권한은 아직 미연결이며, 연결 설정 예시 파일도 자동 소비하지 않는다. RDS 읽기 동시 연결 수와 Kafka 인증/offset 및 출력·checkpoint 계약은 팀원과 별도로 맞춘다.
 
 ## 공식 근거
 

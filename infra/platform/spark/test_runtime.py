@@ -7,6 +7,13 @@ import yaml
 
 
 class RuntimeSafetyTests(unittest.TestCase):
+    def test_existing_namespace_does_not_replace_shared_quota(self):
+        objects = runtime.resources(namespace='pipelines', name_prefix='silver-gold-a', existing_namespace=True)
+        self.assertFalse(any(x['kind'] in {'Namespace', 'ResourceQuota', 'Job', 'Pod'} for x in objects))
+        self.assertEqual({x['metadata']['name'] for x in objects if x['kind'] == 'ServiceAccount'},
+                         {'silver-gold-a-submitter', 'silver-gold-a-driver', 'silver-gold-a-executor'})
+        self.assertTrue(all(x['metadata']['namespace'] == 'pipelines' for x in objects))
+
     def test_custom_namespace_prefix_and_pool_stay_consistent(self):
         options = dict(namespace='example-jobs', name_prefix='example-work', node_pool='example-spark-pool')
         objects = runtime.resources(**options)
@@ -95,6 +102,24 @@ class RuntimeSafetyTests(unittest.TestCase):
         driver = next(x for x in objects if x['kind'] == 'Role' and x['metadata']['name'] == 'spark-driver')
         self.assertFalse(any('networkpolicies' in r['resources'] for r in driver['rules']))
 
+    def test_collection_cleanup_is_driver_only_and_bindings_remain_scoped(self):
+        objects = runtime.resources(namespace='pipelines', name_prefix='silver-gold-a', existing_namespace=True)
+        for obj in objects:
+            for rule in obj.get('rules', []):
+                if 'deletecollection' in rule['verbs']:
+                    self.assertEqual(obj['kind'], 'Role')
+                    self.assertEqual(obj['metadata'], {'name': 'silver-gold-a-driver', 'namespace': 'pipelines'})
+                    self.assertEqual(rule, {'apiGroups': [''], 'resources': ['pods', 'configmaps'], 'verbs': ['deletecollection']})
+        driver = next(o for o in objects if o['kind'] == 'Role' and o['metadata']['name'] == 'silver-gold-a-driver')
+        self.assertTrue(any('deletecollection' in r['verbs'] for r in driver['rules']))
+        for binding in (o for o in objects if o['kind'] == 'RoleBinding'):
+            self.assertEqual(len(binding['subjects']), 1)
+            subject = binding['subjects'][0]
+            self.assertEqual(subject['kind'], 'ServiceAccount')
+            expected = ('airflow', 'airflow-scheduler') if binding['metadata']['name'].startswith('airflow-') else ('pipelines', binding['metadata']['name'])
+            self.assertEqual((subject['namespace'], subject['name']), expected)
+            self.assertEqual(binding['roleRef']['name'], binding['metadata']['name'])
+
     def test_shared_cpu_math_includes_the_waiting_submitter(self):
         sizing = yaml.safe_load((Path(__file__).parent / "cpu-sizing-candidates.yaml").read_text())
         saved = sum(v["current_m"] - v["candidate_m"] for v in sizing["candidates"].values())
@@ -109,9 +134,9 @@ class RuntimeSafetyTests(unittest.TestCase):
         job = runtime.submission_job("example.invalid/spark@sha256:" + "a" * 64, "local:///opt/jobs/main.py", "shared-trial", "shared-memory")
         self.assertEqual(job["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]["cpu"], "100m")
 
-    def test_shared_deployment_config_keeps_spark_capacity_disabled(self):
+    def test_shared_deployment_config_enables_approved_spark_capacity(self):
         path = Path(__file__).resolve().parents[2] / "stacks/compute/deployment.auto.tfvars.json"
-        self.assertIs(json.loads(path.read_text())["spark_node_pool"]["enabled"], False)
+        self.assertIs(json.loads(path.read_text())["spark_node_pool"]["enabled"], True)
 
     def test_two_executors_fit_development_request_and_namespace_budgets(self):
         conf = dict(line.split(maxsplit=1) for line in runtime.properties("dedicated").splitlines())

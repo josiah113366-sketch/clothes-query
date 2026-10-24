@@ -12,8 +12,22 @@ RUN rm -rf /opt/cruise-control /opt/kafka-exporter \
         pcre2-syntax-10.40-7.el9_8.noarch \
     && microdnf clean all
 # Maven Central artifact also checked against its published SHA-512 during preparation.
-ADD --checksum=sha256:660673cbabd2f269da21409208ebd0f0d9977bd92e824fc9daa272f240e88e51 https://repo.maven.apache.org/maven2/io/debezium/debezium-connector-postgres/3.7.0.Final/debezium-connector-postgres-3.7.0.Final-plugin.tar.gz /tmp/postgres-plugin.tar.gz
-RUN mkdir -p /opt/kafka/plugins/postgres \
+# Download inside the build container, not BuildKit's HTTP ADD cache. Retry a
+# failed transfer/checksum together; never extract bytes that failed the pin.
+RUN set -eu; \
+    for attempt in 1 2 3; do \
+        if curl --proto '=https' --proto-redir '=https' --fail --location --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --output /tmp/postgres-plugin.tar.gz \
+            https://repo.maven.apache.org/maven2/io/debezium/debezium-connector-postgres/3.7.0.Final/debezium-connector-postgres-3.7.0.Final-plugin.tar.gz \
+            && printf '%s  %s\n' 660673cbabd2f269da21409208ebd0f0d9977bd92e824fc9daa272f240e88e51 /tmp/postgres-plugin.tar.gz | sha256sum -c -; then \
+            break; \
+        fi; \
+        rm -f /tmp/postgres-plugin.tar.gz; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        sleep "$attempt"; \
+    done \
+    && mkdir -p /opt/kafka/plugins/postgres \
     && tar -xzf /tmp/postgres-plugin.tar.gz -C /opt/kafka/plugins/postgres --strip-components=1 \
     && chown -R 1001:0 /opt/kafka/plugins/postgres \
     && rm /tmp/postgres-plugin.tar.gz

@@ -1,0 +1,110 @@
+{{- if .Values.nodeMetrics.enabled }}
+{{- if not (regexMatch "^.+@sha256:[a-f0-9]{64}$" .Values.nodeMetrics.image) }}
+{{- fail "Node metrics image must be pinned by sha256 digest" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-node-state
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clothes-query-monitoring-node-state
+rules:
+  - apiGroups: [""]
+    resources: [nodes, pods]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clothes-query-monitoring-node-state
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-node-state
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: clothes-query-monitoring-node-state
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clothes-query-monitoring-kubelet-read
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [nodes/metrics]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clothes-query-monitoring-kubelet-read
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-prometheus
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: clothes-query-monitoring-kubelet-read
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-node-state
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: monitoring-node-state}
+  template:
+    metadata:
+      labels: {app: monitoring-node-state}
+    spec:
+      serviceAccountName: monitoring-node-state
+      nodeSelector:
+        karpenter.sh/nodepool: {{ .Values.nodePool.name }}
+      tolerations:
+        - key: {{ .Values.nodePool.taintKey }}
+          operator: Equal
+          value: {{ .Values.nodePool.taintValue }}
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: kube-state-metrics
+          image: {{ .Values.nodeMetrics.image }}
+          args:
+            - --resources=nodes,pods
+            - --metric-labels-allowlist=nodes=[karpenter.sh/nodepool,node.kubernetes.io/instance-type]
+            - --metric-allowlist=kube_node_info,kube_node_labels,kube_node_status_condition,kube_node_status_allocatable,kube_pod_container_resource_requests,kube_pod_status_phase
+          resources:
+            {{- toYaml .Values.nodeMetrics.resources | nindent 12 }}
+          ports: [{name: http, containerPort: 8080}, {name: telemetry, containerPort: 8081}]
+          readinessProbe: {httpGet: {path: /readyz, port: telemetry}, initialDelaySeconds: 5}
+          livenessProbe: {httpGet: {path: /livez, port: telemetry}, initialDelaySeconds: 30}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-node-state
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector: {app: monitoring-node-state}
+  ports: [{name: http, port: 8080, targetPort: http}]
+{{- end }}

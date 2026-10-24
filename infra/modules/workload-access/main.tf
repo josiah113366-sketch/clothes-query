@@ -28,13 +28,18 @@ resource "aws_iam_role_policy" "s3" {
         Action   = sort(tolist(actions))
         Resource = ["${var.bucket_arn}/${prefix}*"]
       }],
+      [for path in sort(tolist(each.value.s3_directory_reads)) : {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${var.bucket_arn}/${path}"]
+      }],
       [
         {
           Effect   = "Allow"
           Action   = ["s3:ListBucket"]
           Resource = [var.bucket_arn]
           Condition = {
-            StringLike = { "s3:prefix" = [for prefix in sort(keys(each.value.s3_access)) : "${prefix}*"] }
+            StringLike = { "s3:prefix" = concat([for prefix in sort(keys(each.value.s3_access)) : "${prefix}*"], sort(tolist(each.value.s3_directory_reads))) }
           }
         },
         { Effect = "Allow", Action = ["s3:GetBucketLocation"], Resource = [var.bucket_arn] }
