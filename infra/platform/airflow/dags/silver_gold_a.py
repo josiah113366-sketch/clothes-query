@@ -60,6 +60,7 @@ def silver_gold_a_batch():
         "spark.dynamicAllocation.minExecutors": "1",
         "spark.dynamicAllocation.initialExecutors": "1",
         "spark.dynamicAllocation.maxExecutors": "2",
+        # infra/platform/spark/runtime.py의 dedicated 자원 프로필을 따른다.
         "spark.driver.memory": "512m", "spark.executor.memory": "1g",
         "spark.driver.memoryOverhead": "512m", "spark.executor.memoryOverhead": "512m",
         "spark.kubernetes.driver.request.cores": "250m",
