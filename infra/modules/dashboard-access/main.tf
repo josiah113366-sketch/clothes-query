@@ -7,7 +7,7 @@ locals {
   glue       = "arn:${local.partition}:glue:ap-northeast-1:${local.account}"
   bucket     = trimprefix(var.bucket_arn, "arn:${local.partition}:s3:::")
   cluster    = "arn:${local.partition}:eks:ap-northeast-1:${local.account}:cluster/${var.cluster_name}"
-  data_paths = ["gold_b/anomaly/", "gold_b/reprocess_events/", "agent/investigation_reports/", var.model_registry_prefix]
+  data_paths = ["gold_b/anomaly/", "gold_b/reprocess_events/", "agent/investigation_reports/", var.model_registry_prefix, "bronze_v2/reviews/"]
   pipeline_status_tables = [
     "gold_b/bronze_lag_snapshots", "gold_b/topic_messages", "gold_b/payment_events", "gold_b/malformed_events",
     "silver/silver_runs", "gold_a/gold_runs"
