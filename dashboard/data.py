@@ -442,7 +442,7 @@ def get_bronze_lag(minutes: int = 180) -> pd.DataFrame:
 @dataset(_TTL_B)
 def get_payment_attempts(hours: int = 6) -> pd.DataFrame:
     """결제 시도 한 건 = 한 줄 (gold_b.payment_attempts 뷰). 컬럼: payment_id, order_id, attempt_no, pg,
-    status, failure_code, failure_cause(PG/CUSTOMER/UNKNOWN), completed_at(UTC), loaded_at(UTC), copies.
+    status, failure_code, failure_cause(PG/CUSTOMER/UNKNOWN), completed_at(UTC), loaded_at(UTC).
     failure_cause 는 뷰가 분류한다. 실패 = PG + CUSTOMER + UNKNOWN 이 항상 성립한다."""
     rng = np.random.default_rng(_SEED + 7)
     n = hours * 90
@@ -479,7 +479,6 @@ def get_payment_attempts(hours: int = 6) -> pd.DataFrame:
             "failure_cause": cause,
             "completed_at": completed,
             "loaded_at": completed + pd.Timedelta(seconds=40),
-            "copies": 1,
         }
     ).sort_values("completed_at")
 
@@ -1142,9 +1141,64 @@ def _real_bronze_lag(minutes: int = 180) -> pd.DataFrame:
     return df
 
 
+MALFORMED_HOURS = 6  # 형식 오류 화면이 읽는 최근 시간 (TODO B1)
+REPROCESS_DAYS = 7  # 재처리 이력 화면이 읽는 최근 날짜 (TODO B1)
+
+
+def _real_payment_attempts(hours: int = 6, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.payment_attempts 뷰의 최근 hours 시간(completed_at). 보류 안 된 결제 하나 = 한 줄.
+    뷰가 원장 전체를 읽어서 시간 폴더 조건은 쓸 수 없다. 대시보드 역할에 뷰(payment_states·payment_attempts) 읽기 권한이 필요하다."""
+    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(hours=hours)
+    df = (query or _athena)(
+        "SELECT payment_id, order_id, attempt_no, pg, status, failure_code, failure_cause,"
+        " completed_at, loaded_at FROM gold_b.payment_attempts"
+        f" WHERE completed_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # completed_at 은 UTC
+        " ORDER BY completed_at"
+    )
+    df["attempt_no"] = pd.to_numeric(df["attempt_no"], errors="coerce")
+    for c in ("completed_at", "loaded_at"):
+        df[c] = _utc(df[c])
+    return df
+
+
+def _real_malformed_events(*, query=None, now=None) -> pd.DataFrame:
+    """gold_b.malformed_events 의 최근 MALFORMED_HOURS 시간(kafka_timestamp). 오류 하나 = 한 줄."""
+    end = now or pd.Timestamp.now(tz="UTC")
+    start = end - pd.Timedelta(hours=MALFORMED_HOURS)
+    df = (query or _athena)(
+        "SELECT topic, kafka_partition, kafka_offset, kafka_timestamp, field, reason, rule_version"
+        " FROM gold_b.malformed_events"
+        f" WHERE ({_hour_partitions(start, end)})"
+        f" AND kafka_timestamp >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # kafka_timestamp 는 UTC
+        " ORDER BY kafka_timestamp"
+    )
+    for c in ("kafka_partition", "kafka_offset"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["kafka_timestamp"] = _utc(df["kafka_timestamp"])
+    return df
+
+
+def _real_reprocess_events(*, query=None, now=None) -> pd.DataFrame:
+    """gold_b.reprocess_events 의 최근 REPROCESS_DAYS 일. 시간 폴더가 없는 작은 표다. at 칸은 따옴표로 감싼다."""
+    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(days=REPROCESS_DAYS)
+    df = (query or _athena)(
+        'SELECT request_id, step, "at", actor, window_start, window_end, rule_version, source'
+        " FROM gold_b.reprocess_events"
+        f" WHERE \"at\" >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"
+        ' ORDER BY "at"'
+    )
+    for c in ("at", "window_start", "window_end"):
+        df[c] = _utc(df[c])
+    return df
+
+
 if ATHENA_WORKGROUP:
     # 파이프라인 상태 > 지연·점검 탭도 실데이터를 쓰게 한다 (못 읽으면 그 탭은 기존처럼 더미로 대체)
     _REAL["get_bronze_lag"] = _real_bronze_lag
+    # 결제 관제·형식 오류·재처리 이력 (TODO B1). 못 읽거나 결과가 없으면 각 화면은 더미로 대체한다
+    _REAL["get_payment_attempts"] = _real_payment_attempts
+    _REAL["get_malformed_events"] = _real_malformed_events
+    _REAL["get_reprocess_events"] = _real_reprocess_events
 
 
 def _ago(sec: float) -> str:

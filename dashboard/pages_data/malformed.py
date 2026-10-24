@@ -68,4 +68,7 @@ with ui.panel("사유별 오류 건수", "필드별 · 사유 쌓기"):
 
 with st.expander("깨진 메시지 목록 (위치 기준)"):
     st.dataframe(msg, hide_index=True, width="stretch")
-st.caption("※ 현재는 더미 데이터입니다.")
+if "get_malformed_events" in data.USING_DUMMY:
+    st.caption("※ 현재는 더미 데이터입니다.")
+else:
+    st.caption(f"최근 {data.MALFORMED_HOURS}시간의 형식 오류입니다.")
