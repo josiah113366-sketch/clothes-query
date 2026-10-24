@@ -1,0 +1,5 @@
+{
+  "source_revision": "9e2fe98abc8f1a71c11c050acae3043b94a9f9ba",
+  "platform": "linux/amd64",
+  "image": "827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/gold-b-lag-collector@sha256:fd040c0a05843c730ff62b4294edb7a851dd8afe6ec905a3cdc8fb77572d694f"
+}

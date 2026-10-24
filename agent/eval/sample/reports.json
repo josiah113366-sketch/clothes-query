@@ -1,0 +1,69 @@
+[
+  {
+    "report_id": "rep-1",
+    "anomaly_id": "a-pg-1",
+    "cause_layer": "PAYMENT",
+    "claims": [
+      {
+        "text": "PG_A 실패가 PG_TIMEOUT으로 쏠림",
+        "kind": "FACT",
+        "evidence": [
+          {
+            "tool": "payment_failure_codes"
+          }
+        ]
+      },
+      {
+        "text": "PG_A 일시 장애로 보임",
+        "kind": "FACT",
+        "evidence": [
+          {
+            "tool": "payment_summary"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "report_id": "rep-2",
+    "anomaly_id": "a-lag-1",
+    "cause_layer": "INGEST",
+    "claims": [
+      {
+        "text": "payments 지연 1500초",
+        "kind": "FACT",
+        "evidence": [
+          {
+            "tool": "bronze_lag"
+          }
+        ]
+      },
+      {
+        "text": "S3 Sink가 멈춘 것으로 보임",
+        "kind": "FACT",
+        "evidence": []
+      }
+    ]
+  },
+  {
+    "report_id": "rep-3",
+    "anomaly_id": "a-dup-1",
+    "cause_layer": "INGEST",
+    "claims": [
+      {
+        "text": "한 주문에 성공 결제 2건",
+        "kind": "FACT",
+        "evidence": [
+          {
+            "tool": "duplicate_success_orders"
+          }
+        ]
+      },
+      {
+        "text": "적재가 두 번 된 듯함",
+        "kind": "FACT",
+        "evidence": []
+      }
+    ]
+  }
+]

@@ -1,12 +1,13 @@
 """화면에 쓰는 데이터를 가져오는 함수 모음.
 
-지금은 **가짜(더미) 데이터**다. 테이블 이름과 컬럼은 노션 설계 문서를 그대로 따랐다.
+Gold A는 설정에 따라 Athena 완료 실행 또는 미리보기 데이터를 읽는다.
+Gold B 등 기존 미리보기 함수의 연결 방식은 유지한다.
   - 「Gold A 설계 정리」 -> order_sales_hourly, product_sales_daily, funnel_session_product,
                            funnel_daily, review_product_daily, review_aspect_daily
   - 「Gold B 칼럼 구성」 -> payment_attempts(뷰), malformed_messages(뷰), malformed_events,
                            bronze_lag_snapshots, reprocess_events
   - gold_b.anomaly 는 탐지 담당이 정의하는 표라서 컬럼은 임시(자리표시)다.
-실데이터 연결 때는 **각 함수 본문만** Athena 조회로 바꾸면 되고, 페이지 코드는 그대로 둔다.
+Gold A 실연결은 gold_a_io.py를 호출하며 빈 결과·조회 실패를 더미로 대체하지 않는다.
   Gold A -> S3 gold_a (Athena),  Gold B -> S3 clothes-query-datalake/gold_b/ (Athena DB `gold_b`)
 
 시간 규칙 (노션 문서 기준)
@@ -83,16 +84,63 @@ USING_DUMMY: set = set()
 _log = logging.getLogger(__name__)
 
 
+def gold_a_real() -> bool:
+    """Gold A는 실연결 모드에서 빈 결과나 실패를 더미로 바꾸지 않는다."""
+    mode = os.getenv(
+        "GOLD_A_DATA_SOURCE", "athena" if os.getenv("GOLD_A_ATHENA_WORKGROUP") else "dummy"
+    )
+    if mode not in {"athena", "dummy"}:
+        raise ValueError("GOLD_A_DATA_SOURCE는 athena 또는 dummy여야 합니다.")
+    return DATA_SOURCE != "dummy" and mode == "athena"
+
+
+def gold_reader():
+    from gold_a_io import GoldAReader
+
+    if "_gold_a_reader" not in st.session_state:
+        import boto3
+
+        st.session_state["_gold_a_reader"] = GoldAReader(
+            boto3.client("athena", region_name=os.getenv("AWS_REGION", "ap-northeast-1")),
+            os.getenv("GOLD_A_ATHENA_WORKGROUP", ""),
+            database=os.getenv("GOLD_A_DATABASE", "gold_a"),
+        )
+    return st.session_state["_gold_a_reader"]
+
+
+def gold_call(method, *args, **kwargs):
+    from gold_a_io import GoldAError
+
+    try:
+        return getattr(gold_reader(), method)(*args, **kwargs)
+    except (GoldAError, ValueError, TypeError, KeyError) as error:
+        st.error(
+            str(error)
+            if isinstance(error, GoldAError)
+            else "Gold A 조회 결과가 배포 명세와 다릅니다."
+        )
+        st.stop()
+    except Exception:  # noqa: BLE001 -- SDK 초기화 실패도 더미로 대체하지 않는다.
+        st.error("Gold A 연결에 실패했습니다. AWS 역할·리전·작업그룹 설정을 확인해 주세요.")
+        st.stop()
+
+
+def product_options():
+    if gold_a_real():
+        return gold_call("products", st.session_state.get("_gold_a_channels", ("trade",)))
+    return PRODUCTS
+
+
 def dataset(ttl: int):
-    """get_* 함수에 붙이는 데코레이터. 캐시(ttl초) + '실데이터 실패/없음 -> 더미' 대체를 한꺼번에 처리한다.
-    데코레이터가 붙은 함수 본문은 '더미 생성'이다."""
+    """Gold A 실연결은 실행별 조회, 기존 경로는 캐시·미리보기 동작을 유지한다.
+    데코레이터가 붙은 함수 본문은 더미 생성이다."""
 
     def deco(dummy_fn):
         name = dummy_fn.__name__
 
         @st.cache_data(ttl=ttl)
         @functools.wraps(dummy_fn)
-        def wrapper(*args, **kwargs):
+        def cached(*args, **kwargs):
             real = _REAL.get(name)
             if DATA_SOURCE != "dummy" and real is not None:
                 try:
@@ -104,6 +152,22 @@ def dataset(ttl: int):
                     _log.exception("실데이터 조회 실패, 더미 사용: %s", name)
             USING_DUMMY.add(name)
             return dummy_fn(*args, **kwargs)
+
+        @functools.wraps(dummy_fn)
+        def wrapper(*args, **kwargs):
+            from gold_a_io import TABLES
+
+            table = name.removeprefix("get_")
+            if table in TABLES and gold_a_real():
+                USING_DUMMY.discard(name)
+                if table == "funnel_session_product":
+                    import inspect
+
+                    bound = inspect.signature(dummy_fn).bind(*args, **kwargs)
+                    bound.apply_defaults()
+                    return gold_call("read", table, **bound.arguments)
+                return gold_call("read", table, *args, **kwargs)
+            return cached(*args, **kwargs)
 
         return wrapper
 

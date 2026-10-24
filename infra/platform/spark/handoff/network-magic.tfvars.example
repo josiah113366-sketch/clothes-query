@@ -1,0 +1,9 @@
+# Merge with existing network actions; do not remove other workloads' requirements.
+# Transport only; IAM limits deletion to magic objects and approved test-run parts.
+additional_s3_endpoint_actions = [
+  "s3:AbortMultipartUpload",
+  "s3:ListMultipartUploadParts",
+  "s3:DeleteObject",
+  "s3:ListBucketMultipartUploads"
+]
+# Bucket-level upload metadata listing is required by the confirmed committer.

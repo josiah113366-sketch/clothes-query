@@ -13,6 +13,12 @@ kafka:
     requests: {cpu: "500m", memory: "1536Mi"}
     limits: {cpu: "1", memory: "1536Mi"}
   heapMi: 512
+  # Keep the only broker on its existing node during voluntary consolidation.
+  # Planned broker maintenance must explicitly review/release this protection.
+  podDisruptionBudgetMaxUnavailable: 0
+  entityOperatorResources:
+    requests: {cpu: "50m", memory: "256Mi"}
+    limits: {cpu: "500m", memory: "384Mi"}
 # Set retentionMs: 604800000 on every business topic in runtime values.
 # Topic-level retention overrides retentionHours; topics remain unspecified here.
 connect:
@@ -22,3 +28,12 @@ connect:
     requests: {cpu: "250m", memory: "1Gi"}
     limits: {cpu: "1", memory: "1Gi"}
   heapMi: 512
+metrics:
+  lagExporter:
+    resources:
+      requests: {cpu: "25m", memory: "128Mi"}
+      limits: {cpu: "500m", memory: "256Mi"}
+ui:
+  resources:
+    requests: {cpu: "25m", memory: "256Mi"}
+    limits: {cpu: "500m", memory: "512Mi"}

@@ -21,7 +21,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         seccompProfile: {type: RuntimeDefault}
-      # Athena/S3 읽기가 필요해지면 Pod Identity 를 연결한 ServiceAccount 를 만든 뒤 주석을 푼다.
+      # dashboard-access 스택의 기존 Pod Identity 역할을 사용한다.
       serviceAccountName: approval-dashboard
       containers:
         - name: dashboard
@@ -40,11 +40,11 @@ spec:
             # 모델 버전·패치노트(S3, 팀 데이터 버킷). Pod Identity 에 이 경로 읽기 권한이 있어야 실제로 읽힌다.
             # 권한이 없거나 읽기에 실패하면 더미로 대체한다.
             - {name: MODEL_REGISTRY_URI, value: "s3://clothes-query-datalake/review-score/model-registry/releases/"}
-            # 재처리 승인 화면: APPROVAL_ATHENA_WORKGROUP 이 없으면 연습 모드(가짜 저장소, 바깥에 아무것도 쓰지 않음)로 돈다.
-            # 실제 연결(진짜 Athena 읽기·쓰기, Airflow DAG 호출)은 대시보드용 workgroup, Pod Identity 권한, Airflow 접속 Secret 이 생긴 뒤 주석을 푼다.
-            # 실제 모드에서는 이메일 아이디 계정(make_test_accounts.py --add)으로 로그인해야 승인할 수 있다.
+            # 기존 전용 workgroup과 Secret을 연결한다. 비밀번호·토큰은 Git에 두지 않는다.
+            # 실제 승인에는 이메일 아이디 계정을 사용하며, DAG ID·완료 계약은 업무 담당이 관리한다.
             - {name: APPROVAL_ATHENA_WORKGROUP, value: "clothes-query-dev-dashboard"}
             - {name: AWS_REGION, value: "ap-northeast-1"}
+            - {name: AWS_DEFAULT_REGION, value: "ap-northeast-1"}
             - {name: AIRFLOW_API_URL, value: "http://airflow-api-server.airflow.svc.cluster.local:8080"}
             - name: AIRFLOW_API_USER
               valueFrom: {secretKeyRef: {name: airflow-api-client, key: username}}
@@ -60,9 +60,9 @@ spec:
             httpGet: {path: /_stcore/health, port: http}
             initialDelaySeconds: 15
             periodSeconds: 20
-          # 노드가 1대(24GiB 한도)라 작게 잡았다. 실제 사용량을 보고 조정한다.
+          # 개발 부하에 맞춘 CPU 예약이며, 메모리와 CPU 상한은 유지한다.
           resources:
-            requests: {cpu: 250m, memory: 512Mi}
+            requests: {cpu: 100m, memory: 512Mi}
             limits: {cpu: "1", memory: 1Gi}
           securityContext:
             allowPrivilegeEscalation: false

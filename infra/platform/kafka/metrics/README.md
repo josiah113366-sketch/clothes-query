@@ -1,5 +1,7 @@
 # Kafka·Connect 지표 노출
 
+2026-10-22 후속: 기존 WAS 노드에 [개발용 Prometheus·Grafana](../../monitoring/README.md)를 추가해 실제 Kafka·Connect·lag 지표 수집을 확인했다. 아래 수집기 미선정 문구는 초기 준비 이력이며, 현재 알림 수신 채널은 여전히 미연결이다.
+
 결정: 인프라 범위에서 Strimzi의 JMX Prometheus Exporter와 선택적 Kafka Exporter를 준비한다. 기본 `metrics.enabled=false`, `metrics.lagExporter.enabled=false`다. 수집 서버·장기 저장·대시보드·알림 채널은 아직 선택/배포하지 않았다.
 
 runtime의 비공개 `runtime.local.yaml`에 다음을 추가해 사용할 수 있다. 아래 regex는 예시이므로 실제 업무 토픽·consumer group으로 바꾼다.

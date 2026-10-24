@@ -1,0 +1,107 @@
+{{- if .Values.alertmanager.enabled }}
+{{- if not (regexMatch "^arn:aws:sns:ap-northeast-1:[0-9]{12}:clothes-query-dev-infra-alerts$" .Values.alertmanager.topicArn) }}
+{{- fail "Supply the Tokyo infrastructure-alerts SNS topic ARN" }}
+{{- end }}
+{{- if not (regexMatch "^.+@sha256:[a-f0-9]{64}$" .Values.alertmanager.image) }}
+{{- fail "Alertmanager image must be pinned by sha256 digest" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-alertmanager
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-alertmanager
+  namespace: {{ .Release.Namespace }}
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: infra-email
+      group_by: [alertname, job]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      - name: infra-email
+        sns_configs:
+          - topic_arn: {{ .Values.alertmanager.topicArn | quote }}
+            sigv4:
+              region: ap-northeast-1
+            send_resolved: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-alertmanager
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: monitoring-alertmanager}
+  template:
+    metadata:
+      labels: {app: monitoring-alertmanager}
+      annotations:
+        checksum/config: {{ toJson .Values.alertmanager | sha256sum }}
+    spec:
+      serviceAccountName: monitoring-alertmanager
+      automountServiceAccountToken: false
+      nodeSelector:
+        karpenter.sh/nodepool: {{ .Values.nodePool.name }}
+      tolerations:
+        - key: {{ .Values.nodePool.taintKey }}
+          operator: Equal
+          value: {{ .Values.nodePool.taintValue }}
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: alertmanager
+          image: {{ .Values.alertmanager.image }}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=
+            - --data.retention=120h
+          env:
+            - {name: AWS_REGION, value: ap-northeast-1}
+            - {name: AWS_DEFAULT_REGION, value: ap-northeast-1}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+          ports: [{name: http, containerPort: 9093}]
+          readinessProbe: {httpGet: {path: /-/ready, port: http}, initialDelaySeconds: 5}
+          livenessProbe: {httpGet: {path: /-/healthy, port: http}, initialDelaySeconds: 15}
+          resources:
+            {{- toYaml .Values.alertmanager.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager, readOnly: true}
+            - {name: data, mountPath: /alertmanager}
+      volumes:
+        - name: config
+          configMap: {name: monitoring-alertmanager}
+        - name: data
+          emptyDir: {sizeLimit: 32Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-alertmanager
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector: {app: monitoring-alertmanager}
+  ports: [{name: http, port: 9093, targetPort: http}]
+{{- end }}

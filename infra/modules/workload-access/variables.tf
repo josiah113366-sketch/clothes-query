@@ -15,11 +15,20 @@ variable "s3_endpoint_actions" {
 variable "bindings" {
   description = "Explicit namespace/ServiceAccount and prefix-specific object actions; empty creates no roles."
   type = map(object({
-    namespace       = string
-    service_account = string
-    s3_access       = map(set(string))
+    namespace          = string
+    service_account    = string
+    s3_access          = map(set(string))
+    s3_directory_reads = optional(set(string), [])
   }))
   default = {}
+  validation {
+    condition = alltrue([for binding in values(var.bindings) : alltrue([
+      for path in binding.s3_directory_reads :
+      contains(keys(binding.s3_access), "${path}/") &&
+      contains(try(binding.s3_access["${path}/"], []), "s3:GetObject")
+    ])])
+    error_message = "Directory probes must name an existing readable prefix without its trailing slash."
+  }
   validation {
     condition = alltrue([for key, binding in var.bindings :
       length(key) <= 32 && can(regex("^[a-z][a-z0-9-]*$", key)) &&

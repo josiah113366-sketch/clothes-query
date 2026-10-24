@@ -1,0 +1,11 @@
+**
+!infra/
+!infra/platform/
+!infra/platform/bronze-lag-collector/
+!infra/platform/bronze-lag-collector/Dockerfile
+!pipelines/
+!pipelines/gold_b/
+!pipelines/gold_b/requirements.txt
+!pipelines/gold_b/__init__.py
+!pipelines/gold_b/collector/
+!pipelines/gold_b/collector/*.py

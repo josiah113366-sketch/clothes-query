@@ -1,0 +1,11 @@
+# Review-only first manual trade validation. Never loaded automatically.
+# This grants no runtime node or job and must follow the endpoint transport update.
+enabled                        = true
+namespace                      = "pipelines"
+service_account_prefix         = "silver-gold-a"
+allow_bucket_multipart_listing = true
+reference_object_arns = [
+  "arn:aws:s3:::hm-ecommerce-data/seed_v2/product_design/product_design.parquet",
+  "arn:aws:s3:::hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"
+]
+rollback_run_ids = ["trade-fixed-normal-20261023", "trade-fixed-reference-wait-20261023"]

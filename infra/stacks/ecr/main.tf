@@ -2,4 +2,7 @@ module "ecr" {
   source                    = "../../modules/ecr"
   name                      = "clothes-query-dev"
   enable_connect_repository = var.enable_connect_repository
+  enable_spark_repositories = var.enable_spark_repositories
+  enable_gold_b_repository  = var.enable_gold_b_repository
+  spark_publisher_user_arns = var.spark_publisher_user_arns
 }

@@ -29,3 +29,10 @@ variable "investigation_write_prefixes" {
   type    = set(string)
   default = []
 }
+variable "investigation_bedrock_profiles" {
+  type = map(object({
+    profile_arn = string
+    model_arns  = set(string)
+  }))
+  default = {}
+}

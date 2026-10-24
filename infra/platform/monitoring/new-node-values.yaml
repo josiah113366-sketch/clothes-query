@@ -1,0 +1,6 @@
+# Optional alternative only; do not use for the current shared-WAS deployment.
+# Applying this overlay can provision a billable t3a.medium node.
+nodePool:
+  create: true
+  name: clothes-query-dev-monitoring
+  taintValue: monitoring

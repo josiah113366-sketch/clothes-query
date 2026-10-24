@@ -1,6 +1,6 @@
 # compute stack
 
-2026-10-22 미적용 준비: `spark_node_pool.enabled=false`가 공유 auto tfvars와 기본값에 들어 있다. 기존 명령으로 Spark 용량이 자동 추가되지 않는다. [Spark 준비](../../platform/spark/README.md)의 전용/공용 메모리 확대 `.tfvars.example`은 검토용이며 아직 실제 apply 대상으로 승인하지 않았다. node pool 출력은 비활성일 때 null이다.
+2026-10-23 전용 풀 연결 요청: 공유 auto tfvars의 `spark_node_pool.enabled=true`로 `clothes-query-dev-compute-spark`를 활성화한다. 모듈 기본값은 계속 비활성이다. Spark 풀은 t3a.large On-Demand, 2 vCPU/8GiB 한도, 전용 taint, WhenEmpty/10분 정리이며 고정 replicas는 없다. 검증 Job은 일시정지를 유지한다. [작업 기록](../../../docs/tasks/infra-spark-nodepool-enable.md)을 참고한다. 공용 노드 메모리 확대 예시는 적용하지 않는다.
 
 EKS Auto Mode의 노드 타입, 증설 한도 및 자동 정리 설정을 관리한다.
 
