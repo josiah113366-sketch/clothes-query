@@ -2,6 +2,7 @@
 
 ## 2026-10-24 최신 후속
 
+- 퍼널 실패 실행 `manual__funnels-full-20261024T070901Z`의 권한을 보완했다. 두 Spark 역할의 클릭 입력·클릭/퍼널 출력·실행별 정리, Driver의 기존 퍼널 Glue 표 2개 조회/파티션 등록과 namespace pods/configmaps deletecollection을 적용했다. 기존 이미지·역할·노드·DAG 상태를 유지했고 업무 재실행은 담당자가 한다. 새 최종 운영 명세의 리뷰·대시보드 연결은 별도 후속이며 이 권한 적용으로 완료된 것으로 취급하지 않는다. [범위와 적용 기록](tasks/infra-silver-funnel-access.md)을 따른다.
 - Gold B 실제 이미지로 Kafka TLS·S3 원장·checkpoint 저장과 정상 재시작을 검증했다. 3개 배치 총 59,972건, 결제 원장 474건, 메시지 위치 중복 0이며 이전 offset부터 이어 읽었다. S3A 폴더 조회 403은 두 적재 역할의 정확한 경로 읽기로 보완했다. 실행 설정·Airflow runtime을 연결했고 시험 Pod·노드를 정리해 Spark 0대로 복귀했다. 원장·checkpoint는 보존하며 상시 운영·배치 동시 실행·강제 장애 복구·재처리/합치기 실행은 아직이다. [실측 기록](tasks/infra-gold-b-checkpoint.md)을 우선한다.
 - Gold B 최종 이미지 `2a8acd10`·커밋 `7d5ebd16`의 ECR 존재와 태그 일치를 확인했다. 사용자가 확정한 `gold_b/_checkpoints/streaming_ingest/` 권한을 적재 Driver/Executor 정책 2개에 적용했고 후속 plan 변경은 0이다. 이미지·checkpoint 포함 runtime 초안을 준비했으며 상시 적재 실행·실제 체크포인트 재시작 검증은 아직이다. [적용 기록](tasks/infra-gold-b-checkpoint.md)을 따른다.
 - #105 제공 SQL로 조사 단독 시험을 완료했다. 예약 실행·실제 조사 Pod exit 0, JP Haiku 호출 4회와 리포트 1건 저장이 통과했다. 원인 층 UNKNOWN은 담당자 허용 기준이다. 같은 시험 ID에 RESOLVED를 추가하고 조사 DAG는 다시 paused로 복원했다. 승인 화면 내부 API·토큰 발급과 재처리 DAG 2개 조회도 확인했다. Sink 정지 리허설은 공동 일정 대기이며 시작하지 않았다. [시험·전달 기록](tasks/infra-investigation-trial.md)을 따른다.

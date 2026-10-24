@@ -2,6 +2,20 @@ variable "enabled" {
   type    = bool
   default = false
 }
+variable "enable_funnel_access" {
+  description = "Opt-in confirmed clickstream input, clicks/funnels outputs and two existing Gold A tables."
+  type        = bool
+  default     = false
+}
+variable "funnel_rollback_run_ids" {
+  description = "Approved funnel run IDs whose partially committed Parquet files may be rolled back."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for id in var.funnel_rollback_run_ids : can(regex("^[A-Za-z0-9_-]{1,100}$", id))])
+    error_message = "Use literal funnel run IDs without wildcards or path separators."
+  }
+}
 variable "enable_trade_publication" {
   description = "Opt-in Silver/Gold trade publication and narrowly scoped R6 reads; does not grant schema creation or reviews access."
   type        = bool

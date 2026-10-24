@@ -17,6 +17,42 @@ locals {
   glue_base      = "arn:aws:glue:ap-northeast-1:${data.aws_caller_identity.current.account_id}"
   silver_tables  = ["silver_runs", "order_amount_checks"]
   gold_tables    = ["gold_runs", "order_sales_hourly_runs", "product_sales_daily_runs", "refresh_holds_runs"]
+  funnel_enabled = var.enabled && var.enable_funnel_access
+  funnel_input   = "bronze_v2/clickstream/"
+  funnel_outputs = ["silver/runtime/clicks/", "gold_a/runtime/funnels/"]
+  funnel_tables  = ["funnel_daily_runs", "funnel_session_product_runs"]
+}
+
+resource "aws_iam_role_policy" "funnel_s3" {
+  for_each = local.funnel_enabled ? aws_iam_role.this : {}
+  name     = "funnel-input-output-and-multipart"
+  role     = each.value.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      { Sid = "ClickstreamRead", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/${local.funnel_input}*"] },
+      { Sid = "FunnelOutputAndMultipart", Effect = "Allow", Action = local.object_actions, Resource = [for p in local.funnel_outputs : "${var.bucket_arn}/${p}*"] },
+      { Sid = "DirectoryProbes", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in concat([local.funnel_input], local.funnel_outputs) : "${var.bucket_arn}/${trimsuffix(p, "/")}"] },
+      { Sid = "FunnelScopedListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = flatten([for p in concat([local.funnel_input], local.funnel_outputs) : ["${p}*", trimsuffix(p, "/")]]) } } },
+      { Sid = "FunnelMagicWorkingObjectsOnly", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in local.funnel_outputs : "${var.bucket_arn}/${p}runs/*/*/__magic_job-*/*"] }
+      ], length(var.funnel_rollback_run_ids) > 0 ? [
+      { Sid = "ApprovedFunnelParquetRollback", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = flatten([for p in concat(["silver/runtime/trade/"], local.funnel_outputs) : [for run_id in sort(tolist(var.funnel_rollback_run_ids)) : "${var.bucket_arn}/${p}runs/${run_id}/*/part-*.parquet"]]) }
+    ] : [])
+  })
+}
+
+resource "aws_iam_role_policy" "funnel_glue" {
+  count = local.funnel_enabled ? 1 : 0
+  name  = "funnel-existing-tables-publication"
+  role  = aws_iam_role.this["driver"].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "FunnelTableReadAndPartitionRegistration", Effect = "Allow"
+      Action   = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition", "glue:CreatePartition"]
+      Resource = concat(["${local.glue_base}:catalog", "${local.glue_base}:database/gold_a"], [for t in local.funnel_tables : "${local.glue_base}:table/gold_a/${t}"])
+    }]
+  })
 }
 
 resource "aws_iam_role_policy" "bronze_v2" {

@@ -14,6 +14,14 @@ variable "enabled" {
   type    = bool
   default = false
 }
+variable "enable_funnel_access" {
+  type    = bool
+  default = false
+}
+variable "funnel_rollback_run_ids" {
+  type    = set(string)
+  default = []
+}
 variable "namespace" {
   type     = string
   default  = null

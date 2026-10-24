@@ -24,6 +24,10 @@ class TradeRuntimeTests(unittest.TestCase):
         self.assertNotIn('image', config)
         self.assertFalse(any(o['kind'] in {'Pod', 'Job', 'CronJob', 'NodePool', 'ResourceQuota', 'ClusterRole'} for o in objects))
         self.assertTrue(all(o['metadata'].get('namespace') != 'airflow' for o in objects))
+        collection_rules = [(o['metadata']['name'], rule) for o in objects if o['kind'] == 'Role'
+                            for rule in o['rules'] if 'deletecollection' in rule['verbs']]
+        self.assertEqual(collection_rules, [('silver-gold-a-driver', {
+            'apiGroups': [''], 'resources': ['pods', 'configmaps'], 'verbs': ['deletecollection']})])
 
     def test_templates_mount_the_matching_configmap_and_use_three_accounts(self):
         objects, config = prepare(IMAGE)

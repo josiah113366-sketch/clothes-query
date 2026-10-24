@@ -7,3 +7,5 @@ Bronze 거래 3개·요청/입력 manifest는 읽기, 거래 출력은 읽기·�
 클러스터 ARN·namespace·ServiceAccount 태그로 Pod Identity 신뢰를 제한한다. 검토용 입력은 stacks/spark-access/trade-test.tfvars.example에 있다. 모듈 기본은 disabled이고 실제 공통 배포 설정은 승인 후 스택에서 별도로 관리한다. network endpoint가 필요한 작업을 허용하지 않으면 역할의 plan을 거부한다. endpoint 통과 권한 자체가 S3 데이터 권한을 부여하는 것은 아니다.
 
 커미터의 fs.s3a.committer.abort.pending.uploads 설정과 실제 작업 객체 경로는 업무 코드에서 확인해야 한다. bucket-level ListBucketMultipartUploads는 별도 opt-in이며 이 모듈의 기본값은 false다. 최종 AWS 쓰기 검증 전 정책 완성을 보장하지 않는다. 새 일반 DeleteObject prefix 권한을 workload-access에 중복 적용하지 않는다.
+
+`enable_funnel_access=true`는 확정된 `bronze_v2/clickstream/` 읽기와 `silver/runtime/clicks/`·`gold_a/runtime/funnels/` 출력/멀티파트/작업 객체 정리를 두 역할에 추가한다. Driver만 기존 `gold_a.funnel_daily_runs`·`funnel_session_product_runs`의 Glue 조회·파티션 등록을 받는다. `funnel_rollback_run_ids`로 승인한 실행에 한해 두 출력 및 공통 Silver 거래 중간 결과의 최종 Parquet 정리가 가능하다. 기본값은 false/빈 집합이며 리뷰·Iceberg·대시보드 권한은 이 옵션에 포함하지 않는다. [실제 적용 기록](../../../docs/tasks/infra-silver-funnel-access.md)을 따른다.
