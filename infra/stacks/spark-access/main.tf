@@ -21,4 +21,6 @@ module "spark_access" {
   allow_bucket_multipart_listing = var.allow_bucket_multipart_listing
   reference_object_arns          = var.reference_object_arns
   rollback_run_ids               = var.rollback_run_ids
+  enable_trade_publication       = var.enable_trade_publication
+  detection_role_name            = var.detection_role_name
 }

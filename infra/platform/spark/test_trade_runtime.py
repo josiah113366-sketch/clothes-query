@@ -8,6 +8,17 @@ IMAGE = '827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/sil
 
 
 class TradeRuntimeTests(unittest.TestCase):
+    def test_trade_publication_requires_digest_and_uses_fixed_bronze_v2_inputs(self):
+        with self.assertRaises(ValueError):
+            prepare(trade_publication=True)
+        objects, config = prepare(IMAGE, trade_publication=True)
+        self.assertEqual((config['silver_database'], config['gold_database']), ('silver', 'gold_a'))
+        self.assertEqual(set(config['reprocess']['inputs']), {'orders', 'order_items', 'payments', 'designs', 'variants'})
+        for dataset in ('orders', 'order_items', 'payments'):
+            self.assertTrue(config['reprocess']['inputs'][dataset][0].startswith('s3://clothes-query-datalake/bronze_v2/'))
+        self.assertFalse(any(o['kind'] in {'Pod', 'Job', 'CronJob', 'NodePool'} for o in objects))
+        self.assertNotIn('silver_database', prepare(IMAGE)[1])
+
     def test_no_digest_does_not_create_jobs_or_airflow_config(self):
         objects, config = prepare()
         self.assertNotIn('image', config)

@@ -1,5 +1,11 @@
 # Spark 실행 기반 — 상시 배포 비활성
 
+## Silver·Gold A 조회 공개 설정
+
+확인한 업무 이미지 digest를 `prepare_trade_runtime.py --image <ECR@sha256:digest> --trade-publication --output <검토파일>`에 전달하면 기존 dedicated 실행 신원·노드 배치를 보존하고 `silver_database`, `gold_database`, Bronze v2 재처리 입력 설정을 ConfigMap에 포함한다. `--existing-helm-values`/`--helm-overlay`로 기존 main GitDagBundle·Secret·agent 설정을 보존한 환경 변수 참조를 추가한다. 도구 자체는 배포·DAG 실행을 하지 않는다.
+
+Glue DDL·Spark 파티션 등록·R6 읽기 권한은 별도다. DB·표 생성 없이 runtime만 공급한 상태를 실행 준비 완료로 보지 않는다. 새 이미지의 정상 거래 배치와 공개 결과를 먼저 확인하고 부분 재처리로 진행한다. 리뷰/퍼널 권한은 별도로 확정한다. [연결 기록](../../../docs/tasks/infra-silver-publication.md)을 따른다.
+
 2026-10-23 후속 명세는 [메일 문안](handoff/email-to-pipelines.md)과 [전달 계약](handoff/silver-gold-a.example.yaml)을 우선한다. 업무 계정 이름·요청/입력 manifest 경로·magic 커미터·Python 패키지를 준비했고 기본 이미지 로컬 검증과 별도 spark-access/ECR plan을 수행했다. 업무 커밋은 원격 미확인, namespace·고정 입력/기대값·Glue 공개는 대기이며 실제 AWS 적용·영구 이미지 발행과 노드 활성화는 아직 하지 않았다.
 
 최초에는 코드만 준비했고, 이후 사용자 승인으로 2026-10-22 임시 합성 시험을 수행했다. 상시 Spark 배포는 비활성 상태이며 공용 메모리 확대는 참고 대안이다. 실제 시험과 정리는 아래 기록을 따른다.

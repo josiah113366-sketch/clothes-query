@@ -35,3 +35,11 @@ variable "rollback_run_ids" {
   type    = set(string)
   default = []
 }
+variable "enable_trade_publication" {
+  type    = bool
+  default = false
+}
+variable "detection_role_name" {
+  type    = string
+  default = "clothes-query-dev-detection-job"
+}

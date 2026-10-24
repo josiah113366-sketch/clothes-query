@@ -11,6 +11,66 @@ locals {
     for run_id in sort(tolist(var.rollback_run_ids)) : "${p}runs/${run_id}/*/part-*.parquet"
   ]])
   reference_keys = [for arn in sort(tolist(var.reference_object_arns)) : trimprefix(arn, "arn:aws:s3:::hm-ecommerce-data/")]
+  publish_trade  = var.enabled && var.enable_trade_publication
+  bronze_v2      = ["bronze_v2/orders/", "bronze_v2/order-items/", "bronze_v2/payments/"]
+  r6_prefixes    = ["silver/runtime/trade/catalog/completed/", "silver/runtime/trade/catalog-data/runs/"]
+  glue_base      = "arn:aws:glue:ap-northeast-1:${data.aws_caller_identity.current.account_id}"
+  silver_tables  = ["silver_runs", "order_amount_checks"]
+  gold_tables    = ["gold_runs", "order_sales_hourly_runs", "product_sales_daily_runs", "refresh_holds_runs"]
+}
+
+resource "aws_iam_role_policy" "bronze_v2" {
+  for_each = local.publish_trade ? aws_iam_role.this : {}
+  name     = "trade-bronze-v2-read"
+  role     = each.value.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in local.bronze_v2 : "${var.bucket_arn}/${p}*"] },
+      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in local.bronze_v2 : "${p}*"] } } }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "publication" {
+  count = local.publish_trade ? 1 : 0
+  name  = "trade-publication-and-reprocess"
+  role  = aws_iam_role.this["driver"].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid = "ReadPublicationTables", Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition"]
+        Resource = concat(["${local.glue_base}:catalog", "${local.glue_base}:database/silver", "${local.glue_base}:database/gold_a"],
+        [for t in local.silver_tables : "${local.glue_base}:table/silver/${t}"], [for t in local.gold_tables : "${local.glue_base}:table/gold_a/${t}"])
+      },
+      {
+        Sid = "RegisterRunPartitions", Effect = "Allow", Action = ["glue:CreatePartition"]
+        Resource = concat(["${local.glue_base}:catalog", "${local.glue_base}:database/silver", "${local.glue_base}:database/gold_a", "${local.glue_base}:table/silver/order_amount_checks"],
+        [for t in local.gold_tables : "${local.glue_base}:table/gold_a/${t}"])
+      },
+      {
+        Sid      = "AppendReprocessRequestsAndEvents", Effect = "Allow", Action = ["s3:PutObject"]
+        Resource = ["${var.bucket_arn}/pipelines/requests/reprocess/*", "${var.bucket_arn}/pipelines/input-manifests/reprocess/*", "${var.bucket_arn}/gold_b/reprocess_events/silver-*"]
+      },
+      { Sid = "OwnSilverEventRead", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/gold_b/reprocess_events/silver-*"] },
+      { Sid = "OwnSilverEventExistence", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = ["gold_b/reprocess_events/silver-*"] } } }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "r6_reader" {
+  count = local.publish_trade ? 1 : 0
+  name  = "silver-r6-published-checks-read"
+  role  = var.detection_role_name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"], Resource = concat(["${local.glue_base}:catalog", "${local.glue_base}:database/silver"], [for t in local.silver_tables : "${local.glue_base}:table/silver/${t}"]) },
+      { Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in local.r6_prefixes : "${var.bucket_arn}/${p}*"] },
+      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in local.r6_prefixes : "${p}*"] } } }
+    ]
+  })
 }
 resource "aws_iam_role" "this" {
   for_each = local.actors

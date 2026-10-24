@@ -15,7 +15,7 @@ ENV_NAME = 'AIRFLOW_PIPELINE_RUNTIME'
 IMAGE = re.compile(r'827913617635\.dkr\.ecr\.ap-northeast-1\.amazonaws\.com/clothes-query-dev/silver-gold-a@sha256:[0-9a-f]{64}')
 
 
-def prepare(image=None):
+def prepare(image=None, trade_publication=False):
     # ResourceQuota applies to the entire namespace. Gold B may share pipelines,
     # so do not impose the legacy four-Pod quota on unrelated shared workloads.
     objects = [obj for obj in resources('dedicated', namespace=NAMESPACE, name_prefix=PREFIX)
@@ -29,6 +29,19 @@ def prepare(image=None):
         'node_selector': {'karpenter.sh/nodepool': 'clothes-query-dev-compute-spark'},
         'spark_conf': {},
     }
+    if trade_publication:
+        if image is None:
+            raise ValueError('Trade publication requires the verified business image digest')
+        config.update(silver_database='silver', gold_database='gold_a', reprocess={
+            'output_root': 's3://clothes-query-datalake',
+            'inputs': {
+                'orders': ['s3://clothes-query-datalake/bronze_v2/orders/'],
+                'order_items': ['s3://clothes-query-datalake/bronze_v2/order-items/'],
+                'payments': ['s3://clothes-query-datalake/bronze_v2/payments/'],
+                'designs': ['s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet'],
+                'variants': ['s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet'],
+            },
+        })
     if image is not None:
         if not IMAGE.fullmatch(image):
             raise ValueError('Use the confirmed Tokyo business repository with immutable sha256 digest')
@@ -63,10 +76,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--image')
+    parser.add_argument('--trade-publication', action='store_true')
     parser.add_argument('--existing-helm-values', type=Path)
     parser.add_argument('--helm-overlay', type=Path)
     args = parser.parse_args()
-    objects, config = prepare(args.image)
+    objects, config = prepare(args.image, args.trade_publication)
     if args.helm_overlay:
         if not args.image or not args.existing_helm_values:
             parser.error('Helm overlay requires verified image digest and actual existing values')

@@ -2,6 +2,19 @@ variable "enabled" {
   type    = bool
   default = false
 }
+variable "enable_trade_publication" {
+  description = "Opt-in Silver/Gold trade publication and narrowly scoped R6 reads; does not grant schema creation or reviews access."
+  type        = bool
+  default     = false
+}
+variable "detection_role_name" {
+  type    = string
+  default = "clothes-query-dev-detection-job"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9+=,.@_-]+$", var.detection_role_name))
+    error_message = "Use an existing IAM role name, not an ARN or wildcard."
+  }
+}
 variable "cluster_name" { type = string }
 variable "bucket_arn" { type = string }
 variable "namespace" {

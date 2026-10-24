@@ -1,4 +1,27 @@
 mock_provider "aws" {}
+run "trade_publication_is_driver_only_and_r6_is_read_only" {
+  command = plan
+  module { source = "../modules/spark-access" }
+  variables {
+    enabled                  = true
+    namespace                = "pipelines"
+    enable_trade_publication = true
+  }
+  assert {
+    condition = (
+      length(aws_iam_role_policy.publication) == 1 && length(aws_iam_role_policy.r6_reader) == 1 &&
+      toset(keys(aws_iam_role_policy.bronze_v2)) == toset(["driver", "executor"]) &&
+      aws_iam_role_policy.r6_reader[0].role == "clothes-query-dev-detection-job" &&
+      [for s in jsondecode(aws_iam_role_policy.publication[0].policy).Statement : s if s.Sid == "RegisterRunPartitions"][0].Action == ["glue:CreatePartition"] &&
+      !strcontains(aws_iam_role_policy.publication[0].policy, "CreateTable") &&
+      !strcontains(aws_iam_role_policy.publication[0].policy, "DeleteObject") &&
+      !strcontains(aws_iam_role_policy.publication[0].policy, "ground_truth") &&
+      !strcontains(aws_iam_role_policy.publication[0].policy, "agent/") &&
+      alltrue(flatten([for s in jsondecode(aws_iam_role_policy.r6_reader[0].policy).Statement : [for a in s.Action : !strcontains(a, "Put") && !strcontains(a, "Create") && !strcontains(a, "Delete")]]))
+    )
+    error_message = "Only the driver may publish; R6 receives scoped read-only Silver access."
+  }
+}
 variables {
   cluster_name = "test-cluster"
   bucket_arn   = "arn:aws:s3:::test-trade-bucket"
