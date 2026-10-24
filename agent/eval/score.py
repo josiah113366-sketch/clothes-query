@@ -214,8 +214,17 @@ def score_reports(incidents, detection, reports):
                    "ratio": round(claims_backed / claims_total, 3) if claims_total else None}
 
 
+TEST_PREFIX = "a-test-"   # 시험용 이상 줄(조사 에이전트 시험). 채점에서 통째로 뺀다
+
+
+def _not_test(rows):
+    return [r for r in rows if not str(r.get("anomaly_id", "")).startswith(TEST_PREFIX)]
+
+
 def score(incidents, anomalies, runs=None, reports=None, allow=None, excluded=(), include=()):
     graded, skipped = split_incidents(incidents, excluded, include)
+    anomalies = _not_test(anomalies)
+    reports = _not_test(reports) if reports is not None else None
     rows = regular_rows(anomalies, runs)
     detection, related = score_detection(graded, rows, allow)
     summary = {"detection": detection, "false_alarms": score_false_alarms(rows, related, muted_windows(skipped, allow)),

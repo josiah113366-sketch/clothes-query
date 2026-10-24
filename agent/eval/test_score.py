@@ -110,5 +110,11 @@ out = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), "--inciden
 check("명령줄 실행이 성공하고 요약이 나옴", (out.returncode, "탐지 적발: 2/3" in out.stdout, "채점하지 않은 사건 3건" in out.stdout), (0, True, True))
 check("S3 Sink 정지 허용 지연 30분 대응이 SCENARIOS에 있음", SCENARIOS["SINK_PAUSE"]["allow_min"], 30)
 
+t_anoms = anoms + [{**anoms[0], "anomaly_id": "a-test-0001", "run_id": "t"}]
+t_reports = reports + [{"anomaly_id": "a-test-0001", "layer": "UNKNOWN"}]
+base_res = score(inc, anoms, runs, reports, excluded=excluded)
+test_res = score(inc, t_anoms, runs, t_reports, excluded=excluded)
+check("a-test- 이상 줄과 리포트는 채점·오탐에 영향 없음", (test_res["false_alarms"], test_res["detected"], test_res.get("layer")), (base_res["false_alarms"], base_res["detected"], base_res.get("layer")))
+
 print("전체:", "모두 통과" if ok else "실패 있음")
 raise SystemExit(0 if ok else 1)
