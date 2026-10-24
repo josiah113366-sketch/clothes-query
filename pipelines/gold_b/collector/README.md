@@ -26,7 +26,7 @@
 | `connector_state` | 커넥터 상태 (`RUNNING`, `PAUSED`, `FAILED` …). 태스크가 RUNNING이 아니면 그 태스크 상태. Connect에 접속하지 못하면 `UNREACHABLE`, 커넥터가 없으면 `NOT_FOUND` |
 
 - S3 Sink는 파일을 쓸 때만 처리 위치를 기록한다(지금 15분 또는 10,000건마다). 그래서 **정상일 때도 `lag_sec`이 0~약 900초를 톱니 모양으로 오간다.**
-- 처리할 메시지가 보관 기간(3일)이 지나 지워졌으면 `lag_sec`은 남아 있는 가장 오래된 메시지 기준이라 실제보다 작다.
+- 처리할 메시지가 보관 기간(7일)이 지나 지워졌으면 `lag_sec`은 남아 있는 가장 오래된 메시지 기준이라 실제보다 작다.
 - Kafka에 접속하지 못하면 그 회차는 파일을 쓰지 않고 오류로 끝난다. 탐지가 "측정 줄 없음"으로 잡는다.
 - Kafka에 없는 토픽은 건너뛰고 나머지를 잰다 (로그에 남김).
 
@@ -42,7 +42,7 @@
 | `KAFKA_SSL_CA_FILE`, `KAFKA_SSL_CERT_FILE`, `KAFKA_SSL_KEY_FILE` | 없음 | mTLS 인증서 파일 경로 (인증서와 키는 함께) |
 | `KAFKA_ADDRESS_FAMILY` | `any` | `any`, `v4`, `v6`. Windows 로컬에서 `localhost`가 IPv6(`::1`)로 먼저 붙어 측정이 `_TRANSPORT`로 실패하면 `v4` |
 | `GOLD_B_CONNECT_URL` | `http://localhost:8083` | Kafka Connect REST 주소 |
-| `GOLD_B_SINK_CONNECTOR` | `bronze-s3-sink` | 잴 S3 Sink 커넥터 이름 |
+| `GOLD_B_SINK_CONNECTOR` | `bronze-s3-sink-v2` | 잴 S3 Sink 커넥터 이름. 기본은 Bronze v2 (2026-10-24: S3 Sink 정지 사건이 v2를 멈추고, 옛 `bronze-s3-sink`는 읽는 쪽이 옮긴 뒤 지운다) |
 | `GOLD_B_SINK_GROUP` | `connect-<커넥터 이름>` | 그 커넥터의 소비자 그룹 |
 | `GOLD_B_LAG_TOPICS` | 커넥터 설정의 `topics` | 쉼표로 나눈 토픽 목록. **운영에서는 꼭 넣는다** (Connect가 멈춰도 계속 재려면) |
 

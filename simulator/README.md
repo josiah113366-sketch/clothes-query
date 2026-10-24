@@ -175,6 +175,7 @@ sim controller serve                                   # http://127.0.0.1:8080 (
 sim controller mode burst                              # 다른 터미널에서
 sim controller pg-outage --pg PG_B --extra-fail 0.85 --minutes 10
 sim controller pollution --kind ORDER_TOTAL_MISMATCH --count 30
+sim controller sink-pause --minutes 25                 # S3 Sink 정지 시작 기록 (정지·재개는 kubectl)
 sim controller end                                     # 진행 중 사건 종료
 ```
 
@@ -186,6 +187,7 @@ sim controller end                                     # 진행 중 사건 종�
 | `running <true\|false>` | 새 가입·방문 멈춤/재개 |
 | `pg-outage --pg PG_B [--extra-fail 0.85] [--minutes 10]` | PG 장애 시작 |
 | `pollution [--kind ORDER_TOTAL_MISMATCH] [--count 30]` | 데이터 오염 |
+| `sink-pause [--connector bronze-s3-sink-v2] [--minutes 25]` | S3 Sink 정지의 시작 기록만 남긴다 (자동 종료 없음, 최대 60분) |
 | `end` | 진행 중 사건 종료 |
 
 `serve` 밖의 명령은 `--url`(`SIM_CONTROLLER_URL`, 기본 `http://127.0.0.1:8080`)로 서버를 HTTP로 부르는 얇은 클라이언트다. 파일을 쓰는 곳은 서버 하나다.
@@ -207,6 +209,22 @@ sim controller end                                     # 진행 중 사건 종�
 | `PG_OUTAGE` | `pg-outage` (PG 하나, 기본 추가 실패율 0.85, 10분, 최대 60분) | 정한 시간 뒤 자동, 또는 `end` |
 | `DATA_POLLUTION` | `pollution` (기본 30건, 최대 500건) | 즉시 (`complete`) |
 | `OPERATOR_PAUSE` | `running false` (사건은 아니지만 트래픽 공백이 장애로 오해되지 않게 남긴다) | `running true` |
+| `SINK_PAUSE` | `sink-pause` (기록만. 제어 파일을 바꾸지 않는다) 뒤에 사람이 `kubectl`로 Sink를 멈춘다 | 사람이 재개를 확인한 뒤 `end` (`manual`). 자동 종료하지 않는다 |
+
+**S3 Sink 정지**(`SINK_PAUSE`)는 Bronze 적재가 멈춰 소비 지연(R3)이 생기는 사건이다. 컨트롤러(ECS)는 EKS 커넥터를 바꿀 수 없어서 정답표만 쓰고, 정지·재개는 사람이 한다. 자동 종료가 없는 것은 정답표의 끝 시각이 실제 재개 시각과 같아야 하기 때문이다. 순서:
+
+```powershell
+sim controller sink-pause --minutes 25        # 1. 시작 기록 (실패하면 멈추지 않는다)
+kubectl patch kafkaconnector bronze-s3-sink-v2 -n kafka --type merge -p '{\"spec\":{\"state\":\"paused\"}}'   # 2. 정지
+# ... 25분 (R3 기준 1200초를 확실히 넘기는 20분 + 여유) ...
+kubectl patch kafkaconnector bronze-s3-sink-v2 -n kafka --type merge -p '{\"spec\":{\"state\":\"running\"}}'  # 3. 재개
+kubectl get kafkaconnector -n kafka           # Ready, 재개 확인
+sim controller end                            # 4. 끝 기록 (manual)
+```
+
+- Connect REST의 pause가 아니라 Strimzi `spec.state`로 멈춘다. REST로 멈추면 운영자가 리소스 상태(`running`)로 되돌릴 수 있다.
+- Gold B 지연 수집기가 같은 커넥터를 봐야 R3가 울린다(`GOLD_B_SINK_CONNECTOR=bronze-s3-sink-v2`).
+- Kafka 보관이 7일이라 정지 동안 메시지는 잃지 않는다. 재개하면 멈춘 위치부터 따라잡는다.
 
 **데이터 오염**은 DB 제약(CHECK, UNIQUE, FK)은 통과하지만 업무 규칙을 어기는 행만 만든다. 스키마 변경은 하지 않는다. 한 종류의 오염은 한 트랜잭션이다.
 

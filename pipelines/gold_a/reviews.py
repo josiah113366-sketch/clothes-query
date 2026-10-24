@@ -6,9 +6,13 @@ import argparse
 import csv
 import io
 import json
+import os
+import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
+from uuid import uuid4
 
 from . import (
     _read_text,
@@ -283,6 +287,255 @@ def search_reviews(
             )
     matches.sort(key=lambda row: (str(row["created_at_kst"]), str(row["review_id"])), reverse=True)
     return len(matches), matches[:limit]
+
+
+# 운영 실행: Spark. 위 Python 함수는 계산 검증·검색·부분 재처리에 사용한다.
+def read_documents(spark, paths, kind="reviews", model_version=None):
+    from pipelines.silver.common import decode_record
+    from pipelines.spark_batch import _spark_uri, dumps
+
+    def parse(files):
+        for uri, text in files:
+            uri = "s3://" + uri[6:] if uri.startswith("s3a://") else uri
+            if uri.lower().endswith(".csv"):
+                if kind != "analysis":
+                    raise ValueError("CSV 입력은 모델 점수 결과만 지원합니다")
+                for row in csv.DictReader(io.StringIO(text.lstrip("\ufeff"))):
+                    if row.get("score") not in {"-2", "-1", "0", "1", "2"}:
+                        raise ValueError("모델 score CSV는 -2~2 정수여야 합니다")
+                    yield dumps({"review_id": row.get("review_id"), "aspect": row.get("aspect"),
+                                 "score": int(row["score"]), "model_version": model_version})
+            else:
+                for number, line in enumerate(text.lstrip("\ufeff").splitlines(), 1):
+                    if line.strip():
+                        yield dumps(decode_record(line, uri, number))
+    files = spark.sparkContext.wholeTextFiles(",".join(_spark_uri(p) for p in paths), minPartitions=2)
+    return files.mapPartitions(parse)
+
+
+def mapping_row(text):
+    row = json.loads(text)
+    if row.get("_input_error") or not all(isinstance(row.get(k), str) and row[k].strip()
+                                          for k in ("product_id", "article_id")):
+        raise ValueError("리뷰 상품 매핑 키 오류")
+    return row["product_id"], row["article_id"]
+
+
+def connect_products(reviews, catalog, mapping=None):
+    from pyspark.sql import functions as F
+
+    variants = catalog["silver_product_variant"].select("article_id", "product_code")
+    if mapping is not None:
+        if mapping.filter("product_id is null or trim(product_id) = '' or article_id is null").limit(1).count():
+            raise ValueError("리뷰 상품 매핑 키 오류")
+        if mapping.groupBy("product_id").count().filter("count > 1").limit(1).count():
+            raise ValueError("리뷰 상품 매핑 product_id 중복")
+        if mapping.join(variants, "article_id", "left_anti").limit(1).count():
+            raise ValueError("리뷰 상품 매핑 대상 상품 오류")
+        reviews = reviews.join(mapping, "product_id", "left").withColumn("article_id", F.coalesce("article_id", "product_id"))
+    else:
+        reviews = reviews.withColumn("article_id", F.col("product_id"))
+    if reviews.join(variants, "article_id", "left_anti").limit(1).count():
+        raise ValueError("리뷰 상품 연결 실패")
+    return reviews.join(variants, "article_id")
+
+
+def build_product_daily(reviews):
+    from pyspark.sql import functions as F
+
+    result = reviews.groupBy("review_date_kst", "article_id", "product_code").agg(
+        F.count("review_id").alias("review_count"), F.sum("rating").alias("rating_sum"),
+        F.sum(F.when(F.col("rating") <= 2, 1).otherwise(0)).alias("low_rating_count"))
+    return result.withColumn("average_rating", F.round(F.col("rating_sum").cast("decimal(30,0)") /
+        F.col("review_count"), 4).cast("double")).withColumn("low_rating_rate", F.round(
+            F.col("low_rating_count").cast("decimal(30,0)") / F.col("review_count"), 6).cast("double"))
+
+
+def build_aspects(spark, reviews, documents, model_version):
+    from pyspark.sql import functions as F
+
+    def validate(text):
+        row = json.loads(text)
+        if row.get("_input_error") or not all(isinstance(row.get(k), str) and row[k].strip()
+                                              for k in ("review_id", "aspect", "model_version")):
+            raise ValueError("분석 결과의 키·속성·모델 버전 오류")
+        if row["aspect"] not in ASPECTS or type(row.get("score")) is not int or row["score"] not in SCORE_FIELDS:
+            raise ValueError("모델 속성 또는 -2~2 정수 점수 오류")
+        number = row.get("model_version_no")
+        if model_version is None and (not isinstance(number, str) or not re.fullmatch(r"[0-9]{1,3}\.[0-9]", number)):
+            raise ValueError("최신 점수의 모델 번호가 없습니다")
+        return row["review_id"], row["aspect"], row["model_version"], number, row["score"]
+
+    all_rows = spark.createDataFrame(documents.map(validate),
+        "review_id string, aspect string, model_version string, model_version_no string, score long").persist()
+    try:
+        selected = all_rows if model_version is None else all_rows.filter(F.col("model_version") == model_version)
+        if model_version is None and selected.groupBy("review_id").agg(
+                F.countDistinct(F.struct("model_version", "model_version_no")).alias("n")).filter("n > 1").limit(1).count():
+            raise ValueError("최신 점수 입력에 한 리뷰의 여러 모델 버전이 섞여 있습니다")
+        if all_rows.limit(1).count() and not selected.limit(1).count():
+            raise ValueError("요청한 모델 버전 결과가 없습니다")
+        if selected.join(reviews.select("review_id"), "review_id", "left_anti").limit(1).count():
+            raise ValueError("분석 결과에 Silver 범위 밖 리뷰 ID가 있습니다")
+        if selected.groupBy("review_id", "aspect").agg(F.countDistinct("score").alias("n")).filter("n > 1").limit(1).count():
+            raise ValueError("동일 리뷰·속성·모델 버전의 분석 내용 충돌")
+        selected = selected.dropDuplicates(["review_id", "aspect", "model_version", "model_version_no"])
+        linked = selected.join(reviews.select("review_id", "review_date_kst", "article_id", "product_code"), "review_id")
+        daily = linked.groupBy("review_date_kst", "article_id", "product_code", "aspect", "model_version", "model_version_no").agg(
+            F.count("review_id").alias("scored_review_count"), F.sum("score").alias("score_sum"),
+            *[F.sum(F.when(F.col("score") == score, 1).otherwise(0)).alias(field) for score, field in SCORE_FIELDS.items()])
+        daily = daily.withColumn("average_score", F.round(F.col("score_sum").cast("decimal(30,0)") /
+                                                         F.col("scored_review_count"), 4).cast("double"))
+        count = reviews.count()
+        analyzed = selected.select("review_id").distinct().count()
+        coverage = {"review_count": count, "reviews_with_aspect_result": analyzed,
+                    "reviews_without_aspect_result": count - analyzed, "analysis_completion_status": "UNVERIFIED",
+                    "note": "결과 없음은 속성 미언급 또는 미분석일 수 있습니다. 0점으로 세지 않습니다."}
+        # 호출자가 저장할 때까지 캐시를 유지하고 finally에서 해제한다.
+        return daily, coverage, all_rows
+    except Exception:
+        all_rows.unpersist()
+        raise
+
+
+def execute_reviews(spark, config):
+    from pyspark.sql import functions as F
+
+    from pipelines.silver.reviews import build_reviews_spark
+    from pipelines.spark_batch import (
+        _spark_uri,
+        _write_json,
+        build_catalog,
+        configure_storage,
+        read_source,
+        resolve_inputs,
+        save_tables,
+    )
+
+    allowed = {"job", "run_id", "inputs", "output_root", "input_complete", "start_date", "end_date", "model_version", "max_key_rows", "analysis_view"}
+    if set(config) - allowed or config.get("input_complete") is not True:
+        raise ValueError("지원하지 않는 리뷰 설정 또는 입력 준비 미확인")
+    start, end = (date.fromisoformat(config[k]).isoformat() for k in ("start_date", "end_date"))
+    if end < start:
+        raise ValueError("리뷰 종료 날짜가 시작 날짜보다 빠릅니다")
+    inputs = config.get("inputs", {})
+    if not {"reviews", "designs", "variants"} <= set(inputs) or set(inputs) - {"reviews", "designs", "variants", "analysis", "mapping"}:
+        raise ValueError("리뷰·상품 스냅샷 입력이 필요합니다")
+    version = config.get("model_version")
+    if "analysis_view" in config and ("analysis" in inputs or version is not None):
+        raise ValueError("최신 점수 뷰와 파일·단일 모델 버전 입력을 함께 지정하지 마세요")
+    if "analysis" in inputs and (not isinstance(version, str) or not version.strip()):
+        raise ValueError("모델 점수 입력에는 model_version이 필요합니다")
+    limit = config.get("max_key_rows", 10000)
+    if type(limit) is not int or not 1 <= limit <= 100000:
+        raise ValueError("리뷰 ID당 행 한도는 1~100,000입니다")
+    output = config.get("output_root")
+    if not isinstance(output, str) or not output.strip() or output.startswith("s3a://"):
+        raise ValueError("출력은 s3:// URI 또는 로컬 경로여야 합니다")
+    run_id = config.get("run_id", "reviews-" + uuid4().hex)
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", run_id):
+        raise ValueError("run_id 형식 오류")
+    if any(part in {"bronze", "bronze_v2", "ground_truth"} for part in output.replace("\\", "/").split("/")):
+        raise ValueError("원천·정답표 아래에는 결과를 쓸 수 없습니다")
+    for locations in inputs.values():
+        if not isinstance(locations, list) or not locations:
+            raise ValueError("입력별 경로 목록이 필요합니다")
+        for uri in locations:
+            if not isinstance(uri, str) or any(part in {"reviews_truth", "ground_truth"} for part in uri.replace("\\", "/").split("/")):
+                raise ValueError("평가용 정답표를 운영 입력으로 사용할 수 없습니다")
+            if "://" not in uri and not output.startswith("s3://"):
+                source, target = Path(uri).resolve(), Path(output).resolve()
+                if source == target or source in target.parents or target in source.parents:
+                    raise ValueError("입력·출력 경로는 겹치지 않아야 합니다")
+    configure_storage(spark, output)
+    paths, inventory = resolve_inputs(inputs, suffixes=(".json", ".jsonl", ".csv"))
+    if any(part in {"reviews_truth", "ground_truth"} for item in inventory
+           for part in item["uri"].replace("\\", "/").split("/")):
+        raise ValueError("입력 파일 목록에 평가용 정답표가 포함되어 있습니다")
+    tables = build_reviews_spark(spark, read_documents(spark, paths["reviews"]), start, end, limit)
+    catalog, score_cache = None, None
+    try:
+        base = output.rstrip("/") + "/silver/runtime/reviews/runs/" + run_id
+        checked = datetime.now(timezone.utc).isoformat()
+        silver = save_tables(tables, base, run_id, checked)
+        silver.pop("format_rules", None)
+        silver.update(status="INCOMPLETE" if tables["quarantined_records"].limit(1).count() else "PASS",
+                      start_date_kst=start, end_date_kst=end, check_version="reviews.v1",
+                      input_objects=inventory, input_completeness="DECLARED_COMPLETE",
+                      code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"), pipeline_version="spark-reviews.v1")
+        publish(output, "silver", base, silver, inventory)
+        if silver["status"] != "PASS":
+            raise ValueError("리뷰 Silver 품질 미완료: Gold A는 갱신하지 않습니다")
+        raw = read_source(spark, "product_design", [_spark_uri(p) for p in paths["designs"]]).unionByName(
+            read_source(spark, "product_variant", [_spark_uri(p) for p in paths["variants"]]))
+        catalog = build_catalog(raw)
+        product = save_tables(catalog, base + "/products", run_id, checked)
+        product.update(status="PASS")
+        _write_json(base + "/products/manifest.json", product)
+        stored = spark.read.parquet(_spark_uri(silver["outputs"]["silver_reviews"]))
+        products = {k: spark.read.parquet(_spark_uri(p)) for k, p in product["outputs"].items()}
+        mapping = None
+        if "mapping" in paths:
+            docs = read_documents(spark, paths["mapping"], "mapping")
+            mapping = spark.createDataFrame(docs.map(mapping_row), "product_id string, article_id string")
+        linked = connect_products(stored, products, mapping)
+        gold_tables = {"review_product_daily": build_product_daily(linked)}
+        coverage, score_snapshot, versions = None, None, []
+        if "analysis_view" in config:
+            import boto3
+
+            from pipelines.review_scores import snapshot_scores
+
+            score_snapshot = snapshot_scores(output, run_id, start, end, config["analysis_view"],
+                boto3.client("athena", region_name="ap-northeast-1"), boto3.client("s3", region_name="ap-northeast-1"))
+            inventory.extend(score_snapshot["objects"])
+            score_paths = [_spark_uri(item["uri"]) for item in score_snapshot["objects"]]
+            scores = (spark.read.parquet(*score_paths) if score_paths else spark.createDataFrame([],
+                "review_id string, aspect string, score long, model_version string, model_version_no string, review_date date"))
+            if scores.filter(F.col("review_date").isNull()).limit(1).count():
+                raise ValueError("모델 점수의 KST 리뷰 날짜가 없습니다")
+            # KST 일자와 Silver 리뷰의 일자가 다르면 조용히 합치지 않는다.
+            if scores.join(linked.select("review_id", "review_date_kst"), "review_id").filter(
+                    F.col("review_date").cast("string") != F.col("review_date_kst")).limit(1).count():
+                raise ValueError("모델 점수와 Silver 리뷰의 KST 날짜가 다릅니다")
+            selected_versions = scores.select("model_version", "model_version_no").distinct().limit(1001).collect()
+            if len(selected_versions) > 1000:
+                raise ValueError("한 실행의 모델 버전 수가 1000개를 초과했습니다")
+            versions = sorted([r.asDict() for r in selected_versions], key=lambda r: str(r))
+            documents = scores.toJSON()
+        elif "analysis" in paths:
+            documents = read_documents(spark, paths["analysis"], "analysis", version)
+        if "analysis_view" in config or "analysis" in paths:
+            daily, coverage, score_cache = build_aspects(spark, linked, documents, version)
+            gold_tables["review_aspect_daily"] = daily
+        gold_base = output.rstrip("/") + "/gold_a/runtime/reviews/runs/" + run_id
+        gold = save_tables(gold_tables, gold_base, run_id, checked)
+        gold.pop("format_rules", None)
+        gold.update(status="PASS", silver_manifest=base + "/manifest.json", products_manifest=base + "/products/manifest.json",
+                    start_date_kst=start, end_date_kst=end, model_version=version, score_schema="score.v1",
+                    review_scores="PROVIDED" if "analysis" in paths or score_snapshot else "NOT_REQUESTED", analysis_coverage=coverage,
+                    score_snapshot=score_snapshot, model_versions=versions,
+                    code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"))
+        publish(output, "gold_a", gold_base, gold, inventory)
+        return gold
+    finally:
+        for frame in tables["_cache"]:
+            frame.unpersist()
+        if catalog:
+            for frame in catalog["_cache"]:
+                frame.unpersist()
+        if score_cache is not None:
+            score_cache.unpersist()
+
+
+def publish(output, layer, base, manifest, inventory):
+    from pipelines.spark_batch import _write_json, verify_inputs
+
+    verify_inputs(inventory)
+    channel = output.rstrip("/") + "/" + layer + "/runtime/reviews"
+    _write_json(base + "/manifest.json", manifest)
+    _write_json(channel + "/completed/" + manifest["run_id"] + ".json", manifest)
+    _write_json(channel + "/current.json", manifest)
 
 
 def main() -> None:

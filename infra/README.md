@@ -39,6 +39,7 @@ bootstrap → network → eks → compute → apps
 | `rds` | `stacks/rds/` | private Single-AZ PostgreSQL | network, 선택 eks | 논리 복제 활성·실제 CDC 검증, 시험 계정/slot 제거·업무 연결 후속 |
 | `storage` | `stacks/storage/` | 데이터 S3, 버저닝·암호화·보호 | bootstrap | 사용자 승인 배포·후속 무변경 plan 확인 |
 | `ecr` | `stacks/ecr/` | WEB/WAS 및 선택적 Connect 이미지 저장소 | bootstrap | 세 저장소 배포·Connect 이미지 push/EKS pull 확인 |
+| `dashboard` | `stacks/dashboard/` | 대시보드 이미지 저장소(`clothes-query-dev/dashboard`) | bootstrap | 코드 작성, 미배포 |
 | `apps` | `stacks/apps/` | Pod Identity, WEB/WAS, Auto Mode ALB | eks, compute, rds, storage, 앱 이미지 | 코드 작성·정적 검증 |
 | `ecs-review-simulator` | `stacks/ecs-review-simulator/` | 리뷰 시뮬레이터 ECS Fargate 기반: ECR·클러스터·IAM·Secret·꺼진 예약 실행·로그/대시보드 (담당자 apply, [안내](stacks/ecs-review-simulator/README.md)) | network, storage | 코드·validate, 미배포 |
 | `sagemaker-review-score` | `stacks/sagemaker-review-score/` | 리뷰 점수화 SageMaker Processing Job 실행 기반: IAM 역할·SG·스크립트용 SSM 설정·Airflow용 launcher 정책 (실행은 Airflow silver DAG 종료 후, [안내](stacks/sagemaker-review-score/README.md)) | network, storage | 코드·validate·plan(9 create), 미배포 |

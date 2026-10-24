@@ -1,0 +1,2 @@
+# 공유 입력은 deployment.auto.tfvars.json 에 있다(expected_account_id). 개인 값은 없다.
+# 개인 파일이 필요해지면 deployment.local.tfvars.json 으로 만든다(Git 제외). 자격증명은 tfvars 에 넣지 않는다.

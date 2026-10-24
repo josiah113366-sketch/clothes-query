@@ -5,7 +5,6 @@
       '구매 전환율'로 표시하지 않는다 (이전 시간 주문이 나중에 결제될 수 있음).
 """
 
-import pandas as pd
 import streamlit as st
 
 import data
@@ -13,13 +12,14 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("trade")
 
 st.title("주문·매출")
 ui.date_note("hour")
 days = ui.pick_period("ord", max_days=7, default=3)  # 더미는 7일치
 
-df = data.get_order_sales_hourly(7)
-df = df[df.hour_start_kst > df.hour_start_kst.max() - pd.Timedelta(days=days)]
+df = ui.last_days(data.get_order_sales_hourly(days), "hour_start_kst", days)
+ui.require_rows(df)
 
 a, b, c = st.columns(3)
 a.metric("주문 수", f"{int(df.order_count.sum()):,}")

@@ -29,6 +29,8 @@ DATA_PAGES = [
     st.Page("pages_data/malformed.py", title="형식 오류", icon="🧩"),
     st.Page("pages_data/anomaly.py", title="이상탐지", icon="🚨"),
     st.Page("pages_data/rca_report.py", title="원인 리포트", icon="🕵️"),
+    st.Page("pages_data/models.py", title="감성분석 모델", icon="🧠"),
+    st.Page("pages_data/approval.py", title="재처리 승인", icon="✅"),
     st.Page("pages_data/reprocess.py", title="재처리 이력", icon="♻️"),
 ]
 

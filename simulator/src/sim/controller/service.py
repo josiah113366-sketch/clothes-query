@@ -24,15 +24,19 @@ from sim.controller.model import (
     DEFAULT_PG_EXTRA_FAIL,
     DEFAULT_PG_OUTAGE_MINUTES,
     DEFAULT_POLLUTION_COUNT,
+    DEFAULT_SINK_PAUSE_MINUTES,
     END,
     MAX_PG_OUTAGE_MINUTES,
     MAX_POLLUTION_COUNT,
+    MAX_SINK_PAUSE_MINUTES,
     MODE_INCIDENTS,
     OPERATOR_PAUSE,
     PG_OUTAGE,
     PGS,
     POLLUTION_KINDS,
     SCHEMA_VERSION,
+    SINK_CONNECTORS,
+    SINK_PAUSE,
     START,
     Incident,
     utc_text,
@@ -232,6 +236,35 @@ class ControllerService:
             self._write_end_or_queue(self._record(END, incident, "complete", summary))
             return self.status()
 
+    def start_sink_pause(
+        self,
+        connector: object = SINK_CONNECTORS[0],
+        minutes: object = DEFAULT_SINK_PAUSE_MINUTES,
+    ) -> dict:
+        """정답표만 남긴다. 사람이 이 뒤에 kubectl로 멈추고, 재개를 확인한 뒤 end_active()."""
+        if connector not in SINK_CONNECTORS:
+            raise InvalidRequestError(
+                f"connector는 {', '.join(SINK_CONNECTORS)} 중 하나여야 합니다."
+            )
+        span = _number(minutes, "minutes")
+        if not 0 < span <= MAX_SINK_PAUSE_MINUTES:
+            raise InvalidRequestError(
+                f"minutes는 0보다 크고 {MAX_SINK_PAUSE_MINUTES} 이하여야 합니다."
+            )
+        with self._lock:
+            self._require_no_active()
+            incident = Incident(
+                self._new_id(),
+                SINK_PAUSE,
+                self._clock(),
+                None,  # 자동 종료하면 실제 재개 시각과 정답표가 어긋난다
+                {"connector": connector, "planned_minutes": span},
+            )
+            self._log.write(self._record(START, incident))  # 실패하면 아무것도 바꾸지 않는다
+            self.active = incident
+            self.last_error = None
+            return self.status()
+
     def end_active(self, reason: str = "manual") -> dict:
         with self._lock:
             if self.active is None:
@@ -329,6 +362,10 @@ class ControllerService:
         self.last_error = None
 
     def _end(self, incident: Incident, ended_by: str) -> None:
+        if incident.type == SINK_PAUSE:  # 제어 파일로 바꾼 것이 없다. 끝 기록만
+            self.active = None
+            self._write_end_or_queue(self._record(END, incident, ended_by))
+            return
         before = (self.mode, self.running, dict(self.pg_extra_fail))
         if incident.type == OPERATOR_PAUSE:
             self.running = True

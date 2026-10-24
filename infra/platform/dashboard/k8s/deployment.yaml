@@ -1,0 +1,73 @@
+# 대시보드 Deployment. 이미지 주소와 Secret 은 apply 전에 채운다 (README 참고).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: dashboard
+  labels:
+    app.kubernetes.io/name: dashboard
+spec:
+  # Streamlit 은 세션을 파드 메모리에 두고 로그인 실패 잠금도 파드별이라 1개로 시작한다.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dashboard
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      # Athena/S3 읽기가 필요해지면 Pod Identity 를 연결한 ServiceAccount 를 만든 뒤 주석을 푼다.
+      # serviceAccountName: dashboard
+      containers:
+        - name: dashboard
+          # 태그보다 digest(@sha256:...)로 고정한다.
+          image: 827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/dashboard@sha256:1a6c8439d2d711d1f527dec6034b0ff051e96f8be97d9f579b8d5f77c7e47c19
+          ports:
+            - name: http
+              containerPort: 8501
+          env:
+            # 고정 계정 3개 로그인. 계정 파일(해시만 들어 있음)은 Secret 으로 마운트한다.
+            - {name: AUTH_MODE, value: "local"}
+            - {name: LOCAL_ACCOUNTS_FILE, value: /etc/dashboard/accounts.json}
+            # auto: 등록된 실데이터 조회를 먼저 쓰고, 없거나 실패하면 더미로 대체한다(화면에 '더미 사용 중' 표시).
+            # 지금 실데이터는 모델 패치노트(S3)뿐이고 나머지 화면은 더미다. 항상 더미로 보려면 dummy.
+            - {name: DATA_SOURCE, value: "auto"}
+            # 모델 버전·패치노트(S3, 팀 데이터 버킷). Pod Identity 에 이 경로 읽기 권한이 있어야 실제로 읽힌다.
+            # 권한이 없거나 읽기에 실패하면 더미로 대체한다.
+            - {name: MODEL_REGISTRY_URI, value: "s3://clothes-query-datalake/review-score/model-registry/releases/"}
+            # 재처리 승인 화면: APPROVAL_ATHENA_WORKGROUP 이 없으면 연습 모드(가짜 저장소, 바깥에 아무것도 쓰지 않음)로 돈다.
+            # 실제 연결(진짜 Athena 읽기·쓰기, Airflow DAG 호출)은 대시보드용 workgroup, Pod Identity 권한, Airflow 접속 Secret 이 생긴 뒤 주석을 푼다.
+            # 실제 모드에서는 이메일 아이디 계정(make_test_accounts.py --add)으로 로그인해야 승인할 수 있다.
+            # - {name: APPROVAL_ATHENA_WORKGROUP, value: "<대시보드용 workgroup>"}
+            # - {name: AWS_REGION, value: "ap-northeast-1"}
+            # - {name: AIRFLOW_API_URL, value: "http://airflow-api-server.airflow.svc.cluster.local:8080"}
+            # - name: AIRFLOW_API_USER
+            #   valueFrom: {secretKeyRef: {name: dashboard-airflow, key: user}}
+            # - name: AIRFLOW_API_PASSWORD
+            #   valueFrom: {secretKeyRef: {name: dashboard-airflow, key: password}}
+          volumeMounts:
+            - {name: accounts, mountPath: /etc/dashboard, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          # 노드가 1대(24GiB 한도)라 작게 잡았다. 실제 사용량을 보고 조정한다.
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: accounts
+          secret:
+            secretName: dashboard-accounts

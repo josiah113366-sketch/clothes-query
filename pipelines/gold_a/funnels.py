@@ -147,6 +147,74 @@ def run(clicks_root: str, transactions_root: str, products_root: str, output_roo
                       "cohort_policy": "first-view-kst; same-session-product; entire-supplied-history; no-cutoff"}, reprocess)
 
 
+def build_funnels_spark(clicks, transactions, catalog, *, _scoped=False):
+    """전체 입력 이력에서 기존 첫 조회·같은 세션/상품 규칙을 Spark SQL로 계산한다."""
+    from pyspark.sql import functions as F
+
+    for tables in (() if _scoped else (clicks, transactions)):
+        count = "active_error_count" if "active_error_count" in tables["dq_results"].columns else "quarantined_count"
+        if tables["dq_results"].filter(f"status != 'PASS' or {count} > 0").limit(1).count():
+            raise ValueError("퍼널 입력 Silver 품질이 불완전합니다")
+    events = clicks["click_events"]
+    orders, items, payments = (transactions[k] for k in ("orders_current", "silver_order_items", "payment_attempts"))
+    variants = catalog["silver_product_variant"].select("article_id", "product_code")
+    if events.groupBy("event_id").count().filter("count > 1").limit(1).count():
+        raise ValueError("Silver 클릭 event_id 중복")
+    if orders.groupBy("order_id").count().filter("count > 1").limit(1).count():
+        raise ValueError("Silver 주문 ID 중복")
+    if events.filter("session_id is null or trim(session_id) = '' or event_type not in ('view','cart_add')").limit(1).count():
+        raise ValueError("클릭의 세션 또는 이벤트 오류")
+    if events.join(variants, "article_id", "left_anti").limit(1).count():
+        raise ValueError("클릭의 상품 연결 오류")
+    if (items.join(orders.select("order_id"), "order_id", "left_anti").limit(1).count()
+            or items.join(variants, "article_id", "left_anti").limit(1).count()):
+        raise ValueError("주문상품의 주문 또는 상품 연결 오류")
+    if payments.join(orders.select("order_id"), "order_id", "left_anti").limit(1).count():
+        raise ValueError("결제의 주문 연결 오류")
+    paid = payments.filter("status = 'SUCCESS'").select("order_id", F.to_timestamp("completed_at_utc").alias("paid_at"))
+    if paid.groupBy("order_id").count().filter("count > 1").limit(1).count():
+        raise ValueError("성공 결제 중복")
+    if paid.join(orders, "order_id").filter(F.col("paid_at") < F.to_timestamp("ordered_at_utc")).limit(1).count():
+        raise ValueError("주문보다 빠른 성공 결제 시각")
+    events = events.withColumn("event_at", F.to_timestamp("event_time_utc"))
+    keys = ["session_id", "article_id"]
+    views = events.filter("event_type = 'view'").groupBy(*keys).agg(F.min("event_at").alias("view_at"))
+    carts = events.filter("event_type = 'cart_add'").join(views, keys).filter("event_at >= view_at").groupBy(*keys).agg(
+        F.min("event_at").alias("cart_at"))
+    steps = views.join(carts, keys, "left")
+    attempts = orders.join(items.select("order_id", "article_id").dropDuplicates(), "order_id").select(
+        "order_id", "session_id", "article_id", F.to_timestamp("ordered_at_utc").alias("order_at"))
+    attempts = attempts.join(steps, keys).filter("order_at >= view_at").join(paid, "order_id", "left")
+    reached = attempts.groupBy(*keys).agg(F.min("order_at").alias("order_at"), F.min("paid_at").alias("paid_at"),
+        F.max(F.when(F.col("cart_at").isNotNull() & (F.col("order_at") >= F.col("cart_at")), 1).otherwise(0)).alias("after_cart"))
+    detail = steps.join(reached, keys, "left").join(variants, "article_id").withColumn("has_view", F.lit(True))
+    for flag, at in (("has_cart", "cart_at"), ("has_order", "order_at"), ("has_paid", "paid_at")):
+        detail = detail.withColumn(flag, F.col(at).isNotNull())
+    detail = detail.withColumn("ordered_after_cart", F.coalesce(F.col("after_cart") > 0, F.lit(False)))
+
+    def iso_kst(field):
+        at = F.from_utc_timestamp(F.col(field), "Asia/Seoul")
+        fraction = F.date_format(at, "SSSSSS")
+        return F.concat(F.date_format(at, "yyyy-MM-dd'T'HH:mm:ss"),
+                        F.when(fraction != "000000", F.concat(F.lit("."), fraction)).otherwise(F.lit("")), F.lit("+09:00"))
+
+    detail = detail.select("session_id", "article_id", "product_code",
+        *[iso_kst(at).alias(name) for name, at in (("first_view_at_kst", "view_at"), ("first_cart_at_kst", "cart_at"),
+                                                  ("first_order_at_kst", "order_at"), ("first_paid_at_kst", "paid_at"))],
+        "has_view", "has_cart", "has_order", "has_paid", "ordered_after_cart")
+    metrics = (("view_sessions", "has_view"), ("cart_sessions", "has_cart"), ("order_sessions", "has_order"),
+               ("paid_sessions", "has_paid"), ("cart_order_sessions", "ordered_after_cart"))
+    daily = detail.groupBy(F.to_date(F.substring("first_view_at_kst", 1, 10)).alias("funnel_date_kst"),
+                           "article_id", "product_code").agg(*[F.sum(F.col(flag).cast("long")).alias(name) for name, flag in metrics])
+    for name, numerator, denominator in (
+        ("view_to_cart_rate", "cart_sessions", "view_sessions"), ("view_to_order_rate", "order_sessions", "view_sessions"),
+        ("view_to_paid_rate", "paid_sessions", "view_sessions"), ("cart_to_order_rate", "cart_order_sessions", "cart_sessions"),
+        ("order_to_paid_rate", "paid_sessions", "order_sessions")):
+        daily = daily.withColumn(name, F.when(F.col(denominator) > 0, F.round(
+            F.col(numerator).cast("decimal(30,0)") / F.col(denominator), 6)).cast("double"))
+    return {"funnel_session_product": detail, "funnel_daily": daily}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Silver → 세션·상품 퍼널 및 일별 전환율")
     for option in ("clicks-root", "transactions-root", "products-root", "output-root"):

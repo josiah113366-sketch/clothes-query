@@ -10,7 +10,13 @@ INGEST_LAG = "INGEST_LAG"  # burst 모드 (적재 지연이 목적)
 TRAFFIC_SURGE = "TRAFFIC_SURGE"  # medium 모드 (약한 급증)
 DATA_POLLUTION = "DATA_POLLUTION"
 OPERATOR_PAUSE = "OPERATOR_PAUSE"  # running=false. 사건은 아니지만 정답표에 남긴다
+SINK_PAUSE = "SINK_PAUSE"  # S3 Sink 정지 (기록만. 정지·재개는 사람이 kubectl로)
 MODE_INCIDENTS: dict[str, str] = {"medium": TRAFFIC_SURGE, "burst": INGEST_LAG}
+
+# S3 Sink 정지: 컨트롤러는 EKS 커넥터를 건드리지 못한다. 자동 종료 없음(재개 확인 뒤 end)
+SINK_CONNECTORS: tuple[str, ...] = ("bronze-s3-sink-v2",)
+DEFAULT_SINK_PAUSE_MINUTES = 25  # R3 기준 1200초를 확실히 넘기는 20분 + 여유
+MAX_SINK_PAUSE_MINUTES = 60
 
 # PG 장애 (PG 이름은 behavior.params.PGS와 같다. 테스트가 확인한다)
 PGS: tuple[str, ...] = ("PG_A", "PG_B")

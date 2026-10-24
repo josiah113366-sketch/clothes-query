@@ -45,7 +45,7 @@ def strict_schema(schema):
 
 
 def check_business_connectors(connector_schema, values):
-    """connectors/cdc-source.yaml, bronze-s3-sink.yaml: CRD, topic contract, PII allowlist, secrets."""
+    """connectors/cdc-source.yaml, bronze-s3-sink(-v2).yaml: CRD, topic contract, PII allowlist, secrets."""
     pii = {"name", "email", "phone", "birth_date", "password_hash"}
     ddl = (REPO / "db" / "schema" / "004_orders.sql").read_text(encoding="utf-8")
     order_columns = {}
@@ -53,7 +53,7 @@ def check_business_connectors(connector_schema, values):
         order_columns[table] = {m for m in re.findall(r"^\s{4}(\w+)\s+(?:uuid|text|bigint|integer|timestamptz)", body, re.M)}
     assert set(order_columns) == {"orders", "order_items", "payments"}
     docs = {}
-    for name in ("cdc-source", "bronze-s3-sink"):
+    for name in ("cdc-source", "bronze-s3-sink", "bronze-s3-sink-v2"):
         text = (REPO / "connectors" / f"{name}.yaml").read_text(encoding="utf-8")
         assert not re.search(r"AKIA[0-9A-Z]{16}|amazonaws\.com|[0-9]{12}", text), name
         doc = yaml.safe_load(text)
@@ -101,9 +101,32 @@ def check_business_connectors(connector_schema, values):
     assert set(values["connect"]["produceTopics"]) == routed | {heartbeat}
     assert {t["name"] for t in values["topics"]} == BUSINESS_TOPICS | {heartbeat}
     assert set(sink["topics"].split(",")) == BUSINESS_TOPICS == set(values["connect"]["consumeTopics"])
-    assert values["connect"]["consumerGroups"] == ["connect-bronze-s3-sink"]
+    assert values["connect"]["consumerGroups"] == ["connect-bronze-s3-sink", "connect-bronze-s3-sink-v2"]
     assert sink["topics.dir"] == "bronze" and sink["timezone"] == "UTC"
     assert sink["path.format"] == "'year'=YYYY/'month'=MM/'day'=dd"
+    # v2 is the same sink into bronze_v2/ plus the Kafka position and time on every row (Gold B reprocessing).
+    v2 = docs["bronze-s3-sink-v2"]
+    meta = {k: v for k, v in v2.items() if k.startswith("transforms")}
+    assert {k: v for k, v in v2.items() if k not in meta} == {**sink, "topics.dir": "bronze_v2"}
+    # Field names and types follow docs/contracts/README.md section 8 (Bronze -> Silver source trace).
+    assert meta == {
+        "transforms": "kafkaMeta,kafkaTime,kafkaTimeType",
+        "transforms.kafkaMeta.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.kafkaMeta.topic.field": "kafka_topic",
+        "transforms.kafkaMeta.partition.field": "kafka_partition",
+        "transforms.kafkaMeta.offset.field": "kafka_offset",
+        "transforms.kafkaMeta.timestamp.field": "kafka_timestamp",
+        "transforms.kafkaTime.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+        "transforms.kafkaTime.field": "kafka_timestamp",
+        "transforms.kafkaTime.target.type": "string",
+        "transforms.kafkaTime.format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "transforms.kafkaTimeType.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.kafkaTimeType.static.field": "kafka_timestamp_type",
+        "transforms.kafkaTimeType.static.value": "CreateTime",
+    }
+    # The static CreateTime is only true while no business topic overrides the timestamp type.
+    for topic in values["topics"]:
+        assert "message.timestamp.type" not in str(topic) and "timestampType" not in topic, topic["name"]
     assert not any(k.startswith(("aws.", "s3.credentials")) for k in sink), "S3 credentials come from Pod Identity"
     prepare = (REPO / "connectors" / "cdc-prepare.sql").read_text(encoding="utf-8")
     publication = re.search(r"CREATE PUBLICATION cdc_pub FOR TABLE ([^;]+);", prepare).group(1)
@@ -113,7 +136,8 @@ def check_business_connectors(connector_schema, values):
     assert "members_archive" not in publication and "PASSWORD '" not in prepare
     role_example = (ROOT / "cdc-orders" / "workload-access.tfvars.example").read_text(encoding="utf-8")
     assert f'service_account = "{values["connect"].get("name", "clothes-query-dev-connect")}-connect"' in role_example
-    assert f'"{sink["topics.dir"]}/" =' in role_example, "S3 Sink output and IAM prefix must match"
+    for prefix in (sink["topics.dir"], v2["topics.dir"]):
+        assert re.search(rf'"{prefix}/"\s+=', role_example), f"S3 Sink output and IAM prefix must match: {prefix}"
     network_example = (ROOT / "cdc-orders" / "network.tfvars.example").read_text(encoding="utf-8")
     assert "s3:AbortMultipartUpload" in role_example and "s3:AbortMultipartUpload" in network_example
 
@@ -204,7 +228,8 @@ def main():
         assert compact_pool["replicas"] == compact_connect["replicas"] == 1
         assert "topologySpreadConstraints" not in compact_pool["template"]["pod"]
         assert compact_pool["storage"]["volumes"][0]["size"] == "20Gi"
-        assert compact_kafka["kafka"]["config"]["log.retention.hours"] == 72
+        assert "log.retention.hours" not in compact_kafka["kafka"]["config"]
+        assert compact_kafka["kafka"]["config"]["log.retention.ms"] == 604800000
         assert compact_pool["storage"]["volumes"][0]["deleteClaim"] is False
         for key in ("default.replication.factor", "min.insync.replicas", "offsets.topic.replication.factor",
                     "transaction.state.log.replication.factor", "transaction.state.log.min.isr"):
@@ -231,7 +256,8 @@ def main():
         assert not any(d["kind"] == "KafkaConnect" for d in measurement_docs)
         measurement_kafka = next(d["spec"] for d in measurement_docs if d["kind"] == "Kafka")
         measurement_pool = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaNodePool")
-        assert measurement_kafka["kafka"]["config"]["log.retention.hours"] == 72
+        assert "log.retention.hours" not in measurement_kafka["kafka"]["config"]
+        assert measurement_kafka["kafka"]["config"]["log.retention.ms"] == 604800000
         assert measurement_pool["replicas"] == 1 and measurement_pool["storage"]["volumes"][0]["size"] == "20Gi"
         assert measurement_pool["resources"]["requests"]["memory"] == "1536Mi"
         measurement_topic = next(d["spec"] for d in measurement_docs if d["kind"] == "KafkaTopic")
@@ -271,7 +297,7 @@ def main():
         assert "infra-smoke" not in business_topics
         for name in BUSINESS_TOPICS:
             assert business_topics[name]["partitions"] == 3 and business_topics[name]["replicas"] == 1
-            assert business_topics[name]["config"]["retention.ms"] == 259200000
+            assert business_topics[name]["config"]["retention.ms"] == 604800000
         assert not any(d["kind"] == "KafkaUser" and d["metadata"]["name"] == "infra-smoke-client" for d in business_docs)
         business_pool = next(d["spec"] for d in business_docs if d["kind"] == "KafkaNodePool")
         measurement_pool_doc = next(d for d in measurement_docs if d["kind"] == "KafkaNodePool")

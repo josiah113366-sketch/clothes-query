@@ -5,10 +5,11 @@ import json
 import os
 import tempfile
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pipelines.format_rules import FormatError
+from pipelines.timestamps import parse_iso_datetime
 
 
 class RowError(ValueError):
@@ -29,12 +30,12 @@ def required_text(row: dict, field: str) -> str:
 def timestamp(row: dict, field: str) -> datetime:
     value = required_text(row, field)
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = parse_iso_datetime(value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "ISO 시각이어야 합니다") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise RowError(field, "INVALID_VALUE", "시간대가 없습니다")
-    return parsed.astimezone(UTC)
+    return parsed.astimezone(timezone.utc)
 
 
 def integer(row: dict, field: str, minimum: int | None = None) -> int:
@@ -132,7 +133,7 @@ def kafka_reference(raw: dict) -> dict:
             valid = value in ("CreateTime", "LogAppendTime")
         elif isinstance(value, str):
             try:
-                parsed = datetime.fromisoformat(value)
+                parsed = parse_iso_datetime(value)
                 valid = parsed.tzinfo is not None and parsed.utcoffset() is not None
             except ValueError:
                 pass
@@ -220,7 +221,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
     temporary = None
     try:
         # 업무 시각이 아닌 이번 검사 완료 시각. 기존 업무 출력은 변경하지 않는다.
-        checked_at = datetime.now(UTC).isoformat()
+        checked_at = datetime.now(timezone.utc).isoformat()
         if dataset == "transactions":
             result["order_amount_checks"] = [
                 {**row, "run_id": snapshot.name, "checked_at": checked_at,
@@ -234,7 +235,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
                                     for row in rows), encoding="utf-8")
             paths[name] = str(path)
         manifest = {
-            "status": "INCOMPLETE" if result["quarantined_records"] else "PASS",
+            "status": "INCOMPLETE" if any(r.get("active", True) for r in result["quarantined_records"]) else "PASS",
             "check_version": check_version,
             **({"format_rules": rule_metadata} if rule_metadata is not None else {}),
             "input_completeness": "DECLARED_COMPLETE" if input_complete else "UNVERIFIED",

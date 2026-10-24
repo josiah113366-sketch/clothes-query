@@ -105,7 +105,11 @@ spec:
       transaction.state.log.min.isr: {{ include "cq.minIsr" . }}
       auto.create.topics.enable: false
       unclean.leader.election.enable: false
+      {{- if .Values.kafka.retentionMs }}
+      log.retention.ms: {{ .Values.kafka.retentionMs }}
+      {{- else }}
       log.retention.hours: {{ .Values.kafka.retentionHours }}
+      {{- end }}
     template:
       podDisruptionBudget:
         maxUnavailable: 1

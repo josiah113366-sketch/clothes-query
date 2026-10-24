@@ -596,7 +596,7 @@ function renderApi() {
 }
 
 // ---------- 상태·컨트롤 ----------
-const TYPE_NAMES = { PG_OUTAGE: "⚡ PG 장애", TRAFFIC_SURGE: "🟠 medium 모드 (급증)", INGEST_LAG: "🔴 burst 모드 (적재 지연)", DATA_POLLUTION: "🧪 데이터 오염" };
+const TYPE_NAMES = { PG_OUTAGE: "⚡ PG 장애", TRAFFIC_SURGE: "🟠 medium 모드 (급증)", INGEST_LAG: "🔴 burst 모드 (적재 지연)", DATA_POLLUTION: "🧪 데이터 오염", SINK_PAUSE: "⏸ S3 Sink 정지 (kubectl로 재개 후 종료)" };
 function renderStatus() {
   const st = S.status; if (!st) return;
   document.body.dataset.mode = st.mode; document.body.dataset.running = String(st.running);
@@ -610,7 +610,7 @@ function renderStatus() {
   const start = Date.parse(inc.started_at), end = inc.ends_at ? Date.parse(inc.ends_at) : null, now = Date.now();
   const left = end ? Math.max(0, end - now) : null, frac = end ? left / Math.max(1, end - start) : 1;
   const mm = left == null ? "∞" : `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`;
-  const col = inc.type === "PG_OUTAGE" || inc.type === "INGEST_LAG" ? "var(--red)" : "var(--amber)";
+  const col = inc.type === "PG_OUTAGE" || inc.type === "INGEST_LAG" || inc.type === "SINK_PAUSE" ? "var(--red)" : "var(--amber)";
   $("#active").innerHTML = `<div class="active-incident">
     <svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="8"/>
       <circle class="fg" cx="50" cy="50" r="42" fill="none" stroke="${col}" stroke-width="8" stroke-linecap="round" transform="rotate(-90 50 50)" stroke-dasharray="263.9" stroke-dashoffset="${263.9 * (1 - frac)}"/>

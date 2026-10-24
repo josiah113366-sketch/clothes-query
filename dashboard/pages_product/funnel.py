@@ -15,6 +15,7 @@ import ui
 from auth import require_role
 
 require_role("product")
+ui.begin_gold_page("funnels")
 
 st.title("구매 퍼널")
 ui.date_note("funnel")
@@ -26,6 +27,7 @@ with c2:
 
 df = ui.last_days(data.get_funnel_daily(), "funnel_date_kst", days)
 df = df[df.article_id.isin(arts)]
+ui.require_rows(df)
 s = df[
     ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions", "cart_order_sessions"]
 ].sum()

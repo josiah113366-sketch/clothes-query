@@ -15,8 +15,8 @@ pytest.importorskip("pyarrow")
 
 import pyarrow.parquet as pq  # noqa: E402
 
-from pipelines.gold_b.jobs.reprocess import (ReprocessError, Request, TopicMissing,  # noqa: E402
-                                             hour_folders, next_request, read_events, run)
+from pipelines.gold_b.jobs.reprocess import (Options, ReprocessError, Request, TopicMissing,  # noqa: E402
+                                             check_request, hour_folders, main, next_request, read_events, run)
 from pipelines.gold_b.ledger import (EVENT_TIME, TABLE_COLUMNS, Judgement, KafkaMessage,  # noqa: E402
                                      LocalStore, hour_folder, hour_of, message_rows, to_arrow)
 from test_ddl import _utc, load_samples, parse_ddl, stand_in_fingerprint  # noqa: E402
@@ -30,7 +30,8 @@ LATE_PAYMENT = {   # Kafka에서 다시 읽지 못하는 결제 줄 (예: 여유
     "payment_id": "00000000-4000-8000-0000-0000000000f9", "order_id": "00000000-4000-8000-0000-0000000000e9",
     "attempt_no": 1, "pg": "PG_A", "status": "SUCCESS", "failure_code": None,
     "completed_at": datetime(2026, 10, 21, 6, 59), "payment_content_hash": "late", "fingerprint_version": "test",
-    "kafka_partition": 0, "kafka_offset": 999, "loaded_at": STREAMED_AT}
+    "kafka_partition": 0, "kafka_offset": 999, "loaded_at": STREAMED_AT,
+    "cdc_op": "c", "source_ts_ms": 1792565940000, "rule_version": "test"}
 
 
 # ---------- 가짜 Kafka, 가짜 형식 검사 ----------
@@ -71,6 +72,14 @@ class FakeKafka:
                 if (m.topic, m.partition) in ranges
                 and ranges[(m.topic, m.partition)][0] <= m.offset < ranges[(m.topic, m.partition)][1]]
 
+    def close(self):
+        pass
+
+
+# 오류 줄의 record_key로 쓰는 메시지 키 (format_check.RECORD_KEYS와 같음, 토픽 이름 기준)
+RECORD_KEYS = {"payments": "payment_id", "orders": "order_id", "order-items": "order_item_id",
+               "clickstream": "event_id"}
+
 
 class SampleChecker:
     """샘플의 기대 결과대로 판정한다. accept_pg_c=True면 PG_C를 허용하는 새 규칙처럼 판정한다."""
@@ -89,9 +98,13 @@ class SampleChecker:
                 "payment_id": v["payment_id"], "order_id": v["order_id"], "attempt_no": v["attempt_no"],
                 "pg": v["pg"], "status": v["status"], "failure_code": v["failure_code"],
                 "completed_at": _utc(v["completed_at"]), "payment_content_hash": stand_in_fingerprint(v),
-                "fingerprint_version": "test"})
+                "fingerprint_version": "test", "cdc_op": v["__op"], "source_ts_ms": v["__source_ts_ms"]})
+        value = s.get("value") if isinstance(s.get("value"), dict) else {}
+        key_field = RECORD_KEYS.get(s["kafka"]["topic"])
         return Judgement(errors=[{"field": e["field"], "reason": e["reason"],
-                                  "raw_sample": "<masked>" if i == 0 else None}
+                                  "raw_sample": "<masked>" if i == 0 else None,
+                                  "record_key": value.get(key_field) if key_field else None,
+                                  "source_ts_ms": value.get("__source_ts_ms")}
                                  for i, e in enumerate(s["expected"]["malformed"])])
 
 
@@ -254,8 +267,8 @@ def test_refuses_before_start(tmp_path, case):
     req, now = request(), NOW
     if case == "unfinished":            # 06시 폴더 끝 07:00 + 10분이 아직 안 됨
         now = datetime(2026, 10, 21, 7, 5, tzinfo=UTC)
-    elif case == "out_of_retention":    # 05:50부터 읽어야 하는데 72시간이 지남
-        now = datetime(2026, 10, 24, 6, 0, tzinfo=UTC)
+    elif case == "out_of_retention":    # 05:50부터 읽어야 하는데 7일이 지남
+        now = datetime(2026, 10, 28, 6, 0, tzinfo=UTC)
     elif case == "rule_version":
         req = request(rule_version="v9")
     else:
@@ -269,6 +282,15 @@ def test_refuses_before_start(tmp_path, case):
     assert json.loads(events(store)[0]["detail"])["retryable"] is False
     assert kafka.reads == 0
     assert ledger_files(tmp_path) == before
+
+
+def test_kafka_retention_is_seven_days():
+    """Kafka 보관 기간은 7일이다 (#86). 3~7일 전 구간도 Kafka에서 다시 읽고, 7일이 넘으면 거부한다."""
+    assert Options().retention == timedelta(days=7)
+    assert check_request(request(), SampleChecker(), Options(), datetime(2026, 10, 27, 6, 0)) == [
+        datetime(2026, 10, 21, 6)]   # 6일 전 (예전 72시간 기준이면 거부)
+    with pytest.raises(ReprocessError):
+        check_request(request(), SampleChecker(), Options(), datetime(2026, 10, 28, 6, 0))
 
 
 class CrashOnceStore(LocalStore):
@@ -303,7 +325,8 @@ def test_failure_midway_then_retry(tmp_path):
                      ("LEDGER_REPLACED", H05, H06), ("FAILED", H06, H07)]
     failed = json.loads(events(store)[-1]["detail"])
     assert (failed["error"], failed["retryable"], failed["replaced_folders"]) == ("OSError", True, 1)
-    assert len(store.files(hour_folder("payment_events", H06))) == 2   # 새 파일은 썼고 옛 파일은 못 지움
+    # 옛 파일, (가)에서 먼저 더한 새 줄 파일, (나)에서 정리한 파일. 정리한 파일을 쓴 뒤 옛 파일을 못 지움
+    assert len(store.files(hour_folder("payment_events", H06))) == 3
 
     run(request(start=(5, 30), end=(6, 30), attempt=2), source=kafka, store=store, checker=checker, now=clock,
         log=lambda _: None)
@@ -343,6 +366,7 @@ def test_poller_takes_gold_b_approvals_oldest_first():
 
 
 RETRYABLE, FINAL = {"error": "KafkaException", "retryable": True}, {"error": "보관 기간 밖", "retryable": False}
+OUTSIDE = {"outside_window": True, "messages": 1, "written": {"payment_events": 1}, "kept": {"payment_events": 0}}
 
 
 @pytest.mark.parametrize("rows,minutes,expected", [
@@ -358,6 +382,11 @@ RETRYABLE, FINAL = {"error": "KafkaException", "retryable": True}, {"error": "�
       ev("rq-1", "FAILED", 2, detail=RETRYABLE)], 120, ("rq-1", 2)),                           # 시작한 뒤에는 승인 만료 없음
     ([ev("rq-1", "APPROVED", 0, window=((5, 10), (6, 30))), ev("rq-1", "STARTED", 1, window=((5, 10), (6, 30))),
       ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05)], 10, ("rq-1", 2)),                   # 06시 폴더 전에 멈춤
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05, detail=OUTSIDE)], 10, ("rq-1", 2)),   # 범위 밖 결제 시각 폴더만 끝내고 멈춤
+    ([ev("rq-1", "APPROVED", 0), ev("rq-1", "STARTED", 1),
+      ev("rq-1", "LEDGER_REPLACED", 2, window=FOLDER_05, detail=OUTSIDE),
+      ev("rq-1", "LEDGER_REPLACED", 3, window=FOLDER_06)], 10, None),                         # 범위 밖 폴더가 있어도 승인 폴더가 다 끝나면 끝남
     ([ev("rq-1", "APPROVED", 0)] + [ev("rq-1", step, n, detail=RETRYABLE if step == "FAILED" else None)
                                     for n, step in enumerate(["STARTED", "FAILED"] * 3, 1)], 10, None),   # 세 번 다 돌림
 ])
@@ -388,3 +417,42 @@ def test_run_number_is_recorded_and_finished_request_is_not_picked_again(tmp_pat
     assert json.loads(events(store)[0]["detail"])["run"] == 2
     approved = {**ev("rq-1", "APPROVED", 0), "rule_version": "test"}
     assert next_request([approved, *read_events(store)], NOW) is None
+
+
+# ---------- 실행 입구 (python -m pipelines.gold_b.jobs.reprocess) ----------
+
+def write_approval(root, rid: str = "rq-1", minutes: int = 30) -> None:
+    """승인 화면이 Athena INSERT로 쓴 것처럼 확장자 없는 파일에 APPROVED 줄을 둔다 (규칙 버전은 규칙표와 같은 0.2.0)."""
+    folder = root / "reprocess_events"
+    folder.mkdir(parents=True, exist_ok=True)
+    pq.write_table(to_arrow("reprocess_events", [ev(rid, "APPROVED", minutes)]), folder / f"approval_{rid}")
+
+
+def test_main_needs_ledger_root_and_reports_nothing_to_do(tmp_path):
+    logs: list[str] = []
+    assert main([], env={}, log=logs.append) == 1
+    assert main([], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
+    assert logs[-1] == "돌릴 재처리 요청이 없다"
+
+
+def test_main_dry_run_only_names_the_request(tmp_path):
+    write_approval(tmp_path)
+    logs: list[str] = []
+    assert main(["--dry-run"], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
+    assert "rq-1" in logs[-1] and "1번째 실행" in logs[-1]
+    assert [row["step"] for row in read_events(LocalStore(tmp_path))] == ["APPROVED"]
+
+
+def test_main_runs_the_approved_request_with_the_format_checker(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    from pipelines.gold_b.jobs import reprocess
+
+    write_approval(tmp_path)
+    monkeypatch.setattr(reprocess, "KafkaReader", lambda config: FakeKafka(sample_messages()))
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path), "KAFKA_BOOTSTRAP": "localhost:9092"}
+    assert main([], env=env, now=ticking(), log=lambda _: None) == 0
+    steps = [row["step"] for row in sorted(read_events(LocalStore(tmp_path)), key=lambda row: row["at"])]
+    assert steps == ["APPROVED", "STARTED", "LEDGER_REPLACED"]
+    assert folder_rows(LocalStore(tmp_path), "payment_events", H06)   # 실제 형식 검사기로 결제 줄을 만들었다
+    assert main([], env=env, now=ticking(), log=lambda _: None) == 0   # 끝난 요청은 다시 고르지 않는다
+    assert len(read_events(LocalStore(tmp_path))) == 3

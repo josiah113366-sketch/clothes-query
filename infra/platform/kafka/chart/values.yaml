@@ -12,6 +12,8 @@ kafka:
   storageGi: 20
   # Approved starting retention: 24 hours. Topic-level retention can override this.
   retentionHours: 24
+  # Optional dynamic override; when set, takes precedence over retentionHours.
+  retentionMs: null
   nodePool: clothes-query-dev-compute
   resources:
     requests: {cpu: "500m", memory: "2Gi"}

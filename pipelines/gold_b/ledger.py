@@ -23,6 +23,7 @@ TABLE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
         ("status", "STRING"), ("failure_code", "STRING"), ("completed_at", "TIMESTAMP"),
         ("payment_content_hash", "STRING"), ("fingerprint_version", "STRING"),
         ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"), ("loaded_at", "TIMESTAMP"),
+        ("cdc_op", "STRING"), ("source_ts_ms", "BIGINT"), ("rule_version", "STRING"),
     ),
     "topic_messages": (
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
@@ -37,6 +38,7 @@ TABLE_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
         ("topic", "STRING"), ("kafka_partition", "INT"), ("kafka_offset", "BIGINT"),
         ("kafka_timestamp", "TIMESTAMP"), ("field", "STRING"), ("reason", "STRING"),
         ("raw_sample", "STRING"), ("rule_version", "STRING"), ("loaded_at", "TIMESTAMP"),
+        ("record_key", "STRING"), ("source_ts_ms", "BIGINT"),
     ),
     "reprocess_events": (
         ("request_id", "STRING"), ("step", "STRING"), ("at", "TIMESTAMP"), ("actor", "STRING"),
@@ -57,8 +59,8 @@ HOUR = timedelta(hours=1)
 
 # 형식 검사가 결제 메시지에서 돌려주는 업무 칼럼과 오류 하나의 칸
 PAYMENT_FIELDS = ("payment_id", "order_id", "attempt_no", "pg", "status", "failure_code",
-                  "completed_at", "payment_content_hash", "fingerprint_version")
-ERROR_FIELDS = ("field", "reason", "raw_sample")
+                  "completed_at", "payment_content_hash", "fingerprint_version", "cdc_op", "source_ts_ms")
+ERROR_FIELDS = ("field", "reason", "raw_sample", "record_key", "source_ts_ms")
 
 
 # ---------- 시각과 시간 폴더 ----------
@@ -130,7 +132,8 @@ def message_rows(message: KafkaMessage, judgement: Judgement, rule_version: str,
         if not isinstance(payment["completed_at"], datetime):
             raise ValueError("결제 줄에 completed_at이 없다 (시간 폴더를 정할 수 없음)")
         payment["completed_at"] = utc_naive(payment["completed_at"])
-        rows["payment_events"].append({**payment, **where, "loaded_at": loaded_at})
+        # rule_version: 같은 메시지를 여러 규칙 버전으로 검사한 이력을 ①에서도 추적한다 (④와 같음)
+        rows["payment_events"].append({**payment, **where, "loaded_at": loaded_at, "rule_version": rule_version})
     fields_seen: set[object] = set()
     for error in judgement.errors:
         # 설계 「중복 제거」: (토픽, 파티션, offset, rule_version, field)가 같으면 한 줄만. 같은 필드의 첫 오류를 남긴다
@@ -155,7 +158,10 @@ class Store(Protocol):
 
     def files(self, folder: str, any_name: bool = False) -> list[str]: ...
     def read(self, path: str, table: str) -> list[dict]: ...
-    def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None: ...
+    def read_bytes(self, path: str) -> bytes: ...   # 원장이 아닌 파일 그대로 (예: Bronze JSON)
+    def write(self, path: str, table: str, rows: Sequence[Mapping],
+              metadata: Mapping[str, str] | None = None) -> None: ...
+    def metadata(self, path: str) -> dict[str, str]: ...
     def delete(self, paths: Sequence[str]) -> None: ...
 
 
@@ -173,10 +179,15 @@ def _visible(name: str, any_name: bool) -> bool:
     return _visible_any(name) if any_name else _visible_parquet(name)
 
 
-def to_arrow(table: str, rows: Sequence[Mapping]) -> pa.Table:
+def to_arrow(table: str, rows: Sequence[Mapping], metadata: Mapping[str, str] | None = None) -> pa.Table:
+    """metadata는 Parquet 파일에 함께 적는 짧은 글 (예: 파일 합치기가 합친 원래 파일 목록)."""
     schema = SCHEMAS[table]
-    return pa.Table.from_pylist([{name: row.get(name) for name in schema.names} for row in rows],
-                                schema=schema)
+    data = pa.Table.from_pylist([{name: row.get(name) for name in schema.names} for row in rows], schema=schema)
+    return data.replace_schema_metadata(dict(metadata)) if metadata else data
+
+
+def _decode(metadata) -> dict[str, str]:
+    return {key.decode(): value.decode() for key, value in (metadata or {}).items()}
 
 
 def from_arrow(table: str, data: pa.Table) -> list[dict]:
@@ -211,13 +222,20 @@ class LocalStore:
     def read(self, path: str, table: str) -> list[dict]:
         return from_arrow(table, pq.read_table(self._root / path))
 
-    def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None:
+    def read_bytes(self, path: str) -> bytes:
+        return (self._root / path).read_bytes()
+
+    def write(self, path: str, table: str, rows: Sequence[Mapping],
+              metadata: Mapping[str, str] | None = None) -> None:
         target = self._root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         # '.'으로 시작하는 임시 이름에 다 쓴 뒤 바꾼다. 쓰는 도중의 파일을 Athena가 읽지 않는다
         temp = target.with_name(f".{target.name}.tmp")
-        pq.write_table(to_arrow(table, rows), temp, compression="snappy")
+        pq.write_table(to_arrow(table, rows, metadata), temp, compression="snappy")
         os.replace(temp, target)
+
+    def metadata(self, path: str) -> dict[str, str]:
+        return _decode(pq.read_schema(self._root / path).metadata)
 
     def delete(self, paths: Sequence[str]) -> None:
         for path in paths:
@@ -254,13 +272,20 @@ class S3Store:
         return sorted(found)
 
     def read(self, path: str, table: str) -> list[dict]:
-        body = self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
-        return from_arrow(table, pq.read_table(pa.BufferReader(body)))
+        return from_arrow(table, pq.read_table(pa.BufferReader(self.read_bytes(path))))
 
-    def write(self, path: str, table: str, rows: Sequence[Mapping]) -> None:
+    def read_bytes(self, path: str) -> bytes:
+        return self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
+
+    def write(self, path: str, table: str, rows: Sequence[Mapping],
+              metadata: Mapping[str, str] | None = None) -> None:
         buffer = pa.BufferOutputStream()
-        pq.write_table(to_arrow(table, rows), buffer, compression="snappy")
+        pq.write_table(to_arrow(table, rows, metadata), buffer, compression="snappy")
         self._s3.put_object(Bucket=self._bucket, Key=self._key(path), Body=buffer.getvalue().to_pybytes())
+
+    def metadata(self, path: str) -> dict[str, str]:
+        body = self._s3.get_object(Bucket=self._bucket, Key=self._key(path))["Body"].read()
+        return _decode(pq.read_schema(pa.BufferReader(body)).metadata)
 
     def delete(self, paths: Sequence[str]) -> None:
         keys = [self._key(path) for path in paths]

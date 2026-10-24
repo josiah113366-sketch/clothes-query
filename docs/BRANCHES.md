@@ -95,6 +95,7 @@ gitGraph
 | `sim/cdc-orders` | `docs/tasks/sim-cdc-orders.md` | 머지됨 | |
 | `sim/ecs-image` | `docs/tasks/sim-ecs-image.md` | 머지됨 | 2026-10-22 |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 진행 중 | |
+| `sim/sink-pause` | [sim-sink-pause.md](tasks/sim-sink-pause.md) | 진행 중 | |
 | `sim/review-delivered` | [sim-review-delivered.md](tasks/sim-review-delivered.md) (리뷰 시뮬레이터 배송완료 기준·KST 0시 실행) | 검토 대기 | |
 | `sim/normal-scale` | `docs/tasks/sim-normal-scale.md` | 머지됨 | 2026-10-22 (#60) |
 | `sim/console` | `docs/tasks/sim-console.md` | 머지됨 | |
@@ -114,6 +115,7 @@ gitGraph
 |---|---|---|---|
 | `infra/eks-audit-cost` | [infra-eks-audit-cost.md](tasks/infra-eks-audit-cost.md) | PR #39 머지됨·수집 중단 취소 후속 | 2026-10-21 |
 | `infra/eks-audit-restore` | [infra-eks-audit-restore.md](tasks/infra-eks-audit-restore.md) | 실제 복구 완료·검토 대기 | |
+| `infra/kafka-retention-only` | [infra-kafka-retention-week.md](tasks/infra-kafka-retention-week.md) | Kafka 7일 보관·alias 충돌 수정만 최신 main에서 분리, 실환경 적용 이력 포함 | |
 | `infra/shared-deployment-config` | [infra-shared-deployment-config.md](tasks/infra-shared-deployment-config.md) | 최신 main 통합·머지 전 검증 | |
 | `infra/agent-development-access` | [infra-agent-development-access.md](tasks/infra-agent-development-access.md) | 실제 적용·PR #49 검토 대기 | |
 | `infra/airflow-runtime` | [infra-airflow-runtime.md](tasks/infra-airflow-runtime.md) | 개발 Airflow 설치·합성 검증 완료, PR #41 검토 대기 | |
@@ -127,6 +129,7 @@ gitGraph
 | `infra/ecs-review-simulator` | [sim-review-ecs.md](tasks/sim-review-ecs.md) (리뷰 시뮬레이터 ECS 기반) | 진행 중 | |
 | `infra/review-order` | [infra-review-order.md](tasks/infra-review-order.md) (리뷰 시뮬레이터 RDS 주문 읽기) | 검토 대기 | |
 | `infra/sagemaker-review-score` | [infra-sagemaker-review-score.md](tasks/infra-sagemaker-review-score.md) (리뷰 점수화 SageMaker Processing Job 기반) | 진행 중 | |
+| `infra/sagemaker-model-release` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (점수화 SSM 을 릴리스 묶음 기준으로. `dashboard/model-benchmark`에 머지해 함께 올림) | 진행 중 | |
 | `infra/ecs-simulator` | [infra-ecs-simulator.md](tasks/infra-ecs-simulator.md) (거래·회원 시뮬레이터 ECS) | 머지됨 | 2026-10-22 |
 | `infra/ecs-simulator-backend` | [infra-ecs-simulator-backend.md](tasks/infra-ecs-simulator-backend.md) (ECS 스택 backend 설정 공유) | 진행 중 | |
 | `infra/spark-preparation-share` | [infra-spark-preparation-share.md](tasks/infra-spark-preparation-share.md) | 비활성 Spark 기반 통합 공유, 업무 명세·배포 대기 | |
@@ -148,7 +151,7 @@ gitGraph
 | `agent/skeleton` | [agent-skeleton.md](tasks/agent-skeleton.md) | 머지됨 (PR #42) | 2026-10-21 |
 | `agent/review-fixes` | [agent-review-fixes.md](tasks/agent-review-fixes.md) | 머지됨 (PR #48) | 2026-10-21 |
 | `agent/detect-r6` | [agent-detect-r6.md](tasks/agent-detect-r6.md) | 머지됨 (PR #47) | 2026-10-21 |
-| `agent/eval-skeleton` | `agent-eval-skeleton.md` (PR 없음, 실제 이상 이력이 쌓인 뒤 PR) | 진행 중 | |
+| `agent/eval-score` | [agent-eval-score.md](tasks/agent-eval-score.md) | 머지됨 (PR #96) | 2026-10-24 |
 
 | `agent/ddl` | [agent-ddl.md](tasks/agent-ddl.md) | 머지됨 (PR #53) | 2026-10-22 |
 | `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
@@ -160,15 +163,25 @@ gitGraph
 | `agent/conclusion-check` | [agent-conclusion-check.md](tasks/agent-conclusion-check.md) | 머지됨 (PR #76) | 2026-10-23 |
 | `agent/silver-source` | `agent-silver-source.md` 없음(작은 변경, PR #80 본문 참고) | 머지됨 (PR #80) | 2026-10-23 |
 | `agent/rules-doc` | [agent-rules-doc.md](tasks/agent-rules-doc.md) | 검토 대기 | |
+| `agent/silver-conf` | [agent-silver-conf.md](tasks/agent-silver-conf.md) | 머지됨 (PR #108) | 2026-10-24 |
 
 
 ### dashboard
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `dashboard/gold-a-athena` | [dashboard-gold-a-athena.md](tasks/dashboard-gold-a-athena.md) (Gold A 완료 실행·보류 목록 Athena 조회 및 상품 관리 화면 연결) | 검토 대기 | |
 | `dashboard/baseline` | [dashboard-baseline.md](tasks/dashboard-baseline.md) | 진행 중 | |
+| `dashboard/deploy` | [dashboard-deploy.md](tasks/dashboard-deploy.md) (대시보드 EKS 배포 파일, ECR 스택, 공유 ALB 템플릿) | 진행 중 | |
+| `dashboard/model-benchmark` | [dashboard-model-benchmark.md](tasks/dashboard-model-benchmark.md) (감성분석 모델 화면, 패치노트, 릴리스 묶음·되돌림, 점수화 SSM. `review-model/release`·`infra/sagemaker-model-release` 포함, 세 영역 통합 예외) | 진행 중 | |
+| `dashboard/approval-page` | [dashboard-approval-page.md](tasks/dashboard-approval-page.md) | 검토 대기 | |
 
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
+
+### conn
+| 브랜치 | 작업 지시서 | 상태 | 머지일 |
+|---|---|---|---|
+| `conn/bronze-v2` | [conn-bronze-v2.md](tasks/conn-bronze-v2.md) | 머지됨 (infra 포함, 사용자 예외 승인) | |
 
 ### pipelines
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
@@ -186,7 +199,15 @@ gitGraph
 | `pipelines/gold-b` | [gold-b-pipelines.md](tasks/gold-b-pipelines.md) | 머지됨 (#36) | 2026-10-22 |
 | `pipelines/gold-b-views` | [gold-b-views.md](tasks/gold-b-views.md) | 머지됨 (#70) | 2026-10-23 |
 | `pipelines/gold-b-collector` | [gold-b-collector.md](tasks/gold-b-collector.md) | 머지됨 (#78) | 2026-10-23 |
-| `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 검토 대기 | |
+| `pipelines/gold-b-reprocess` | [gold-b-reprocess.md](tasks/gold-b-reprocess.md) | 머지됨 (#84) | 2026-10-23 |
+| `pipelines/gold-b-format-check` | [gold-b-format-check.md](tasks/gold-b-format-check.md) | 머지됨 (#91) | 2026-10-23 |
+| `pipelines/gold-b-compact` | [gold-b-compact.md](tasks/gold-b-compact.md) | 머지됨 (#88) | 2026-10-23 |
+| `pipelines/gold-b-ingest` | [gold-b-ingest.md](tasks/gold-b-ingest.md) | 머지됨 (#92) | 2026-10-23 |
+| `pipelines/gold-b-payment-update` | [gold-b-payment-update.md](tasks/gold-b-payment-update.md) | 머지됨 (#95) | 2026-10-23 |
+| `pipelines/gold-b-image` | [gold-b-image.md](tasks/gold-b-image.md) | 머지됨 (#98) | 2026-10-24 |
+| `pipelines/gold-b-reprocess-by-message` | [gold-b-reprocess-by-message.md](tasks/gold-b-reprocess-by-message.md) | 머지됨 (#99) | 2026-10-24 |
+| `pipelines/gold-b-dags` | [gold-b-dags.md](tasks/gold-b-dags.md) | 검토 대기 | |
+| `pipelines/gold-b-bronze-reprocess` | [gold-b-bronze-reprocess.md](tasks/gold-b-bronze-reprocess.md) | 검토 대기 | |
 
 ### gold-a
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

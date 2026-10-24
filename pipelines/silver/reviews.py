@@ -10,10 +10,13 @@ import argparse
 import json
 import os
 import tempfile
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from itertools import islice
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
+
+from pipelines.timestamps import parse_iso_datetime
 
 from .common import RowError, collect_latest, decode_record, publish_bundle
 
@@ -88,7 +91,7 @@ def _timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다")
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = parse_iso_datetime(value)
     except ValueError as exc:
         raise RowError(field, "TYPE_MISMATCH", "시간대가 있는 ISO 시각이어야 합니다") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -118,10 +121,10 @@ def normalize_review(raw: dict[str, object]) -> dict[str, object]:
         "product_name": raw.get("product_name"),
         "category": raw.get("category"),
         "order_id": raw.get("order_id"),
-        "created_at_utc": created.astimezone(UTC).isoformat(),
+        "created_at_utc": created.astimezone(timezone.utc).isoformat(),
         "created_at_kst": kst.isoformat(),
         "review_date_kst": kst.date().isoformat(),
-        "emitted_at_utc": emitted.astimezone(UTC).isoformat(),
+        "emitted_at_utc": emitted.astimezone(timezone.utc).isoformat(),
         "rating": rating,
         "text": raw["text"],
         "option_size": raw.get("option_size"),
@@ -193,6 +196,60 @@ def run(input_root: str, output_root: str, start: date, end: date) -> dict[str, 
         "input_count": result["dq_results"][0]["input_count"],
     }, _write_text)
     return {day: len(rows) for day, rows in result["by_day"].items()}
+
+
+# Spark 실행에서도 위 normalize_review·collect_latest 규칙을 공유한다.
+REVIEW_SCHEMA = ", ".join(f"{k} string" for k in (
+    "review_id", "event_id", "product_id", "product_name", "category", "order_id",
+    "created_at_utc", "created_at_kst", "review_date_kst", "emitted_at_utc", "text",
+    "option_size", "option_color", "source")) + ", rating long, has_photo boolean"
+
+METRICS = ("input_count", "accepted_count", "duplicate_count", "quarantined_count",
+           "output_count", "superseded_count", "conflict_count", "pending_count", "unknown_key_error_count")
+
+
+def build_reviews_spark(spark, documents, start, end, max_key_rows=10000):
+    from pyspark.sql import functions as F
+
+    from pipelines.spark_batch import SCHEMAS, dumps
+
+    def key_of(text):
+        row = json.loads(text)
+        key = row.get("review_id")
+        return ("id:" + key if isinstance(key, str) and key.strip() else
+                "row:" + dumps(row["_input_source"])), row
+
+    def process(group):
+        rows = list(islice(group[1], max_key_rows + 1))
+        if len(rows) > max_key_rows:
+            raise ValueError("동일 리뷰 ID 입력이 행 한도를 넘습니다")
+        selected, issues, quality = collect_latest(rows, "reviews", "review_id", normalize_review,
+                                                   "emitted_at_utc", "reviews.v1")
+        for name, values in (("silver_reviews", selected), ("quarantined_records", issues),
+                             ("dq_results", [quality])):
+            for value in values:
+                if name == "quarantined_records":
+                    value["source_record_id"] = f"reviews:{value['source_file']}:{value['source_line']}"
+                yield name, dumps(value)
+
+    tall = spark.createDataFrame(documents.map(key_of).groupByKey().flatMap(process),
+                                "table_name string, payload string").persist()
+    normalized = tall.filter("table_name = 'silver_reviews'").select(
+        F.from_json("payload", REVIEW_SCHEMA, {"mode": "FAILFAST"}).alias("r")).select("r.*")
+    selected = normalized.filter(F.col("review_date_kst").between(start, end))
+    issues = tall.filter("table_name = 'quarantined_records'").select(
+        F.from_json("payload", SCHEMAS["quarantined_records"], {"mode": "FAILFAST"}).alias("r")).select("r.*")
+    dq = tall.filter("table_name = 'dq_results'").select(
+        F.from_json("payload", ", ".join(f"{k} long" for k in METRICS)).alias("r")).select("r.*")
+    summary = dq.agg(*[F.coalesce(F.sum(k), F.lit(0)).alias(k) for k in METRICS])
+    # 출력 건수는 KST 범위 선택 후 계산하며 큰 키 배열 대신 상세 행으로 추적한다.
+    summary = summary.drop("output_count").crossJoin(selected.agg(F.count("review_id").alias("output_count")))
+    outside = normalized.filter(~F.col("review_date_kst").between(start, end)).agg(F.count("review_id").alias("outside_range_count"))
+    summary = summary.crossJoin(outside).withColumn("source_dataset", F.lit("reviews")).withColumn(
+        "check_version", F.lit("reviews.v1")).withColumn("status", F.when(
+            F.col("quarantined_count") > 0, "INCOMPLETE").otherwise("PASS"))
+    return {"silver_reviews": selected.withColumn("review_date_kst", F.to_date("review_date_kst")),
+            "quarantined_records": issues, "dq_results": summary, "_cache": (tall,)}
 
 
 def main() -> None:

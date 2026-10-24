@@ -1,0 +1,1 @@
+{"schema_version": 1, "incident_id": "INC-TEST", "phase": "start", "type": "PG_OUTAGE", "at": "2026-10-20T20:00:00Z", "params": {"pg": "PG_A", "extra_fail": 0.85, "planned_minutes": 1}}

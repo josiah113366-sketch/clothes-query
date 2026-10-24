@@ -128,6 +128,26 @@ kubectl apply -f connectors/bronze-s3-sink.yaml
 kubectl get kafkaconnector -n kafka
 ```
 
+## 6. Bronze v2 (줄마다 Kafka 위치·시각, `conn/bronze-v2`)
+
+`bronze-s3-sink-v2`가 Kafka에 남은 메시지를 처음부터 `bronze_v2/`에 다시 쓴다. 이유와 값은 `connectors/README.md`의 "Bronze v2". 시뮬레이터는 멈추지 않는다.
+
+1. **보관 기간 확인 (Helm 전 필수).** 이 values는 브로커와 업무 토픽 모두 7일(`retentionMs: 604800000`, `infra/kafka-retention-only` #86)이다. 클러스터 값과 다르면 Helm upgrade가 클러스터를 values 값으로 바꿔, 줄어드는 경우 그보다 오래된 메시지가 지워진다.
+   ```powershell
+   kubectl get kafkatopic -n kafka -o custom-columns="NAME:.spec.topicName,RETENTION_MS:.spec.config.retention\.ms"
+   ```
+   값이 `604800000`이 아니면 멈추고 확인한다. 3단계 diff에도 `retention`·`log.retention` 줄이 없어야 한다.
+2. **workload-access**: Connect 역할에 `bronze_v2/` 쓰기를 더한다. 1절 명령으로 plan한다. 기대 변경은 정책 1개 수정(update in-place)뿐이다. 비공개 `deployment.local.tfvars.json`의 `bronze-s3-sink`에도 `bronze_v2/`가 있어야 한다(공개 파일과 같게).
+3. **Helm upgrade**: 4절 명령. 바뀌는 것은 Connect KafkaUser의 그룹 ACL(`connect-bronze-s3-sink-v2` 읽기), Kafka UI 사용자의 같은 그룹 읽기, lag exporter 그룹 정규식뿐이어야 한다. 토픽·`KafkaNodePool`이 바뀌면 멈춘다.
+4. **커넥터 등록**
+   ```powershell
+   kubectl apply -f connectors/bronze-s3-sink-v2.yaml
+   kubectl get kafkaconnector -n kafka
+   ```
+   Kafka UI → Consumers → `connect-bronze-s3-sink-v2`의 lag가 줄어들다 0 근처에 머물면 따라잡은 것이다. 그동안 Connect Pod 재시작이 없는지 본다(Sink 두 개라 버퍼가 두 배다).
+5. **확인**: `bronze_v2/payments/...` 파일 한 줄에 `kafka_topic`, `kafka_partition`, `kafka_offset`, `kafka_timestamp`(ISO, `...Z`), `kafka_timestamp_type`(`CreateTime`)이 있고, 파티션별 첫 파일 이름의 offset이 Kafka의 가장 오래된 offset과 같다.
+6. **옛 Sink 정리 (읽는 쪽이 옮긴 뒤)**: `kubectl delete kafkaconnector bronze-s3-sink -n kafka`. 옛 `bronze/` 객체와 `bronze/` 권한은 남긴다. values의 옛 그룹 이름은 별도 PR에서 뺀다.
+
 ## Kafka UI
 
 ```powershell

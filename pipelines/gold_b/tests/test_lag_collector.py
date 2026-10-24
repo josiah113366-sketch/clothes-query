@@ -89,7 +89,7 @@ def test_backlog_gives_count_and_age(tmp_path):
     row, kafka = measure(tmp_path, low=0, end=130, committed=100, stamp_age=170)
     assert (row["end_offset"], row["committed_offset"], row["lag_msgs"], row["lag_sec"]) == (130, 100, 30, 170.0)
     assert row["connector_state"] == "RUNNING"
-    assert kafka.groups == ["connect-bronze-s3-sink"]      # 커넥터 이름으로 정한 S3 Sink 그룹
+    assert kafka.groups == ["connect-bronze-s3-sink-v2"]   # 커넥터 이름으로 정한 S3 Sink 그룹 (기본은 Bronze v2)
     assert kafka.requested == {("payments", 0): 100}       # 처리 안 된 가장 오래된 메시지 1건만 읽음
 
 
@@ -211,7 +211,7 @@ def test_kafka_failure_writes_nothing_and_hides_details(tmp_path):   # 규칙 3
 
 def test_settings_defaults_and_checks(tmp_path):
     settings = make_settings(tmp_path)
-    assert settings.sink_group == "connect-bronze-s3-sink" and settings.topics == ("payments",)
+    assert settings.sink_group == "connect-bronze-s3-sink-v2" and settings.topics == ("payments",)
     assert make_settings(tmp_path, GOLD_B_SINK_GROUP="custom-group").sink_group == "custom-group"
     assert "localhost" not in repr(settings)                    # 주소가 로그에 찍히지 않게
     for bad in ({"GOLD_B_LAG_OUTPUT": ""},
