@@ -19,6 +19,8 @@
 
 ## CI/CD (GitHub Actions + Argo CD)
 
+CPU·메모리·환경 변수 같은 매니페스트 설정은 main 대상 PR로 변경한다. `deploy/dashboard`는 아래 workflow가 main 기준으로 매번 다시 만드는 배포 산출물이다. 배포 브랜치에만 수동 수정하면 다음 배포에서 사라진다. 개발 CPU 예약은 25m이며 CPU 상한 1코어·메모리 예약/상한은 유지한다. [변경 기록](../../../docs/tasks/infra-dashboard-cpu-reservation.md).
+
 main 에 대시보드 소스가 머지되면 사람이 digest 를 고치거나 커밋하지 않아도 배포된다.
 
 ```

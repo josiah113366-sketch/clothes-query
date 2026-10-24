@@ -62,7 +62,7 @@ spec:
             periodSeconds: 20
           # 개발 부하에 맞춘 CPU 예약이며, 메모리와 CPU 상한은 유지한다.
           resources:
-            requests: {cpu: 100m, memory: 512Mi}
+            requests: {cpu: 25m, memory: 512Mi}
             limits: {cpu: "1", memory: 1Gi}
           securityContext:
             allowPrivilegeEscalation: false

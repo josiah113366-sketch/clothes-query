@@ -111,6 +111,7 @@ gitGraph
 ### infra
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
+| `infra/dashboard-cpu-reservation` | [infra-dashboard-cpu-reservation.md](tasks/infra-dashboard-cpu-reservation.md) | CPU 25m 유지, main PR 준비 | |
 | `infra/applied-state-sync` | [infra-applied-state-sync.md](tasks/infra-applied-state-sync.md) | 적용 후속·draft 보존·#100 반영·Gold B 연결 기반 검증 완료, 공유 브랜치 | |
 | `infra/grafana-plugin-recovery` | [infra-grafana-plugin-recovery.md](tasks/infra-grafana-plugin-recovery.md) | 적용·조회 검증 완료, applied-state-sync에 통합·원본 보존 | |
 | `infra/silver-gold-a-connections` | [infra-silver-gold-a-connections.md](tasks/infra-silver-gold-a-connections.md) | 실행 기반 적용·첫 업무 실행 확인, applied-state-sync에 통합·원본 보존 | |
