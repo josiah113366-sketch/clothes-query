@@ -1,0 +1,127 @@
+# 대시보드 CI/CD: main 에 대시보드 소스가 머지되면 이미지를 빌드해 ECR 에 올리고,
+# 그 digest 를 적은 매니페스트를 deploy/dashboard 브랜치에 덮어쓴다. 클러스터 반영은 Argo CD 가 한다.
+#
+#   main 머지 -> (이 워크플로) 빌드·ECR push -> deploy/dashboard 브랜치에 digest 반영
+#             -> (Argo CD, 최대 약 3분 주기) deploy/dashboard 의 infra/platform/dashboard/k8s 를 dashboard namespace 에 sync
+#
+# 왜 deploy/dashboard 브랜치인가
+#   - 사람이 digest 를 고쳐 커밋하던 일을 없애면서 main 에는 자동 커밋을 남기지 않는다 (main 보호 규칙과도 충돌 없음).
+#   - 매번 "main 의 그 커밋 + digest 1줄 변경" 커밋 하나로 강제 덮어쓰므로 매니페스트 변경(env, 리소스 등)도 main 기준으로 같이 배포된다.
+#   - 되돌리기: 이전 main 커밋에서 Actions 의 "Run workflow"(workflow_dispatch)를 다시 돌리면 그 커밋의 이미지로 돌아간다.
+#
+# 처음 한 번 준비 (README 의 "CI/CD" 절 참고)
+#   1. infra/stacks/dashboard 를 apply 해 GitHub OIDC 역할을 만든다 (출력 github_actions_role_arn).
+#   2. GitHub 저장소 Settings > Secrets and variables > Actions > Variables 에 DASHBOARD_DEPLOY_ROLE_ARN 을 등록한다.
+#      (비밀값이 아니라 역할 주소다. 액세스 키는 어디에도 저장하지 않는다)
+#   3. Argo CD 에 infra/platform/dashboard/argocd/ 를 적용한다.
+name: Dashboard deploy
+
+on:
+  push:
+    branches: [main]
+    # 이미지에 들어가는 파일(Dockerfile 의 COPY 대상)과 매니페스트가 바뀔 때만 돈다. Dockerfile 이 바뀌면 여기도 맞춘다
+    paths:
+      - "dashboard/**"
+      - "agent/approval/approval.py"
+      - "agent/detect/athena_io.py"
+      - "infra/platform/dashboard/Dockerfile"
+      - "infra/platform/dashboard/Dockerfile.dockerignore"
+      - "infra/platform/dashboard/k8s/**"
+      - ".github/workflows/dashboard-deploy.yml"
+  # 수동 실행: 재배포나 되돌리기(이전 커밋을 골라 실행). main 이 아닌 브랜치는 AWS 역할 조건에서 거부된다
+  workflow_dispatch:
+
+permissions:
+  contents: write   # deploy/dashboard 브랜치 push
+  id-token: write   # AWS OIDC 토큰 발급 (액세스 키 없이 역할을 받는다)
+
+# 배포는 순서대로 하나씩. 진행 중인 배포를 취소하지 않는다 (ECR push 도중 끊기지 않게)
+concurrency:
+  group: dashboard-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REPOSITORY: clothes-query-dev/dashboard     # infra/stacks/dashboard 의 저장소 이름
+  DEPLOY_BRANCH: deploy/dashboard                 # Argo CD Application 의 targetRevision 과 같아야 한다
+  MANIFEST: infra/platform/dashboard/k8s/deployment.yaml
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # deploy 브랜치 push 에 GITHUB_TOKEN 을 쓴다 (이 job 안에서만 유효)
+          persist-credentials: true
+
+      - name: Assume AWS role with GitHub OIDC
+        env:
+          ROLE_ARN: ${{ vars.DASHBOARD_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ROLE_ARN}" ]; then
+            echo "::error::저장소 변수 DASHBOARD_DEPLOY_ROLE_ARN 이 없습니다 (infra/stacks/dashboard 출력 github_actions_role_arn)."
+            exit 1
+          fi
+          # 외부 action 없이 러너의 OIDC 토큰으로 직접 역할을 받는다. audience 는 IAM OIDC 공급자의 client_id 와 같아야 한다
+          token="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+                   "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r .value)"
+          creds="$(aws sts assume-role-with-web-identity --role-arn "${ROLE_ARN}" \
+                   --role-session-name "gha-dashboard-${GITHUB_RUN_ID}" --web-identity-token "${token}" \
+                   --duration-seconds 3600 --query Credentials --output json)"
+          for k in AccessKeyId SecretAccessKey SessionToken; do echo "::add-mask::$(jq -r ".${k}" <<<"${creds}")"; done
+          {
+            echo "AWS_ACCESS_KEY_ID=$(jq -r .AccessKeyId <<<"${creds}")"
+            echo "AWS_SECRET_ACCESS_KEY=$(jq -r .SecretAccessKey <<<"${creds}")"
+            echo "AWS_SESSION_TOKEN=$(jq -r .SessionToken <<<"${creds}")"
+            echo "AWS_DEFAULT_REGION=${AWS_REGION}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build and push image (skip if the tag already exists)
+        id: image
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          registry="${account}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          # 태그 = 커밋 앞 7자리. deploy.ps1 이 깨끗한 커밋에서 쓰는 태그와 같아서, 이미 수동으로 올린 커밋이면 빌드를 건너뛴다
+          # (저장소가 IMMUTABLE 이라 같은 태그를 다시 push 할 수 없다)
+          tag="${GITHUB_SHA::7}"
+          image="${registry}/${ECR_REPOSITORY}:${tag}"
+          if aws ecr describe-images --repository-name "${ECR_REPOSITORY}" --image-ids "imageTag=${tag}" >/dev/null 2>&1; then
+            echo "ECR 에 ${tag} 가 이미 있어 빌드를 건너뜁니다."
+          else
+            aws ecr get-login-password | docker login --username AWS --password-stdin "${registry}"
+            # 노드가 amd64(t3a) 라서 플랫폼을 고정한다. 빌드 컨텍스트는 저장소 루트 (Dockerfile 의 COPY 경로 기준)
+            docker build --platform linux/amd64 -f infra/platform/dashboard/Dockerfile -t "${image}" .
+            docker push "${image}"
+          fi
+          digest="$(aws ecr describe-images --repository-name "${ECR_REPOSITORY}" --image-ids "imageTag=${tag}" \
+                    --query 'imageDetails[0].imageDigest' --output text)"
+          case "${digest}" in sha256:*) ;; *) echo "::error::digest 를 읽지 못했습니다: ${digest}"; exit 1;; esac
+          echo "registry=${registry}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "이미지: ${image} (${digest})" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish manifest with the new digest to the deploy branch
+        env:
+          REGISTRY: ${{ steps.image.outputs.registry }}
+          TAG: ${{ steps.image.outputs.tag }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          # 지금 체크아웃한 커밋(main) 위에 deploy 브랜치를 새로 만든다. 이전 deploy 커밋은 버린다 (강제 덮어쓰기)
+          git checkout -B "${DEPLOY_BRANCH}"
+          # image: 줄의 저장소 주소 뒤(@sha256:... 또는 :태그)만 새 digest 로 바꾼다. 줄 끝 CR 이 있어도 건드리지 않는다
+          sed -i -E "s#(image:[[:space:]]*)[^[:space:]]*/${ECR_REPOSITORY}[@:][^[:space:]]*#\1${REGISTRY}/${ECR_REPOSITORY}@${DIGEST}#" "${MANIFEST}"
+          grep -q "${ECR_REPOSITORY}@${DIGEST}" "${MANIFEST}" || { echo "::error::${MANIFEST} 의 image 줄을 찾지 못했습니다."; exit 1; }
+          git add "${MANIFEST}"
+          # main 에 이미 같은 digest 가 적혀 있으면 바뀐 것이 없다. 그래도 deploy 브랜치는 이 main 커밋으로 맞춘다
+          git commit -m "deploy(dashboard): ${TAG} ${DIGEST}" -m "source: ${GITHUB_SHA}" || true
+          git push --force origin "HEAD:refs/heads/${DEPLOY_BRANCH}"
+          echo "배포 브랜치: ${DEPLOY_BRANCH} <- ${GITHUB_SHA::7} + ${DIGEST}" >> "${GITHUB_STEP_SUMMARY}"

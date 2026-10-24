@@ -45,7 +45,8 @@ configs:
   clusterCredentials:
     in-cluster:
       server: https://kubernetes.default.svc
-      namespaces: api
+      # dashboard: infra/platform/dashboard/argocd (dashboard project, its own namespaced Role).
+      namespaces: api,dashboard
       clusterResources: false
       config: {}
 controller:

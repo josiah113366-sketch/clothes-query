@@ -16,3 +16,15 @@ variable "expected_account_id" {
     error_message = "Provide the approved AWS account ID."
   }
 }
+variable "github_repository" {
+  description = "GitHub owner/repo whose main-branch workflows may push dashboard images (github-actions.tf)."
+  type        = string
+  default     = "josiah113366-sketch/clothes-query"
+}
+variable "create_github_oidc_provider" {
+  # 2026-10-24: 이 계정에는 GitHub OIDC 공급자가 이미 있다 (apply 시 EntityAlreadyExists). 그래서 기본은 기존 것을 읽어 쓴다.
+  # 새 계정처럼 공급자가 없을 때만 true 로 바꾼다.
+  description = "Create the account-wide GitHub OIDC provider. Keep false when it already exists in this AWS account."
+  type        = bool
+  default     = false
+}

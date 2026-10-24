@@ -1,0 +1,34 @@
+# 대시보드 Argo CD Application.
+# deploy/dashboard 브랜치(.github/workflows/dashboard-deploy.yml 이 main 커밋 + 새 이미지 digest 로 덮어쓰는 브랜치)의
+# infra/platform/dashboard/k8s 를 dashboard namespace 에 맞춘다.
+#
+# - namespace.yaml 은 클러스터 리소스라 제외한다 (namespace 는 이미 있고 사람이 관리).
+# - 자동 sync: 새 커밋이 보이면(Argo CD 저장소 확인 주기 timeout.reconciliation=180s) 바로 반영한다.
+# - selfHeal: 누가 kubectl 로 Deployment 를 바꾸면 Git 상태로 되돌린다. 그래서 이 Application 을 만든 뒤에는
+#   deploy.ps1 의 kubectl apply 로 이미지를 바꾸지 않는다 (README "CI/CD" 참고). Secret 은 Argo CD 가 다루지 않아 그대로 수동.
+# - prune: false. Git 에서 파일이 빠져도 클러스터 리소스를 지우지 않는다 (지울 때는 사람이 확인 후 직접).
+# - finalizer 를 달지 않는다: Application 을 지워도 대시보드 Deployment/Service 는 남는다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dashboard
+  namespace: argocd
+spec:
+  project: dashboard
+  source:
+    repoURL: https://github.com/josiah113366-sketch/clothes-query.git
+    targetRevision: deploy/dashboard
+    path: infra/platform/dashboard/k8s
+    directory:
+      exclude: namespace.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dashboard
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+  # Deployment 를 몇 번까지 되돌릴 수 있게 기록할지 (Argo CD UI 의 History)
+  revisionHistoryLimit: 5

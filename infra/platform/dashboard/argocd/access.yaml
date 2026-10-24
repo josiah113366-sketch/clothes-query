@@ -1,0 +1,66 @@
+# Argo CD 가 dashboard namespace 에 대시보드 앱만 배포할 수 있게 하는 권한 (infra/platform/argocd/was-access.yaml 과 같은 방식).
+# controller: Deployment·Service 변경 + 상태 조회. server(UI): 같은 대상 조회만.
+# Secret·ServiceAccount·RBAC 은 여기서 다루지 않는다. dashboard-accounts / airflow-api-client Secret 과
+# approval-dashboard ServiceAccount 는 지금처럼 사람이(deploy.ps1 -AccountsOnly 등) 관리한다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-dashboard-deployer
+  namespace: dashboard
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch, create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-dashboard-deployer
+  namespace: dashboard
+subjects:
+  - kind: ServiceAccount
+    name: argocd-application-controller
+    namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-dashboard-deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-dashboard-viewer
+  namespace: dashboard
+rules:
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [services, pods, pods/log, events]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-dashboard-viewer
+  namespace: dashboard
+subjects:
+  - kind: ServiceAccount
+    name: argocd-server
+    namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-dashboard-viewer
