@@ -175,7 +175,7 @@ def run(input_root: str, output_root: str, through: date,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="회원 CDC Bronze → 회원 현재 상태 Silver")
-    parser.add_argument("--input-root", required=True, help="bronze/members-events 경로")
+    parser.add_argument("--input-root", required=True, help="bronze_v2/members-events 경로")
     parser.add_argument("--output-root", required=True, help="로컬 결과 루트")
     parser.add_argument("--through-date", type=date.fromisoformat, required=True, help="UTC 수집 날짜")
     parser.add_argument("--rules-path", help="공통 입력 규칙 YAML. 생략하면 저장소 기본 규칙")

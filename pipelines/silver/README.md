@@ -69,7 +69,7 @@ R6는 MISMATCH만 금액 불일치로 본다. UNVERIFIED는 입력 준비 미확
 
 | 항목 | 기준 |
 |---|---|
-| 입력 | `bronze/members-events/year=YYYY/month=MM/day=DD/*.json` 전체 이력. 폴더 날짜는 UTC Kafka 수집일 |
+| 입력 | `bronze_v2/members-events/year=YYYY/month=MM/day=DD/*.json` 전체 이력. 폴더 날짜는 UTC Kafka 수집일 |
 | 출력 | 로컬 `silver/members_current/as_of=YYYY-MM-DD/current.json`이 가리키는 정상·격리·품질 결과 묶음 |
 | 한 행의 기준 | 해당 UTC 수집일까지의 `member_id`당 최신 상태 1행 |
 | 중복·순서 | 동일 내용·원천 시각은 중복 제거. 오류 없는 회원만 더 큰 `__source_ts_ms` 선택. 오류·동시각 충돌이 있는 회원은 전체 보류 |
@@ -77,7 +77,7 @@ R6는 MISMATCH만 금액 불일치로 본다. UNVERIFIED는 입력 준비 미확
 | 제외 | 이름·이메일·전화번호 등 PII. Source 커넥터가 입수에서 제외하며 Silver도 필요한 필드만 선택 |
 
 ```powershell
-python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronze/members-events> --output-root pipelines/silver/.local/lake --through-date 2026-10-14
+python -m pipelines.silver.members --input-root <로컬 또는 s3://버킷/bronze_v2/members-events> --output-root pipelines/silver/.local/lake --through-date 2026-10-14
 ```
 
 `as_of`는 실행 시각이 아니라 **어느 UTC 수집 날짜까지 읽었는지**를 뜻한다. 이전 날짜 결과를 다시 만들더라도 최신 날짜 결과를 덮어쓰지 않는다. 현재 확인한 실제 파일은 초기 스냅샷(`__op=r`)뿐이다. `c/u` 선택 규칙은 합성 입력으로만 검증했으며 실제 변경 이벤트가 오면 다시 확인해야 한다. 첫 버전은 로컬 Silver 출력만 지원한다.

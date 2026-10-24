@@ -28,9 +28,9 @@ pending:
   dag_repository_path: null
   dag_delivery_method: null
   inputs:
-    orders: {uri: 's3://clothes-query-datalake/bronze/orders/', format: json_lines}
-    order_items: {uri: 's3://clothes-query-datalake/bronze/order-items/', format: json_lines}
-    payments: {uri: 's3://clothes-query-datalake/bronze/payments/', format: json_lines}
+    orders: {uri: 's3://clothes-query-datalake/bronze_v2/orders/', format: json_lines}
+    order_items: {uri: 's3://clothes-query-datalake/bronze_v2/order-items/', format: json_lines}
+    payments: {uri: 's3://clothes-query-datalake/bronze_v2/payments/', format: json_lines}
   input_date_partition_rule: UTC_Kafka_record_date_folders__KST_business_date_aggregation
   outputs:
     silver_uri: 's3://clothes-query-datalake/silver/runtime/trade/'

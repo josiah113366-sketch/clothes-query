@@ -25,9 +25,9 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
   "job": "trade", "run_id": "trade-20261022-001",
   "output_root": "s3://<데이터-버킷>/", "input_complete": true,
   "inputs": {
-    "orders": ["s3://<데이터-버킷>/bronze/orders/"],
-    "order_items": ["s3://<데이터-버킷>/bronze/order-items/"],
-    "payments": ["s3://<데이터-버킷>/bronze/payments/"],
+    "orders": ["s3://<데이터-버킷>/bronze_v2/orders/"],
+    "order_items": ["s3://<데이터-버킷>/bronze_v2/order-items/"],
+    "payments": ["s3://<데이터-버킷>/bronze_v2/payments/"],
     "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
     "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"]
   }
@@ -49,19 +49,19 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
 
 ### 퍼널 실행 요청
 
-같은 진입점과 DAG에서 job=funnels를 사용한다. 거래 입력 5개에 clicks를 추가하며 원천은 bronze/clickstream/이다. 기존 거래 복원·금액 검사·상품 기준정보 처리를 재사용한다.
+같은 진입점과 DAG에서 job=funnels를 사용한다. 거래 입력 5개에 clicks를 추가하며 원천은 bronze_v2/clickstream/이다. 기존 거래 복원·금액 검사·상품 기준정보 처리를 재사용한다.
 
 ```json
 {
   "job": "funnels", "run_id": "funnels-20261022-001",
   "output_root": "s3://<데이터-버킷>/", "input_complete": true,
   "inputs": {
-    "orders": ["s3://<데이터-버킷>/bronze/orders/"],
-    "order_items": ["s3://<데이터-버킷>/bronze/order-items/"],
-    "payments": ["s3://<데이터-버킷>/bronze/payments/"],
+    "orders": ["s3://<데이터-버킷>/bronze_v2/orders/"],
+    "order_items": ["s3://<데이터-버킷>/bronze_v2/order-items/"],
+    "payments": ["s3://<데이터-버킷>/bronze_v2/payments/"],
     "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
     "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"],
-    "clicks": ["s3://<데이터-버킷>/bronze/clickstream/"]
+    "clicks": ["s3://<데이터-버킷>/bronze_v2/clickstream/"]
   }
 }
 ```
@@ -80,7 +80,7 @@ docker build -f pipelines/Dockerfile --build-arg SPARK_IMAGE=<팀-기본이미�
 
 Gold는 저장된 Silver/상품 Parquet을 다시 읽는다. 거래·클릭 품질 오류는 아래 부분 공개 규칙으로 처리한다. 상품 기준정보 자체 오류·집계 단계에서 새로 발견한 연결/시각 오류·저장 실패는 실행 실패로 전달하고 기존 공개 참조를 유지한다. 정상 빈 클릭 파일은 퍼널 0건이고, 입력 파일 자체가 없으면 실패다.
 
-인프라 추가 연결 범위: bronze/clickstream/ 읽기, silver/runtime/clicks/ 및 gold_a/runtime/funnels/ 읽기·쓰기와 해당 실행 데이터셋 아래 magic committer 작업 객체 정리. 현재 거래 경로 권한이 이 범위를 포함한다고 가정하지 않는다. Athena/Glue 테이블·정기 실행·실제 Kafka 범위 검증은 후속이다.
+인프라 추가 연결 범위: bronze_v2/clickstream/ 읽기, silver/runtime/clicks/ 및 gold_a/runtime/funnels/ 읽기·쓰기와 해당 실행 데이터셋 아래 magic committer 작업 객체 정리. 현재 거래 경로 권한이 이 범위를 포함한다고 가정하지 않는다. Athena/Glue 테이블·정기 실행·실제 Kafka 범위 검증은 후속이다.
 
 ### 리뷰 실행 요청
 
@@ -108,7 +108,7 @@ WHERE review_date BETWEEN DATE '2026-10-19' AND DATE '2026-10-19';
   "start_date": "2026-10-19", "end_date": "2026-10-19",
   "model_version": "<모델-버전>",
   "inputs": {
-    "reviews": ["s3://<데이터-버킷>/bronze/reviews/<대상-파일>.jsonl"],
+    "reviews": ["s3://<데이터-버킷>/bronze_v2/reviews/<대상-파일>.jsonl"],
     "designs": ["s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet"],
     "variants": ["s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet"],
     "analysis": ["s3://<데이터-버킷>/<모델-결과>/scores.csv"]

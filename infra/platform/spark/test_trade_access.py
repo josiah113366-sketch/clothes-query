@@ -19,7 +19,7 @@ class TradeAccessTests(unittest.TestCase):
 
     def test_supplied_contract_is_scoped_and_still_not_deployable(self):
         plan = access_plan(self.contract)
-        self.assertEqual(plan['read_prefixes'], ['bronze/orders/', 'bronze/order-items/', 'bronze/payments/'])
+        self.assertEqual(plan['read_prefixes'], ['bronze_v2/orders/', 'bronze_v2/order-items/', 'bronze_v2/payments/'])
         self.assertEqual(plan['read_write_prefixes'], ['silver/runtime/trade/', 'gold_a/runtime/trade/'])
         self.assertEqual(set(plan['missing_binding_inputs']), {'namespace', 'service_account_prefix', 'config_request_prefix_uri'})
         self.assertFalse(plan['delete_permissions'])
@@ -38,7 +38,7 @@ class TradeAccessTests(unittest.TestCase):
         self.assertNotIn('example-trade-submitter', merged['bindings'])
         for role in ['driver', 'executor']:
             access = merged['bindings']['example-trade-' + role]['s3_access']
-            self.assertEqual(access['bronze/orders/'], ['s3:GetObject'])
+            self.assertEqual(access['bronze_v2/orders/'], ['s3:GetObject'])
             self.assertEqual(access['silver/runtime/trade/'], ['s3:GetObject', 's3:PutObject'])
             self.assertEqual(access['gold_a/runtime/trade/'], ['s3:GetObject', 's3:PutObject'])
             self.assertEqual(access['run-requests/example-trade/'], ['s3:GetObject'])
@@ -61,7 +61,7 @@ class TradeAccessTests(unittest.TestCase):
                 prefix(uri, 'clothes-query-datalake')
 
     def test_reject_accidentally_broadened_input_and_config(self):
-        self.contract['pending']['inputs']['orders']['uri'] = 's3://clothes-query-datalake/bronze/'
+        self.contract['pending']['inputs']['orders']['uri'] = 's3://clothes-query-datalake/bronze_v2/'
         with self.assertRaisesRegex(ValueError, 'three supplied'):
             access_plan(self.contract)
         self.setUp()
