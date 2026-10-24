@@ -112,7 +112,11 @@ def test_fingerprint_yaml_null_compatibility_and_original_time_precision():
         raw = {**success, field: success[field].replace(":00+", ":00.1234567+")}
         # 입력 검사 후에도 원문을 보존하고 시각 변환 전에 지문 정밀도를 검사한다.
         before = deepcopy(raw)
-        rules.validate("payments", raw)
+        try:
+            rules.validate("payments", raw)
+        except FormatError as error:
+            # 3.10은 공통 파서에서 먼저 거부한다. 원문 보존과 지문의 거부는 버전과 무관하다.
+            assert error.field == field
         assert raw == before
         with pytest.raises(FingerprintError) as caught:
             payment_fingerprint(raw)
@@ -229,7 +233,10 @@ def test_kafka_trace_observations_and_conflict_references(tmp_path):
     assert all(r["source_file"] == str(paths[2].resolve()) for r in conflicts)
     # 추적 정보 차이는 업무 중복·내용 충돌 판정에 섞지 않는다.
     loaded, _ = load_jsonl(str(paths[2]), allow_cdc=True)
-    identical = build_silver([order()], [], [loaded[0], {**loaded[1], "_input_source": loaded[2]["_input_source"]}])
+    identical = build_silver([order()], [], [
+        {**loaded[0], "__op": "c", "__source_ts_ms": 1000},
+        {**loaded[1], "__op": "c", "__source_ts_ms": 1000,
+         "_input_source": loaded[2]["_input_source"]}])
     assert len(identical["payment_attempts"]) == 1
     assert not identical["quarantined_records"]
 

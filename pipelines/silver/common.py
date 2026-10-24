@@ -235,7 +235,7 @@ def run_local(locations: dict[str, str], output_root: str, dataset: str,
                                     for row in rows), encoding="utf-8")
             paths[name] = str(path)
         manifest = {
-            "status": "INCOMPLETE" if result["quarantined_records"] else "PASS",
+            "status": "INCOMPLETE" if any(r.get("active", True) for r in result["quarantined_records"]) else "PASS",
             "check_version": check_version,
             **({"format_rules": rule_metadata} if rule_metadata is not None else {}),
             "input_completeness": "DECLARED_COMPLETE" if input_complete else "UNVERIFIED",

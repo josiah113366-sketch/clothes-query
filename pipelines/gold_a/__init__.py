@@ -113,7 +113,7 @@ def load_silver(manifest_uri: str, expected: dict, names: list[str]) -> tuple[di
     if not isinstance(dq_path, str):
         raise ValueError("Silver 품질 결과 경로가 없습니다")  # noqa: TRY004 - manifest 검증 오류 계약 유지
     checks = read_rows(dq_path)
-    if not checks or any(row.get("status") != "PASS" or row.get("quarantined_count") != 0 for row in checks):
+    if not checks or any(row.get("status") != "PASS" or row.get("active_error_count", row.get("quarantined_count")) != 0 for row in checks):
         raise ValueError("Silver 품질 결과가 불완전하므로 Gold A 갱신을 중단합니다")
     loaded = {}
     for name in names:
@@ -128,7 +128,7 @@ def load_silver(manifest_uri: str, expected: dict, names: list[str]) -> tuple[di
 
 def require_pass(silver: dict) -> None:
     checks = silver.get("dq_results")
-    if not checks or any(row.get("status") != "PASS" or row.get("quarantined_count") != 0 for row in checks):
+    if not checks or any(row.get("status") != "PASS" or row.get("active_error_count", row.get("quarantined_count")) != 0 for row in checks):
         raise ValueError("Silver 품질 결과가 불완전합니다")
 
 
@@ -262,7 +262,7 @@ def load_scoped_trade(root: str) -> tuple[dict, dict]:
         raise ValueError("거래 품질 상태를 판정할 수 없습니다")
     if sum(row.get("quarantined_count", -1) for row in checks) != len(trade["quarantined_records"]):
         raise ValueError("품질 건수와 오류 기록이 일치하지 않습니다")
-    if (manifest["status"] == "PASS") != (not trade["quarantined_records"]):
+    if (manifest["status"] == "PASS") != (not any(r.get("active", True) for r in trade["quarantined_records"])):
         raise ValueError("Silver 상태와 오류 기록이 일치하지 않습니다")
     return trade, {"manifest_path": uri, "run_id": manifest.get("run_id"),
                    "outputs": outputs, "dq_results": checks,
@@ -285,7 +285,7 @@ def plan_trade_holds(trade: dict, previous: dict | None, tables: list[str],
                      previous_funnel_rows: list[dict] | None = None, error_refs_limit: int | None = None
                      ) -> tuple[list[dict], set[str], list[dict]]:
     """모든 현재/이전 후보로 범위를 찾는다. 추적 불가는 관련 결과 묶음 전체 보류."""
-    issues = trade["quarantined_records"]
+    issues = [row for row in trade["quarantined_records"] if row.get("active", True)]
     if not issues:
         return [], set(), []
     candidates = list(trade["impact_candidates"])
@@ -439,7 +439,10 @@ def plan_spark_holds(trade, previous, names, click_tables=None):
         old = old.unionByName(spark.createDataFrame(old_context[:limit], current.schema))
     previous_tables = {name: spark.read.parquet(_spark_uri(previous["outputs"][name])) for name in names} if previous else {}
     holds, affected, context = [], set(), []
-    issues = bounded(trade["quarantined_records"])
+    active = trade["quarantined_records"]
+    if "active" in active.columns:
+        active = active.filter(F.coalesce(F.col("active"), F.lit(True)))
+    issues = bounded(active)
     has_quality_error = bool(issues)
     if issues:
         key_frame = spark.createDataFrame([(r["source_dataset"], r.get("record_key")) for r in issues],
