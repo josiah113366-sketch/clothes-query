@@ -10,14 +10,15 @@ from zoneinfo import ZoneInfo
 
 from pipelines.format_rules import DEFAULT_RULES, FormatError, FormatRules
 from pipelines.payment_fingerprint import FingerprintError, payment_fingerprint
+from pipelines.payment_state import payment_decisions
 
 from .common import RowError as _RowError
 from .common import integer as _integer
-from .common import run_local
+from .common import kafka_reference, run_local
 from .common import timestamp as _time
 
 KST = ZoneInfo("Asia/Seoul")
-CHECK_VERSION = "transactions.v8"
+CHECK_VERSION = "transactions.v9"
 AMOUNT_CHECK_VERSION = "items-sum-v1"
 
 
@@ -35,7 +36,8 @@ def _check_cdc(raw: dict, name: str) -> None:
         if any(field.startswith("__source") for field in raw):
             raise _RowError("__op", "MISSING_FIELD", "CDC 변경 종류가 없습니다")
         return
-    allowed = {"r", "c", "u"} if name == "orders" else {"r", "c"}
+    allowed = {"r", "c", "u"} if name == "orders" or (
+        name == "payments" and kafka_reference(raw)["status"] == "VALID") else {"r", "c"}
     if raw["__op"] not in allowed:
         raise _RowError("__op", "UNSUPPORTED_CDC", "지원하지 않는 변경 또는 삭제입니다")
     _integer(raw, "__source_ts_ms", 0)
@@ -68,8 +70,13 @@ def _payment(raw: dict) -> dict:
     # YAML 검사 후 원본 문자열로 계산한다. datetime 변환 시 정밀도 손실을 숨기지 않는다.
     fingerprint = payment_fingerprint(raw)
     requested, completed = _time(raw, "requested_at"), _time(raw, "completed_at")
+    trace = kafka_reference(raw)
+    position = ({"kafka_topic": trace["topic"], "kafka_partition": trace["partition"],
+                 "kafka_offset": trace["offset"], "source_ts_ms": raw.get("__source_ts_ms"),
+                 "cdc_op": raw.get("__op")} if trace["status"] == "VALID" else {})
     return {
         **fingerprint,
+        **position,
         "payment_id": raw["payment_id"], "order_id": raw["order_id"],
         "attempt_no": raw["attempt_no"], "method": raw["method"], "pg": raw["pg"],
         "amount": raw["amount"], "status": raw["status"], "failure_code": raw.get("failure_code"),
@@ -85,6 +92,7 @@ def build_silver(
     input_complete: bool = False,
     rules: FormatRules | None = None,
     *, _initial_errors: dict | None = None, _unlinked_item_error: bool = False,
+    _inactive_payments: set | None = None,
 ) -> dict[str, list[dict]]:
     """정상 상세 4개와 격리·품질 결과 반환. 입출력 실패는 호출자가 처리한다."""
     inputs = {"orders": orders, "order_items": order_items, "payments": payments}
@@ -148,6 +156,16 @@ def build_silver(
             if "rule_id" in issue:
                 errors[name][index]["rule_id"] = issue["rule_id"]
 
+    decisions = payment_decisions(payments, errors["payments"])
+    inactive = {i for i, (state, _) in decisions.items() if state == "HISTORY"}
+    inactive.update(_inactive_payments or ())
+    for index, (state, reason) in decisions.items():
+        if state == "HOLD":
+            reject("payments", index, "payment_id", reason,
+                   "Kafka 위치·최신 결제 상태를 확정할 수 없습니다", "CONFLICT")
+    for index, issue in errors["payments"].items():
+        issue["active"] = index not in inactive
+
     groups: dict[str, dict[str, list[int]]] = {}
     for name, rows in inputs.items():
         groups[name] = defaultdict(list)
@@ -157,17 +175,21 @@ def build_silver(
                 groups[name][key].append(index)
         # 같은 키의 오류 행을 무시하고 다른 행을 정답으로 채택하지 않는다.
         for indices in groups[name].values():
-            if any(index in errors[name] for index in indices):
-                for index in indices:
+            relevant = [i for i in indices if name != "payments" or i not in inactive]
+            if any(index in errors[name] for index in relevant):
+                for index in relevant:
                     reject(name, index, keys[name], "UNTRUSTED_GROUP",
                            "같은 키의 오류 기록이 있어 결과 확정을 보류합니다", "DEPENDENCY_BLOCKED")
 
     def eligible(name: str) -> list[tuple[int, dict]]:
-        return [(index, row) for index, row in normalized[name].items() if index not in errors[name]]
+        return [(index, row) for index, row in normalized[name].items() if index not in errors[name]
+                and (name != "payments" or index not in inactive)]
 
     def reject_group(name: str, key: str, field: str, code: str, message: str,
                      category: str = "CONFLICT") -> None:
         for index in groups[name][key]:
+            if name == "payments" and index in inactive:
+                continue
             reject(name, index, field, code, message, category)
 
     # 주문의 정상 변경은 유지하고, 같은 변경 시각의 상충은 해당 주문 전체를 보류한다.
@@ -319,18 +341,25 @@ def build_silver(
     quarantine, quality = [], []
     for name, rows in inputs.items():
         issues = [errors[name][index] for index in sorted(errors[name])]
+        for issue in issues:
+            issue.setdefault("active", True)
+        active_issues = [issue for issue in issues if issue["active"]]
         quarantine.extend(issues)
         accepted = len(unique(name))
         quality.append({
             "source_dataset": name, "check_name": "transaction_processing",
-            "check_version": CHECK_VERSION, "status": "INCOMPLETE" if issues else "PASS",
+            "check_version": CHECK_VERSION, "status": "INCOMPLETE" if active_issues else "PASS",
             "format_rules": rules.reference(),
             "input_count": len(rows), "accepted_count": accepted,
             "quarantined_count": len(issues),
-            "duplicate_count": len(rows) - len(issues) - accepted,
+            "historical_error_count": len(issues) - len(active_issues),
+            "active_error_count": len(active_issues),
+            "superseded_count": len(inactive - set(errors[name])) if name == "payments" else 0,
+            "duplicate_count": len(rows) - len(issues) - accepted - (
+                len(inactive - set(errors[name])) if name == "payments" else 0),
             "conflict_count": sum(issue["category"] == "CONFLICT" for issue in issues),
             "pending_count": sum(issue["category"] == "PENDING_REFERENCE" for issue in issues),
-            "affected_order_ids": sorted({issue["order_id"] for issue in issues if issue["order_id"]}),
+            "affected_order_ids": sorted({issue["order_id"] for issue in active_issues if issue["order_id"]}),
             "source_row_numbers": [issue["source_row_number"] for issue in issues],
             "output_counts": {key: len(output[key]) for key in destinations[name]},
         })

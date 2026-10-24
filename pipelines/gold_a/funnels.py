@@ -152,7 +152,8 @@ def build_funnels_spark(clicks, transactions, catalog, *, _scoped=False):
     from pyspark.sql import functions as F
 
     for tables in (() if _scoped else (clicks, transactions)):
-        if tables["dq_results"].filter("status != 'PASS' or quarantined_count > 0").limit(1).count():
+        count = "active_error_count" if "active_error_count" in tables["dq_results"].columns else "quarantined_count"
+        if tables["dq_results"].filter(f"status != 'PASS' or {count} > 0").limit(1).count():
             raise ValueError("퍼널 입력 Silver 품질이 불완전합니다")
     events = clicks["click_events"]
     orders, items, payments = (transactions[k] for k in ("orders_current", "silver_order_items", "payment_attempts"))
