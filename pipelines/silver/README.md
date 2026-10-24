@@ -265,3 +265,26 @@ python -m pipelines.silver.products --designs-input <디자인-JSONL-경로> --v
 - 동시 실행 잠금·과거 실행 정리·서로 다른 리뷰 범위 간 결과 병합·날짜/상품 부분 재처리는 제공하지 않는다. 서로 겹치는 범위를 여러 개 읽지 말고 소비할 범위를 명시한다.
 - 회원 S3 출력은 기존처럼 지원하지 않는다. 리뷰 S3 입출력은 유지하지만 이번 검증에서 실제 AWS 요청은 실행하지 않는다.
 - 검사 버전은 members.v2/reviews.v1이다. 회원은 공통 format_rules.yaml 검사를 연결해 규칙 버전·내용 해시와 격리 rule_id도 기록한다. 리뷰는 자체 검사를 유지한다.
+
+## R6 Athena 공개 · 코드 구현, 배포 전
+
+- 배포 DDL: `silver_runs.sql` → `order_amount_checks.sql`. 기본 DB는 `silver`이며 실제 환경에 맞춰 DDL과 실행 인자를 함께 지정한다. 기존 테이블 위치/스키마가 다르면 공개자는 덮어쓰지 않고 실패한다.
+- 공개 실행: `python -m pipelines.r6_publication --config-uri s3://<버킷>/pipelines/requests/<실행>.json --database silver`.
+- Silver 고정 manifest와 completed 기록을 읽고 기존 order_amount_checks만 공개한다. 원본 판정·금액·6자리 시각·지문은 수정하지 않는다. 공개 Parquet은 TIMESTAMP_MILLIS와 정확한 `checked_at_utc` 문자열을 함께 보존한다.
+- 저장 위치: `silver/runtime/trade/catalog-data/runs/<run_id>/order_amount_checks/`. run_id는 Glue 파티션 컬럼이다. 결과 저장·파티션 등록 후 `silver/runtime/trade/catalog/completed/<run_id>.parquet`에 완료 한 행을 공개한다.
+- `COMPLETED`는 공개 완료이며 품질 PASS가 아니다. `quality_status=INCOMPLETE`, MISMATCH·검사 대기·정상 0행도 명시적으로 공개한다. 행 부재나 대기 상태를 해소로 판단하지 않는다.
+- 소비자는 **silver_runs의 완료 목록을 기준으로** 실행을 순서대로 읽는다. 등록된 검사 파티션만 전체 조회하면 아직 완료 공개되지 않은 실행을 볼 수 있으므로 아래처럼 완료 목록과 연결한다. 현재 판정 잡의 최신 실행 하나 조회를 순차 소비로 바꾸는 작업은 주현 담당이며 이 코드에서 수정하지 않는다.
+
+```sql
+SELECT c.*
+FROM silver.order_amount_checks c
+JOIN silver.silver_runs r ON c.run_id = r.run_id
+WHERE r.status = 'COMPLETED'
+ORDER BY r.completed_at, r.run_id, c.order_id, c.check_name;
+```
+
+- 공개 순서는 S3 `silver/runtime/trade/catalog-control/publication.json`의 조건부 쓰기로 직렬화한다. 실패한 미완료 실행이 있으면 같은 run_id를 먼저 재개한다. 이미 공개된 실행은 완료 시각을 바꾸거나 행을 추가하지 않는다. 시계가 뒤로 가도 다음 완료 시각은 이전보다 1ms 이상 크다.
+- 강제 종료로 소유권이 남으면 **이전 게시자가 종료됐음을 확인한 후에만** 같은 요청에 `--recover-stopped-owner <publication.json의 owner>`를 지정한다. 자동 만료나 잠금 강탈은 하지 않는다.
+- Airflow: 기존 `silver_gold_a_batch`에 `publish_r6` 후속 태스크를 연결한다. `AIRFLOW_PIPELINE_RUNTIME`에 `silver_database`를 추가한다. 공개 Pod는 Driver ServiceAccount를 사용한다. Gold 실패 뒤에도 유효한 Silver 결과는 공개하되 watcher가 DAG 실패를 유지한다. 수동 실행·동시 실행 1개를 유지한다.
+- 인프라 확인: 공개 역할에 해당 Silver 원본/완료 기록 읽기, catalog-data/catalog/completed/catalog-control 읽기·쓰기, Glue GetTable/GetPartition/CreatePartition 및 결과 목록 조회용 S3 ListBucket이 필요하다. DDL은 배포 시 관리하며 처리 잡에 DB/테이블 생성·변경 권한은 요구하지 않는다. 판정 역할에는 공개 두 경로와 두 표만 읽게 하고 원문·제어 기록은 열지 않는다.
+- 실제 Glue 생성·Athena 조회·새 이미지 발행·Airflow Trigger 검증은 배포 단계다. 결제 UPDATE, 자동 원본 복구·재처리 DAG, 업무별 DAG 분리, 리뷰/전체 Gold A 공개는 후속 완료 목표로 남는다.

@@ -38,6 +38,8 @@ def silver_gold_a_batch():
             raise ValueError("AIRFLOW_PIPELINE_RUNTIME에 digest 이미지·namespace·제출기/Driver/Executor 실행 신원을 설정하세요")
         if RUNTIME["namespace"] in {"agent", "kafka", "kube-system"}:
             raise ValueError("기존 agent·Kafka 실행 신원을 재사용하지 마세요")
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", RUNTIME.get("silver_database", "")):
+            raise ValueError("AIRFLOW_PIPELINE_RUNTIME.silver_database에 배포된 R6 Glue DB를 지정하세요")
         return True
 
     checked = check_request()
@@ -110,6 +112,42 @@ def silver_gold_a_batch():
         startup_timeout_seconds=300,
     )
     checked >> worker
+    publish = KubernetesPodOperator(
+        task_id="publish_r6",
+        name="silver-r6-publish",
+        namespace=RUNTIME.get("namespace", "unconfigured"),
+        service_account_name=RUNTIME.get("driver_service_account", "unconfigured"),
+        image=RUNTIME.get("image", "unconfigured"),
+        in_cluster=True,
+        cmds=["python3", "-m", "pipelines.r6_publication"],
+        arguments=["--config-uri", "{{ dag_run.conf['config_uri'] }}",
+                   "--database", RUNTIME.get("silver_database", "unconfigured")],
+        # Gold A가 실패해도 완료된 Silver 품질 결과는 제공한다. 최종 실패는 아래 watcher가 유지한다.
+        trigger_rule="all_done",
+        node_selector=NODE_SELECTOR,
+        tolerations=[k8s.V1Toleration(key="clothes-query/dedicated", operator="Equal",
+                                    value="spark", effect="NoSchedule")],
+        container_resources=k8s.V1ResourceRequirements(
+            requests={"cpu": "250m", "memory": "512Mi"},
+            limits={"cpu": "500m", "memory": "1Gi"},
+        ),
+        get_logs=True,
+        log_pod_spec_on_failure=False,
+        do_xcom_push=False,
+        on_finish_action="delete_pod",
+        startup_timeout_seconds=300,
+    )
+    worker >> publish
+
+    @task(trigger_rule="one_failed", retries=0)
+    def report_failure():
+        # all_done 공개 태스크가 성공해도 상위 Spark 실패를 DAG 성공으로 숨기지 않는다.
+        raise RuntimeError("요청 검사·Spark 처리·R6 공개 중 실패가 있습니다")
+
+    failed = report_failure()
+    checked >> failed
+    worker >> failed
+    publish >> failed
 
 
 batch_dag = silver_gold_a_batch()
