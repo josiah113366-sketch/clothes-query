@@ -19,6 +19,8 @@
 
 ## CI/CD (GitHub Actions + Argo CD)
 
+Gold A 실데이터는 `GOLD_A_DATA_SOURCE=athena`, `GOLD_A_ATHENA_WORKGROUP=clothes-query-dev-dashboard`, `GOLD_A_DATABASE=gold_a`로 연결한다. IAM은 dashboard-access의 `enable_gold_a_reads`가 관리한다. 환경 변수는 main 대상 PR 머지 후 아래 Actions → deploy/dashboard → Argo CD 경로로 반영한다. live Deployment만 수정하면 selfHeal이 되돌린다. [권한 적용·실제 Pod 조회 검증](../../../docs/tasks/infra-dashboard-gold-a-read.md)을 참고한다.
+
 main 에 대시보드 소스가 머지되면 사람이 digest 를 고치거나 커밋하지 않아도 배포된다.
 
 ```

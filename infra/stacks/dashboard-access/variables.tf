@@ -10,6 +10,10 @@ variable "enable_pipeline_status_reads" {
   type    = bool
   default = false
 }
+variable "enable_gold_a_reads" {
+  type    = bool
+  default = false
+}
 variable "model_registry_prefix" {
   type    = string
   default = "review-score/model-registry/releases/"

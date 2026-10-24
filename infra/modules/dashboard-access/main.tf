@@ -16,6 +16,43 @@ locals {
     "gold_b/bronze_lag_snapshots/", "gold_b/topic_messages/", "gold_b/payment_events/", "gold_b/malformed_events/",
     "silver/runtime/trade/catalog/completed/", "gold_a/catalog/"
   ], [for channel in ["trade", "funnels", "reviews"] : "gold_a/runtime/${channel}/catalog/completed/"])
+  gold_a_datasets = {
+    trade   = ["order_sales_hourly", "product_sales_daily", "refresh_holds"]
+    funnels = ["funnel_daily", "funnel_session_product", "refresh_holds"]
+    reviews = ["review_product_daily", "review_aspect_daily"]
+  }
+  gold_a_tables = concat(["gold_runs"], distinct(flatten([
+    for datasets in values(local.gold_a_datasets) : [for dataset in datasets : "${dataset}_runs"]
+  ])))
+  gold_a_paths = concat(
+    [for channel in keys(local.gold_a_datasets) : "gold_a/runtime/${channel}/catalog/completed/"],
+    flatten([for channel, datasets in local.gold_a_datasets : [for dataset in datasets : "gold_a/runtime/${channel}/runs/*/${dataset}/"]])
+  )
+}
+
+resource "aws_iam_role_policy" "gold_a_read" {
+  count = var.enable_gold_a_reads ? 1 : 0
+  name  = "gold-a-metrics-read-only"
+  role  = aws_iam_role.dashboard.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "GoldAMetricsMetadata"
+        Effect   = "Allow"
+        Action   = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition"]
+        Resource = concat(["${local.glue}:catalog", "${local.glue}:database/gold_a"], [for table in local.gold_a_tables : "${local.glue}:table/gold_a/${table}"])
+      },
+      { Sid = "GoldAMetricsObjects", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for path in local.gold_a_paths : "${var.bucket_arn}/${path}*"] },
+      {
+        Sid       = "GoldAMetricsListing"
+        Effect    = "Allow"
+        Action    = ["s3:ListBucket"]
+        Resource  = [var.bucket_arn]
+        Condition = { StringLike = { "s3:prefix" = flatten([for path in local.gold_a_paths : [trimsuffix(path, "/"), "${path}*"]]) } }
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role_policy" "pipeline_status" {

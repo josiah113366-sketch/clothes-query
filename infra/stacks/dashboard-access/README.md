@@ -1,5 +1,7 @@
 # Dashboard 접근 스택
 
+공유 설정의 `enable_gold_a_reads=true`는 Gold A 지표·보류 조회용 읽기 정책을 추가한다. 기존 역할·workgroup·승인 쓰기는 유지한다. [검증과 화면 설정 반영 절차](../../../docs/tasks/infra-dashboard-gold-a-read.md)를 따른다.
+
 선행 eks/storage state를 읽어 승인 대시보드 전용 IAM 역할·inline policy·Athena workgroup·Pod Identity association 4개를 관리한다. 새 노드·ALB·S3 버킷·업무 테이블·대시보드 앱은 만들지 않는다. state key는 dashboard-access 전용이며 기존 스택과 공유하지 않는다.
 
 공유 deployment.auto.tfvars.json의 namespace/ServiceAccount/workgroup/결과 경로/1GiB 쿼리 상한을 사용한다. backend 위치는 deployment.backend.hcl이다. init -backend-config=deployment.backend.hcl 후 validate·plan을 확인한다. [연결 안내](../../platform/dashboard-access/README.md)를 따른다.
