@@ -160,3 +160,59 @@ resource "aws_eks_pod_identity_association" "this" {
   role_arn        = aws_iam_role.this[each.key].arn
   depends_on      = [aws_iam_role_policy.s3]
 }
+
+locals {
+  review_enabled = var.enabled && var.enable_review_access
+  review_outputs = ["silver/runtime/reviews/", "gold_a/runtime/reviews/"]
+  review_input   = "bronze/reviews/"
+  review_scores  = "pipelines/input-manifests/review-scores/"
+  review_results = "athena-results/review-score/"
+  review_iceberg = "silver/review_aspect_scores_iceberg/"
+  review_db      = "clothes_query_dev_review_score"
+}
+
+# Managed policies avoid the existing Driver's aggregate inline-policy size limit.
+resource "aws_iam_policy" "review_s3" {
+  count = local.review_enabled ? 1 : 0
+  name  = "clothes-query-dev-${var.service_account_prefix}-review-data"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      { Sid = "ReviewInputRead", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/${local.review_input}*", "${var.bucket_arn}/${trimsuffix(local.review_input, "/")}", "${var.bucket_arn}/${local.review_scores}*"] },
+      { Sid = "ReviewOutputs", Effect = "Allow", Action = local.object_actions, Resource = [for p in local.review_outputs : "${var.bucket_arn}/${p}*"] },
+      { Sid = "ReviewOutputDirectoryProbes", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in local.review_outputs : "${var.bucket_arn}/${trimsuffix(p, "/")}"] },
+      { Sid = "ReviewListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = flatten([for p in concat([local.review_input, local.review_scores], local.review_outputs) : ["${p}*", trimsuffix(p, "/")]]) } } },
+      { Sid = "ReviewMagicCleanup", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = [for p in local.review_outputs : "${var.bucket_arn}/${p}runs/*/*/__magic_job-*/*"] }
+      ], length(var.review_rollback_run_ids) > 0 ? [
+      { Sid = "ApprovedReviewParquetRollback", Effect = "Allow", Action = ["s3:DeleteObject"], Resource = flatten([for p in local.review_outputs : [for id in sort(tolist(var.review_rollback_run_ids)) : "${var.bucket_arn}/${p}runs/${id}/*/part-*.parquet"]]) }
+    ] : [])
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "review_s3" {
+  for_each   = local.review_enabled ? aws_iam_role.this : {}
+  role       = each.value.name
+  policy_arn = aws_iam_policy.review_s3[0].arn
+}
+
+resource "aws_iam_policy" "review_driver" {
+  count = local.review_enabled ? 1 : 0
+  name  = "clothes-query-dev-${var.service_account_prefix}-review-query"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Sid = "ExistingReviewWorkgroup", Effect = "Allow", Action = ["athena:GetWorkGroup", "athena:StartQueryExecution", "athena:GetQueryExecution", "athena:GetQueryResults", "athena:StopQueryExecution"], Resource = ["arn:aws:athena:ap-northeast-1:${data.aws_caller_identity.current.account_id}:workgroup/clothes-query-dev-athena-review-score"] },
+      { Sid = "ReviewSourceMetadata", Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"], Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/${local.review_db}", "${local.glue_base}:table/${local.review_db}/review_aspect_scores_latest", "${local.glue_base}:table/${local.review_db}/review_aspect_scores"] },
+      { Sid = "ReadOnlyScoreIceberg", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/${local.review_iceberg}*"] },
+      { Sid = "ReviewResultsAndFrozenInput", Effect = "Allow", Action = local.object_actions, Resource = ["${var.bucket_arn}/${local.review_results}*", "${var.bucket_arn}/${local.review_scores}*"] },
+      { Sid = "ReviewQueryListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in [local.review_iceberg, local.review_results, local.review_scores] : "${p}*"] } } },
+      { Sid = "PublishExistingReviewGoldTables", Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition", "glue:CreatePartition"], Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/gold_a", "${local.glue_base}:table/gold_a/review_product_daily_runs", "${local.glue_base}:table/gold_a/review_aspect_daily_runs"] }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "review_driver" {
+  count      = local.review_enabled ? 1 : 0
+  role       = aws_iam_role.this["driver"].name
+  policy_arn = aws_iam_policy.review_driver[0].arn
+}

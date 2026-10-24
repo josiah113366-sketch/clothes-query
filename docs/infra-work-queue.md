@@ -2,6 +2,7 @@
 
 ## 2026-10-24 최신 후속
 
+- 재전달된 퍼널의 정확한 클릭 객체를 실제 Driver/Executor 역할로 HeadObject해 둘 다 HTTP 200을 확인했다. 미적용 리뷰 권한도 기존 이미지·계정 그대로 추가했고 최신 점수 뷰 SELECT·결과 읽기와 리뷰 원본·Iceberg 읽기가 실제 Driver 신원에서 통과했다. Executor Athena/Iceberg 원본 권한과 Iceberg 쓰기·정상 결과 삭제는 허용하지 않았다. 판정 R6 읽기/조사 분리를 확인했고 후속 plan 변경은 0이다. 업무 재실행·리뷰 UNLOAD/출력·실행별 실패 Parquet 정리는 별도 검증이며 리뷰 업무 run_id는 아직 받지 않았다. [현재 권한과 읽기 결과](tasks/infra-silver-review-access.md)를 우선한다.
 - 대시보드 상태 화면용 요청에 따라 기존 approval-dashboard 역할에 Gold B 원장 4개·Silver/Gold 완료 목록의 Glue/S3 읽기 정책 하나를 추가했다. Gold gold_runs의 실제 채널별 완료 목록 위치도 반영했고 원본 쓰기·삭제·DDL 권한은 추가하지 않았다. 기존 승인·Athena 결과 쓰기, workgroup·Pod는 유지했고 후속 plan 변경은 0이다. 화면 코드 배포는 별개다. [권한·위치 기록](tasks/infra-dashboard-status-read.md)을 따른다.
 - 퍼널 실패 실행 `manual__funnels-full-20261024T070901Z`의 권한을 보완했다. 두 Spark 역할의 클릭 입력·클릭/퍼널 출력·실행별 정리, Driver의 기존 퍼널 Glue 표 2개 조회/파티션 등록과 namespace pods/configmaps deletecollection을 적용했다. 기존 이미지·역할·노드·DAG 상태를 유지했고 업무 재실행은 담당자가 한다. 새 최종 운영 명세의 리뷰·대시보드 연결은 별도 후속이며 이 권한 적용으로 완료된 것으로 취급하지 않는다. [범위와 적용 기록](tasks/infra-silver-funnel-access.md)을 따른다.
 - Gold B 실제 이미지로 Kafka TLS·S3 원장·checkpoint 저장과 정상 재시작을 검증했다. 3개 배치 총 59,972건, 결제 원장 474건, 메시지 위치 중복 0이며 이전 offset부터 이어 읽었다. S3A 폴더 조회 403은 두 적재 역할의 정확한 경로 읽기로 보완했다. 실행 설정·Airflow runtime을 연결했고 시험 Pod·노드를 정리해 Spark 0대로 복귀했다. 원장·checkpoint는 보존하며 상시 운영·배치 동시 실행·강제 장애 복구·재처리/합치기 실행은 아직이다. [실측 기록](tasks/infra-gold-b-checkpoint.md)을 우선한다.

@@ -2,6 +2,19 @@ variable "enabled" {
   type    = bool
   default = false
 }
+variable "enable_review_access" {
+  description = "Opt-in confirmed review sources, outputs and read-only latest-score lookup."
+  type        = bool
+  default     = false
+}
+variable "review_rollback_run_ids" {
+  type    = set(string)
+  default = []
+  validation {
+    condition     = alltrue([for id in var.review_rollback_run_ids : can(regex("^[A-Za-z0-9_-]{1,100}$", id))])
+    error_message = "Use literal approved review run IDs."
+  }
+}
 variable "enable_funnel_access" {
   description = "Opt-in confirmed clickstream input, clicks/funnels outputs and two existing Gold A tables."
   type        = bool

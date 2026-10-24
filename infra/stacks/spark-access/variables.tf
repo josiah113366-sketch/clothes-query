@@ -14,6 +14,14 @@ variable "enabled" {
   type    = bool
   default = false
 }
+variable "enable_review_access" {
+  type    = bool
+  default = false
+}
+variable "review_rollback_run_ids" {
+  type    = set(string)
+  default = []
+}
 variable "enable_funnel_access" {
   type    = bool
   default = false

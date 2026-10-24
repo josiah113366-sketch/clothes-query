@@ -23,6 +23,8 @@ module "spark_access" {
   rollback_run_ids               = var.rollback_run_ids
   enable_trade_publication       = var.enable_trade_publication
   enable_funnel_access           = var.enable_funnel_access
+  enable_review_access           = var.enable_review_access
+  review_rollback_run_ids        = var.review_rollback_run_ids
   funnel_rollback_run_ids        = var.funnel_rollback_run_ids
   detection_role_name            = var.detection_role_name
 }

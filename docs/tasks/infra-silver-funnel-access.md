@@ -22,6 +22,8 @@ Spark 준비 도구 테스트 26개, 전체 Terraform 24개 root·23개 suite·1
 
 ## 새로 받은 최종 운영 명세와 구분
 
+후속: 리뷰 권한과 실제 최신 점수 읽기는 [리뷰 연결 기록](infra-silver-review-access.md), 요청된 대시보드 상태 조회는 [대시보드 읽기 기록](infra-dashboard-status-read.md)에서 완료했다. 아래는 퍼널 적용 시점의 범위 설명이다.
+
 추가 문자에 포함된 리뷰 원문 `bronze/reviews/`, 리뷰 출력 두 루트, Iceberg 최신 점수 조회·점수 고정 쓰기, 리뷰 Gold 표 2개와 대시보드 Gold A 조회는 이번 퍼널 정책에 섞어 적용하지 않았다. 이 항목들은 이제 구체적인 경로·표 명세를 받았으므로 후속 연결이 가능하다.
 
 기존 `clothes-query-dev-athena-review-score`는 ENABLED이고 결과 위치는 `athena-results/review-score/`다. 실제 최신 뷰와 `silver/review_aspect_scores_iceberg`의 Iceberg 원본도 존재한다. 리뷰 원문을 `bronze_v2/reviews/`로 자동 변경하지 않는다. Driver에는 읽기 전용 모델 원본과 UNLOAD 대상 쓰기가 필요하고 Executor에는 고정 점수 파일 읽기만 필요하다. 기존 MERGE용 광범위 정책을 Spark 역할에 그대로 붙이지 않는다.

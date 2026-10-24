@@ -1,4 +1,29 @@
 mock_provider "aws" {}
+run "review_queries_are_driver_only_and_iceberg_is_read_only" {
+  command = plan
+  module { source = "../modules/spark-access" }
+  variables {
+    enabled              = true
+    namespace            = "pipelines"
+    enable_review_access = true
+  }
+  assert {
+    condition = (
+      toset(keys(aws_iam_role_policy_attachment.review_s3)) == toset(["driver", "executor"]) &&
+      aws_iam_role_policy_attachment.review_driver[0].role == aws_iam_role.this["driver"].name &&
+      !strcontains(aws_iam_policy.review_s3[0].policy, "athena:") &&
+      !strcontains(aws_iam_policy.review_s3[0].policy, "review_aspect_scores_iceberg") &&
+      !strcontains(aws_iam_policy.review_s3[0].policy, "bronze_v2/reviews") &&
+      [for s in jsondecode(aws_iam_policy.review_driver[0].policy).Statement : s if s.Sid == "ReadOnlyScoreIceberg"][0].Action == ["s3:GetObject"] &&
+      !strcontains(aws_iam_policy.review_driver[0].policy, "glue:UpdateTable") &&
+      !strcontains(aws_iam_policy.review_driver[0].policy, "glue:CreateTable") &&
+      alltrue([for s in jsondecode(aws_iam_policy.review_s3[0].policy).Statement :
+        !contains(s.Action, "s3:DeleteObject") || alltrue([for r in s.Resource : strcontains(r, "/__magic_job-")])
+      ])
+    )
+    error_message = "Only the Driver may query the latest score view, with read-only Iceberg and isolated review outputs."
+  }
+}
 run "funnel_access_is_opt_in_and_publication_driver_only" {
   command = plan
   module { source = "../modules/spark-access" }
