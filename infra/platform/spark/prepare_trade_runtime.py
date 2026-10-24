@@ -20,8 +20,6 @@ def prepare(image=None, trade_publication=False):
     # so do not impose the legacy four-Pod quota on unrelated shared workloads.
     objects = [obj for obj in resources('dedicated', namespace=NAMESPACE, name_prefix=PREFIX)
                if obj['kind'] != 'ResourceQuota']
-    driver_role = next(obj for obj in objects if obj['kind'] == 'Role' and obj['metadata']['name'] == PREFIX + '-driver')
-    driver_role['rules'].append({'apiGroups': [''], 'resources': ['pods', 'configmaps'], 'verbs': ['deletecollection']})
     config = {
         'namespace': NAMESPACE,
         'submitter_service_account': PREFIX + '-submitter',
