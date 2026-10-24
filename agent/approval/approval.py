@@ -189,6 +189,12 @@ def approve(request_id, actor, now, query, write, trigger, cfg=ApprovalConfig())
     return start_run(request_id, now, query, trigger, cfg)
 
 
+def _iso_z(value):
+    """Airflow 재처리 DAG는 시각을 UTC ISO(2026-10-24T00:00:00Z)로 받는다(현지 님 호출 명세). 표에서 읽은 'YYYY-MM-DD HH:MM:SS'를 바꾼다."""
+    text = value.strftime("%Y-%m-%dT%H:%M:%S") if hasattr(value, "strftime") else str(value).replace(" ", "T")[:19]
+    return text + "Z"
+
+
 def start_run(request_id, now, query, trigger, cfg=ApprovalConfig()):
     """Airflow DAG를 부른다. dag_run_id를 request_id로 하므로 같은 요청을 두 번 불러도 Airflow가 409로 막는다(성공으로 본다)."""
     rows = fetch_rows(query, request_id)
@@ -200,8 +206,10 @@ def start_run(request_id, now, query, trigger, cfg=ApprovalConfig()):
     req = next((r for r in rows if r["step"] == "REQUESTED"), None)
     if req is None:
         raise ApprovalError("BAD_STATE", "요청 줄(REQUESTED)이 없습니다.")
-    conf = {"request_id": request_id, "window_start": base["window_start"], "window_end": base["window_end"], "rule_version": base["rule_version"],
+    conf = {"request_id": request_id, "window_start": _iso_z(base["window_start"]), "window_end": _iso_z(base["window_end"]), "rule_version": base["rule_version"],
             "source": base["source"], "anomaly_id": detail.get("anomaly_id"), "report_id": detail.get("report_id"), "attempt": base["attempt"]}
+    if base.get("parent_request_id"):
+        conf["parent_request_id"] = base["parent_request_id"]
     if "order_ids" in _detail(req):
         conf["order_ids"] = _detail(req)["order_ids"]
     if detail["dag_id"] == POLLER:      # 재처리 DAG가 APPROVED 줄을 읽어 시작한다. 같은 줄을 두 번 처리하지 않는 것은 그 DAG의 몫(STARTED 줄 확인)
