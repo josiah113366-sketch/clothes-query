@@ -1,6 +1,8 @@
 # Silver·Gold A Glue·Athena 공개 명세
 
-상태: **실행 ID 고정 조회 방식은 결정. 아래 DB·표 이름과 공개 레코드·권한은 인프라/소비자 검토안이며 아직 배포·구현하지 않았다.**
+상태: **실행 ID 고정 조회 방식은 결정. R6 공개는 main #103에 구현됨. Gold 공개·부분 재처리·최신 모델 연결은 pipelines/final-runtime에서 검증 중이며 실제 Glue/Athena 배포는 아직이다.**
+
+구현의 정확한 컬럼·타입은 `pipelines/silver/silver_runs.sql`, `pipelines/silver/order_amount_checks.sql`, `pipelines/gold_a/tables.sql`을 따른다. 아래의 이전 제안 표와 컬럼이 다르면 배포에는 DDL을 사용한다. 특히 silver_runs의 검사 건수 이름은 row_count이며 format_rule_sha256/available_tables_json은 현재 Silver DDL에 없다. Gold 지표와 보류 목록은 같은 완료 channel/run_id를 사용한다. 구현·권한·재처리 호출은 [실행 안내](../../pipelines/README.md)의 최종 실행 연결 절에 정리한다.
 
 목적: 재영님은 카탈로그·S3·실행 권한을 연결하고, 대시보드와 R6 판정 잡은 어느 완료 결과를 읽어야 하는지 같은 기준으로 확인한다. 원천 입력 형식 규칙인 format_rules.yaml과는 다른 **결과 공개 계약**이다.
 
@@ -10,11 +12,11 @@
 |---|---|
 | 실행별 불변 결과를 run_id로 고정 조회 | 결정 |
 | 지표와 refresh_holds는 같은 channel/run_id로 조회 | 결정 |
-| 현재 Spark Parquet·실행 manifest·completed/current 기록 | 구현됨(PR #82), 실제 EKS 실행 미검증 |
-| Glue DB/표·실행 파티션 등록·Athena 조회 | 미구현 |
-| 아래 silver_runs/gold_runs 공개 목록, completed_at | 미구현 |
+| 현재 Spark Parquet·실행 manifest·completed/current 기록 | 구현됨, 기존 이미지의 실제 EKS 거래 입출력 검증 완료. 신규 후보는 추가 운영 검증 필요 |
+| Glue DB/표·실행 파티션 등록·Athena 조회 | DDL·등록 코드 구현, 실제 운영 배포·조회 검증 전 |
+| silver_runs/gold_runs 공개 목록, completed_at | Silver는 #103, Gold는 final-runtime 후보에 구현. 정확한 컬럼은 배포 DDL 기준 |
 | R6의 완료 실행 순차 소비 | 합의 방향. 현재 판정 코드는 최신 실행 하나 조회이므로 변경 필요 |
-| 운영 리뷰 점수는 Iceberg 최신 점수 뷰 사용 | 결정, Gold A 조회 연결은 미구현 |
+| 운영 리뷰 점수는 Iceberg 최신 점수 뷰 사용 | 결정, final-runtime에 실행별 조회 결과 고정·연결 구현. 실제 운영 조회 검증 전 |
 
 현재 current.json은 Spark 내부 최신 참조다. 이를 바꾸어도 Glue·Athena 공개가 자동으로 바뀌지 않는다. **Athena 공개 기준은 아래 완료 공개 목록**이며, 계산 완료와 카탈로그 공개 완료를 구분한다.
 
@@ -97,7 +99,7 @@ PARTIAL은 공개 실패가 아니다. 해당 실행의 지표에는 이전 정�
 
 COMPLETED 공개 목록이 없는 channel은 미생성으로 표시한다. 공개 목록의 건수 0과 테이블 없음, 쿼리 실패를 구분한다. 실패한 최신 시도는 완료 공개 목록에 없으므로 그 실패 여부는 Airflow/실행 기록에서 확인한다. 이전 공개 실행을 최신 성공으로 계속 읽는 것이 실패 탐지를 대신하지 않는다.
 
-## 4. 완료 공개 목록(신규 구현 필요)
+## 4. 완료 공개 목록(초기 제안 · 실제 스키마는 DDL 기준)
 
 ### silver.silver_runs — 거래 Silver/R6
 
@@ -132,7 +134,7 @@ status와 quality_status를 혼동하지 않는다. Silver INCOMPLETE 결과를 
 - checked_at은 실행 검사에 부여한 시각으로 카탈로그 공개 완료 시각이 아니므로 R6 소비 커서로 사용하지 않는다.
 - completed_at은 카탈로그 공개 순서에 맞춰 발급한다. **같은 완료 목록을 쓰는 공개자는 하나로 직렬화하고 후속 공개의 completed_at이 이전보다 반드시 커야 한다.** 밀리초가 같으면 이전 값 +1밀리초 이상으로 발급하는 방식도 검토한다. 실패/재시작 후에도 이전 공개 값을 복원해야 한다.
 - 단순 datetime.now()·run_id 정렬·DAG 하나의 max_active_runs=1만으로 이 조건을 보장했다고 하지 않는다. 특히 trade/funnels가 같은 Silver 거래 목록에 기록하므로 공개 직렬화가 필요하다.
-- 이 조건과 장애 복구가 아직 구현되지 않았다. 구현·검증 전에는 주현님에게 (completed_at, run_id) 커서로 실행을 절대 건너뛰지 않는다고 보장하지 않는다.
+- R6(#103)와 Gold(final-runtime)의 공개자는 조건부 S3 쓰기·미완료 실행 우선 재개·단조 증가 완료 시각을 구현했다. 운영 배포·조회와 판정 잡의 순차 소비까지 검증되기 전에는 실제 R6 연결 완료로 표시하지 않는다.
 
 ## 5. R6 제공 표
 

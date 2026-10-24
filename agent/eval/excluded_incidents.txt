@@ -1,0 +1,6 @@
+# 채점에서 뺄 사건 id (한 줄에 하나, '#' 뒤는 이유). 정답표 담당(성철 님) 요청, 2026-10-23.
+# 형식을 확인하려고 짧게 걸어 본 시험이라 탐지가 반응하기엔 짧다. 이 숫자는 정답표 화면의 값을 옮긴 것이라 실제 파일과 대조해 확인한다.
+91a05368-9d0a-4159-8710-e2deaea1ff0d   # SINK_PAUSE 시험 (18:51~18:54 KST, 3분 30초)
+76ec169b-ff26-43a7-a030-9d0e3d1f82ce   # DATA_POLLUTION 시험 (19:11 KST, ORDER_TOTAL_MISMATCH 30건, 주문 total_amount가 +10,000원)
+f4d25089-1fcf-4c94-96e0-5d5ab0b2a1a1   # PG_OUTAGE 시험 (19:12~19:13 KST, PG_A 추가 실패율 0.85, 1분)
+8e29bce3-ed8a-48fa-bc9f-4f8bb70f667c   # INGEST_LAG(burst) 시험 (19:13~19:14 KST)

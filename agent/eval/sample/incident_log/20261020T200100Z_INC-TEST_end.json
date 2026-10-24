@@ -1,0 +1,1 @@
+{"schema_version": 1, "incident_id": "INC-TEST", "phase": "end", "type": "PG_OUTAGE", "at": "2026-10-20T20:01:00Z", "ended_by": "timer", "result": {}}

@@ -7,6 +7,7 @@ import unittest
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from pyspark.sql import SparkSession
@@ -107,6 +108,43 @@ class SparkReviewsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "범위 밖"):
             build_aspects(self.spark, connected, self.documents([dict(self.scores[0], review_id="unknown")]), "m1")
 
+    def test_04_latest_view_keeps_each_reviews_selected_model(self):
+        connected = self.spark.createDataFrame([("R1", "2026-10-19", "0000000001", 100),
+                                                 ("R2", "2026-10-19", "0000000001", 100)],
+                                                "review_id string, review_date_kst string, article_id string, product_code long")
+        scores = [{**row, "model_version_no": "1.0"} for row in self.scores] + [
+            {**self.scores[0], "review_id": "R2", "model_version": "m2", "model_version_no": "2.0", "score": 2}]
+        daily, coverage, cached = build_aspects(self.spark, connected, self.documents(scores), None)
+        try:
+            self.assertEqual({r.model_version for r in daily.collect()}, {"m1", "m2"})
+            self.assertEqual(coverage["reviews_with_aspect_result"], 2)
+        finally:
+            cached.unpersist()
+        with self.assertRaisesRegex(ValueError, "여러 모델"):
+            build_aspects(self.spark, connected, self.documents(scores + [dict(scores[0], model_version="m0")]), None)
+
+    def test_05_athena_snapshot_adapter_preserves_lineage_and_kst_date(self):
+        fixture = Path(os.environ["SPARK_TEST_INPUT"])
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            review = root / "reviews.jsonl"
+            review.write_text(json.dumps(self.review) + "\n", encoding="utf-8")
+            target = root / "scores"
+            self.spark.createDataFrame([("R1", "품질·내구성", -2, "m2", "2.0", date(2026, 10, 19))],
+                "review_id string, aspect string, score long, model_version string, model_version_no string, review_date date").write.parquet(str(target))
+            files = [{"dataset": "analysis", "uri": str(path), "size": path.stat().st_size,
+                      "mtime_ns": path.stat().st_mtime_ns} for path in target.glob("*.parquet")]
+            snapshot = {"query_execution_id": "fixed-query", "source_view": "review_aspect_scores_latest", "objects": files}
+            config = {"job": "reviews", "run_id": "latest-view", "input_complete": True,
+                "start_date": "2026-10-19", "end_date": "2026-10-19", "output_root": str(root / "out"),
+                "analysis_view": {"workgroup": "gold-review"}, "inputs": {"reviews": [str(review)],
+                    "designs": [str(fixture / "designs.jsonl")], "variants": [str(fixture / "variants.jsonl")]}}
+            with patch("boto3.client"), patch("pipelines.review_scores.snapshot_scores", return_value=snapshot):
+                result = execute(self.spark, config)
+            self.assertEqual(result["model_versions"], [{"model_version": "m2", "model_version_no": "2.0"}])
+            self.assertEqual(result["score_snapshot"]["query_execution_id"], "fixed-query")
+            self.assertEqual(self.spark.read.parquet(result["outputs"]["review_aspect_daily"]).first().model_version_no, "2.0")
+
     def test_03_parquet_repeat_error_empty_csv_and_mapping(self):
         fixture = Path(os.environ["SPARK_TEST_INPUT"])
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,6 +158,15 @@ class SparkReviewsTest(unittest.TestCase):
                       "output_root": str(root / "output"), "inputs": {"reviews": [str(raw)], "analysis": [str(score)],
                           "designs": [str(fixture / "designs.jsonl")], "variants": [str(fixture / "variants.jsonl")]}}
             gold = execute(self.spark, config)
+            # 실제 Spark 출력 타입·순서와 배포 DDL을 대조한다.
+            import re
+
+            from pipelines.gold_publication import TYPES
+            sql = (Path(__file__).resolve().parents[1] / "gold_a/tables.sql").read_text(encoding="utf-8")
+            for name, schema in gold["schemas"].items():
+                body = re.search(r"gold_a\." + name + r"_runs\s*\((.*?)\)\s*PARTITIONED", sql, re.DOTALL)[1]
+                self.assertEqual([(f["name"], TYPES[f["type"]]) for f in schema["fields"]],
+                                 [tuple(token.strip().lower().split()) for token in body.split(",")])
             pointer = root / "output/gold_a/runtime/reviews/current.json"
             self.assertEqual(gold["output_counts"]["review_aspect_daily"], 1)
             actual = rows(self.spark.read.parquet(gold["outputs"]["review_product_daily"]))

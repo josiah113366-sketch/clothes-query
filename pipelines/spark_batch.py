@@ -15,6 +15,7 @@ from pyspark.sql import functions as F
 
 from pipelines.format_rules import DEFAULT_RULES, FormatError, FormatRules
 from pipelines.payment_fingerprint import FingerprintError
+from pipelines.payment_state import payment_decisions
 from pipelines.silver import clicks, products, transactions
 from pipelines.silver.common import (
     RowError,
@@ -30,13 +31,16 @@ TABLES = ("orders_current", "order_status_history", "silver_order_items", "payme
           "quarantined_records", "dq_results", "order_amount_checks", "impact_candidates")
 RAW_SCHEMA = "dataset string, record_key string, order_id string, source_id string, raw string, signature string, version_kind string, version_key string, issue string"
 TALL_SCHEMA = "table_name string, payload string"
+DQ_METRICS = ("input_count", "accepted_count", "quarantined_count", "duplicate_count", "conflict_count",
+              "pending_count", "historical_error_count", "active_error_count", "superseded_count")
 ORDER_FIELDS = "order_id string, member_id string, session_id string, status string, status_reason string, total_amount long, ordered_at_utc string, ordered_at_kst string, updated_at_utc string, updated_at_kst string, source_ts_ms long"
 SCHEMAS = {
+    "dq_order_results": "order_id string, source_dataset string, " + ", ".join(f"{key} long" for key in DQ_METRICS),
     "orders_current": ORDER_FIELDS,
     "order_status_history": "order_id string, previous_status string, status string, status_reason string, changed_at_utc string, changed_at_kst string, source_ts_ms long",
     "silver_order_items": "order_item_id string, order_id string, article_id string, quantity long, unit_price long, item_amount long",
-    "payment_attempts": "payment_id string, order_id string, attempt_no long, method string, pg string, amount long, status string, failure_code string, requested_at_utc string, requested_at_kst string, completed_at_utc string, completed_at_kst string, payment_content_hash string, fingerprint_version string",
-    "quarantined_records": "source_dataset string, source_row_number long, source_file string, source_line long, source_record_id string, record_key string, order_id string, field string, error_code string, reason string, category string, rule_id string, check_version string, order_total_amount long, item_total_amount long, amount_difference long, kafka_reference string",
+    "payment_attempts": "payment_id string, order_id string, attempt_no long, method string, pg string, amount long, status string, failure_code string, requested_at_utc string, requested_at_kst string, completed_at_utc string, completed_at_kst string, payment_content_hash string, fingerprint_version string, kafka_topic string, kafka_partition long, kafka_offset long, source_ts_ms long, cdc_op string",
+    "quarantined_records": "source_dataset string, source_row_number long, source_file string, source_line long, source_record_id string, record_key string, order_id string, field string, error_code string, reason string, category string, rule_id string, check_version string, order_total_amount long, item_total_amount long, amount_difference long, kafka_reference string, active boolean",
     "order_amount_checks": "order_id string, check_name string, check_version string, status string, order_total_amount long, item_total_amount long, amount_difference long",
     "impact_candidates": "source_dataset string, source_row_number long, source_record_id string, valid boolean, order_id string, order_item_id string, payment_id string, article_id string, session_id string, status string, ordered_at string, updated_at string, completed_at string, cdc_op string, source_ts_ms long, source string",
     "silver_product_design": ", ".join(f"{name} long" for name in products.DESIGN_INTEGERS) + ", " + ", ".join(f"{name} string" for name in products.DESIGN_TEXT),
@@ -129,6 +133,18 @@ def read_source(spark, dataset, paths, rules_path=DEFAULT_RULES):
 def global_issues(raw):
     """주문별 분산 처리 전에 주문 경계를 넘는 PK 충돌까지 검사한다."""
     keyed = raw.filter(F.col("record_key").isNotNull())
+    def choose(pair):
+        rows = list(islice(pair[1], 100001))
+        if len(rows) > 100000:
+            raise ValueError("동일 결제 입력이 100,000행을 초과했습니다")
+        decisions = payment_decisions([json.loads(row.raw) for row in rows],
+                                      [i for i, row in enumerate(rows) if row.issue])
+        for i, row in enumerate(rows):
+            state, reason = decisions.get(i, (None, None))
+            yield row.source_id, state, reason
+    decisions = raw.sparkSession.createDataFrame(keyed.filter("dataset = 'payments'").rdd.map(
+        lambda row: (row.record_key, row)).groupByKey().flatMap(choose),
+        "source_id string, payment_state string, payment_hold string")
     groups = keyed.groupBy("dataset", "record_key").agg(
         F.max(F.col("issue").isNotNull().cast("int")).alias("has_invalid"),
         F.countDistinct(F.when(F.col("issue").isNull(), F.col("signature"))).alias("contents"),
@@ -136,21 +152,27 @@ def global_issues(raw):
     conflicts = keyed.filter((F.col("dataset") == "orders") & F.col("issue").isNull()).groupBy(
         "dataset", "record_key", "version_kind", "version_key").agg(F.countDistinct("signature").alias("n")).filter(
             "n > 1").select("dataset", "record_key").distinct().withColumn("order_conflict", F.lit(True))
-    joined = raw.join(groups, ["dataset", "record_key"], "left").join(conflicts, ["dataset", "record_key"], "left")
+    joined = raw.join(groups, ["dataset", "record_key"], "left").join(conflicts, ["dataset", "record_key"], "left").join(
+        decisions, "source_id", "left")
 
     def issue(field, code, message, category):
         return F.to_json(F.struct(field.alias("field"), F.lit(code).alias("error_code"),
                                  F.lit(message).alias("reason"), F.lit(category).alias("category")))
     key_field = F.create_map(*[item for pair in KEYS.items() for item in (F.lit(pair[0]), F.lit(pair[1]))])[F.col("dataset")]
     conflict = F.when(F.col("dataset") == "orders", F.coalesce("order_conflict", F.lit(False))).otherwise(F.col("contents") > 1)
-    return joined.withColumn("global_issue", F.coalesce(
+    legacy_issue = F.coalesce(
         F.col("issue"),
         F.when(F.col("has_invalid") == 1, issue(key_field, "UNTRUSTED_GROUP", "같은 키의 오류 기록이 있어 결과 확정을 보류합니다", "DEPENDENCY_BLOCKED")),
         F.when(conflict, issue(F.when(F.col("dataset") == "orders", F.lit("updated_at")).otherwise(key_field),
                               "CONTENT_CONFLICT", "동일 키의 업무 내용이 다릅니다", "CONFLICT")),
         F.when((F.col("dataset") == "orders") & (F.col("kinds") > 1), issue(F.lit("__source_ts_ms"),
                     "AMBIGUOUS_ORDER", "동일 주문에 CDC 행과 업무 행이 섞여 순서를 확정할 수 없습니다", "CONFLICT"))
-    ))
+    )
+    return joined.withColumn("global_issue", F.when(F.col("payment_state") == "HOLD",
+        F.to_json(F.struct(F.lit("payment_id").alias("field"), F.col("payment_hold").alias("error_code"),
+                          F.lit("Kafka 위치·최신 결제 상태를 확정할 수 없습니다").alias("reason"),
+                          F.lit("CONFLICT").alias("category")))).when(
+        F.col("payment_state").isin("CURRENT", "HISTORY"), F.col("issue")).otherwise(legacy_issue))
 
 
 def _restore_order(group, rules_path, input_complete, unknown_item, max_rows):
@@ -161,14 +183,18 @@ def _restore_order(group, rules_path, input_complete, unknown_item, max_rows):
     inputs = {name: [] for name in ("orders", "order_items", "payments")}
     initial = {name: {} for name in inputs}
     sources = {}
+    inactive = set()
     for row in rows:
         index = len(inputs[row.dataset])
+        if row.dataset == "payments" and row.payment_state == "HISTORY":
+            inactive.add(index)
         inputs[row.dataset].append(json.loads(row.raw))
         sources[row.dataset, index + 1] = row.source_id
         if row.global_issue:
             initial[row.dataset][index] = json.loads(row.global_issue)
     result = transactions.build_silver(inputs["orders"], inputs["order_items"], inputs["payments"], input_complete,
-        FormatRules(rules_path), _initial_errors=initial, _unlinked_item_error=unknown_item)
+        FormatRules(rules_path), _initial_errors=initial, _unlinked_item_error=unknown_item,
+        _inactive_payments=inactive)
     for table, records in result.items():
         for record in records:
             if table in {"impact_candidates", "quarantined_records"}:
@@ -178,6 +204,8 @@ def _restore_order(group, rules_path, input_complete, unknown_item, max_rows):
                     record[key] = dumps(record[key])
             # 상세는 분산된 별도 테이블 행으로 보존하고 거대한 품질 배열은 모으지 않는다.
             if table == "dq_results":
+                yield "dq_order_results", dumps({"order_id": rows[0].order_id, **{
+                    key: record.get(key, 0) for key in ("source_dataset",) + DQ_METRICS}})
                 for key in ("amount_checks", "affected_order_ids", "source_row_numbers", "output_counts"):
                     record.pop(key, None)
             yield table, dumps(record)
@@ -194,7 +222,7 @@ def build_trade(raw, rules_path=DEFAULT_RULES, input_complete=False, max_order_r
     tables = {name: tall.filter(F.col("table_name") == name).select(
         F.from_json("payload", schema, {"mode": "FAILFAST"}).alias("r")).select("r.*")
         for name, schema in SCHEMAS.items() if name not in {"silver_product_design", "silver_product_variant"}}
-    metrics = ("input_count", "accepted_count", "quarantined_count", "duplicate_count", "conflict_count", "pending_count")
+    metrics = DQ_METRICS
     dq = tall.filter("table_name = 'dq_results'").select(F.from_json("payload",
         "source_dataset string, " + ", ".join(f"{key} long" for key in metrics)).alias("r")).select("r.*")
     # 오류 분류는 원천 행의 최종 격리 결과를 기준으로 집계한다.
@@ -202,7 +230,7 @@ def build_trade(raw, rules_path=DEFAULT_RULES, input_complete=False, max_order_r
     datasets = raw.sparkSession.createDataFrame([(name,) for name in ("orders", "order_items", "payments")], "source_dataset string")
     summary = datasets.join(summary, "source_dataset", "left").fillna(0)
     rule_ref = dumps(FormatRules(rules_path).reference())
-    tables["dq_results"] = summary.withColumn("status", F.when(F.col("quarantined_count") > 0, "INCOMPLETE").otherwise("PASS"))
+    tables["dq_results"] = summary.withColumn("status", F.when(F.col("active_error_count") > 0, "INCOMPLETE").otherwise("PASS"))
     tables["dq_results"] = tables["dq_results"].withColumn("check_version", F.lit(transactions.CHECK_VERSION)).withColumn("format_rules", F.lit(rule_ref))
     tables["_cache"] = (raw, checked, tall)
     return tables
@@ -393,7 +421,7 @@ def execute(spark, config):
         from pipelines.gold_a.reviews import execute_reviews
 
         return execute_reviews(spark, config)
-    if not isinstance(config, dict) or set(config) - {"job", "run_id", "inputs", "output_root", "input_complete", "max_order_rows", "max_click_rows"}:
+    if not isinstance(config, dict) or set(config) - {"job", "run_id", "inputs", "output_root", "input_complete", "max_order_rows", "max_click_rows", "input_manifest", "reprocess_scope"}:
         raise ValueError("지원하지 않는 Spark 실행 설정 필드입니다")
     if config.get("job") not in {"trade", "funnels"} or config.get("input_complete") is not True:
         raise ValueError("거래·퍼널 실행에는 전체 이력·참조 입력 준비 확인이 필요합니다")
@@ -407,7 +435,7 @@ def execute(spark, config):
     if not isinstance(output, str) or not output.strip() or output.startswith("s3a://"):
         raise ValueError("출력은 s3:// URI 또는 로컬 경로로 지정하세요")
     if output.startswith("s3://"):
-        if set(location(output)[1].split("/")) & {"bronze", "ground_truth"}:
+        if set(location(output)[1].split("/")) & {"bronze", "bronze_v2", "ground_truth"}:
             raise ValueError("Bronze·정답표 아래에는 결과를 쓸 수 없습니다")
     else:
         target = Path(output).resolve()
@@ -426,6 +454,9 @@ def execute(spark, config):
     if type(config.get("max_click_rows", 10000)) is not int or not 1 <= config.get("max_click_rows", 10000) <= 100000:
         raise ValueError("클릭 ID당 행 한도는 1~100,000입니다")
     inputs, inventory = resolve_inputs(config["inputs"])
+    if config.get("input_manifest"):
+        from pipelines.reprocess import verify_fixed_inputs
+        verify_fixed_inputs(config["input_manifest"], inventory)
     raw = None
     for name in ("orders", "order_items", "payments"):
         source = read_source(spark, name, [_spark_uri(p) for p in inputs[name]])
@@ -434,14 +465,23 @@ def execute(spark, config):
     output = config["output_root"].rstrip("/")
     base = output + "/silver/runtime/trade/runs/" + run_id
     tables["_cache"][-1].count()
+    actual_scope = None
+    if config.get("reprocess_scope"):
+        from pipelines.reprocess import merge_scoped_silver
+        tables, actual_scope = merge_scoped_silver(spark, tables, config["reprocess_scope"], output, inventory)
     checked_at = datetime.now(timezone.utc).isoformat()
     click_tables, click_manifest = None, None
     try:
         silver = save_tables(tables, base, run_id, checked_at)
-        silver.update(status="INCOMPLETE" if tables["quarantined_records"].limit(1).count() else "PASS", inputs=inputs,
+        silver.update(status="INCOMPLETE" if tables["quarantined_records"].filter("active").limit(1).count() else "PASS", inputs=inputs,
                       input_objects=inventory, input_completeness="DECLARED_COMPLETE",
                       kafka_observations=kafka_observations(tables["_cache"][0]), pipeline_version="spark-trade.v1",
                       code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"), check_version=transactions.CHECK_VERSION)
+        if actual_scope:
+            silver["actual_scope"] = actual_scope
+            silver["input_application"] = "ORDER_STATE_PATCH"
+            silver["state_base_manifest"] = config["reprocess_scope"]["previous_silver"]
+            silver["state_base_manifest_sha256"] = config["reprocess_scope"]["previous_sha256"]
         verify_inputs(inventory)
         _write_json(base + "/manifest.json", silver)
         channel = output + "/silver/runtime/trade"
@@ -509,6 +549,7 @@ def execute(spark, config):
                         held_context=context if holds else [], held_click_context=click_context if holds else [],
                         published_at=datetime.now(timezone.utc).isoformat(), previous_run_id=(previous or {}).get("run_id"),
                         check_version="gold-a.spark-scoped.v1")
+            gold.update(code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"), actual_scope=actual_scope)
             if job == "funnels":
                 gold.update(silver_clicks_manifest=click_base + "/manifest.json",
                             cohort_policy="first-view-kst; same-session-product; entire-supplied-history; no-cutoff")
@@ -532,6 +573,8 @@ def execute(spark, config):
 def main():
     parser = argparse.ArgumentParser(description="Spark Silver → Gold A 거래·리뷰·퍼널 집계")
     parser.add_argument("--config-uri", required=True)
+    parser.add_argument("--expected-job", choices=("trade", "funnels", "reviews"))
+    parser.add_argument("--recover-stopped-owner")
     args = parser.parse_args()
     if args.config_uri.startswith("s3://"):
         import boto3
@@ -540,9 +583,19 @@ def main():
         config = json.loads(boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read())
     else:
         config = json.loads(Path(args.config_uri).read_text(encoding="utf-8"))
+    if args.expected_job and config.get("job") != args.expected_job:
+        raise ValueError("실행 요청의 job과 업무 DAG가 다릅니다")
     spark = SparkSession.builder.appName("silver-gold-a-" + str(config.get("job", "unknown"))).getOrCreate()
     try:
-        result = execute(spark, config)
+        if config.get("job") in {"trade", "funnels"} and config["output_root"].startswith("s3://"):
+            import boto3
+
+            from pipelines.runtime_control import trade_lease
+            with trade_lease(config["output_root"], boto3.client("s3", region_name="ap-northeast-1"),
+                             args.recover_stopped_owner):
+                result = execute(spark, config)
+        else:
+            result = execute(spark, config)
         print(dumps({"run_id": result["run_id"], "status": result["status"], "output_counts": result["output_counts"]}))
     finally:
         spark.stop()

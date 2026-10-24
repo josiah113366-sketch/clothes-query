@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from rules import R6_RULE, Config, open_orders, r1_pg_failures, r3_bronze_lag, r4_malformed, r5_duplicate_success, r6_order_total
 
 STEP_MIN = 5     # 판정 주기 (제안)
+MAX_REDETECT_PER_RUN = 1   # 한 번 실행에서 재판정하는 교체 구간(시간 폴더) 수. 구간 하나가 Athena 쿼리 약 52개(5분 간격 13번 x 4개)라 여럿을 한 번에 하면 작업 제한 시간(3분)을 넘을 수 있다. 남은 것은 다음 5분 실행이 이어서 한다
 ACTOR = "detect_job"
 
 
@@ -59,9 +60,10 @@ WHERE {_in('collected_at', tick - timedelta(minutes=cfg.miss_min), tick, cfg)}{_
 
 
 def _replaced_filter(query, cfg, tick):
-    """최근 5분 안에 교체가 끝난 시간대(LEDGER_REPLACED)의 줄 중, 교체 때 적재된 줄(loaded_at <= 교체 기록 시각)을 빼는 조건."""
+    """최근 5분 안에 Gold B 원장 교체(source가 KAFKA·BRONZE·비어 있음, SILVER 제외)가 끝난 시간대의 줄 중, 교체 때 적재된 줄(loaded_at <= 교체 기록 시각)을 빼는 조건."""
     events = query(f"""SELECT window_start, window_end, "at" AS replaced_at FROM gold_b.reprocess_events
-WHERE step = 'LEDGER_REPLACED' AND "at" >= {_ts(tick - timedelta(minutes=STEP_MIN), cfg)}""")
+WHERE step = 'LEDGER_REPLACED' AND (source IS NULL OR source IN ('KAFKA', 'BRONZE'))
+  AND "at" >= {_ts(tick - timedelta(minutes=STEP_MIN), cfg)}""")
     parts = []
     for e in events:
         ws, we, at = (datetime.fromisoformat(str(e[k]).replace("T", " ")) for k in ("window_start", "window_end", "replaced_at"))
@@ -244,6 +246,6 @@ def run_once(query, write, cfg: Config = None, now: datetime = None, tick: datet
     cfg = cfg or Config()
     now = now or datetime.utcnow()
     summary = {"regular": regular_run(query, write, cfg, now, tick), "redetected": []}
-    for item in pending_replacements(query):
+    for item in pending_replacements(query)[:MAX_REDETECT_PER_RUN]:
         summary["redetected"].append(redetect(query, write, cfg, now, item))
     return summary

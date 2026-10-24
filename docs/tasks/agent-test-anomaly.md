@@ -1,6 +1,6 @@
 # 작업 지시서: agent/test-anomaly
 
-> 상태: 진행 중 · 브랜치: `agent/test-anomaly` · 다음 작업: 재영 님이 Athena에서 시험 이상 줄을 넣고 조사 DAG 첫 실행을 확인
+> 상태: 완료 · 브랜치: `agent/test-anomaly` · 다음 작업: 재영 님이 Athena에서 시험 이상 줄을 넣고 조사 DAG 첫 실행을 확인
 
 ## 목표
 
