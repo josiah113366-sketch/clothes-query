@@ -157,6 +157,7 @@ gitGraph
 | `agent/bedrock` | [agent-bedrock.md](tasks/agent-bedrock.md) | 머지됨 (PR #54) | 2026-10-23 |
 | `agent/image-build` | [agent-image-build.md](tasks/agent-image-build.md) | 머지됨 (PR #62) | 2026-10-23 |
 | `agent/dags` | [agent-dags.md](tasks/agent-dags.md) | 진행 중 (PR #64) | |
+| `agent/test-anomaly` | [agent-test-anomaly.md](tasks/agent-test-anomaly.md) | 진행 중 | |
 
 
 ### dashboard
