@@ -1,6 +1,7 @@
 """Gold B 재처리·파일 합치기. 잡은 Gold B 이미지(pipelines/gold_b/Dockerfile)에서 파이썬으로 돈다 (Spark 아님).
 
 - gold_b_reprocess: 5분마다 승인된 재처리 요청 하나를 골라 돌린다. 승인 화면이 이 DAG를 기다린다 (agent/approval의 POLLER).
+  Kafka 보관 기간(7일)이 지난 시간대는 Bronze v2에서 읽는다 (bronze_root를 설정했을 때만, 없으면 그런 요청은 거부).
 - gold_b_compact: 매일 00:30 UTC에 끝난 어제(UTC) 시간 폴더의 작은 파일을 합친다.
 두 DAG는 같은 pool에 넣어 같은 시간에 돌지 않는다 (재처리가 승인 범위 밖 결제 시각 폴더도 고칠 수 있음).
 실행 신원·이미지·주소는 인프라가 AIRFLOW_GOLD_B_RUNTIME JSON으로 공급한다. 없으면 확인 태스크에서 멈추고 Pod를 띄우지 않는다.
@@ -22,8 +23,8 @@ POOL = RUNTIME.get("pool") or "default_pool"
 KAFKA_TLS_DIR = "/opt/kafka-tls"   # Secret 키: ca.crt(Kafka 클러스터 CA), user.crt, user.key
 
 
-def check_runtime(kafka):
-    """실행 설정 확인. 틀리면 ValueError로 멈추고 Pod를 띄우지 않는다."""
+def check_runtime(reprocess):
+    """실행 설정 확인. 틀리면 ValueError로 멈추고 Pod를 띄우지 않는다. Kafka·Bronze 설정은 재처리만 쓴다."""
     if (not re.fullmatch(r".+@sha256:[0-9a-f]{64}", RUNTIME.get("image", ""))
             or not RUNTIME.get("namespace") or not RUNTIME.get("service_account")):
         raise ValueError("AIRFLOW_GOLD_B_RUNTIME에 digest 이미지·namespace·실행 신원(service_account)을 설정하세요")
@@ -31,16 +32,20 @@ def check_runtime(kafka):
         raise ValueError("기존 agent·Kafka 실행 신원을 재사용하지 마세요")
     if not re.fullmatch(r"s3://[^/]+/.+", RUNTIME.get("ledger_root", "")):
         raise ValueError("ledger_root에 원장 위치(s3://<버킷>/gold_b)를 설정하세요")
-    if kafka and not (RUNTIME.get("kafka_bootstrap") and RUNTIME.get("kafka_tls_secret")):
+    if reprocess and not (RUNTIME.get("kafka_bootstrap") and RUNTIME.get("kafka_tls_secret")):
         raise ValueError("재처리는 Kafka 주소(kafka_bootstrap)와 인증서 Secret(kafka_tls_secret)이 필요합니다")
+    if reprocess and RUNTIME.get("bronze_root") and not re.fullmatch(r"s3://[^/]+/.+", RUNTIME["bronze_root"]):
+        raise ValueError("bronze_root에는 Bronze v2 위치(s3://<버킷>/bronze_v2)를 설정하세요")
     return True
 
 
-def gold_b_pod(task_id, module, kafka):
-    """Gold B 잡 하나를 돌리는 Pod. kafka=True면 Kafka 인증서를 붙이고 KAFKA_* 환경변수를 준다."""
+def gold_b_pod(task_id, module, reprocess):
+    """Gold B 잡 하나를 돌리는 Pod. 재처리면 Kafka 인증서를 붙이고 KAFKA_*·Bronze 위치 환경변수를 준다."""
     env = {"GOLD_B_LEDGER_ROOT": RUNTIME.get("ledger_root", "unconfigured"), "AWS_EC2_METADATA_DISABLED": "true"}
     volumes, mounts = [], []
-    if kafka:
+    if reprocess and RUNTIME.get("bronze_root"):
+        env["GOLD_B_BRONZE_ROOT"] = RUNTIME["bronze_root"]
+    if reprocess:
         env.update({"KAFKA_BOOTSTRAP": RUNTIME.get("kafka_bootstrap", "unconfigured"),
                     "KAFKA_SECURITY_PROTOCOL": "SSL",
                     "KAFKA_SSL_CA_FILE": KAFKA_TLS_DIR + "/ca.crt",
@@ -93,9 +98,9 @@ def gold_b_pod(task_id, module, kafka):
 def gold_b_reprocess():
     @task
     def check_reprocess_runtime():
-        return check_runtime(kafka=True)
+        return check_runtime(reprocess=True)
 
-    check_reprocess_runtime() >> gold_b_pod("reprocess", "pipelines.gold_b.jobs.reprocess", kafka=True)
+    check_reprocess_runtime() >> gold_b_pod("reprocess", "pipelines.gold_b.jobs.reprocess", reprocess=True)
 
 
 @dag(
@@ -113,10 +118,10 @@ def gold_b_reprocess():
 def gold_b_compact():
     @task
     def check_compact_runtime():
-        return check_runtime(kafka=False)
+        return check_runtime(reprocess=False)
 
     # 날짜를 주지 않으면 잡이 어제(UTC)를 합친다
-    check_compact_runtime() >> gold_b_pod("compact", "pipelines.gold_b.jobs.compact", kafka=False)
+    check_compact_runtime() >> gold_b_pod("compact", "pipelines.gold_b.jobs.compact", reprocess=False)
 
 
 reprocess_dag = gold_b_reprocess()
