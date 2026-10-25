@@ -1,6 +1,7 @@
 """[데이터 관리] 결제 관제. 데이터: Gold B payment_attempts 뷰 (결제 시도 1건 = 1줄).
 
 시나리오 1(PG 장애): 특정 PG 에 장애가 생겨 결제가 실패하는가?
+시나리오 3(데이터 오염): 한 주문에 성공 결제가 2건 이상 생겼는가? (아래 「성공 결제가 2건 이상인 주문」)
 읽는 법 (노션):
   - 실패 원인은 뷰가 분류한다: PG(PG_TIMEOUT, PG_ERROR) / CUSTOMER(잔액부족·한도초과·거절) / UNKNOWN(그 외).
     실패 = PG + CUSTOMER + UNKNOWN 이 항상 성립한다.
@@ -8,6 +9,8 @@
   - 같은 결제가 여러 번 들어와도 뷰가 Kafka 위치 순서로 마지막 이벤트 하나만 보여 준다.
     여러 파티션에 나뉘었거나 순서가 이상하거나 마지막이 형식 오류인 결제는 보류되어 빠진다 (payment_conflicts 뷰).
   - 이상 판정(묶어 세기)은 탐지 담당의 일이다. 이 화면은 원장을 읽기 쉽게 보여주는 용도다.
+  - 성공 결제 중복은 형식은 맞고 업무 규칙만 어기는 데이터라 형식 오류 화면에는 나오지 않는다 (판정 R5).
+    중복 행의 결제 시각은 과거일 수 있어 최근 '적재' 시각으로 찾는다. 평소 0건이 정상이다.
 """
 
 import pandas as pd
@@ -127,5 +130,24 @@ with st.expander("실패 결제 목록"):
         hide_index=True,
         width="stretch",
     )
+with ui.panel("성공 결제가 2건 이상인 주문", f"시나리오 3 · 최근 {data.DUPLICATE_HOURS}시간 적재 기준"):
+    dup = data.get_duplicate_success(data.DUPLICATE_HOURS).copy()
+    if dup.empty:
+        st.success("성공 결제가 2건 이상인 주문이 없습니다 (정상).")
+    else:
+        st.error(f"성공 결제가 2건 이상인 주문 {len(dup):,}건: 업무 규칙 위반 (데이터 오염, 판정 R5)")
+        dup["결제 시각(KST)"] = data.to_kst(dup.first_completed_at).dt.strftime("%m-%d %H:%M:%S")
+        dup["적재 시각(KST)"] = data.to_kst(dup.last_loaded_at).dt.strftime("%m-%d %H:%M:%S")
+        st.dataframe(
+            dup[["order_id", "success_count", "pgs", "결제 시각(KST)", "적재 시각(KST)", "payment_ids"]],
+            hide_index=True,
+            width="stretch",
+        )
+    st.caption(
+        "원본 DB에 들어간 행이라 재처리해도 그대로 다시 나올 수 있습니다. 결제 시각은 처음 성공한 결제의 시각입니다."
+    )
+    if "get_duplicate_success" in data.USING_DUMMY:
+        st.caption("※ 이 칸은 더미 데이터입니다.")
+
 if "get_payment_attempts" in data.USING_DUMMY:
     st.caption("※ 현재는 더미 데이터입니다.")

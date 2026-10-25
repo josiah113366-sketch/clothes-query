@@ -7,6 +7,7 @@
 읽는 법 (노션): S3 Sink 는 15분마다 파일을 쓰므로 lag_sec 은 정상일 때도 0 ~ 약 900초를 톱니 모양으로 반복한다.
         이 모양이 '평소'다. 톱니 꼭대기가 계속 높아지거나 connector_state 가 RUNNING 이 아니면 이상.
         유입(topic_messages)은 그대로인데 지연만 커졌다면 폭주가 아니라 Bronze 적재 자체의 문제다.
+        「토픽별 유입」 그래프가 그 구분을 보여 준다 (토픽마다 조회 구간 중앙값 = 1).
 시각은 UTC 로 저장되어 있어 화면에서는 KST 로 바꿔 보여준다.
 """
 
@@ -106,6 +107,35 @@ with t_lag:
             f"평소 모양: 0~약 900초 톱니. 점선 경고 기준은 {NORMAL_MAX_SEC}초(코드 NORMAL_MAX_SEC)."
         )
 
+    with ui.panel("토픽별 유입 (평소 대비)", "1분 · KST · 1 = 조회 구간 중앙값"):
+        inflow = data.get_topic_inflow(data.INFLOW_MINUTES).copy()
+        if inflow.empty:
+            st.warning(
+                f"최근 {data.INFLOW_MINUTES // 60}시간 동안 원장에 들어온 메시지가 없습니다. 적재 잡이 멈췄는지 확인하세요."
+            )
+        else:
+            inflow["minute_kst"] = data.to_kst(inflow.minute)
+            per_topic = inflow.pivot_table(
+                index="minute_kst", columns="topic", values="messages", aggfunc="sum"
+            ).fillna(0)
+            per_topic = per_topic[sorted(per_topic.columns)]  # 토픽 이름 순서 = 색 순서 (지연 그래프와 같게)
+            # 토픽마다 크기가 수십~수천 배 달라서(클릭 > 주문 > 결제) 평소(중앙값) 대비 배수로 한 그래프에 그린다
+            ratio = (per_topic / per_topic.median().where(lambda m: m > 0)).round(2)
+            charts.line(
+                ratio,
+                key="pl_inflow",
+                area=False,
+                threshold=1.0,
+                threshold_label="평소(중앙값)",
+                height="300px",
+            )
+            last = per_topic.iloc[-1].astype(int)
+            st.caption(
+                "최근 1분 건수: "
+                + ", ".join(f"{topic} {count:,}" for topic, count in last.items())
+                + ". 지연과 함께 유입도 늘었으면 폭주, 유입은 그대로인데 지연만 커지면 S3 Sink(Bronze 적재)의 문제입니다."
+            )
+
     with ui.panel("원장 신뢰성 점검"):
         st.dataframe(
             data.get_reliability_checks().assign(checked_at=lambda d: data.to_kst(d.checked_at)),
@@ -115,7 +145,11 @@ with t_lag:
     st.caption(
         "점검에 문제가 나오면 그 시간대의 탐지 결과는 믿지 않고 Gold B부터 고친 뒤 재판정합니다."
     )
-    dummy = ["원장 신뢰성 점검"] + (["지연 측정"] if "get_bronze_lag" in data.USING_DUMMY else [])
+    dummy = (
+        ["원장 신뢰성 점검"]
+        + (["지연 측정"] if "get_bronze_lag" in data.USING_DUMMY else [])
+        + (["유입"] if "get_topic_inflow" in data.USING_DUMMY else [])
+    )
     st.caption(f"※ 지금 더미 데이터: {', '.join(dummy)}.")
 
 
