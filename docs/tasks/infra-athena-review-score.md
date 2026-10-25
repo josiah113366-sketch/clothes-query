@@ -105,3 +105,5 @@
 - **알려진 한계·남은 일:** SQL 실제 검증, SageMaker 출력 prefix 변경, Airflow 태스크, staging·결과 정리 정책(수명주기), 사라진 속성 처리, Gold 의 버전 선택 규칙, 타임스탬프 타입 확인.
 
 - **추가(2026-10-25):** Silver 리뷰가 실행별 경로로 나뉘어 쓰이므로 읽기 전용 외부 테이블 `silver_reviews_runs`(run_id 프로젝션)를 추가하고, `select_unscored.py` 는 `current.json`(PASS)의 run_id 로 이 테이블을 읽어 점수 로그와 LEFT JOIN 해 미점수 후기만 `--max-reviews`(기본 1500)건 고른다. 재영 확인 필요: Silver 경로 S3 읽기 권한, 이후 `silver.reviews_runs` 로 교체.
+
+- **변경(2026-10-26, 정의 파일만 수정. apply 는 하지 않음):** 읽기 뷰 `review_aspect_scores_latest` 의 버전 선택을 점수 테이블에서 점수 로그(`review_score_log`)로 옮기고 비교용 모델 버전(`comparison_model_versions`, 기본 `2.4b_score_s2r`)을 선택에서 뺐다. 이름·열·타입은 그대로다. 새 버전이 속성 0개로 분석한 후기에 옛 버전 점수가 되살아나는 문제와, 비교용 모델만 점수를 낸 후기가 Gold 로 들어가는 문제를 막는다. 후기 단위 뷰 `review_score_status_latest`(열: review_id, review_date, model_version, model_version_no, analyzed_at, n_aspects, score_status)를 추가했다(SSM 설정에 `status_view`). plan 예상: 뷰 1 in-place 변경, 새 뷰 1 add, SSM 1 change, 삭제 0 (2026-10-26 plan: 1 to add, 2 to change, 0 to destroy). 적용 후 `sql/verify_latest_view.sql` 로 확인한다. 확인 필요: Terraform 으로 만든 뷰가 Athena 에서 정상 뷰로 읽히는지는 apply 후 확인한다. Gold 담당에게 변경안을 먼저 공유해야 한다.

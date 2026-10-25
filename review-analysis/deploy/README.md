@@ -123,6 +123,39 @@ Airflow DAG 가 생기면 이 반복은 DAG 가 맡는다.
 | `athena 설정(SSM)에 … 가 없습니다` | athena 스택 apply 전이거나 `$A` 가 옛 값. SSM 을 다시 읽는다 |
 | Git Bash 에서 SSM 이름 오류 | `/…` 이름이 변환된다. PowerShell 을 쓰거나 `MSYS_NO_PATHCONV=1` |
 
+### 비교용 모델(s2r)로 1,500건 돌리기 (2026-10-25)
+
+Gold 는 번호가 가장 큰 결과를 읽으므로 비교 모델은 s2c(1.0)보다 낮은 번호(0.1)로 올린다. 비교 모델은 **SSM 의 기본 실행 버전(`release`)을 바꾸지 않고** `--release` 로 지정해서만 돌린다.
+이름과 번호는 그 버전의 릴리스 묶음(manifest)에서만 가져오고(따로 덮어쓰지 않는다), `merge.sql` 은 `model_version` 이름으로 구분해 쌓으므로 s2c 결과와 섞이지 않는다.
+s2r 의 합친 모델과 릴리스 묶음은 2026-10-25 S3 에 등록했다(GPU PC 에서 병합 → 패치노트 `releases/2.4b_score_s2r.yaml` → `upload_model.py --weights-already-uploaded`). 다른 비교 모델을 추가할 때도 이 순서를 따른다. 묶음이 없으면 manifest 가 없어 실행이 멈춘다.
+
+```powershell
+# 위 "0. 준비" 블록($R, $S, $A 와 Run-Athena/Show/Fill)을 먼저 실행한 뒤 — 변수 $MV/$MVNO 를 비교 모델 것으로 바꾼다
+$CMP = "2.4b_score_s2r"
+$M = aws s3 cp "$($S.registry_prefix)$CMP/manifest.json" - --region $R | ConvertFrom-Json
+$MV = $M.model_version; $MVNO = $M.model_version_no          # 2.4b_score_s2r / 0.1
+"$MV $MVNO"
+
+# 1) 같은 Silver 실행에서 점수 로그에 0.1 이 없는 후기 1,500건 선택 (정렬이 같아 s2c 첫 배치와 같은 후기가 뽑힌다)
+$out = python deploy/select_unscored.py --model-version-no $MVNO --run-id reviews-v2-20261024T155307Z --max-reviews 1500
+$sel = $out[-1] | ConvertFrom-Json
+if (-not $sel.review_dates) { throw "작성일 목록이 비었습니다. 위 출력을 확인하세요" }
+
+# 2) 비교 모델로 Job 실행 (SSM release 는 그대로)
+python deploy/run_processing_job.py --release $CMP --input-key $sel.output_key --wait
+
+# 3) 날짜별 반영 (merge → merge_log)
+foreach ($day in $sel.review_dates) {
+  Run-Athena (Fill 'merge.sql'     $day) | Out-Null
+  Run-Athena (Fill 'merge_log.sql' $day) | Out-Null
+  "반영 완료: $day"
+}
+# 끝난 뒤에는 위 "0. 준비" 블록을 다시 실행해 $MV/$MVNO 를 현재 버전으로 되돌린다
+```
+- 같은 후기를 s2c 도 점수화했는지: 대시보드 감성분석 모델 > 버전 비교 탭이 두 버전이 모두 점수를 낸 (후기, 속성) 쌍을 보여 준다(기준 A=2.4b_score_s2r, 비교 B=2.4b_score_s2c).
+- 비교 실행으로 `review_aspect_scores_latest`(Gold)는 바뀌지 않는다(번호가 큰 s2c 결과가 우선). 미점수 후기 선택은 모델 번호별이라 기본 버전(1.0)의 남은 건수에도 영향이 없다.
+- 비용·시간은 1,500건 기준 s2c 한 회와 같다(약 40분, 약 0.7달러).
+
 ### Airflow 실행 역할 권한 확인 (읽기 전용)
 
 ```powershell

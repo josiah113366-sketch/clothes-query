@@ -7,6 +7,15 @@ variable "enable_review_access" {
   type        = bool
   default     = false
 }
+variable "review_log_iceberg_prefix" {
+  description = "점수 로그 테이블 review_score_log 의 Iceberg 위치(최신 점수 뷰가 읽음). athena-review-score 의 log_table_prefix 와 같아야 한다. 읽기 전용."
+  type        = string
+  default     = "silver/review_score_log_iceberg/"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9/_.=-]*/$", var.review_log_iceberg_prefix)) && !strcontains(var.review_log_iceberg_prefix, "//") && !contains(split("/", var.review_log_iceberg_prefix), "..")
+    error_message = "Use a literal prefix ending with '/', without wildcards."
+  }
+}
 variable "review_rollback_run_ids" {
   type    = set(string)
   default = []

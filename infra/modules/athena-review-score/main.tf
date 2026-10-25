@@ -448,24 +448,53 @@ resource "aws_glue_catalog_table" "staging_log" {
   }
 }
 
-# ------------------------------------------------------------------ Gold 읽기용 Athena 뷰 (후기마다 model_version_no 최대 결과)
+# ------------------------------------------------------------------ Gold 읽기용 Athena 뷰 (후기마다 점수 로그 기준 최신 버전의 결과)
 # Athena 뷰는 Glue 에 table_type = VIRTUAL_VIEW 인 테이블로 저장되고, view_original_text 는 "/* Presto View: <base64(JSON)> */" 형식이다.
 # JSON 에는 뷰의 SQL(originalSql), 카탈로그/스키마, 열 이름과 Athena 타입이 들어간다. Athena 콘솔의 CREATE VIEW 가 만드는 것과 같은 모양이다.
 #
+# 버전 선택은 점수 테이블이 아니라 점수 로그(review_score_log, 후기마다 한 행, n_aspects 포함)에서 한다 (2026-10-26 변경):
+#   (1) 새 버전이 속성을 0개로 분석한 후기는 점수 테이블에 새 버전 행이 없다. 점수 테이블에서 max 를 고르면 옛 버전 점수가 되살아나지만,
+#       로그에서 고르면 새 버전이 선택되고 점수 행이 없으니 결과에 나오지 않는다(= 속성 없음).
+#   (2) 비교용 모델 버전(comparison_model_versions)은 선택에서 뺀다. 비교용 모델만 점수를 낸 후기가 Gold 로 들어가지 않는다.
+# 점수 행은 점수 테이블에서 (review_id, review_date, model_version_no) 로 가져온다. 뷰 이름과 열·타입은 이전과 같다.
+#
 # 뷰 정의에 WHERE 를 넣지 않는다. Gold 가 `WHERE review_date BETWEEN ...` 로 거르면 옵티마이저가 조건을 뷰 안으로 밀어 넣어 파티션 프루닝이 된다.
-# 윈도우 함수의 PARTITION BY 에 review_date 를 함께 넣은 이유: 후기 하나의 review_date 는 변하지 않으므로 결과는 같고,
-# review_date 가 윈도우 파티션 키에 들어 있어야 review_date 조건을 윈도우 아래(테이블 스캔)로 밀어 내릴 수 있다. (실제로 밀리는지는 EXPLAIN 으로 확인 — README 참고)
+# 로그 선택(GROUP BY)과 JOIN 모두 review_date 를 키에 포함해 review_date 조건이 두 테이블 스캔까지 내려가게 한다. (실제로 밀리는지는 EXPLAIN 으로 확인 — README 참고)
 # SELECT 는 열 이름을 명시한다(ADD COLUMNS 로 model_version_no 가 테이블 맨 끝에 있어서 순서에 기대면 안 된다).
-# 미검증: Terraform 으로 만든 뷰를 Athena 가 정상 뷰로 읽는지는 첫 apply 에서 확인한다. 안 되면 이 리소스를 빼고 Athena `CREATE OR REPLACE VIEW` 로 만든다.
+# 미검증: Terraform 으로 만든 뷰를 Athena 가 정상 뷰로 읽는지는 apply 후 확인한다. 안 되면 이 리소스를 빼고 Athena `CREATE OR REPLACE VIEW` 로 만든다.
 locals {
+  # 비교용 모델 버전 목록을 SQL 문자열 리스트로. 비어 있으면 '' 하나(NOT IN () 는 문법 오류).
+  comparison_versions_sql = length(var.comparison_model_versions) == 0 ? "''" : join(", ", [for v in var.comparison_model_versions : "'${replace(v, "'", "''")}'"])
+
+  db_name = aws_glue_catalog_database.this.name
+
   latest_view_sql = <<-EOT
-    SELECT review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date
-    FROM (
-      SELECT review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date,
-             max(model_version_no) OVER (PARTITION BY review_id, review_date) AS max_no
-      FROM "${aws_glue_catalog_database.this.name}"."${var.table_name}"
+    WITH chosen AS (
+      SELECT review_id, review_date, max(model_version_no) AS model_version_no
+      FROM "${local.db_name}"."${var.log_table_name}"
+      WHERE model_version NOT IN (${local.comparison_versions_sql})
+      GROUP BY review_id, review_date
     )
-    WHERE model_version_no = max_no
+    SELECT s.review_id, s.aspect, s.score, s.model_version, s.model_version_no, s.analyzed_at, s.review_date
+    FROM "${local.db_name}"."${var.table_name}" s
+    JOIN chosen c
+      ON  s.review_id = c.review_id
+      AND s.review_date = c.review_date
+      AND s.model_version_no = c.model_version_no
+  EOT
+
+  # 후기 단위 상태 뷰: 로그 기준 후기별 최신 버전(비교용 제외) 한 행. 로그에 없는 Silver 후기는 Gold 가 LEFT JOIN 으로 미분석 판단.
+  status_view_sql = <<-EOT
+    WITH ranked AS (
+      SELECT review_id, review_date, model_version, model_version_no, analyzed_at, n_aspects,
+             row_number() OVER (PARTITION BY review_id, review_date ORDER BY model_version_no DESC) AS rn
+      FROM "${local.db_name}"."${var.log_table_name}"
+      WHERE model_version NOT IN (${local.comparison_versions_sql})
+    )
+    SELECT review_id, review_date, model_version, model_version_no, analyzed_at, n_aspects,
+           CASE WHEN n_aspects = 0 THEN '속성없음' ELSE '점수있음' END AS score_status
+    FROM ranked
+    WHERE rn = 1
   EOT
 
   # 뷰 열: Presto(Athena) 타입과 Glue(Hive) 타입을 같이 둔다. 타입은 실제 Iceberg 테이블 열과 정확히 같아야 한다.
@@ -479,13 +508,33 @@ locals {
     { name = "review_date", presto = "date", glue = "date" },
   ]
 
+  # n_aspects 는 로그 테이블 정의의 int(Iceberg) = Athena integer.
+  status_view_columns = [
+    { name = "review_id", presto = "varchar", glue = "string" },
+    { name = "review_date", presto = "date", glue = "date" },
+    { name = "model_version", presto = "varchar", glue = "string" },
+    { name = "model_version_no", presto = "decimal(4,1)", glue = "decimal(4,1)" },
+    { name = "analyzed_at", presto = "timestamp(6)", glue = "timestamp" },
+    { name = "n_aspects", presto = "integer", glue = "int" },
+    { name = "score_status", presto = "varchar", glue = "string" },
+  ]
+
   latest_view_json = jsonencode({
     originalSql  = trimspace(local.latest_view_sql)
     catalog      = "awsdatacatalog"
-    schema       = aws_glue_catalog_database.this.name
+    schema       = local.db_name
     owner        = "trino"
     runAsInvoker = false
     columns      = [for c in local.latest_view_columns : { name = c.name, type = c.presto }]
+  })
+
+  status_view_json = jsonencode({
+    originalSql  = trimspace(local.status_view_sql)
+    catalog      = "awsdatacatalog"
+    schema       = local.db_name
+    owner        = "trino"
+    runAsInvoker = false
+    columns      = [for c in local.status_view_columns : { name = c.name, type = c.presto }]
   })
 }
 
@@ -512,8 +561,35 @@ resource "aws_glue_catalog_table" "latest_view" {
     }
   }
 
-  # 뷰가 읽는 점수 테이블이 먼저 있어야 한다.
-  depends_on = [aws_glue_catalog_table.scores]
+  # 뷰가 읽는 점수 테이블과 점수 로그 테이블이 먼저 있어야 한다.
+  depends_on = [aws_glue_catalog_table.scores, aws_glue_catalog_table.score_log]
+}
+
+# 후기 단위 점수 상태 뷰(속성없음/점수있음). Gold 가 Silver 후기와 LEFT JOIN 해서 미분석(로그에 없음)·속성 없음·점수 있음을 구분한다.
+resource "aws_glue_catalog_table" "status_view" {
+  name          = var.status_view_name
+  database_name = aws_glue_catalog_database.this.name
+  table_type    = "VIRTUAL_VIEW"
+
+  parameters = {
+    presto_view = "true"
+    comment     = "Presto View"
+  }
+
+  view_original_text = "/* Presto View: ${base64encode(local.status_view_json)} */"
+  view_expanded_text = "/* Presto View */"
+
+  storage_descriptor {
+    dynamic "columns" {
+      for_each = local.status_view_columns
+      content {
+        name = columns.value.name
+        type = columns.value.glue
+      }
+    }
+  }
+
+  depends_on = [aws_glue_catalog_table.score_log]
 }
 
 # ------------------------------------------------------------------ Athena 워크그룹
@@ -649,6 +725,7 @@ resource "aws_ssm_parameter" "config" {
     table_location            = "s3://${var.bucket_name}/${var.table_prefix}/"
     results_location          = "s3://${var.bucket_name}/${var.results_prefix}/"
     latest_view               = var.latest_view_name
+    status_view               = var.status_view_name
     silver_reviews_runs_table = var.silver_reviews_runs_table_name
     silver_reviews_root       = "s3://${var.bucket_name}/${var.silver_reviews_prefix}/"
     runner_policy_name        = aws_iam_policy.athena_runner.name

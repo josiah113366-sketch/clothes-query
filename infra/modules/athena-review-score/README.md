@@ -13,7 +13,9 @@
 | `staging_log_prefix`, `log_table_prefix` | 후기별 점수 로그 staging prefix(기본 `staging/review-score-log`)와 로그 Iceberg 테이블 위치(기본 `silver/review_score_log_iceberg`) |
 | `results_prefix` | Athena 쿼리 결과 위치(기본 `athena-results/review-score`) |
 | `database_name`, `table_name`, `staging_table_name` | Glue DB·점수 테이블 이름 |
-| `latest_view_name` | Gold 가 읽는 Athena 뷰 이름(기본 `review_aspect_scores_latest`, 후기마다 `model_version_no` 최대 결과). Glue `VIRTUAL_VIEW` 로 생성 |
+| `latest_view_name` | Gold 가 읽는 Athena 뷰 이름(기본 `review_aspect_scores_latest`). 버전은 점수 로그 `review_score_log` 에서 후기마다 `model_version_no` 최대(비교용 제외)로 고르고, 점수 행은 점수 테이블에서 가져온다. Glue `VIRTUAL_VIEW` 로 생성 |
+| `status_view_name` | 후기 단위 점수 상태 뷰 이름(기본 `review_score_status_latest`). 로그 기준 후기별 최신 버전(비교용 제외) 한 행 + `score_status`(`속성없음`/`점수있음`). 로그에 없는 Silver 후기는 Gold 가 LEFT JOIN 으로 미분석 판단 |
+| `comparison_model_versions` | 비교용 모델 버전 목록(기본 `["2.4b_score_s2r"]`). 두 뷰의 버전 선택에서 제외한다. 비어 있으면 제외하지 않는다 |
 | `log_table_name`, `staging_log_table_name` | 후기별 점수 로그 테이블(Iceberg)과 그 staging 외부 테이블 이름 |
 | `bytes_scanned_cutoff` | 쿼리당 스캔 한도(기본 10GB, 최소 10MB) |
 | `config_parameter_name` | 스크립트가 읽는 SSM 파라미터 이름 |
