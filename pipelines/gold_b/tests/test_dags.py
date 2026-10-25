@@ -207,24 +207,28 @@ def test_compact_pod_needs_only_the_ledger(monkeypatch):
     check, pod = parts(load(monkeypatch, RUNTIME).compact_dag)
     assert check.downstream == [pod]
     k = pod.kwargs
-    assert k["cmds"] == ["python3", "-m", "pipelines.gold_b.jobs.compact"]
-    assert k["arguments"] == ["--day", "{{ params.day }}"]   # 날짜 입력이 비면 잡이 어제(UTC)를 합친다
-    assert k["env_vars"] == {"GOLD_B_LEDGER_ROOT": RUNTIME["ledger_root"], "AWS_EC2_METADATA_DISABLED": "true"}
+    assert k["cmds"] == ["python3", "-m", "pipelines.gold_b.jobs.compact"] and "arguments" not in k
+    assert k["env_vars"] == {"GOLD_B_LEDGER_ROOT": RUNTIME["ledger_root"], "AWS_EC2_METADATA_DISABLED": "true",
+                             "GOLD_B_COMPACT_DAY": "{{ params.day }}"}   # 날짜 입력, 비면 잡이 어제(UTC)를 합친다
     assert (k["volumes"], k["volume_mounts"]) == ([], [])   # Kafka를 읽지 않는다
     assert k["automount_service_account_token"] is False
 
 
 def test_compact_dag_takes_an_optional_day(monkeypatch, tmp_path):
-    """손으로 실행할 때 지난 날을 넣을 수 있다 (비우면 어제 UTC, 2026-10-25). Airflow가 형식을 막고, 잡은 빈 값과 날짜를 받는다."""
+    """손으로 실행할 때 지난 날을 넣을 수 있다 (비우면 어제 UTC, 2026-10-25). Airflow가 형식을 막고, 잡은 Pod 환경변수로 받는다.
+    명령 인자가 아니라 환경변수라서, 날짜 입력을 모르는 옛 이미지도 실패하지 않고 어제를 합친다."""
     compact = job("compact")
-    param = load(monkeypatch, RUNTIME).compact_dag.settings["params"]["day"]
+    dags = load(monkeypatch, RUNTIME)
+    param = dags.compact_dag.settings["params"]["day"]
+    assert parts(dags.compact_dag)[1].kwargs["env_vars"][compact.ENV_DAY] == "{{ params.day }}"
+    assert compact.ENV_DAY not in parts(dags.reprocess_dag)[1].kwargs["env_vars"]
     assert (param.default, param.schema["type"]) == ("", "string")
     pattern = re.compile(param.schema["pattern"])
     assert [bool(pattern.search(v)) for v in ("", "2026-10-21", "10/21", "2026-10-21 ")] == [True, True, False, False]
     env, logs = {"GOLD_B_LEDGER_ROOT": str(tmp_path)}, []
     now = lambda: datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)   # noqa: E731
-    assert compact.main(["--day", ""], env=env, now=now, log=logs.append) == 0           # 예약 실행: 빈 값 = 어제
-    assert compact.main(["--day", "2026-10-21"], env=env, now=now, log=logs.append) == 0
+    assert compact.main([], env={**env, compact.ENV_DAY: ""}, now=now, log=logs.append) == 0           # 예약 실행: 빈 값 = 어제
+    assert compact.main([], env={**env, compact.ENV_DAY: "2026-10-21"}, now=now, log=logs.append) == 0
     assert [line.split(":")[0] for line in logs] == ["파일 합치기 2026-10-24", "파일 합치기 2026-10-21"]
 
 

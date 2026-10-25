@@ -121,12 +121,15 @@ def test_main_compacts_yesterday_by_default(tmp_path):
 
 
 def test_main_takes_an_empty_day_as_yesterday_and_refuses_a_bad_day(tmp_path):
-    """Airflow DAG는 날짜 입력이 비면 --day 빈 값을 넘긴다. 빈 값은 어제(UTC)이고, 형식이 틀리면 합치지 않고 멈춘다."""
+    """빈 날짜(--day 또는 GOLD_B_COMPACT_DAY)는 어제(UTC)이고, 형식이 틀리면 합치지 않고 멈춘다."""
     store = LocalStore(tmp_path)
     seed(store)
     env = {"GOLD_B_LEDGER_ROOT": str(tmp_path)}
     with pytest.raises(SystemExit):
         main(["--day", "10/21"], env=env, now=after_day, log=lambda _: None)
+    logs: list[str] = []
+    assert main([], env={**env, "GOLD_B_COMPACT_DAY": "10/21"}, now=after_day, log=logs.append) == 1
+    assert "GOLD_B_COMPACT_DAY" in logs[-1]
     assert len(store.files(hour_folder("topic_messages", H06))) == 3
     assert main(["--day", " "], env=env, now=after_day, log=lambda _: None) == 0
     assert len(store.files(hour_folder("topic_messages", H06))) == 1
