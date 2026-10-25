@@ -1372,7 +1372,7 @@ def _real_rca_reports(days: int = RCA_DAYS, *, query=None, now=None) -> pd.DataF
     for c in ("anomaly_detected_at", "created_at"):
         df[c] = _utc(df[c])
     for c in ("claims", "problems"):
-        df[c] = df[c].apply(lambda v: json.loads(v) if v else [])
+        df[c] = df[c].apply(lambda v: [] if pd.isna(v) or v == "" else json.loads(v))
     return df
 
 
