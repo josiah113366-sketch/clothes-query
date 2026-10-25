@@ -205,7 +205,7 @@ def test_real_pages(monkeypatch, name):
     assert any("run-a" in c.value for c in at.caption)
     if name != "orders":
         widgets = at.multiselect or at.selectbox
-        assert "0000000001" in str(widgets[0].value)
+        assert "0000000001" in str(widgets[0].options)
 
 
 @pytest.mark.parametrize("kind", ["no_run", "empty", "failed", "partial"])

@@ -79,6 +79,7 @@ with ui.panel("일별 리뷰 수", "작성일(KST) 기준 · 건"):
 asp = ui.last_days(data.get_review_aspect_daily(), "review_date_kst", days)
 asp = asp[asp.article_id.isin(arts)]
 asp = ui.select_model(asp, "rv_model")
+st.caption(f"선택한 기간·상품·모델의 속성 점수 {int(asp.mentioned_review_count.sum()):,}건. 리뷰 수와 다른 지표입니다.")
 # 고른 모델 버전 이름 (패널 제목에 표시). select_model 이 버전 하나만 남긴 표를 돌려준다
 ver = asp["model_key" if "model_key" in asp else "model_version"].iloc[0]
 g = asp.groupby("aspect", as_index=False)[
