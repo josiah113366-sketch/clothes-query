@@ -23,3 +23,7 @@ variable "service_account" { type = string }
 variable "workgroup_name" { type = string }
 variable "results_prefix" { type = string }
 variable "bytes_scanned_cutoff_per_query" { type = number }
+variable "enable_review_score_reads" {
+  type    = bool
+  default = false
+}

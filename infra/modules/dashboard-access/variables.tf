@@ -65,3 +65,17 @@ variable "bytes_scanned_cutoff_per_query" {
     error_message = "Use an integer cutoff of at least 10MiB."
   }
 }
+variable "enable_review_score_reads" {
+  description = "감성분석 모델 화면용 읽기 전용 정책(점수 테이블·점수 로그·최신 뷰·Silver 리뷰 실행 출력·실행 요약 JSON)을 추가한다."
+  type        = bool
+  default     = false
+}
+variable "review_score_database" {
+  description = "감성분석 점수 Glue 데이터베이스 이름(athena-review-score 스택의 database_name)."
+  type        = string
+  default     = "clothes_query_dev_review_score"
+  validation {
+    condition     = can(regex("^[a-z0-9_]+$", var.review_score_database))
+    error_message = "Use a Glue database name."
+  }
+}
