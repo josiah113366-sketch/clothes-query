@@ -88,3 +88,5 @@ Job 자체, 스케줄, 스크립트 수정은 만들지 않는다(실행은 Airf
 - **확인한 결과:** fmt·validate 통과, 첫 plan 9 create / 0 change / 0 destroy, apply 후 plan 변경 없음. 2026-10-21 GPU 쿼터 증설 후 팀 AWS 에서 모델/코드 업로드부터 Job 실행·결과 확인까지 진행해 이상 없음(작성자 확인, 상세 수치는 PR 본문에 첨부).
 - **알려진 한계·남은 일:** launcher 정책 연결(Airflow 역할), `score_batch.py`·`run_processing_job.py` 수정(별도 PR), 오류 파일 기록 방식 결정,
   `/aws/sagemaker/ProcessingJobs` 로그 보존 기간(무기한) 정책.
+
+- **추가(2026-10-25):** 미점수 후기 선택이 Silver 실행 출력(athena 스택의 `silver_reviews_runs`)을 읽는 방식으로 바뀌었다. 따라서 Job 역할·launcher 의 `silver/reviews/*` 읽기는 새 방식에서 쓰이지 않는다(구 `--input-key` 시험 방식만 사용). 지금은 그대로 두고, 시험 방식을 없앨 때 함께 제거한다. Athena 쿼리 권한은 athena 스택 `runner` 정책을 붙여서 받는다.

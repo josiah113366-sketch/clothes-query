@@ -29,7 +29,9 @@ locals {
   results_arn = "${var.bucket_arn}/${var.results_prefix}/*"
   # 후기별 점수 로그(review_score_log): staging 읽기, Iceberg 테이블 위치 읽기/쓰기/삭제
   staging_log_arn = "${var.bucket_arn}/${var.staging_log_prefix}/*"
-  log_table_arn   = "${var.bucket_arn}/${var.log_table_prefix}/*"
+  # Silver 리뷰 실행 출력(읽기 전용): runs/<run_id>/silver_reviews/, current.json, completed/
+  silver_reviews_arn = "${var.bucket_arn}/${var.silver_reviews_prefix}/*"
+  log_table_arn      = "${var.bucket_arn}/${var.log_table_prefix}/*"
 
   # s3:ListBucket 은 리소스 제한이 안 되어 prefix 조건으로 좁힌다.
   list_prefixes = [
@@ -38,6 +40,7 @@ locals {
     "${var.results_prefix}/*",
     "${var.staging_log_prefix}/*",
     "${var.log_table_prefix}/*",
+    "${var.silver_reviews_prefix}/*",
   ]
 
   catalog_arn  = "arn:${local.partition}:glue:${var.region}:${local.account_id}:catalog"
@@ -310,6 +313,69 @@ resource "aws_glue_catalog_table" "score_log" {
   }
 }
 
+# ------------------------------------------------------------------ Silver 리뷰 실행 출력 읽기 전용 외부 테이블
+# Silver 파이프라인(Spark)은 리뷰를 실행(run)별 경로에 쓴다: silver/runtime/reviews/runs/<run_id>/silver_reviews/ (Parquet 1개 이상, 날짜 파티션 없음, 그 실행의 전체 스냅샷).
+# 경로가 실행마다 바뀌므로 run_id 를 파티션 키로 두고 "파티션 프로젝션 injected" 를 쓴다: 파티션을 등록하지 않아도
+# WHERE run_id = '<실행 ID>' 로 부르면 그 실행 폴더를 바로 읽는다(주의: 모든 쿼리에 run_id 조건이 있어야 한다).
+# 어느 run_id 를 읽을지는 select_unscored.py 가 current.json 의 run_id(status PASS)로 정한다.
+# 이 테이블은 우리 DB 에 둔 임시 읽기 전용 정의다. Silver 담당이 silver.reviews_runs 를 공개하면 그 이름으로 바꿔 읽고 이 테이블은 지운다.
+# 열은 2026-10-25 current.json 의 silver_reviews 스키마 16개와 같다. 시각 열(created_at_utc, emitted_at_utc)은 정밀도 문제가 있을 수 있어
+# (계약 문서의 "정밀도 게이트") 우리 쿼리는 쓰지 않는다.
+resource "aws_glue_catalog_table" "silver_reviews_runs" {
+  name          = var.silver_reviews_runs_table_name
+  database_name = aws_glue_catalog_database.this.name
+  description   = "READ-ONLY external table over Silver reviews run outputs (run_id projection injected). Replace with silver.reviews_runs when published."
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    EXTERNAL                    = "TRUE"
+    "classification"            = "parquet"
+    "projection.enabled"        = "true"
+    "projection.run_id.type"    = "injected"
+    "storage.location.template" = "s3://${var.bucket_name}/${var.silver_reviews_prefix}/runs/$${run_id}/silver_reviews/"
+  }
+
+  partition_keys {
+    name = "run_id"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${var.bucket_name}/${var.silver_reviews_prefix}/runs/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+    }
+
+    dynamic "columns" {
+      for_each = [
+        { name = "review_id", type = "string" },
+        { name = "event_id", type = "string" },
+        { name = "product_id", type = "string" },
+        { name = "product_name", type = "string" },
+        { name = "category", type = "string" },
+        { name = "order_id", type = "string" },
+        { name = "created_at_utc", type = "timestamp" },
+        { name = "created_at_kst", type = "string" },
+        { name = "review_date_kst", type = "date" },
+        { name = "emitted_at_utc", type = "timestamp" },
+        { name = "text", type = "string" },
+        { name = "option_size", type = "string" },
+        { name = "option_color", type = "string" },
+        { name = "source", type = "string" },
+        { name = "rating", type = "bigint" },
+        { name = "has_photo", type = "boolean" },
+      ]
+      content {
+        name = columns.value.name
+        type = columns.value.type
+      }
+    }
+  }
+}
+
 # ------------------------------------------------------------------ 점수 로그 staging 외부 테이블 (merge_log.sql 의 입력)
 resource "aws_glue_catalog_table" "staging_log" {
   name          = var.staging_log_table_name
@@ -518,6 +584,14 @@ data "aws_iam_policy_document" "athena_runner" {
     resources = [local.catalog_arn, local.database_arn, local.tables_arn]
   }
 
+  # Silver 리뷰 실행 출력 읽기 전용(Athena 외부 테이블 silver_reviews_runs 와 current.json·completed 확인용). 쓰기 권한은 없다.
+  # 인프라 담당(재영) 확인 필요: 이 prefix 읽기를 이 정책(= Athena 로 미점수 후기를 고르는 실행 역할)에 주어도 되는지, 다른 역할 경계와 맞는지.
+  statement {
+    sid       = "ReadSilverReviews"
+    actions   = ["s3:GetObject"]
+    resources = [local.silver_reviews_arn]
+  }
+
   statement {
     sid       = "ReadStaging"
     actions   = ["s3:GetObject"]
@@ -562,19 +636,21 @@ resource "aws_ssm_parameter" "config" {
   description = "review score Iceberg/Athena config for Airflow tasks (managed by Terraform)"
   type        = "String"
   value = jsonencode({
-    region               = var.region
-    workgroup            = aws_athena_workgroup.this.name
-    database             = aws_glue_catalog_database.this.name
-    table                = var.table_name
-    staging_table        = var.staging_table_name
-    log_table            = var.log_table_name
-    staging_log_table    = var.staging_log_table_name
-    staging_log_location = "s3://${var.bucket_name}/${var.staging_log_prefix}/"
-    log_table_location   = "s3://${var.bucket_name}/${var.log_table_prefix}/"
-    staging_location     = "s3://${var.bucket_name}/${var.staging_prefix}/"
-    table_location       = "s3://${var.bucket_name}/${var.table_prefix}/"
-    results_location     = "s3://${var.bucket_name}/${var.results_prefix}/"
-    latest_view          = var.latest_view_name
-    runner_policy_name   = aws_iam_policy.athena_runner.name
+    region                    = var.region
+    workgroup                 = aws_athena_workgroup.this.name
+    database                  = aws_glue_catalog_database.this.name
+    table                     = var.table_name
+    staging_table             = var.staging_table_name
+    log_table                 = var.log_table_name
+    staging_log_table         = var.staging_log_table_name
+    staging_log_location      = "s3://${var.bucket_name}/${var.staging_log_prefix}/"
+    log_table_location        = "s3://${var.bucket_name}/${var.log_table_prefix}/"
+    staging_location          = "s3://${var.bucket_name}/${var.staging_prefix}/"
+    table_location            = "s3://${var.bucket_name}/${var.table_prefix}/"
+    results_location          = "s3://${var.bucket_name}/${var.results_prefix}/"
+    latest_view               = var.latest_view_name
+    silver_reviews_runs_table = var.silver_reviews_runs_table_name
+    silver_reviews_root       = "s3://${var.bucket_name}/${var.silver_reviews_prefix}/"
+    runner_policy_name        = aws_iam_policy.athena_runner.name
   })
 }
