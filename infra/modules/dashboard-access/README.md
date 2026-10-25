@@ -1,5 +1,7 @@
 # 승인 대시보드 접근
 
+`enable_gold_a_reads=true`는 같은 역할에 Gold A 지표 전용 읽기 정책을 추가한다. 대상은 `gold_runs`와 지표·보류 테이블 7개이며 S3는 채널별 완료 목록과 해당 데이터셋의 실행별 Parquet 폴더로 제한한다. 제어 파일·Spark 체크포인트·Silver 원본·Gold A 쓰기/삭제·Glue DDL 권한은 추가하지 않는다. 기존 승인 쓰기 정책은 유지한다. [검증 기록](../../../docs/tasks/infra-dashboard-gold-a-read.md)을 참고한다.
+
 기존 EKS의 dashboard/approval-dashboard Pod Identity, 전용 Athena workgroup과 S3 결과 경로를 준비한다. gold_b.anomaly_current 및 기반 anomaly, agent.investigation_reports, gold_b.reprocess_events 메타데이터·원본을 읽는다. 업무 쓰기는 gold_b/reprocess_events/에만 허용하며 객체 삭제·Glue DDL·Bedrock·다른 결과 경로·ground_truth 접근은 허용하지 않는다.
 
 2026-10-23 모델 패치노트 조회를 위해 `model_registry_prefix`(기본 `review-score/model-registry/releases/`)의 GetObject와 제한된 목록 조회를 추가한다. 이 경로 쓰기·삭제·모델 가중치 읽기는 추가하지 않는다. 기존 역할·workgroup·Pod Identity는 같은 dashboard-access state에서 관리한다. 상세 배포·검증은 [작업 기록](../../../docs/tasks/infra-dashboard-runtime-connect.md)을 참고한다.

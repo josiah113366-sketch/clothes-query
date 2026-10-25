@@ -82,4 +82,8 @@ main 머지 ──▶ .github/workflows/dashboard-deploy.yml
 ## 알아둘 것
 - 로그인 실패 잠금은 파드별 메모리라 replicas 는 1로 둔다.
 - HTTP 구간에서는 비밀번호가 암호화되지 않는다. 운영 전 도메인과 HTTPS 로 바꾼다.
-- `DATA_SOURCE=auto`는 데이터별 연결 상태에 따라 실데이터 또는 더미를 쓴다. 실제 연결된 것은 승인 조회와 모델 패치노트이며, Gold A 등 나머지 분석 화면을 모두 연결한 것은 아니다. 패치노트 prefix는 읽기만, 승인 이벤트 prefix는 필요한 쓰기만 허용하며 `ground_truth/`는 명시 거부한다. 앱 담당의 Athena 함수 연결은 별도다.
+- `DATA_SOURCE=auto`는 데이터별 연결 상태에 따라 실데이터 또는 더미를 쓴다. Gold A는 아래 별도 설정으로 실데이터를 조회하며 오류를 더미로 숨기지 않는다. 패치노트 prefix는 읽기만, 승인 이벤트 prefix는 필요한 쓰기만 허용하며 `ground_truth/`는 명시 거부한다.
+
+## Gold A 조회 연결
+
+Gold A 실데이터는 `GOLD_A_DATA_SOURCE=athena`, `GOLD_A_ATHENA_WORKGROUP=clothes-query-dev-dashboard`, `GOLD_A_DATABASE=gold_a`로 연결한다. IAM은 dashboard-access의 `enable_gold_a_reads`가 관리한다. 환경 변수는 main 대상 PR 머지 후 Actions → deploy/dashboard → Argo CD 경로로 반영한다. live Deployment만 수정하면 selfHeal이 되돌린다. [권한 적용·실제 Pod 조회 검증](../../../docs/tasks/infra-dashboard-gold-a-read.md)을 참고한다.

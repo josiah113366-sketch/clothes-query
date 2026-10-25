@@ -20,6 +20,11 @@ variable "bucket_arn" {
     error_message = "Use an existing data bucket ARN without a prefix."
   }
 }
+variable "enable_gold_a_reads" {
+  type    = bool
+  default = false
+}
+
 variable "namespace" {
   type    = string
   default = "dashboard"

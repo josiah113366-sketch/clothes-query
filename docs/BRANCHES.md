@@ -153,6 +153,7 @@ gitGraph
 | `infra/common-cpu-diet` | [infra-common-cpu-diet.md](tasks/infra-common-cpu-diet.md) | 공용 노드 2→1 통합 검증, applied-state-sync에 통합·원본 보존 | |
 | `infra/spark-runtime-prep` | [infra-spark-runtime-prep.md](tasks/infra-spark-runtime-prep.md) | 원본 보존, 합성 시험 완료·업무 미적용. spark-preparation-share로 공유 | |
 | `infra/athena-review-score` | [infra-athena-review-score.md](tasks/infra-athena-review-score.md) (점수 결과 Iceberg 테이블 Athena/Glue 기반, 초안) | 진행 중 | |
+| `infra/dashboard-gold-a-read` | [infra-dashboard-gold-a-read.md](tasks/infra-dashboard-gold-a-read.md) | 읽기 정책 적용·실제 Pod 조회 검증, 화면 설정 머지 대기 | |
 
 ### api
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

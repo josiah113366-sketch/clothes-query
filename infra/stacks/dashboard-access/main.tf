@@ -13,6 +13,7 @@ module "dashboard_access" {
   namespace                      = var.namespace
   service_account                = var.service_account
   enable_pipeline_status_reads   = var.enable_pipeline_status_reads
+  enable_gold_a_reads            = var.enable_gold_a_reads
   model_registry_prefix          = var.model_registry_prefix
   workgroup_name                 = var.workgroup_name
   results_prefix                 = var.results_prefix

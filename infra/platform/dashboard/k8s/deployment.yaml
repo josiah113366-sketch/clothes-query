@@ -35,7 +35,7 @@ spec:
             - {name: AUTH_MODE, value: "local"}
             - {name: LOCAL_ACCOUNTS_FILE, value: /etc/dashboard/accounts.json}
             # auto: 등록된 실데이터 조회를 먼저 쓰고, 없거나 실패하면 더미로 대체한다(화면에 '더미 사용 중' 표시).
-            # 지금 실데이터는 모델 패치노트(S3)뿐이고 나머지 화면은 더미다. 항상 더미로 보려면 dummy.
+            # Gold A는 아래 전용 설정으로 Athena를 조회하며 실패를 더미 값으로 숨기지 않는다.
             - {name: DATA_SOURCE, value: "auto"}
             # 모델 버전·패치노트(S3, 팀 데이터 버킷). Pod Identity 에 이 경로 읽기 권한이 있어야 실제로 읽힌다.
             # 권한이 없거나 읽기에 실패하면 더미로 대체한다.
@@ -43,6 +43,10 @@ spec:
             # 기존 전용 workgroup과 Secret을 연결한다. 비밀번호·토큰은 Git에 두지 않는다.
             # 실제 승인에는 이메일 아이디 계정을 사용하며, DAG ID·완료 계약은 업무 담당이 관리한다.
             - {name: APPROVAL_ATHENA_WORKGROUP, value: "clothes-query-dev-dashboard"}
+            # Gold A는 기존 전용 workgroup을 공유하고 원본은 읽기만 한다.
+            - {name: GOLD_A_DATA_SOURCE, value: "athena"}
+            - {name: GOLD_A_ATHENA_WORKGROUP, value: "clothes-query-dev-dashboard"}
+            - {name: GOLD_A_DATABASE, value: "gold_a"}
             - {name: AWS_REGION, value: "ap-northeast-1"}
             - {name: AWS_DEFAULT_REGION, value: "ap-northeast-1"}
             - {name: AIRFLOW_API_URL, value: "http://airflow-api-server.airflow.svc.cluster.local:8080"}
