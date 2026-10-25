@@ -43,3 +43,39 @@
 - [x] `git diff --check`
 
 ## 작업 결과 (머지 전에 작성한다)
+
+### 만든 것
+
+- `dashboard/data.py`
+  - `dataset(ttl, allow_empty=False)`: `allow_empty=True`면 실데이터가 비어도 더미로 바꾸지 않는다. 기본값은 지금 동작 그대로라 다른 화면은 바뀌지 않는다.
+  - `get_topic_inflow(분)`: 더미(45~30분 전 5배 폭주)와 실데이터 `_real_topic_inflow` (`gold_b.topic_messages` 1분 × 토픽, 시간 폴더 조건, 덜 찬 지금 분·직전 분 제외).
+  - `get_duplicate_success(시간)`: 더미(2주문)와 실데이터 `_real_duplicate_success` (`gold_b.payment_attempts`, 최근 적재된 성공 결제의 주문 중 성공 2건 이상, 판정 R5와 같은 방식, 최대 200줄).
+  - 둘 다 workgroup 환경변수가 있을 때 `_REAL`에 등록하고 `allow_empty=True`다.
+- 화면
+  - 결제 관제: 「성공 결제가 2건 이상인 주문」 칸 (있으면 빨간 경고와 주문·결제 번호·PG·결제 시각·적재 시각 표, 없으면 "없습니다 (정상)"). 이 칸만 더미면 칸 아래에 "※ 이 칸은 더미 데이터입니다.". 맨 위 설명에 시나리오 3을 더했다.
+  - 파이프라인 상태 › 지연·점검: 「토픽별 유입 (평소 대비)」 그래프 (토픽마다 조회 구간 중앙값 = 1, 점선 1) 와 최근 1분 건수. 비면 "적재 잡이 멈췄는지 확인" 경고. 탭 아래 더미 안내에 "유입"을 더했다.
+- `dashboard/test_gold_b_scenarios.py` (28개): 등록, 두 SQL(표, 적재 시각 기준, 시간 폴더, 덜 찬 분 제외)·칸·형식, 빈 결과는 그대로(형식 오류는 지금처럼 더미), 조회 실패는 더미, 두 화면을 더미·실제 모양·빈 데이터로 연다 (`AppTest`).
+- 문서: `dashboard/README.md` 배포 7번, `dashboard/TODO.md` B10(새 줄)·B1(완료), #110 머지 표시.
+
+### 왜
+
+- 시나리오 2에서 지연이 커졌을 때 폭주인지 S3 Sink 문제인지 가르려면 유입을 같이 봐야 하는데, 데이터 흐름 탭은 마지막 적재 시각과 오늘 건수만 보여 줬다.
+- 시나리오 3(성공 결제 중복)은 형식이 맞는 데이터라 형식 오류 화면에 안 나오고, 결제 관제에도 보이는 곳이 없었다. 중복 행의 결제 시각은 과거일 수 있어 결제 시각 기준 "최근 6시간" 목록으로는 놓친다.
+- "비면 더미" 규칙을 그대로 쓰면 중복 0건(정상)일 때 가짜 중복 주문이, 유입이 끊겼을 때 가짜 유입이 보여 판단을 틀리게 한다.
+
+### 확인한 결과
+
+- `python test_gold_b_scenarios.py` 28개, `python test_gold_b_data.py` 30개, `python test_approval_page.py` 28개, `python -m pytest -q test_gold_a_io.py` 19개 통과 (로컬 Python 3.12, streamlit 1.59.2. `streamlit_echarts`가 없는 PC라 그리기는 빈 함수로 대신).
+- 코드를 일부러 틀리게 바꾼 9가지(두 함수의 `allow_empty`, 데코레이터 조건, 적재 시각 → 결제 시각, 덜 찬 분 조건, 유입 등록, 더미 안내의 "유입", 최근 1분 값, 빈 결과 안내)를 시험이 모두 잡았다.
+- 실제 Athena (은서 님 AWS 자격, 대시보드 workgroup, SELECT만): 유입 900줄(180분 × 토픽 5개, 분당 중앙값 clickstream 2,051·order-items 54·orders 47·payments 16·members-events 15, 2초), 성공 결제 중복 0줄(최근 7일 적재분, 10초). 칸·형식이 맞다.
+
+### 알아 둘 것
+
+- 성공 결제 중복 칸은 대시보드 역할에 결제 뷰 읽기 권한이 생겨야 실데이터다 (지금은 `TABLE_NOT_FOUND`로 실패해 더미, F3).
+- 형식 오류·재처리 이력도 평소 비어 있는 게 정상이라 `allow_empty=True`가 맞을 수 있다. 화면 주인(민혁 님)과 정한 뒤 한 줄씩 바꾸면 된다.
+
+### 다음 할 일
+
+- 사용자: push, PR (머지하면 main 자동 배포 #113으로 대시보드에 반영)
+- 재영 님: 대시보드 역할에 뷰 `payment_states`·`payment_attempts`의 `glue:GetTable` (#115에 함께)
+- 민혁 님: 형식 오류·재처리 이력의 "비면 더미" 규칙 정하기
