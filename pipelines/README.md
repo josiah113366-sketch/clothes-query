@@ -82,6 +82,18 @@ Gold는 저장된 Silver/상품 Parquet을 다시 읽는다. 거래·클릭 품�
 
 인프라 추가 연결 범위: bronze/clickstream/ 읽기, silver/runtime/clicks/ 및 gold_a/runtime/funnels/ 읽기·쓰기와 해당 실행 데이터셋 아래 magic committer 작업 객체 정리. 현재 거래 경로 권한이 이 범위를 포함한다고 가정하지 않는다. Athena/Glue 테이블·정기 실행·실제 Kafka 범위 검증은 후속이다.
 
+### 고정 세션 퍼널 시연
+
+`pipelines.funnel_demo_prepare`는 완료 거래의 고정 클릭 파일 목록 전체에서 선택 세션을 읽고, 연결된 Silver 주문·상품·결제·주문 검사·주문별 품질과 Python 기대값을 로컬 입력 묶음으로 고정한다. 원본 탐색 시간과 Spark 처리 시간은 분리한다. 고정 목록 밖의 미래 이벤트와 전체 방문자 전환율을 의미하지 않는다.
+
+- 준비: `python -m pipelines.funnel_demo_prepare --trade-manifest <완료-manifest-URI> --sha256 <해시> --sessions <세션-배열.json> --output <새-로컬-폴더> --run-id <시연-ID>`
+- 실행: `spark-submit ... pipelines/funnel_demo.py --config-uri <요청-URI> --expected-job funnels`
+- Airflow: 기존 `silver_gold_a_funnels`에 `{"config_uri":"s3://<bucket>/pipelines/requests/<demo>.json","mode":"demo"}`를 전달한다. 다른 DAG에서는 demo를 거부한다. 요청 자체에도 `job=funnels`, `mode=demo`가 있어야 한다.
+- 요청 필드: `job`, `mode`, `run_id`, `output_root`, `selection_manifest`, `selection_sha256`. manifest 안의 입력 파일은 상대 경로·SHA-256·크기로 고정한다. 로컬 생성기가 만든 묶음을 S3로 옮길 때 파일 배치를 유지한다.
+- S3 출력은 `s3://<bucket>/pipelines/demo/funnels/runs/<시연-ID>/`에 한정한다. 기존 run은 덮어쓰지 않는다. 이 신규 경로와 입력 묶음에 대한 권한은 인프라 담당자가 확인해야 한다.
+- 결과는 클릭·상품·퍼널 Parquet, `metrics.json`, `manifest.json`, `completed.json`이다. 후속 R6 태스크는 NOT_APPLICABLE, Gold 태스크는 시연 완료만 확인하며 운영 Glue/Gold 완료 목록에 등록하지 않는다. 운영 대시보드에 이 표본을 전체 결과로 노출하지 않는다. 시연 Athena 표·뷰 연결은 별도다.
+- 측정은 단계별 개별 시간·누적 시간, 입력 건수/바이트, 실행 환경을 남긴다. SparkSession 생성 이후부터 측정하므로 Pod 대기·제출 시간은 포함하지 않는다. Pod CPU·메모리는 별도 관측이 없으면 NOT_COLLECTED/NULL이며 로컬 값을 EKS 처리량으로 사용하지 않는다.
+
 ### 리뷰 실행 요청
 
 **운영 점수 입력 결정: Iceberg 기반 Athena 뷰** `clothes_query_dev_review_score.review_aspect_scores_latest`를 조회한다. 모델 파일이나 SageMaker 중간 CSV를 Gold A가 운영 입력으로 직접 선택하지 않는다.
@@ -333,3 +345,38 @@ Gold A #67 main 반영, ECR 업로드·digest 고정, namespace·세 실행 신�
 - 리뷰별 최신 모델이 다를 수 있으므로 집계에 model_version/model_version_no를 함께 보존하고 manifest에 실제 버전 집합을 남긴다. 점수 0건과 미요청을 구분하고 결과 없는 리뷰를 임의로 0점으로 세지 않는다.
 - Gold DDL은 `pipelines/gold_a/tables.sql`, 공개 코드는 `pipelines.gold_publication`이다. Spark 결과를 검증하고 필요한 모든 run_id 파티션을 등록한 다음 `gold_runs` 완료 목록에 공개한다. 지표와 refresh_holds는 같은 channel/run_id로 읽는다. 등록된 지표만 전체 조회하면 완료 전 파티션이 보일 수 있으므로 완료 목록과 연결해야 한다.
 - Driver에는 기존 S3 권한 외에 Gold Glue GetTable/GetPartition/CreatePartition, 제어 기록 쓰기, 리뷰 Athena 조회/취소/결과 manifest 읽기와 뷰·결과 prefix 권한, Silver 재처리 이벤트 읽기·추가 쓰기가 필요하다. DB/테이블 생성·변경은 배포 권한으로 분리한다.
+
+## 퍼널 최종 배치: 날짜별 백필과 증분
+
+`mode=incremental`은 완료 거래 Silver를 재사용한다. 거래 Bronze를 다시 정제하지 않는다. 정기 스케줄은 사용자 결정에 따라 수동으로 유지한다.
+
+- 준비기가 현재 `bronze_v2/clickstream/` 객체·ETag·크기, 완료 거래 manifest, 상품 seed를 고정한다. 기본 묶음은 **32개 파일 / 128MiB 이하 / UTC 수집 날짜 하나**다. `max_files`, `max_bytes`로 줄일 수 있다. 큰 파일·변경/삭제된 과거 파일을 건너뛰지 않는다.
+- UTC 폴더 날짜는 작업 순서다. 퍼널은 **세션×상품 첫 조회 KST 날짜** 기준이다. 이전 클릭 상태와 Gold를 보존하여 다음 날짜에 도착한 클릭·주문·결제도 과거 코호트에 반영한다. 임의 만료 시간을 두지 않는다.
+- Python 형식 검사는 새 파일에만 적용한다. 기존 상태는 Parquet/Spark SQL로 중복·충돌을 검사한다. 같은 event_id의 충돌/오류는 관련 세션을 보류하고 기존 결과를 유지한다. 세션 불명 오류는 전체 갱신 보류다. 공통 규칙 해시가 바뀌면 상태를 그대로 재사용하지 않는다.
+- 거래가 바뀌면 이전·현재 거래에 연결된 세션을 보수적으로 재계산한다. 상품 seed가 바뀌면 보존된 모든 정상 세션을 재계산한다. 원본 전체 INCOMPLETE를 PASS로 바꾸지 않는다.
+- `silver/runtime/clicks/runs/<run>/`에 event_state, click_events, dq_results, quarantined_keys와 manifest를 저장한다. 기존 상태의 Parquet 병합, Silver/Gold 전체 스냅샷 입출력·일별 합산 비용은 남는다. **새 원본 양을 제한하며 전체 실행 시간이 상수라는 뜻은 아니다.** 단계 시간·새 파일 수/바이트를 기록한다.
+- Gold 지표·refresh_holds를 같은 run_id로 저장하고 재조회한다. 중간 백필은 Glue 파티션만 등록해 해당 run_id로 조회하고 `gold_runs`에는 노출하지 않는다. 마지막 묶음에서만 완료 목록/current를 갱신해 기존 대시보드 결과를 교체한다. DDL은 기존 `gold_a/tables.sql`이다.
+- 공개 태스크가 실제 Athena에서 같은 run_id의 상세·일별·보류 건수를 확인한 뒤 처리 위치를 확정한다. checkpoint는 `silver/runtime/clicks/catalog-control/incremental.json`의 고정 manifest URI/SHA256이며 owner를 조건부 쓰기로 잠근다. 실패하면 다음 묶음을 시작하지 않는다. **Kafka offset 연속 수신 완료를 뜻하지 않는다.**
+- `silver_gold_a_funnels`가 조회 성공 후 다음 묶음 요청을 만들고 동일 DAG를 순차 호출한다. 다음 주소는 종료 메시지→명시적 XCom으로 전달하며 사이드카/pods/exec 권한이 필요 없다. 고정 목록이 끝나면 종료한다. 이후 수동 준비·실행은 새 객체·변경된 거래/상품을 반영한다. 입력이 같으면 `NO_NEW_INPUT`이다.
+
+업무 이미지 안에서 요청 준비(기본은 로컬 저장, 아래 명령은 업로드하지 않음):
+
+```bash
+python3 -m pipelines.funnel_incremental_prepare \
+  --clicks s3://clothes-query-datalake/bronze_v2/clickstream/ \
+  --designs s3://hm-ecommerce-data/seed_v2/product_design/product_design.parquet \
+  --variants s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet \
+  --trade-manifest s3://clothes-query-datalake/silver/runtime/trade/current.json \
+  --output-root s3://clothes-query-datalake --run-id funnels-inc-UNIQUE \
+  --directory /tmp/funnels-request-UNIQUE --max-files 32 --max-bytes 134217728
+```
+
+검수 후 `--write-s3`를 명시하면 요청은 `pipelines/requests/funnels-incremental/<run>.json`, 입력은 `pipelines/input-manifests/funnels-incremental/<run>/`에 불변 저장한다. 같은 ID로 다른 내용을 덮어쓰지 않는다. DAG conf:
+
+```json
+{"mode":"incremental","config_uri":"s3://clothes-query-datalake/pipelines/requests/funnels-incremental/funnels-inc-UNIQUE.json"}
+```
+
+배포 설정: `AIRFLOW_PIPELINE_RUNTIME.funnel_athena_workgroup`, `funnel_athena_output`. Driver의 해당 workgroup Start/Get/StopQueryExecution·GetQueryResults, 결과 S3 읽기/쓰기, 기존 Glue 등록 및 상태/요청 prefix의 조건부 쓰기를 인프라 담당자가 확인한다. IAM/RBAC는 이 구현에서 변경하지 않았다.
+
+Spark 완료 후 공개/조회만 실패하면 **publish_gold부터 재개**한다. 강제 종료로 owner가 남았으면 Driver 종료를 확인한 뒤 `python3 -m pipelines.funnel_control --config-uri <기존 요청> --release-stopped-owner <기존 run_id> --confirm-driver-stopped`로 잠금을 해제한다. 처리 위치는 유지하며 실패한 결과를 덮어쓰지 않고 새 run_id를 사용한다. 증분 체인과 예전 전체 퍼널 요청을 섞어 실행하지 않는다.

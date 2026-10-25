@@ -4,7 +4,7 @@ import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import PropertyMock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 try:
     from airflow.dag_processing.dagbag import DagBag
@@ -64,6 +64,48 @@ class PublicationDagTest(unittest.TestCase):
         self.assertEqual(dag.get_task("record_reprocess_result").upstream_task_ids, {"publish_gold", "publish_r6"})
         self.assertEqual(dag.get_task("record_reprocess_result").trigger_rule, "all_done")
         self.assertTrue(all(d.schedule is None for d in self.dags.values()))
+
+    def test_demo_is_explicit_funnel_only_and_renders_separate_entry(self):
+        from jinja2 import Environment, StrictUndefined
+
+        dag = self.dags["silver_gold_a_funnels"]
+        worker = dag.get_task("submit_spark")
+        entry = next(value for value in worker.arguments if "local:///opt/pipelines/pipelines/" in value)
+        template = Environment(undefined=StrictUndefined).from_string(entry)
+        assert template.render(dag_run=SimpleNamespace(conf={"mode": "demo"})).endswith("/funnel_demo.py")
+        assert template.render(dag_run=SimpleNamespace(conf={"mode": "incremental"})).endswith("/funnel_incremental.py")
+        assert template.render(dag_run=SimpleNamespace(conf={})).endswith("/spark_batch.py")
+        checker = self.dag.get_task("check_request").python_callable
+        with patch.dict(checker.__globals__, {"get_current_context": lambda: {
+                "dag_run": SimpleNamespace(conf={"mode": "demo", "config_uri": "s3://bucket/demo.json"})}}), self.assertRaisesRegex(ValueError, "퍼널"):
+            checker()
+
+    def test_backfill_continuation_waits_for_verified_publication_and_remains_manual(self):
+        dag = self.dags["silver_gold_a_funnels"]
+        next_batch = dag.get_task("prepare_next_funnel_batch")
+        self.assertEqual(next_batch.upstream_task_ids, {"publish_gold"})
+        self.assertFalse(next_batch.do_xcom_push)
+        self.assertEqual(len(next_batch.callbacks), 1)
+        trigger = dag.get_task("trigger_next_funnel_batch")
+        self.assertEqual(trigger.trigger_dag_id, "silver_gold_a_funnels")
+        self.assertFalse(trigger.wait_for_completion)
+        self.assertEqual(trigger.conf["mode"], "incremental")
+        self.assertIsNone(dag.schedule)
+
+    def test_funnel_continuation_callback_rejects_missing_or_failed_pod_result(self):
+        from kubernetes.client import models as k8s
+        operator = self.dags["silver_gold_a_funnels"].get_task("prepare_next_funnel_batch")
+        callback = operator.callbacks[0]
+        ti = Mock()
+        value = {"continue": True, "config_uri": "s3://bucket/pipelines/requests/next.json", "next_run_id": "next"}
+        pod = k8s.V1Pod(status=k8s.V1PodStatus(container_statuses=[k8s.V1ContainerStatus(
+            name=operator.base_container_name, image="test", image_id="test", ready=False, restart_count=0,
+            state=k8s.V1ContainerState(terminated=k8s.V1ContainerStateTerminated(exit_code=0, message=json.dumps(value))))]))
+        callback.on_pod_completion(pod=pod, client=None, mode="sync", operator=operator, context={"ti": ti})
+        ti.xcom_push.assert_called_once_with(key="funnel_continuation", value=value)
+        pod.status.container_statuses[0].state.terminated.exit_code = 1
+        with self.assertRaises(ValueError):
+            callback.on_pod_completion(pod=pod, client=None, mode="sync", operator=operator, context={"ti": ti})
 
 
 if __name__ == "__main__":

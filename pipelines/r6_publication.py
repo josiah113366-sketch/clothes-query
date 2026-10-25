@@ -300,6 +300,16 @@ def main():
         request = json.loads(response["Body"].read())
     finally:
         response["Body"].close()
+    if request.get("mode") == "demo":
+        from pipelines.funnel_demo import validate_request
+        validate_request(request)
+        print(encode({"status": "NOT_APPLICABLE", "mode": "demo", "production_published": False}).decode())
+        return
+    if request.get("mode") == "incremental":
+        from pipelines.funnel_incremental import validate
+        validate(request)
+        print(encode({"status": "NOT_APPLICABLE", "mode": "incremental", "reason": "completed trade Silver is reused"}).decode())
+        return
     if request.get("job") == "reviews":
         print(encode({"status": "NOT_APPLICABLE", "job": "reviews"}).decode())
         return

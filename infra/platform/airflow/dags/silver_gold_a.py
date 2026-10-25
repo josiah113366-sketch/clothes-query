@@ -5,13 +5,33 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 
+from airflow.providers.cncf.kubernetes.callbacks import KubernetesPodOperatorCallback
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import dag, get_current_context, task
 from kubernetes.client import models as k8s
 
 RUNTIME = json.loads(os.environ.get("AIRFLOW_PIPELINE_RUNTIME", "{}"))
 NODE_SELECTOR = RUNTIME.get("node_selector", {"karpenter.sh/nodepool": "clothes-query-dev-compute-spark"})
 TEMPLATE_DIR = "/opt/spark/infra"
+
+
+class FunnelContinuationCallback(KubernetesPodOperatorCallback):
+    """Small termination message -> explicit XCom, without a pods/exec sidecar."""
+    @staticmethod
+    def on_pod_completion(*, pod, client, mode, operator, context, **kwargs):
+        statuses = (pod.status.container_statuses or []) if pod and pod.status else []
+        terminated = next((status.state.terminated for status in statuses
+                           if status.name == operator.base_container_name and status.state and status.state.terminated), None)
+        if not terminated or terminated.exit_code != 0 or not terminated.message or len(terminated.message) > 3500:
+            raise ValueError("다음 퍼널 묶음의 정상 종료 메시지가 없습니다")
+        value = json.loads(terminated.message)
+        if set(value) != {"continue", "config_uri", "next_run_id"} or type(value["continue"]) is not bool:
+            raise ValueError("퍼널 연속 실행 응답이 다릅니다")
+        if value["continue"] and (not re.fullmatch(r"s3://[^/]+/.+\.json", value["config_uri"])
+                                  or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", value["next_run_id"])):
+            raise ValueError("다음 퍼널 실행 요청 주소·ID가 다릅니다")
+        context["ti"].xcom_push(key="funnel_continuation", value=value)
 
 
 def build_dag(channel):
@@ -39,6 +59,11 @@ def silver_gold_a_batch(channel):
     @task
     def check_request():
         request = get_current_context()["dag_run"].conf
+        if request.get("mode", "full") not in {"full", "demo", "incremental"} or (request.get("mode") in {"demo", "incremental"} and channel != "funnels"):
+            raise ValueError("demo·incremental 모드는 퍼널 DAG에서만 사용할 수 있습니다")
+        if request.get("mode") == "incremental" and (not RUNTIME.get("funnel_athena_workgroup")
+                or not RUNTIME.get("funnel_athena_output", "").startswith("s3://")):
+            raise ValueError("증분 실행의 Athena 조회 검증 설정이 필요합니다")
         if reprocess:
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request.get("request_id", "")) or not reprocess_runtime:
                 raise ValueError("재처리 승인 요청과 reprocess 실행 설정이 필요합니다")
@@ -98,7 +123,9 @@ def silver_gold_a_batch(channel):
                  "--deploy-mode", "cluster"]
     for key, value in conf.items():
         arguments.extend(["--conf", key + "=" + str(value)])
-    arguments.extend(["local:///opt/pipelines/pipelines/spark_batch.py", "--config-uri", config_uri,
+    entry = ("local:///opt/pipelines/pipelines/{{ 'funnel_demo.py' if dag_run.conf.get('mode') == 'demo' else 'funnel_incremental.py' if dag_run.conf.get('mode') == 'incremental' else 'spark_batch.py' }}"
+             if channel == "funnels" else "local:///opt/pipelines/pipelines/spark_batch.py")
+    arguments.extend([entry, "--config-uri", config_uri,
                       "--expected-job", job])
     worker = KubernetesPodOperator(
         task_id="submit_spark",
@@ -129,7 +156,7 @@ def silver_gold_a_batch(channel):
         startup_timeout_seconds=300,
     )
     checked >> worker
-    def python_pod(task_id, module, arguments, trigger="all_success"):
+    def python_pod(task_id, module, arguments, trigger="all_success", callbacks=None):
         return KubernetesPodOperator(
         task_id=task_id,
         name="silver-gold-a-" + task_id.replace("_", "-"),
@@ -153,6 +180,7 @@ def silver_gold_a_batch(channel):
         do_xcom_push=False,
         on_finish_action="delete_pod",
         startup_timeout_seconds=300,
+        callbacks=callbacks,
     )
     all_tasks = [checked, worker]
     if reprocess:
@@ -166,9 +194,35 @@ def silver_gold_a_batch(channel):
         worker >> publish
         all_tasks.append(publish)
     gold = python_pod("publish_gold", "pipelines.gold_publication", ["--config-uri", config_uri,
-        "--database", RUNTIME.get("gold_database", "unconfigured")])
+        "--database", RUNTIME.get("gold_database", "unconfigured"),
+        "--athena-workgroup", RUNTIME.get("funnel_athena_workgroup", ""),
+        "--athena-output", RUNTIME.get("funnel_athena_output", "")])
     worker >> gold
     all_tasks.append(gold)
+    if channel == "funnels":
+        next_batch = python_pod("prepare_next_funnel_batch", "pipelines.funnel_control", ["--config-uri", config_uri],
+                                callbacks=[FunnelContinuationCallback])
+        gold >> next_batch
+
+        @task.branch
+        def choose_funnel_continuation():
+            context = get_current_context()
+            value = context["ti"].xcom_pull(task_ids="prepare_next_funnel_batch", key="funnel_continuation") or {}
+            return "trigger_next_funnel_batch" if value.get("continue") else "funnel_inventory_complete"
+
+        @task
+        def funnel_inventory_complete():
+            return "captured inventory complete; future input discovery remains manual"
+
+        choice = choose_funnel_continuation()
+        trigger_next = TriggerDagRunOperator(task_id="trigger_next_funnel_batch", trigger_dag_id="silver_gold_a_funnels",
+            trigger_run_id="{{ ti.xcom_pull(task_ids='prepare_next_funnel_batch', key='funnel_continuation')['next_run_id'] }}",
+            conf={"mode": "incremental", "config_uri": "{{ ti.xcom_pull(task_ids='prepare_next_funnel_batch', key='funnel_continuation')['config_uri'] }}"},
+            wait_for_completion=False, skip_when_already_exists=True)
+        next_batch >> choice
+        choice >> trigger_next
+        choice >> funnel_inventory_complete()
+        all_tasks.extend([next_batch, choice, trigger_next])
     if reprocess:
         finished = python_pod("record_reprocess_result", "pipelines.reprocess", ["finish",
             "--request-json", "{{ dag_run.conf | tojson }}", "--runtime-json", json.dumps(reprocess_runtime)], "all_done")
