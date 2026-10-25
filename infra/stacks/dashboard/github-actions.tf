@@ -36,12 +36,18 @@ data "aws_iam_policy_document" "dashboard_ci_trust" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # sub 는 "repo:<소유자>/<저장소>:ref:refs/heads/<브랜치>". main 만 허용한다.
+    # sub 는 "<접두어>:ref:refs/heads/<브랜치>". main 만 허용한다.
+    # 이 저장소는 immutable subject 를 쓴다 (gh api repos/<저장소>/actions/oidc/customization/sub 의 use_immutable_subject=true).
+    # 그래서 실제 토큰의 접두어는 "repo:<소유자>@<소유자ID>/<저장소>@<저장소ID>" 형태다 (var.github_sub_prefix).
+    # 옛 형식(repo:<소유자>/<저장소>)도 같이 허용해, 설정이 기본으로 돌아가도 끊기지 않게 한다.
     # 다른 브랜치에서 시험 배포가 필요하면 여기에 그 브랜치를 잠깐 추가한다 (상시 허용하지 않는다)
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values = [
+        "${var.github_sub_prefix}:ref:refs/heads/main",
+        "repo:${var.github_repository}:ref:refs/heads/main",
+      ]
     }
   }
 }
