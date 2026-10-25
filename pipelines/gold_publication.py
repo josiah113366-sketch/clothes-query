@@ -96,6 +96,20 @@ class GoldPublisher:
         if (manifest.get("run_id") != run_id or manifest.get("status") not in {"PASS", "PARTIAL"}
                 or not required <= names or names - METRICS[self.channel]):
             raise PublicationError("Gold 완료 결과·공개 테이블 오류")
+        silver_run_id = manifest.get("silver_run_id", run_id)
+        if not isinstance(silver_run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", silver_run_id):
+            raise PublicationError("Gold 기준 Silver 실행 ID 오류")
+        if manifest.get("gold_only"):
+            silver_key = f"silver/runtime/reviews/runs/{silver_run_id}/manifest.json"
+            silver_raw, _ = self.store.get(silver_key)
+            silver_done, _ = self.store.get(f"silver/runtime/reviews/completed/{silver_run_id}.json")
+            if (self.channel != "reviews" or manifest.get("silver_manifest") != self.store.uri(silver_key)
+                    or silver_raw is None or silver_done is None
+                    or hashlib.sha256(silver_raw).hexdigest() != manifest.get("silver_manifest_sha256")
+                    or json.loads(silver_raw) != json.loads(silver_done)
+                    or json.loads(silver_raw).get("status") != "PASS"
+                    or json.loads(silver_raw).get("run_id") != silver_run_id):
+                raise PublicationError("Gold-only 기준 Silver 완료 출처 오류")
         registry = self.table("gold_runs", RUN_COLUMNS, [("channel", "string")])
         tables = {}
         for name in sorted(names):
@@ -146,7 +160,7 @@ class GoldPublisher:
                 row = {key: manifest.get(key) for key, _ in RUN_COLUMNS}
                 row.update(run_id=run_id, completed_at=millis(at), status="COMPLETED",
                            quality_status=manifest["status"], source_manifest=self.store.uri(source),
-                           source_manifest_sha256=digest, silver_run_id=run_id,
+                           source_manifest_sha256=digest, silver_run_id=silver_run_id,
                            held_scope_count=len(manifest.get("held_scopes", [])),
                            available_tables_json=json.dumps(manifest["output_counts"], sort_keys=True))
                 self.store.immutable(completed_key, parquet([row], RUN_COLUMNS))

@@ -1,0 +1,15 @@
+{
+  "job": "reviews",
+  "gold_only": true,
+  "run_id": "reviews-gold-only-NEW_RUN_ID",
+  "output_root": "s3://clothes-query-datalake",
+  "input_complete": true,
+  "start_date": "2026-10-21",
+  "end_date": "2026-10-24",
+  "silver_manifest": "s3://clothes-query-datalake/silver/runtime/reviews/runs/reviews-v2-20261024T155307Z/manifest.json",
+  "silver_manifest_sha256": "REPLACE_WITH_SHA256_OF_EXISTING_MANIFEST_BYTES",
+  "analysis_view": {
+    "workgroup": "clothes-query-dev-athena-review-score",
+    "timeout_seconds": 600
+  }
+}
