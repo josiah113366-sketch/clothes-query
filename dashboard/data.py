@@ -721,7 +721,8 @@ def get_reprocess_events() -> pd.DataFrame:
 
 @dataset(_TTL_B)
 def get_reliability_checks() -> pd.DataFrame:
-    """원장 신뢰성 점검 3종 (오프셋 빈틈 / 중복 / 적재 정지). 문제가 나오면 그 시간대 탐지 결과는 믿지 않는다."""
+    """원장 신뢰성 점검 3종 (오프셋 빈틈 / 중복 / 적재 정지). 문제가 나오면 그 시간대 탐지 결과는 믿지 않는다.
+    컬럼: check, target, result(정상 / 확인 필요 / 문제), detail, checked_at(UTC). 실데이터는 _real_reliability_checks (TODO B3)."""
     now = pd.Timestamp.now(tz="UTC").floor("min")
     return pd.DataFrame(
         [
@@ -1241,6 +1242,75 @@ def _real_rca_reports(days: int = RCA_DAYS, *, query=None, now=None) -> pd.DataF
     return df
 
 
+RELIABILITY_MINUTES = 180  # 원장 신뢰성 점검이 보는 최근 분 (지연·유입 그래프와 같은 길이, TODO B3)
+STALE_SEC = 120  # 적재 잡·지연 수집기가 이보다 오래 쓰지 않으면 멈춤으로 본다 (Gold B 설계의 고장 기준 2분)
+
+
+def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, *, query=None, now=None) -> pd.DataFrame:
+    """원장 신뢰성 점검 3종을 Athena 조회 한 번으로 계산한다 (agent/reliability 쿼리, 조사 도구 ledger_reliability와 같은 질문).
+
+    ① 오프셋 빈틈: 최근 minutes 분(Kafka 시각. 덜 찬 지금 분과 직전 분은 뺀다)에 파티션마다 offset이 이어지는가.
+       메시지가 보인 파티션 수가 지연 수집기가 재는 파티션 수보다 적으면 '확인 필요'.
+    ② 중복: 같은 메시지 위치(토픽, 파티션, offset)가 두 줄인가. 같은 결제 번호는 Debezium 재전송 등으로 생기고
+       뷰가 걸러 주므로 참고로만 적는다.
+    ③ 적재 정지: 적재 잡의 마지막 loaded_at, 지연 수집기의 마지막 collected_at 이 STALE_SEC 넘게 지났는가.
+    한계: ①은 관측된 처음~끝 offset 사이만 본다. 구간 경계에서 Kafka 시각 순서가 뒤바뀐 메시지가 있으면 빈틈으로 보일 수 있다.
+    """
+    now = now or pd.Timestamp.now(tz="UTC")
+    end = now.floor("min") - pd.Timedelta(minutes=1)
+    start = end - pd.Timedelta(minutes=minutes)
+    window, recent = f"({_hour_partitions(start, end)})", f"({_hour_partitions(start, now)})"
+    since, until = (f"TIMESTAMP '{t:%Y-%m-%d %H:%M:%S}'" for t in (start, end))  # 원장 시각은 UTC
+    partition = "concat(topic, '-', CAST(kafka_partition AS varchar))"
+    position = "concat(topic, '-', CAST(kafka_partition AS varchar), '-', CAST(kafka_offset AS varchar))"
+    row = (query or _athena)(
+        "WITH m AS (SELECT topic, kafka_partition, kafka_offset FROM gold_b.topic_messages"
+        f" WHERE {window} AND kafka_timestamp >= {since} AND kafka_timestamp < {until}),"
+        " g AS (SELECT topic, kafka_partition,"
+        " (max(kafka_offset) - min(kafka_offset) + 1) - count(DISTINCT kafka_offset) AS missing"
+        " FROM m GROUP BY topic, kafka_partition)"
+        " SELECT (SELECT coalesce(sum(missing), 0) FROM g) AS missing_offsets,"
+        " (SELECT count(*) FROM g WHERE missing > 0) AS gap_partitions,"
+        " (SELECT count(*) FROM g) AS partitions_seen,"
+        f" (SELECT count(DISTINCT {partition}) FROM gold_b.bronze_lag_snapshots"
+        f" WHERE {window} AND collected_at >= {since}) AS partitions_expected,"
+        f" (SELECT count(*) - count(DISTINCT {position}) FROM m) AS duplicate_rows,"
+        " (SELECT count(*) - count(DISTINCT payment_id) FROM gold_b.payment_events"
+        f" WHERE {window} AND completed_at >= {since} AND completed_at < {until}) AS duplicate_payment_ids,"
+        f" (SELECT max(loaded_at) FROM gold_b.topic_messages WHERE {recent}) AS last_loaded,"
+        f" (SELECT max(collected_at) FROM gold_b.bronze_lag_snapshots WHERE {recent}) AS last_collected"
+    ).iloc[0]
+    n = {k: int(float(row[k] or 0)) for k in ("missing_offsets", "gap_partitions", "partitions_seen",
+                                              "partitions_expected", "duplicate_rows", "duplicate_payment_ids")}
+    span = f"최근 {minutes // 60}시간" if minutes % 60 == 0 else f"최근 {minutes}분"
+    if n["missing_offsets"]:
+        gap = ("문제", f"{span} 빈틈 {n['missing_offsets']:,}건 (파티션 {n['gap_partitions']}개)")
+    elif n["partitions_seen"] < n["partitions_expected"]:
+        gap = ("확인 필요", f"{span} 메시지가 없는 파티션 {n['partitions_expected'] - n['partitions_seen']}개"
+                         f" (보인 파티션 {n['partitions_seen']}/{n['partitions_expected']}개)")
+    else:
+        gap = ("정상", f"{span} 빈틈 0건 (파티션 {n['partitions_seen']}개)")
+    dup = ("문제" if n["duplicate_rows"] else "정상",
+           f"같은 위치 {n['duplicate_rows']:,}건 · 같은 결제 번호 {n['duplicate_payment_ids']:,}건"
+           "(참고: Debezium 재전송 등, 뷰가 걸러 줌)")
+    ages = {}
+    for name, col in (("적재 잡", "last_loaded"), ("지연 수집기", "last_collected")):
+        at = _utc(pd.Series([row[col]])).iloc[0]
+        ages[name] = None if pd.isna(at) else max((now - at).total_seconds(), 0.0)
+    stopped = [name for name, sec in ages.items() if sec is None or sec > STALE_SEC]
+    last = ", ".join(f"{name} {_ago(sec)}" if sec is not None else f"{name} {span} 기록 없음" for name, sec in ages.items())
+    stall = ("문제" if stopped else "정상", (f"멈춤: {', '.join(stopped)} · " if stopped else "") + f"마지막 기록 {last}")
+    return pd.DataFrame(
+        [
+            {"check": "오프셋 빈틈", "target": "topic_messages", "result": gap[0], "detail": gap[1], "checked_at": now},
+            {"check": "중복(같은 topic/partition/offset)", "target": "topic_messages", "result": dup[0],
+             "detail": dup[1], "checked_at": now},
+            {"check": "적재 정지(2분 초과)", "target": "loaded_at / collected_at", "result": stall[0],
+             "detail": stall[1], "checked_at": now},
+        ]
+    )
+
+
 if ATHENA_WORKGROUP:
     # 파이프라인 상태 > 지연·점검 탭도 실데이터를 쓰게 한다 (못 읽으면 그 탭은 기존처럼 더미로 대체)
     _REAL["get_bronze_lag"] = _real_bronze_lag
@@ -1255,6 +1325,8 @@ if ATHENA_WORKGROUP:
     # 이상탐지·원인 리포트 (2026-10-25, 탐지 담당 직접 연결). 이상·리포트가 없는 것이 정상이라 비어도 더미로 바꾸지 않는다
     _REAL["get_anomalies"] = _real_anomalies
     _REAL["get_rca_reports"] = _real_rca_reports
+    # 원장 신뢰성 점검 3종 (TODO B3). 늘 세 줄이라 비는 일이 없고, 못 읽으면 더미로 대체한다
+    _REAL["get_reliability_checks"] = _real_reliability_checks
 
 
 def _ago(sec: float) -> str:
