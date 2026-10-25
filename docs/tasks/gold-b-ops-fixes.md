@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-ops-fixes
 
-> 상태: 진행 중 · 브랜치: `pipelines/gold-b-ops-fixes` (최신 `main` `25feba2`) · 담당: 은서 · 다음 작업: PR (사용자), DAG 실행 (재영 님) (2026-10-25 사용자: "1번 해줘", "3번 … 정리해줘", "4번 정리해줘")
+> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-ops-fixes` (최신 `main` `25feba2`) · 담당: 은서 · 다음 작업: PR (사용자), DAG 실행 (재영 님) (2026-10-25 사용자: "1번 해줘", "3번 … 정리해줘", "4번 정리해줘")
 
 ## 목표
 
@@ -43,8 +43,39 @@
 
 ## 완료 확인
 
-- [ ] `python -m pytest -q pipelines/gold_b/tests` 통과
-- [ ] 실제 Airflow 3.3.2에서 `airflow.sdk.Param`과 KubernetesPodOperator `arguments` 템플릿 확인 (가져오기만)
-- [ ] `git diff --check`
+- [x] `python -m pytest -q pipelines/gold_b/tests` 통과 (243개)
+- [x] 실제 Airflow 3.3.2에서 바뀐 DAG 파일을 만들어 확인 (`airflow.sdk.Param`, 합치기 Pod 환경변수 템플릿. 등록하지 않고 읽기만)
+- [x] `git diff --check`
 
 ## 작업 결과 (머지 전에 작성한다)
+
+### 만든 것
+
+- **재처리 승인 대기** (`jobs/reprocess.py`의 `next_request`, `main`): 아직 시작하지 않은 요청은 승인 범위의 마지막 시간 폴더 끝 + 10분이 지나야 고른다. 그 전에는 기다리고(승인 만료 60분은 그대로), 할 일이 없을 때 로그에 `돌릴 재처리 요청이 없다 (시간 폴더가 끝나길 기다리는 승인 n개)`를 쓴다. 범위가 잘못된 요청은 기다리지 않고 골라 잡이 이유와 함께 `FAILED`로 남긴다. 잡의 시작 전 확인(안 끝난 폴더 거부)은 그대로 둬서 이중으로 막는다.
+- **파일 합치기 날짜 입력** (`infra/platform/airflow/dags/gold_b.py`, `jobs/compact.py`): `gold_b_compact` DAG에 `day` 입력(Airflow `Param`, `YYYY-MM-DD` 또는 빈 값)을 두고 Pod 환경변수 `GOLD_B_COMPACT_DAY`로 넘긴다. 잡은 `--day`, 없으면 `GOLD_B_COMPACT_DAY`, 둘 다 비면 어제(UTC)를 합친다. 형식이 틀리면 합치지 않고 1로 끝난다.
+- **시연 점검표** `docs/design/gold-b/scenario-checks.md` (제안): 시연 전 준비, 시나리오 1(PG 장애, R1)·2(S3 Sink 정지, R3)·3(성공 결제 중복, R5)마다 거는 명령과 층별(원장·뷰·판정·대시보드·조사) 기대 결과와 시간, 재처리 리허설 R-1(같은 입력)·R-2(승인 화면 흐름, 기대 `STILL_OPEN`)·R-3(바로잡히는 시연 두 안, 팀 결정)·R-4(실패·경계), 파일 합치기 확인, 확인 SQL 8개.
+- **문서 정리:** `pipelines/gold-b-workflow-doc`(push 안 함)에서 #100·#101 머지 표시와 설계 체크리스트 4개를 가져왔다 (워크플로우 문서·그림은 넣지 않음). 설계 체크리스트를 실제 배포·점검 결과로 고치고(배포, 1~2분 안 원장 반영, 지연 기준선, 필요 없어진 항목 2개), 시나리오 2·3 항목을 2026-10-23에 바뀐 정의에 맞췄다. `pipelines/gold_b/README.md`에 지금 운영 상태와 이미지, 시각 형식 결정을 적었다. 잡 설명(`jobs/README.md`)과 DAG 설명(`infra/platform/airflow/dags/README.md`)도 같이 고쳤다.
+
+### 왜
+
+- 장애 직후(시간 폴더가 끝나기 전)에 승인하면 poller가 바로 골라 다시 시도하지 않는 `FAILED`로 끝났다. 시연 흐름(장애 → 판정 → 승인 → 재처리)에서 걸리기 쉬웠다.
+- 합치기 DAG는 어제만 합쳐서, 적재 잡이 따라잡으며 쌓은 10-20~10-23 폴더(`topic_messages` 파일 295·205·752·633개)를 합칠 방법이 손으로 Pod를 띄우는 것뿐이었다.
+- 날짜를 명령 인자(`--day {{ params.day }}`)로 넘기면, DAG 파일(Git으로 바로 공급)이 이미지보다 먼저 바뀌었을 때 옛 이미지(`2a8acd10`)가 빈 값을 못 읽어 합치기가 실패한다. `--`만 넘기는 방법도 Python 3.10·3.12 모두 "모르는 인자"로 실패했다. 그래서 옛 이미지가 무시하는 환경변수로 넘긴다 (옛 이미지는 날짜 입력을 무시하고 어제를 합친다).
+
+### 확인한 결과
+
+- `python -m pytest -q pipelines/gold_b/tests` 243개 통과 (로컬 Python 3.12). 새 시험: poller 기다리기·만료·잘못된 범위·실행 입구 로그, 합치기 DAG 날짜 입력·환경변수·형식 오류.
+- 고친 기다리기 조건을 일부러 빼면 새 시험 3개가 실패했다.
+- 실제 Airflow 3.3.2(dag-processor Pod, 등록하지 않고 파일만 실행): 바뀐 DAG가 만들어지고, 합치기 Pod 환경변수가 날짜 입력이 비면 `''`, 넣으면 `2026-10-21`로 채워지며, 재처리 Pod는 그대로다. 형식이 틀린 날짜(`10/21`)는 `ParamValidationError`로 막힌다.
+- 점검표의 확인 SQL 8개를 실제 Athena(대시보드 workgroup, SELECT만)에서 지금 값으로 돌렸다.
+
+### 알아 둘 것
+
+- 두 고침의 잡 코드는 **이미지 안**에 있다. 머지 뒤 main 커밋으로 Gold B 이미지를 다시 빌드해 ECR에 올리고, 재영 님이 `AIRFLOW_GOLD_B_RUNTIME`의 digest를 바꿔야 효과가 난다. 적재 잡은 바뀐 코드가 없어 다시 띄울 필요가 없다.
+- 이미지를 바꾸기 전에도 DAG는 안전하다: 재처리는 그대로 돌고, 합치기는 날짜 입력을 무시하고 어제를 합친다.
+
+### 다음 할 일
+
+- 사용자: push, PR, 머지 뒤 이미지 빌드·ECR push
+- 재영 님: 실행 설정 digest 바꾸기, 재처리 시험(`rq-test-20261024-01`), 합치기 시험(10-24, 이어서 10-20~10-23은 날짜 입력으로 한 번씩), DAG 켜기
+- 팀: 결과가 바로잡히는 재처리 시연을 할지 (점검표 R-3)
