@@ -82,6 +82,7 @@ asp = ui.select_model(asp, "rv_model")
 st.caption(f"선택한 기간·상품·모델의 속성 점수 {int(asp.mentioned_review_count.sum()):,}건. 리뷰 수와 다른 지표입니다.")
 # 고른 모델 버전 이름 (패널 제목에 표시). select_model 이 버전 하나만 남긴 표를 돌려준다
 ver = asp["model_key" if "model_key" in asp else "model_version"].iloc[0]
+st.caption(f"속성 분석 관찰 범위(KST): {asp.review_date_kst.min():%Y-%m-%d} ~ {asp.review_date_kst.max():%Y-%m-%d} · 모델 {ver}")
 g = asp.groupby("aspect", as_index=False)[
     [
         "mentioned_review_count",
@@ -92,17 +93,29 @@ g = asp.groupby("aspect", as_index=False)[
 ].sum()
 g["negative_rate"] = data.safe_div(g.negative_review_count, g.mentioned_review_count)
 g = g.sort_values("negative_rate", ascending=False)
-with ui.panel("속성별 부정 비율", f"모델 버전 {ver} · 부정 비율 높은 순"):
+with ui.panel("속성별 부정 비율·건수", f"모델 버전 {ver} · 선택 기간·상품의 분석된 속성 점수 기준"):
     # 부정 비율 높은 순 진행 막대. 색은 한 가지(상태색이 아니라 계열 1색)로 크기만 비교한다.
     # 막대 끝 = 가장 높은 속성의 비율 (100% 가 아니다). 정확한 값은 막대 오른쪽 숫자로 읽는다.
-    charts.rank(
-        [(a, r, charts.color(0)) for a, r in zip(g.aspect, g.negative_rate, strict=True)],
-        key="rv_neg",
-        max_value=max(float(g.negative_rate.fillna(0).max()), 0.01),
-    )
+    left, right = st.columns(2)
+    with left:
+        st.caption("부정 비율 · 동일 속성 순서")
+        charts.rank(
+            [(a, r, charts.color(0)) for a, r in zip(g.aspect, g.negative_rate, strict=True)],
+            key="rv_neg", max_value=1.0,
+        )
+    with right:
+        st.caption("부정 건수 · 동일 속성 순서")
+        charts.rank(
+            [(a, int(n), charts.color(1)) for a, n in zip(g.aspect, g.negative_review_count, strict=True)],
+            key="rv_neg_count", fmt=None,
+            max_value=max(float(g.negative_review_count.max()), 1),
+        )
+    st.dataframe(g[["aspect", "negative_review_count", "mentioned_review_count", "negative_rate"]].rename(columns={
+        "aspect": "속성", "negative_review_count": "부정 건수", "mentioned_review_count": "분석 점수 건수", "negative_rate": "부정 비율"
+    }), hide_index=True, width="stretch", column_config={"부정 비율": st.column_config.NumberColumn(format="percent")})
     with st.expander("표로 보기"):
         st.dataframe(g, hide_index=True, width="stretch")
-    st.caption("속성별 리뷰 수는 합쳐서 전체 리뷰 수로 쓰지 않습니다.")
+    st.caption("높은 부정 비율과 많은 부정 건수는 다른 관점입니다. 소표본 속성은 특히 주의해서 해석하며, 속성별 점수를 합쳐 전체 리뷰 수로 쓰지 않습니다. 원인이나 모델 판정의 정확성을 입증하는 지표는 아닙니다.")
 
 # ---- 속성 추이 ----
 one = st.selectbox("추이를 볼 속성", sorted(asp.aspect.dropna().unique()))

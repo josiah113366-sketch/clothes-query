@@ -34,6 +34,9 @@ class Athena:
         return self
 
     def result(self, sql):
+        if " AS order_without_cart" in sql:
+            return ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions",
+                    "cart_order_sessions", "order_without_cart", "order_with_cart", "invalid_rows"], [["1", "1", "1", "1", "1", "0", "1", "0"]]
         if ".gold_runs " in sql:
             columns = [
                 "run_id",
@@ -293,7 +296,7 @@ def test_review_page_does_not_merge_model_numbers(monkeypatch):
     ).run()
     assert not at.exception and not at.error
     assert list(at.selectbox[0].options) == ["s2c · 1.0", "s2c · 2.0"]
-    assert at.dataframe[0].value.mentioned_review_count.sum() == 10
+    assert at.dataframe[0].value["분석 점수 건수"].sum() == 10
     at.selectbox[0].select("s2c · 2.0").run()
     assert not at.exception and not at.error
-    assert at.dataframe[0].value.mentioned_review_count.sum() == 20
+    assert at.dataframe[0].value["분석 점수 건수"].sum() == 20
