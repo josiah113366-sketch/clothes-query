@@ -1,5 +1,6 @@
 """실제 Spark 엔진으로 리뷰 기준 함수·Parquet 공개 경계를 비교한다."""
 
+import hashlib
 import json
 import os
 import tempfile
@@ -54,6 +55,71 @@ class SparkReviewsTest(unittest.TestCase):
     def input_rows(self, values):
         return [{**row, "_input_source": {"file": "fixture", "line": i}, "_input_error": None}
                 for i, row in enumerate(values, 1)]
+
+    def test_06_gold_only_reuses_parquet_without_bronze_or_scoring(self):
+        from pipelines.spark_batch import _write_json, save_tables
+
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            base = root / "silver/runtime/reviews/runs/old"
+            checked = "2026-10-19T00:00:00Z"
+            review_rows = [("R1", "0000000001", date(2026, 10, 19), 2),
+                           ("R2", "0000000001", date(2026, 10, 19), 5),
+                           ("R3", "0000000001", date(2026, 10, 19), 3)]
+            tables = {"silver_reviews": self.spark.createDataFrame(review_rows,
+                          "review_id string, product_id string, review_date_kst date, rating long"),
+                      "dq_results": self.spark.createDataFrame([("PASS",)], "status string"),
+                      "quarantined_records": self.spark.createDataFrame([], "error string")}
+            silver = save_tables(tables, str(base), "old", checked)
+            silver.update(status="PASS", start_date_kst="2026-10-19", end_date_kst="2026-10-19")
+            products = {"silver_product_design": self.spark.createDataFrame([(100,)], "product_code long"),
+                        "silver_product_variant": self.spark.createDataFrame([("0000000001", 100)],
+                                                       "article_id string, product_code long")}
+            product = save_tables(products, str(base / "products"), "old", checked)
+            product["status"] = "PASS"
+            _write_json(str(base / "manifest.json"), silver)
+            _write_json(str(base / "products/manifest.json"), product)
+            _write_json(str(root / "silver/runtime/reviews/completed/old.json"), silver)
+            _write_json(str(root / "silver/runtime/reviews/current.json"), silver)
+            preserved = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+            scores_path = root / "snapshot"
+            score_rows = [("R1", "품질·내구성", -2, "m1", "1.0", date(2026, 10, 19)),
+                          ("R1", "품질·내구성", -2, "m1", "1.0", date(2026, 10, 19)),
+                          ("R2", "품질·내구성", 2, "m2", "2.0", date(2026, 10, 19))]
+            self.spark.createDataFrame(score_rows,
+                "review_id string, aspect string, score long, model_version string, model_version_no string, review_date date").write.parquet(str(scores_path))
+            objects = [{"dataset": "analysis", "uri": str(p), "size": p.stat().st_size,
+                        "mtime_ns": p.stat().st_mtime_ns} for p in scores_path.glob("*.parquet")]
+            snapshot = {"query_execution_id": "existing-scores", "objects": objects}
+            config = {"job": "reviews", "gold_only": True, "run_id": "gold-new", "input_complete": True,
+                      "output_root": str(root), "silver_manifest": str(base / "manifest.json"),
+                      "silver_manifest_sha256": hashlib.sha256((base / "manifest.json").read_bytes()).hexdigest(),
+                      "start_date": "2026-10-19", "end_date": "2026-10-19",
+                      "analysis_view": {"workgroup": "existing-score-view"}}
+            with patch("boto3.client"), patch("pipelines.review_scores.snapshot_scores", return_value=snapshot) as snap, \
+                    patch("pipelines.silver.reviews.build_reviews_spark", side_effect=AssertionError("Bronze forbidden")), \
+                    patch("pipelines.spark_batch.read_source", side_effect=AssertionError("seed rebuild forbidden")):
+                result = execute(self.spark, config)
+                snap.assert_called_once()
+            self.assertEqual(result["silver_run_id"], "old")
+            self.assertEqual(result["silver_manifest"], config["silver_manifest"])
+            self.assertEqual(result["output_counts"], {"review_product_daily": 1, "review_aspect_daily": 2})
+            actual = self.spark.read.parquet(result["outputs"]["review_product_daily"]).first()
+            self.assertEqual((actual.review_count, actual.rating_sum, actual.low_rating_count), (3, 10, 1))
+            self.assertEqual(actual.average_rating, 3.3333)
+            self.assertEqual(actual.low_rating_rate, 0.333333)
+            aspects = self.spark.read.parquet(result["outputs"]["review_aspect_daily"]).collect()
+            self.assertEqual(sum(r.scored_review_count for r in aspects), 2)
+            self.assertEqual(sum(r.score_sum for r in aspects), 0)
+            self.assertEqual(result["analysis_coverage"]["reviews_without_aspect_result"], 1)
+            self.assertEqual(result["score_snapshot"]["query_execution_id"], "existing-scores")
+            self.assertTrue(all(p.read_bytes() == body for p, body in preserved.items()))
+            self.assertFalse((root / "silver/runtime/reviews/runs/gold-new").exists())
+            previous_gold = (root / "gold_a/runtime/reviews/current.json").read_bytes()
+            config.update(run_id="bad-date", start_date="2026-10-18")
+            with self.assertRaisesRegex(ValueError, "날짜"):
+                execute(self.spark, config)
+            self.assertEqual((root / "gold_a/runtime/reviews/current.json").read_bytes(), previous_gold)
 
     def test_01_dates_duplicates_scores_and_reference(self):
         older = dict(self.review, emitted_at="2026-10-18T23:00:00Z", rating=5)

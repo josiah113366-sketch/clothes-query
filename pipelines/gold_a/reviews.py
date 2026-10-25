@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
@@ -398,6 +399,64 @@ def build_aspects(spark, reviews, documents, model_version):
         raise
 
 
+def _completed_review_source(config):
+    """current 포인터 대신 고정된 완료 Silver와 같은 실행의 상품 기준정보를 검증한다."""
+    uri = config.get("silver_manifest", "")
+    if not isinstance(uri, str) or not uri:
+        raise ValueError("Gold-only에는 고정 Silver manifest가 필요합니다")
+    uri = uri.replace("\\", "/")
+    if not uri.endswith("/manifest.json"):
+        raise ValueError("Gold-only에는 고정 Silver manifest가 필요합니다")
+    text = _read_text(uri)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if config.get("silver_manifest_sha256") != digest:
+        raise ValueError("기존 Silver manifest 해시가 다릅니다")
+    silver = json.loads(text)
+    source_id = silver.get("run_id", "")
+    suffix = "/silver/runtime/reviews/runs/" + source_id + "/manifest.json"
+    if (not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", source_id) or not uri.endswith(suffix)
+            or silver.get("status") != "PASS" or source_id == config.get("run_id")):
+        raise ValueError("기존 PASS 리뷰 Silver와 다른 새 Gold 실행 ID가 필요합니다")
+    root = uri[:-len(suffix)]
+    if root != config["output_root"].replace("\\", "/").rstrip("/"):
+        raise ValueError("Gold-only 출력은 기존 Silver와 같은 데이터 레이크 root를 사용해야 합니다")
+    completed = root + "/silver/runtime/reviews/completed/" + source_id + ".json"
+    if json.loads(_read_text(completed)) != silver:
+        raise ValueError("기존 Silver 완료 기록과 manifest가 다릅니다")
+    if any(silver.get(k + "_date_kst") != config[k + "_date"] for k in ("start", "end")):
+        raise ValueError("Gold-only 날짜는 완료된 Silver 전체 범위와 같아야 합니다")
+    base = uri.removesuffix("/manifest.json")
+    product_uri = base + "/products/manifest.json"
+    product_text = _read_text(product_uri)
+    product = json.loads(product_text)
+    if product.get("run_id") != source_id or product.get("status") != "PASS":
+        raise ValueError("완료된 리뷰 실행의 PASS 상품 기준정보가 필요합니다")
+    for manifest, prefix, required in (
+            (silver, base, {"silver_reviews", "dq_results", "quarantined_records"}),
+            (product, base + "/products", {"silver_product_design", "silver_product_variant"})):
+        if set(manifest.get("outputs", {})) != required:
+            raise ValueError("완료된 리뷰·상품 Parquet 목록이 다릅니다")
+        for name in required:
+            if manifest["outputs"][name].replace("\\", "/").rstrip("/") != prefix + "/" + name:
+                raise ValueError("기존 결과가 고정 실행 경로 밖에 있습니다")
+    return silver, product, product_uri, digest, completed, hashlib.sha256(product_text.encode("utf-8")).hexdigest()
+
+
+def _load_review_parquet(spark, manifest, paths):
+    from pyspark.sql.types import StructType
+
+    from pipelines.spark_batch import _spark_uri
+
+    tables = {}
+    for name in manifest["outputs"]:
+        frame = spark.read.parquet(*[_spark_uri(p) for p in paths[name]])
+        if (frame.count() != manifest["output_counts"][name]
+                or frame.schema.simpleString() != StructType.fromJson(manifest["schemas"][name]).simpleString()):
+            raise ValueError("기존 Parquet 건수·스키마가 manifest와 다릅니다")
+        tables[name] = frame
+    return tables
+
+
 def execute_reviews(spark, config):
     from pyspark.sql import functions as F
 
@@ -412,14 +471,20 @@ def execute_reviews(spark, config):
         save_tables,
     )
 
-    allowed = {"job", "run_id", "inputs", "output_root", "input_complete", "start_date", "end_date", "model_version", "max_key_rows", "analysis_view"}
+    allowed = {"job", "run_id", "inputs", "output_root", "input_complete", "start_date", "end_date", "model_version", "max_key_rows", "analysis_view",
+               "gold_only", "silver_manifest", "silver_manifest_sha256"}
     if set(config) - allowed or config.get("input_complete") is not True:
         raise ValueError("지원하지 않는 리뷰 설정 또는 입력 준비 미확인")
     start, end = (date.fromisoformat(config[k]).isoformat() for k in ("start_date", "end_date"))
     if end < start:
         raise ValueError("리뷰 종료 날짜가 시작 날짜보다 빠릅니다")
     inputs = config.get("inputs", {})
-    if not {"reviews", "designs", "variants"} <= set(inputs) or set(inputs) - {"reviews", "designs", "variants", "analysis", "mapping"}:
+    gold_only = config.get("gold_only", False)
+    if type(gold_only) is not bool or (not gold_only and {"silver_manifest", "silver_manifest_sha256"} & set(config)):
+        raise ValueError("Gold-only 설정 오류")
+    if gold_only and (set(inputs) - {"mapping"} or "analysis_view" not in config):
+        raise ValueError("Gold-only는 완료된 Silver·상품과 기존 Athena 점수 뷰만 사용합니다")
+    if not gold_only and (not {"reviews", "designs", "variants"} <= set(inputs) or set(inputs) - {"reviews", "designs", "variants", "analysis", "mapping"}):
         raise ValueError("리뷰·상품 스냅샷 입력이 필요합니다")
     version = config.get("model_version")
     if "analysis_view" in config and ("analysis" in inputs or version is not None):
@@ -448,32 +513,62 @@ def execute_reviews(spark, config):
                 if source == target or source in target.parents or target in source.parents:
                     raise ValueError("입력·출력 경로는 겹치지 않아야 합니다")
     configure_storage(spark, output)
+    source = _completed_review_source(config) if gold_only else None
     paths, inventory = resolve_inputs(inputs, suffixes=(".json", ".jsonl", ".csv"))
+    if source:
+        silver, product, product_uri, source_sha, completed_uri, product_sha = source
+        inherited = {**silver["outputs"], **product["outputs"]}
+        inherited_paths, inherited_inventory = resolve_inputs(
+            {name: [uri.rstrip("/") + "/"] for name, uri in inherited.items()}, suffixes=(".parquet",))
+        inventory.extend(inherited_inventory)
+        _, manifest_inventory = resolve_inputs({"source_manifests": [config["silver_manifest"], product_uri, completed_uri]})
+        inventory.extend(manifest_inventory)
     if any(part in {"reviews_truth", "ground_truth"} for item in inventory
            for part in item["uri"].replace("\\", "/").split("/")):
         raise ValueError("입력 파일 목록에 평가용 정답표가 포함되어 있습니다")
-    tables = build_reviews_spark(spark, read_documents(spark, paths["reviews"]), start, end, limit)
+    tables = ({"_cache": ()} if gold_only else
+              build_reviews_spark(spark, read_documents(spark, paths["reviews"]), start, end, limit))
     catalog, score_cache = None, None
     try:
         base = output.rstrip("/") + "/silver/runtime/reviews/runs/" + run_id
         checked = datetime.now(timezone.utc).isoformat()
-        silver = save_tables(tables, base, run_id, checked)
-        silver.pop("format_rules", None)
-        silver.update(status="INCOMPLETE" if tables["quarantined_records"].limit(1).count() else "PASS",
-                      start_date_kst=start, end_date_kst=end, check_version="reviews.v1",
-                      input_objects=inventory, input_completeness="DECLARED_COMPLETE",
-                      code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"), pipeline_version="spark-reviews.v1")
-        publish(output, "silver", base, silver, inventory)
-        if silver["status"] != "PASS":
-            raise ValueError("리뷰 Silver 품질 미완료: Gold A는 갱신하지 않습니다")
-        raw = read_source(spark, "product_design", [_spark_uri(p) for p in paths["designs"]]).unionByName(
-            read_source(spark, "product_variant", [_spark_uri(p) for p in paths["variants"]]))
-        catalog = build_catalog(raw)
-        product = save_tables(catalog, base + "/products", run_id, checked)
-        product.update(status="PASS")
-        _write_json(base + "/products/manifest.json", product)
-        stored = spark.read.parquet(_spark_uri(silver["outputs"]["silver_reviews"]))
-        products = {k: spark.read.parquet(_spark_uri(p)) for k, p in product["outputs"].items()}
+        if gold_only:
+            loaded = _load_review_parquet(spark, silver, inherited_paths)
+            dq = loaded["dq_results"]
+            stored = loaded["silver_reviews"]
+            if (loaded["quarantined_records"].limit(1).count() or dq.count() != 1
+                    or dq.filter("status is null or status != 'PASS'").limit(1).count()):
+                raise ValueError("기존 Silver 품질 미완료: Gold A는 갱신하지 않습니다")
+            if (stored.filter(F.col("review_id").isNull() | (F.trim("review_id") == "")
+                              | F.col("rating").isNull() | ~F.col("rating").between(1, 5)
+                              | F.col("review_date_kst").isNull()
+                              | ~F.col("review_date_kst").between(start, end)).limit(1).count()
+                    or stored.groupBy("review_id").count().filter("count > 1").limit(1).count()):
+                raise ValueError("기존 Silver 리뷰 키·별점·날짜 오류")
+            products = _load_review_parquet(spark, product, inherited_paths)
+            variants = products["silver_product_variant"]
+            if (variants.filter("article_id is null or product_code is null").limit(1).count()
+                    or variants.groupBy("article_id").count().filter("count > 1").limit(1).count()):
+                raise ValueError("기존 상품 기준정보 키 오류")
+        else:
+            silver = save_tables(tables, base, run_id, checked)
+            silver.pop("format_rules", None)
+            silver.update(status="INCOMPLETE" if tables["quarantined_records"].limit(1).count() else "PASS",
+                          start_date_kst=start, end_date_kst=end, check_version="reviews.v1",
+                          input_objects=inventory, input_completeness="DECLARED_COMPLETE",
+                          code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"), pipeline_version="spark-reviews.v1")
+            publish(output, "silver", base, silver, inventory)
+            if silver["status"] != "PASS":
+                raise ValueError("리뷰 Silver 품질 미완료: Gold A는 갱신하지 않습니다")
+            raw = read_source(spark, "product_design", [_spark_uri(p) for p in paths["designs"]]).unionByName(
+                read_source(spark, "product_variant", [_spark_uri(p) for p in paths["variants"]]))
+            catalog = build_catalog(raw)
+            product = save_tables(catalog, base + "/products", run_id, checked)
+            product.update(status="PASS")
+            product_uri = base + "/products/manifest.json"
+            _write_json(product_uri, product)
+            stored = spark.read.parquet(_spark_uri(silver["outputs"]["silver_reviews"]))
+            products = {k: spark.read.parquet(_spark_uri(p)) for k, p in product["outputs"].items()}
         mapping = None
         if "mapping" in paths:
             docs = read_documents(spark, paths["mapping"], "mapping")
@@ -511,11 +606,17 @@ def execute_reviews(spark, config):
         gold_base = output.rstrip("/") + "/gold_a/runtime/reviews/runs/" + run_id
         gold = save_tables(gold_tables, gold_base, run_id, checked)
         gold.pop("format_rules", None)
-        gold.update(status="PASS", silver_manifest=base + "/manifest.json", products_manifest=base + "/products/manifest.json",
+        gold.update(status="PASS", silver_manifest=config["silver_manifest"] if gold_only else base + "/manifest.json",
+                    silver_run_id=silver["run_id"], products_manifest=product_uri,
                     start_date_kst=start, end_date_kst=end, model_version=version, score_schema="score.v1",
                     review_scores="PROVIDED" if "analysis" in paths or score_snapshot else "NOT_REQUESTED", analysis_coverage=coverage,
                     score_snapshot=score_snapshot, model_versions=versions,
                     code_ref=os.environ.get("PIPELINE_CODE_REF", "unknown"))
+        if gold_only:
+            if _completed_review_source(config) != source:
+                raise ValueError("처리 중 기존 Silver·상품 manifest가 변경되었습니다")
+            gold.update(gold_only=True, silver_manifest_sha256=source_sha,
+                        products_manifest_sha256=product_sha)
         publish(output, "gold_a", gold_base, gold, inventory)
         return gold
     finally:
