@@ -16,6 +16,17 @@ locals {
     "gold_b/bronze_lag_snapshots/", "gold_b/topic_messages/", "gold_b/payment_events/", "gold_b/malformed_events/",
     "silver/runtime/trade/catalog/completed/", "gold_a/catalog/"
   ], [for channel in ["trade", "funnels", "reviews"] : "gold_a/runtime/${channel}/catalog/completed/"])
+  # 감성분석 모델 화면이 읽는 곳(읽기 전용). Glue 는 athena-review-score 스택의 DB·표·뷰, S3 는 Iceberg 표 위치와 Silver 리뷰 실행 출력, 실행 요약 JSON.
+  review_score_tables = ["review_aspect_scores", "review_score_log", "review_aspect_scores_latest", "silver_reviews_runs"]
+  review_score_objects = [
+    "silver/review_aspect_scores_iceberg/", "silver/review_score_log_iceberg/",
+    "silver/runtime/reviews/current.json", "silver/runtime/reviews/completed/",
+    "silver/runtime/reviews/runs/*/silver_reviews/", "staging/review-score/_summary_scores_"
+  ]
+  review_score_list_prefixes = [
+    "silver/review_aspect_scores_iceberg/", "silver/review_score_log_iceberg/",
+    "silver/runtime/reviews/", "staging/review-score/"
+  ]
   gold_a_datasets = {
     trade   = ["order_sales_hourly", "product_sales_daily", "refresh_holds"]
     funnels = ["funnel_daily", "funnel_session_product", "refresh_holds"]
@@ -158,6 +169,16 @@ resource "aws_iam_role_policy" "dashboard" {
         Action    = ["s3:ListBucket", "s3:ListBucketVersions"]
         Resource  = [var.bucket_arn]
         Condition = { StringLike = { "s3:prefix" = ["ground_truth", "ground_truth/*"] } }
+      },
+      # AWS에만 있던 문을 코드로 옮김(2026-10-25). 원래 추가한 사람 확인 필요.
+      # 결제 관제 화면이 읽는 뷰 gold_b.payment_states, gold_b.payment_attempts 의 메타데이터 조회(glue:GetTable)만 허용한다(TODO F3).
+      # 이 문이 코드에 없으면 apply 때 삭제되어 결제 관제가 실데이터를 못 읽는다. 문 순서(맨 뒤)는 AWS의 현재 정책과 맞춘 것이다.
+      {
+        Sid    = "PaymentViewMetadata"
+        Effect = "Allow"
+        Action = ["glue:GetTable"]
+        Resource = concat(["${local.glue}:catalog", "${local.glue}:database/gold_b"],
+        [for t in ["payment_states", "payment_attempts"] : "${local.glue}:table/gold_b/${t}"])
       }
     ]
   })
@@ -169,4 +190,25 @@ resource "aws_eks_pod_identity_association" "dashboard" {
   service_account = var.service_account
   role_arn        = aws_iam_role.dashboard.arn
   depends_on      = [aws_iam_role_policy.dashboard]
+}
+
+# 감성분석 모델 화면용 읽기 전용 정책. Glue 메타데이터 조회 + 점수 Iceberg 표·Silver 리뷰 실행 출력·실행 요약 JSON 의 S3 읽기만 준다.
+# 쓰기·Glue DDL 권한은 없다. Silver 리뷰 실행 출력은 Athena 가 상품·작성일·별점과, 점수 차가 큰 후기 확인용 원문(text, 팀 내부용)을 읽는 데 필요하다.
+resource "aws_iam_role_policy" "review_score_read" {
+  count = var.enable_review_score_reads ? 1 : 0
+  name  = "review-score-read-only"
+  role  = aws_iam_role.dashboard.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReviewScoreMetadata"
+        Effect   = "Allow"
+        Action   = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartitions", "glue:GetPartition", "glue:BatchGetPartition"]
+        Resource = concat(["${local.glue}:catalog", "${local.glue}:database/${var.review_score_database}"], [for t in local.review_score_tables : "${local.glue}:table/${var.review_score_database}/${t}"])
+      },
+      { Sid = "ReviewScoreObjects", Effect = "Allow", Action = ["s3:GetObject"], Resource = [for p in local.review_score_objects : "${var.bucket_arn}/${p}*"] },
+      { Sid = "ReviewScoreListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in local.review_score_list_prefixes : "${p}*"] } } }
+    ]
+  })
 }

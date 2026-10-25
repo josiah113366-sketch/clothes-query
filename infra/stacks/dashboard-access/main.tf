@@ -14,6 +14,7 @@ module "dashboard_access" {
   service_account                = var.service_account
   enable_pipeline_status_reads   = var.enable_pipeline_status_reads
   enable_gold_a_reads            = var.enable_gold_a_reads
+  enable_review_score_reads      = var.enable_review_score_reads
   model_registry_prefix          = var.model_registry_prefix
   workgroup_name                 = var.workgroup_name
   results_prefix                 = var.results_prefix

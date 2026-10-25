@@ -21,21 +21,107 @@
 
 미점수 후기만 점수화하기(시험용, 파일 하나 지정): `python deploy/select_unscored.py --input-key <JSONL 후기 파일 S3 키>`(개수만 보려면 `--dry-run`) 또는 `python deploy/run_processing_job.py --input-key <키> --select-unscored --wait`. 점수 로그(`review_score_log`)에 현재 모델 번호로 이미 기록된 후기를 빼고 남은 것만 입력으로 쓰며, 남은 후기가 0건이면 Job 을 만들지 않는다. Job 이 끝난 뒤 `merge.sql` → `merge_log.sql` 을 실행해야 다음 실행에서 "이미 점수 있음"으로 인식된다.
 
-### Silver 실행 출력에서 미점수 후기 점수화 (2026-10-25)
+### Silver 실행 출력에서 미점수 후기 점수화 — 수동 실행 (2026-10-25)
 
 Silver 리뷰는 Spark 가 실행(run)별 경로(`silver/runtime/reviews/runs/<run_id>/silver_reviews/`, Parquet)에 쓰므로 경로가 계속 바뀐다.
 그래서 athena 스택의 **읽기 전용 외부 테이블 `silver_reviews_runs`**(run_id 파티션 프로젝션)를 Athena 로 읽는다.
-`select_unscored.py`(`--input-key` 없이)가 `silver/runtime/reviews/current.json` 의 `run_id`(status 가 PASS 일 때만)를 정하고, 그 실행의 후기 중 점수 로그에 현재 모델 번호가 없는 후기를 `--max-reviews`(기본 1500)건만 골라 JSONL 로 쓴다. `--run-id` 로 실행을 직접 지정할 수 있다.
+`select_unscored.py`(`--input-key` 없이)가 `silver/runtime/reviews/current.json` 의 `run_id`(status 가 PASS 일 때만)를 정하고, 그 실행의 후기 중 점수 로그에 현재 모델 번호가 없는 후기를 `--max-reviews`(기본 1500)건만 골라 `staging/review-score-input/…/unscored_<시각>.jsonl` 로 쓴다.
+`silver_reviews_runs` 는 임시 읽기 전용 정의다(Silver 쪽이 `silver.reviews_runs` 를 공개하면 읽는 이름만 바꾸고 이 테이블은 지운다).
 
+**0. 준비** (PowerShell, `review-analysis/` 폴더, AWS 자격이 잡힌 창)
 ```powershell
-python deploy/select_unscored.py --dry-run            # 개수만 보기 (파일 안 씀)
-python deploy/run_processing_job.py --select-unscored --wait   # 선택 → Job. 끝나면 출력된 작성일에 대해 merge.sql → merge_log.sql 실행
+cd C:\workspace\e-commerce\clothes-query\review-analysis
+# 주의: PowerShell 변수는 대소문자를 구분하지 않는다. $r 과 $R 은 같은 변수이므로 선택 결과는 $sel 로 쓴다
+$R = "ap-northeast-1"
+$S = aws ssm get-parameter --name /clothes-query/dev/sagemaker-review-score/config --region $R --query Parameter.Value --output text | ConvertFrom-Json
+$A = aws ssm get-parameter --name /clothes-query/dev/athena-review-score/config   --region $R --query Parameter.Value --output text | ConvertFrom-Json
+$B = $S.bucket
+# manifest 에서 모델 이름·번호 (merge 에 쓴다)
+$M = aws s3 cp "$($S.registry_prefix)$($S.release)/manifest.json" - --region $R | ConvertFrom-Json
+$MV = $M.model_version; $MVNO = $M.model_version_no
+
+function Run-Athena($sql) {   # 쿼리 실행 후 끝날 때까지 기다린다. 성공하면 실행 ID 를 돌려준다
+  $id = aws athena start-query-execution --work-group $A.workgroup --query-string $sql --region $R --query QueryExecutionId --output text
+  do { Start-Sleep 3; $st = aws athena get-query-execution --query-execution-id $id --region $R --query QueryExecution.Status --output json | ConvertFrom-Json } while ($st.State -in 'QUEUED','RUNNING')
+  if ($st.State -ne 'SUCCEEDED') { throw "Athena $($st.State): $($st.StateChangeReason)" }
+  $id
+}
+function Show($id) { aws athena get-query-results --query-execution-id $id --region $R --query "ResultSet.Rows[].Data[].VarCharValue" --output text }
+function Fill($file, $day) {  # SQL 파일의 자리표시자를 값으로 바꾼다. $day = 'YYYY-MM-DD' (후기 작성일)
+  $y,$m,$d = $day.Split('-')
+  $t = Get-Content "..\infra\stacks\athena-review-score\sql\$file" -Raw -Encoding UTF8
+  $map = @{database=$A.database; table=$A.table; log_table=$A.log_table; staging_table=$A.staging_table; staging_log_table=$A.staging_log_table;
+           year=$y; month=$m; day=$d; model_version=$MV; model_version_no=$MVNO}
+  foreach ($k in $map.Keys) { $t = $t.Replace("{{$k}}", [string]$map[$k]) }
+  $t
+}
+```
+- `score_batch.py` 를 고친 뒤에는 **S3 의 실행 코드 사본을 다시 올려야** 한다(릴리스 묶음 `…/releases/<버전>/code/`). 안 올리면 Job 이 옛 코드로 돌아 exit code 2 가 난다.
+- `$A.silver_reviews_runs_table` 이 비어 있으면 `$A` 를 SSM 에서 다시 읽는다(athena 스택 apply 직후엔 값이 바뀐다).
+
+**1. 건수 확인** (읽기만 한다, 파일을 쓰지 않는다)
+```powershell
+python deploy/select_unscored.py --dry-run                       # current.json 의 run_id (status PASS 일 때만)
+python deploy/select_unscored.py --dry-run --run-id <run_id>     # 실행을 직접 지정 (completed/<run_id>.json 이 PASS 여야 함)
+```
+출력: `Silver 실행 <run_id>: 전체 N건, 이미 점수 있음 …, 점수 필요 …건 → 이번에 …건 선택, 남음 …건`
+
+**2. 선택 + Job 실행**
+```powershell
+$out = python deploy/select_unscored.py --max-reviews 1500        # 후기를 골라 staging/review-score-input/ 에 JSONL 로 쓴다
+$out                                                              # 사람용 요약
+$sel = $out[-1] | ConvertFrom-Json                                  # 마지막 줄이 결과 JSON: run_id, selected, remaining, review_dates, output_key
+if ($sel.selected -eq 0) { "남은 후기 없음 - 끝" } else {
+  python deploy/run_processing_job.py --input-key $sel.output_key --wait     # Job 을 띄우고 끝날 때까지 기다린다
+}
+```
+- 한 줄로 하고 싶으면 `python deploy/run_processing_job.py --select-unscored --wait [--run-id <id>] [--max-reviews 1500]` (선택과 Job 을 한 번에; 선택된 작성일이 화면에 나온다). 반복 자동화에는 위처럼 나누는 쪽이 편하다(작성일 목록 JSON).
+- `--max-reviews` 기본 1500: Job 한 번(최대 3600초)이 초당 약 0.6~0.7건이라 약 2,200건이 한계이므로 여유를 둔다.
+- Job 이 `Completed` 가 아니면 아래 3 으로 가지 않는다(오류 파일은 `silver/review_aspect_scores_error/`).
+
+**3. 날짜별 반영** (선택된 작성일 = `$sel.review_dates` 또는 화면의 "작성일 … 에 대해")
+```powershell
+if (-not $sel.review_dates) { throw '작성일 목록($sel.review_dates)이 비었습니다. 2번의 $sel 를 확인하세요' }   # 비어 있으면 아래 루프가 조용히 아무것도 안 한다
+foreach ($day in $sel.review_dates) {
+  Run-Athena (Fill 'merge.sql'     $day) | Out-Null     # 점수 upsert + 빠진 속성 삭제
+  Run-Athena (Fill 'merge_log.sql' $day) | Out-Null     # 후기별 점수 로그 (반드시 merge.sql 다음)
+  "반영 완료: $day"
+}
+```
+`merge_log.sql` 까지 끝나야 다음 선택에서 "이미 점수 있음"으로 인식된다.
+
+**4. 확인**
+```powershell
+$V = "$($A.database).$($A.latest_view)"
+Show (Run-Athena "SELECT count(*) AS rows, count(DISTINCT review_id) AS reviews FROM $V")                          # 점수가 들어간 후기 수
+Show (Run-Athena "SELECT count(*) AS scored FROM $($A.database).$($A.log_table) WHERE model_version_no = DECIMAL '$MVNO'")   # 점수 로그(현재 번호)
+python deploy/select_unscored.py --dry-run                                                                          # 남은 건수 (0 이 될 때까지)
 ```
 
-- 한 번에 1500건인 이유: Job 한 번(최대 3600초)이 처리량(초당 약 0.6~0.7건)상 약 2,200건이 한계라 여유를 둔다. 첫 Silver 실행은 약 1.85만 건이라 **선택 → Job → merge → merge_log 를 남은 건수가 0 이 될 때까지 반복**한다(약 13회).
-- 반복은 스크립트로 묶지 않았다: merge 에 SQL 템플릿과 날짜 목록이 필요해서다. 자동화는 Airflow DAG 에서 한다.
-- merge_log 반영 전에 다시 선택하면 같은 후기가 다시 뽑힌다.
-- `silver_reviews_runs` 는 임시 읽기 전용 정의다. Silver 쪽이 `silver.reviews_runs` 를 공개하면 읽는 이름만 바꾸고 이 테이블은 지운다. **S3 읽기 권한(`silver/runtime/reviews/*`)은 인프라 담당(재영) 확인이 필요하다.**
+**5. 남은 건수 0 까지 반복** — 첫 Silver 실행은 약 1.85만 건이라 약 13회(회당 약 40분, 합계 약 8시간, 비용 약 8.5달러)
+```powershell
+while ($true) {
+  $out = python deploy/select_unscored.py --max-reviews 1500; $sel = $out[-1] | ConvertFrom-Json
+  if ($sel.selected -eq 0) { "끝"; break }
+  python deploy/run_processing_job.py --input-key $sel.output_key --wait
+  if ($LASTEXITCODE -ne 0) { "Job 실패 - 멈춤"; break }
+  if (-not $sel.review_dates) { "작성일 목록이 비어 멈춤"; break }
+  foreach ($day in $sel.review_dates) { Run-Athena (Fill 'merge.sql' $day) | Out-Null; Run-Athena (Fill 'merge_log.sql' $day) | Out-Null }
+  "방금 $($sel.selected)건 반영, 남음 $($sel.remaining)건"
+}
+```
+Airflow DAG 가 생기면 이 반복은 DAG 가 맡는다.
+
+**6. 자주 나는 오류**
+| 증상 | 원인·조치 |
+|---|---|
+| Job exit code 2 | S3 의 `score_batch.py` 가 옛 버전. 새 파일을 릴리스 묶음 code/ 에 올린다 |
+| `입력 파일이 없습니다 … NoSuchKey` | `--input-key` 의 키가 틀렸거나 지워짐. `select_unscored.py` 를 다시 실행해 새 파일을 만든다 |
+| `Silver 실행 … status 가 PASS 가 아닙니다` | 그 실행은 읽지 않는다. 다른 `--run-id` 를 쓰거나 Silver 담당에게 확인 |
+| `current.json 파일이 없습니다` / AccessDenied | Silver 경로 읽기 권한 확인: `python deploy/check_airflow_access.py --role <역할 이름>` |
+| 같은 후기가 또 선택됨 / 남은 건수가 안 줄어듦 | `merge.sql` → `merge_log.sql` 을 아직 안 돌렸다(또는 다른 날짜가 빠졌다). `$sel.review_dates` 가 비어 있으면 루프가 조용히 건너뛰니 먼저 `$sel.review_dates` 를 출력해 본다. 점수 로그 행 수(`review_score_log`)가 늘었는지로 확인 |
+| `athena 설정(SSM)에 … 가 없습니다` | athena 스택 apply 전이거나 `$A` 가 옛 값. SSM 을 다시 읽는다 |
+| Git Bash 에서 SSM 이름 오류 | `/…` 이름이 변환된다. PowerShell 을 쓰거나 `MSYS_NO_PATHCONV=1` |
 
 ### Airflow 실행 역할 권한 확인 (읽기 전용)
 

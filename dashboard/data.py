@@ -22,8 +22,8 @@ import functools
 import json
 import logging
 import os
-import zlib
 
+import model_io
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -805,133 +805,95 @@ def get_rca_reports() -> pd.DataFrame:
 
 
 # =====================================================================
-# 감성분석 모델 관리 (데이터 관리 > '감성분석 모델' 화면)
-#   실데이터 연결 시 읽을 곳 (athena-review-score 스택, Glue DB):
-#     review_aspect_scores   점수 테이블 (review_id, aspect, score, model_version, model_version_no, analyzed_at, review_date)
-#     review_score_log       후기별 점수 로그 (속성이 0개인 후기도 n_aspects = 0 으로 한 줄)
-#     review_aspect_scores_latest 뷰   Gold 가 읽는 값 (후기마다 model_version_no 가 가장 큰 결과)
-#   점수는 -2 ~ +2, '미언급'은 행이 없다. 시각 컬럼(analyzed_at)은 UTC 로 가정하고 화면에서 KST 로 바꾼다.
-#   ※ 아래 모델 이름·숫자는 모두 더미다. 후기 원문은 점수 데이터에 없고(review_id 만) get_review_texts 로 따로 읽는다.
+# 감성분석 모델 관리 (데이터 관리 > '감성분석 모델' 화면)  ※ 더미 없음 (lemin 2026-10-25)
+#   읽는 곳과 쿼리는 model_io.py 에 있다. 여기서는 설정(환경변수)을 읽어 캐시하고 화면에 DataFrame 을 돌려준다.
+#   읽기에 실패하거나 설정이 없으면 가짜 값을 만들지 않고 model_io.ModelDataUnavailable 을 던진다.
+#   화면(pages_data/models.py)은 그 탭을 회색 '미연결'로 표시한다. @dataset 을 쓰지 않으므로 DATA_SOURCE=dummy 여도 더미를 반환하지 않는다.
+#
+#   환경변수 (버킷 이름은 코드에 두지 않는다)
+#     DASHBOARD_ATHENA_WORKGROUP  쿼리 실행 작업그룹 (파이프라인 흐름 탭과 같음)
+#     MODEL_REGISTRY_URI          s3://<버킷>/review-score/model-registry/releases/  모델 버전·패치노트·평가 지표
+#     REVIEW_SCORE_STAGING_URI    s3://<버킷>/staging/review-score/  Job 실행 요약 JSON (없으면 MODEL_REGISTRY_URI 의 버킷에서 유도)
+#     REVIEW_SILVER_ROOT_URI      s3://<버킷>/silver/runtime/reviews/  Silver 최근 실행 (없으면 같은 버킷에서 유도)
+#     REVIEW_SCORE_DATABASE       Glue DB (기본 clothes_query_dev_review_score)
+#   점수는 -2 ~ +2, '미언급'은 행이 없다. 시각(analyzed_at)은 UTC, 화면에서 KST 로 바꾼다.
+#   후기 원문은 '점수 차가 큰 후기' 확인용으로 review_id 몇 건에 한해서만 읽는다(get_review_meta). 팀 내부용이다.
 # =====================================================================
-# (모델 이름, model_version_no). 번호 규칙: 평가 모델/로직이 바뀌면 메이저, 작은 수정이면 마이너를 올린다.
-_MODELS = [("2.3_score_s2c", 0.0), ("2.4b_score_s2c", 1.0)]
 SCORES = [-2, -1, 0, 1, 2]  # 속성별 점수 값
+# 모델이 점수를 매기는 속성 11개 (review-analysis/deploy/score_batch.py 의 ASPECTS, 라벨 가이드 v3 와 같다).
+# 위 ASPECTS 는 Gold A 미리보기용 옛 목록이라 이 화면에서는 쓰지 않는다. 바꾸면 score_batch.py 와 함께 바꾼다.
+MODEL_ASPECTS = [
+    "재질·촉감", "사이즈·핏", "색상·디자인", "품질·내구성", "가격·가성비", "냄새",
+    "세탁·관리", "활용성·사용감", "배송", "포장", "교환·환불·CS",
+]  # fmt: skip
 
 
-@dataset(_TTL_A)
-def get_model_registry() -> pd.DataFrame:
-    """모델 버전 1줄. 컬럼: model_version, model_version_no, gold_read(Gold 가 읽는 버전인지), deployed_at(UTC),
-    change_type(최초/메이저/마이너), summary(한 줄 요약), rescore_required(기존 후기 재점수화 대상인지),
-    based_on(되돌림 버전이면 원래 버전 이름), notes(배포 뒤 정정·추가 [{date, text}]),
-    last_analyzed_at(UTC), analyzed_reviews, unscored_reviews(현재 버전만. 옛 버전은 NaN. S3 패치노트만 읽을 때는 모두 비어 있다),
-    eval_set, eval_n, f1, mae, qwk(오프라인 평가 지표, 패치노트의 evaluation).
-    실데이터: MODEL_REGISTRY_URI 가 있으면 S3 패치노트(_real_model_registry)를 읽는다."""
-    now = pd.Timestamp.now(tz="UTC").tz_localize(None).floor("60min")
-    return pd.DataFrame(
-        {
-            "model_version": [m for m, _ in _MODELS],
-            "model_version_no": [n for _, n in _MODELS],
-            "gold_read": [False, True],
-            "change_type": ["최초", "메이저"],
-            "summary": [
-                "점수 모델 첫 배포",
-                "LoRA 병합 배포, 극단 점수 학습 보강, 출력 형식 정리, 평가 세트 교체",
-            ],
-            "rescore_required": [False, True],
-            "deployed_at": [now - pd.Timedelta(days=40), now - pd.Timedelta(days=12)],
-            "based_on": [None, None],
-            "notes": [[], [{"date": "2026-10-20", "text": "예시: 평가 세트 이름 표기 정정"}]],
-            "last_analyzed_at": [now - pd.Timedelta(days=12), now - pd.Timedelta(hours=7)],
-            "analyzed_reviews": [7_940, 3_410],
-            "unscored_reviews": [np.nan, 281.0],
-            "eval_set": ["사람 평가 세트 v1", "사람 평가 세트 v2"],
-            "eval_n": [99, 99],
-            "f1": [0.842, 0.868],
-            "mae": [0.301, 0.263],
-            "qwk": [0.891, 0.915],
-        }
+def model_aspect_categories(values) -> list:
+    """표시 순서: 모델 속성 11개 순서대로, 그 밖의 이름(속성 목록이 바뀐 경우)은 뒤에 이름순으로 붙인다(값을 버리지 않는다)."""
+    extra = sorted(set(pd.Series(values).dropna()) - set(MODEL_ASPECTS))
+    return MODEL_ASPECTS + extra
+ModelDataUnavailable = model_io.ModelDataUnavailable
+
+
+def _model_cfg() -> model_io.Config:
+    """환경변수로 model_io 설정을 만든다. 위치가 따로 없으면 모델 레지스트리와 같은 버킷의 기본 경로를 쓴다."""
+    bucket = MODEL_REGISTRY_URI[5:].split("/", 1)[0] if MODEL_REGISTRY_URI.startswith("s3://") else ""
+    stage = os.getenv("REVIEW_SCORE_STAGING_URI") or (f"s3://{bucket}/staging/review-score/" if bucket else "")
+    silver = os.getenv("REVIEW_SILVER_ROOT_URI") or (f"s3://{bucket}/silver/runtime/reviews/" if bucket else "")
+    return model_io.Config(
+        database=os.getenv("REVIEW_SCORE_DATABASE", "clothes_query_dev_review_score"),
+        staging_uri=stage,
+        silver_root_uri=silver,
     )
 
 
-@dataset(_TTL_A)
-def get_model_changelog() -> pd.DataFrame:
-    """버전별 패치노트 항목. 컬럼: model_version, category, item, detail.
-    category: 모델 / 학습 데이터 / 프롬프트·후처리 / 속성 목록 / 평가 / 배포.
-    실데이터: review-analysis/releases/<버전>.yaml 의 changes (S3 로 배포된 JSON, _real_model_changelog).
-    ※ 아래 내용은 화면 구성을 보기 위한 예시다."""
-    rows = [
-        ("2.3_score_s2c", "모델", "초판", "속성별 점수(-2~+2)를 직접 내는 점수 모델 첫 배포"),
-        (
-            "2.3_score_s2c",
-            "속성 목록",
-            "속성 11개",
-            "사이즈·핏 ~ 활용성·사용감 11개 속성을 대상으로 함",
-        ),
-        ("2.3_score_s2c", "평가", "사람 평가 세트 v1", "99건 기준 F1 0.842, MAE 0.301, QWK 0.891"),
-        (
-            "2.4b_score_s2c",
-            "모델",
-            "LoRA 병합 배포",
-            "어댑터를 기본 모델에 병합해 배포 형태를 바꿈",
-        ),
-        (
-            "2.4b_score_s2c",
-            "학습 데이터",
-            "극단 점수 보강",
-            "-2, +2 예시를 더 넣어 약한 부정·강한 긍정 구분을 개선",
-        ),
-        (
-            "2.4b_score_s2c",
-            "프롬프트·후처리",
-            "출력 형식",
-            "속성별 한 줄 출력. 파싱 실패 후기는 다음 실행에서 다시 시도",
-        ),
-        (
-            "2.4b_score_s2c",
-            "평가",
-            "평가 세트 교체",
-            "사람 평가 세트 v2로 바뀜. 이전 버전 수치와 직접 비교할 수 없음",
-        ),
-        (
-            "2.4b_score_s2c",
-            "배포",
-            "전체 재점수화",
-            "메이저 번호가 올라 기존 후기가 모두 재점수화 대상이 됨",
-        ),
-    ]
-    return pd.DataFrame(rows, columns=["model_version", "category", "item", "detail"])
+def _model_query(sql: str) -> pd.DataFrame:
+    """Athena 조회. 작업그룹이 없거나 실패하면 ModelDataUnavailable (가짜 값 없음)."""
+    if not ATHENA_WORKGROUP:
+        raise ModelDataUnavailable("Athena 작업그룹(DASHBOARD_ATHENA_WORKGROUP)이 설정되지 않았습니다")
+    try:
+        return _athena(sql)
+    except Exception as e:
+        _log.exception("감성분석 모델 Athena 조회 실패")
+        raise ModelDataUnavailable(f"Athena 조회에 실패했습니다 ({type(e).__name__}: {str(e)[:160]})") from e
 
 
-# ---- 실데이터: 모델 버전·패치노트 (S3 model-registry) ----------------------
+def _model_s3():
+    import boto3  # 실데이터를 쓸 때만 필요하다
+
+    return boto3.client("s3", region_name=AWS_REGION)
+
+
+# ---- 모델 버전·패치노트 (S3 model-registry) --------------------------------
 # 패치노트는 review-analysis/releases/<버전>.yaml 로 git 에 쓰고, 모델을 올릴 때(upload_model.py) JSON 으로 바뀌어 S3 에 올라간다.
 #   <MODEL_REGISTRY_URI>index.json        버전 목록 {schema, versions:[{model_version, model_version_no, change_type, released_at, summary, based_on}]}
 #   <MODEL_REGISTRY_URI><버전>.json        버전 하나의 패치노트 (changes, evaluation, rescore_required, notes, based_on ...)
 # 릴리스 묶음(manifest)이 있는 버전만 올라가므로 여기 보이는 버전 = 실제로 배포할 수 있는 버전이다.
-# MODEL_REGISTRY_URI: s3://<버킷>/review-score/model-registry/releases/ (끝에 / 필수). 버킷 이름은 코드에 두지 않고 환경변수로만 받는다.
-#   비어 있으면 등록하지 않아 더미를 쓴다. 읽기 권한(Pod Identity)은 infra 쪽 작업이다(TODO F4).
-# 양식 번호(schema)가 아래 값과 다르면 읽지 않고 더미로 대체한다(release_notes.py 의 SCHEMA 와 맞춘다).
+# 양식 번호(schema)가 아래 값과 다르면 읽지 않는다(release_notes.py 의 SCHEMA 와 맞춘다).
 MODEL_REGISTRY_URI = os.getenv("MODEL_REGISTRY_URI", "")
 _RELEASE_SCHEMA = 1
 
 
 @st.cache_data(ttl=_TTL_A)
 def _read_releases(uri: str) -> list:
-    """S3 에서 index.json 과 버전별 패치노트 JSON 을 읽어 문서 목록을 돌려준다. 실패하면 예외(=> 더미 대체)."""
-    import boto3  # 실데이터를 쓸 때만 필요하다
-
+    """S3 에서 index.json 과 버전별 패치노트 JSON 을 읽어 문서 목록을 돌려준다. 실패하면 ModelDataUnavailable."""
     if not (uri.startswith("s3://") and uri.endswith("/")):
-        raise ValueError("MODEL_REGISTRY_URI 는 s3://<버킷>/<경로>/ 형식이어야 합니다")
+        raise ModelDataUnavailable("MODEL_REGISTRY_URI 는 s3://<버킷>/<경로>/ 형식이어야 합니다")
     bucket, prefix = uri[5:].split("/", 1)
-    s3 = boto3.client("s3")
+    try:
+        s3 = _model_s3()
 
-    def get(key):
-        doc = json.loads(s3.get_object(Bucket=bucket, Key=prefix + key)["Body"].read())
-        if doc.get("schema") != _RELEASE_SCHEMA:
-            raise ValueError(f"{key}: schema {doc.get('schema')} 를 읽을 수 없습니다")
-        return doc
+        def get(key):
+            doc = json.loads(s3.get_object(Bucket=bucket, Key=prefix + key)["Body"].read())
+            if doc.get("schema") != _RELEASE_SCHEMA:
+                raise ValueError(f"{key}: schema {doc.get('schema')} 를 읽을 수 없습니다")
+            return doc
 
-    index = get("index.json")
-    return [get(f"{v['model_version']}.json") for v in index.get("versions", [])]
+        index = get("index.json")
+        return [get(f"{v['model_version']}.json") for v in index.get("versions", [])]
+    except Exception as e:
+        _log.exception("모델 레지스트리 읽기 실패")
+        raise ModelDataUnavailable(f"모델 레지스트리(S3)를 읽지 못했습니다 ({type(e).__name__})") from e
 
 
 def _kst_date_to_utc(d: str) -> pd.Timestamp:
@@ -939,10 +901,21 @@ def _kst_date_to_utc(d: str) -> pd.Timestamp:
     return pd.Timestamp(d) - pd.Timedelta(hours=9)
 
 
-def _real_model_registry() -> pd.DataFrame:
+def _need_registry() -> list:
+    if not MODEL_REGISTRY_URI:
+        raise ModelDataUnavailable("모델 레지스트리(MODEL_REGISTRY_URI)가 설정되지 않았습니다")
     docs = _read_releases(MODEL_REGISTRY_URI)
     if not docs:
-        return pd.DataFrame()
+        raise ModelDataUnavailable("모델 레지스트리에 배포된 버전이 없습니다")
+    return docs
+
+
+@st.cache_data(ttl=_TTL_A)
+def get_model_registry() -> pd.DataFrame:
+    """모델 버전 1줄. 컬럼: model_version, model_version_no, gold_read(Gold 가 읽는 버전인지), deployed_at(UTC),
+    change_type(최초/메이저/마이너), summary, rescore_required, based_on(되돌림이면 원래 버전), notes([{date, text}]),
+    eval_set, eval_n, f1, mae, qwk (패치노트의 evaluation). 분석 현황 열은 get_model_analysis_status 가 따로 채운다."""
+    docs = _need_registry()
     top = max(float(d["model_version_no"]) for d in docs)
     rows = []
     for d in docs:
@@ -959,10 +932,6 @@ def _real_model_registry() -> pd.DataFrame:
                 "deployed_at": _kst_date_to_utc(d["released_at"]),
                 "based_on": d.get("based_on"),
                 "notes": d.get("notes") or [],
-                # 분석 현황은 점수 테이블(Athena) 연결 후 채운다(TODO B6). 그 전에는 비워 둔다.
-                "last_analyzed_at": pd.NaT,
-                "analyzed_reviews": np.nan,
-                "unscored_reviews": np.nan,
                 "eval_set": ev.get("eval_set"),
                 "eval_n": ev.get("eval_n"),
                 "f1": ev.get("f1"),
@@ -973,182 +942,78 @@ def _real_model_registry() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _real_model_changelog() -> pd.DataFrame:
+@st.cache_data(ttl=_TTL_A)
+def get_model_changelog() -> pd.DataFrame:
+    """버전별 패치노트 항목. 컬럼: model_version, category, item, detail."""
     rows = [
         (d["model_version"], c["category"], c["item"], c["detail"])
-        for d in _read_releases(MODEL_REGISTRY_URI)
+        for d in _need_registry()
         for c in d.get("changes") or []
     ]
     return pd.DataFrame(rows, columns=["model_version", "category", "item", "detail"])
 
 
-if MODEL_REGISTRY_URI:
-    _REAL["get_model_registry"] = _real_model_registry
-    _REAL["get_model_changelog"] = _real_model_changelog
+@st.cache_data(ttl=_TTL_A)
+def get_model_analysis_status() -> pd.DataFrame:
+    """버전별 분석 현황(점수 로그). 컬럼: model_version, last_analyzed_at(UTC), analyzed_reviews, unscored_reviews.
+    unscored_reviews 는 Gold 가 읽는 버전(번호가 가장 큰 버전)만 계산한다(최근 Silver 실행의 후기 중 그 번호로 점수 로그가 없는 후기).
+    옛 버전은 NaN. 점수 로그를 못 읽으면 ModelDataUnavailable, Silver 를 못 읽으면 unscored_reviews 만 NaN."""
+    cfg = _model_cfg()
+    stats = model_io.registry_stats(_model_query, cfg)
+    stats["unscored_reviews"] = np.nan
+    top = max(_need_registry(), key=lambda d: float(d["model_version_no"]))
+    try:
+        left = model_io.unscored_remaining(_model_query, _model_s3(), cfg, f"{float(top['model_version_no']):.1f}")
+        if (stats.model_version == top["model_version"]).sum() == 0:  # 아직 점수 로그가 없는 새 버전
+            stats.loc[len(stats)] = [top["model_version"], pd.NaT, 0, left]
+        else:
+            stats.loc[stats.model_version == top["model_version"], "unscored_reviews"] = left
+    except ModelDataUnavailable:
+        _log.warning("미점수 잔량을 구하지 못했습니다", exc_info=True)
+    return stats
 
 
-@dataset(_TTL_A)
+@st.cache_data(ttl=_TTL_A)
 def get_model_review_daily(days: int = 30) -> pd.DataFrame:
-    """작성일(KST) × 모델 버전별 분석한 후기 수. 컬럼: review_date, model_version, analyzed_review_count,
-    zero_aspect_review_count(속성이 0개 나온 후기 수)."""
-    rng = np.random.default_rng(_SEED + 20)
-    dates = pd.date_range(end=_today_kst(), periods=days)
-    rows = []
-    for m, _ in _MODELS:
-        for d in dates:
-            n = int(rng.integers(240, 320))
-            rows.append((d, m, n, int(n * rng.uniform(0.04, 0.09))))
-    return pd.DataFrame(
-        rows,
-        columns=[
-            "review_date",
-            "model_version",
-            "analyzed_review_count",
-            "zero_aspect_review_count",
-        ],
-    )
+    """작성일(KST) × 모델 버전별 분석한 후기 수. 컬럼: review_date, model_version, analyzed_review_count, zero_aspect_review_count."""
+    return model_io.review_daily(_model_query, _model_cfg(), days)
 
 
-@dataset(_TTL_A)
+@st.cache_data(ttl=_TTL_A)
 def get_model_score_daily(days: int = 30) -> pd.DataFrame:
-    """작성일(KST) × 모델 버전 × 속성 × 점수별 후기 수. 컬럼: review_date, model_version, aspect, score,
-    review_count. 한 후기는 속성마다 점수가 하나이므로 review_count 의 속성별 합 = 그 속성을 언급한 후기 수.
-    속성끼리 더하면 후기 하나가 여러 번 세어지므로 전체 후기 수로 쓰지 않는다."""
-    rng = np.random.default_rng(_SEED + 21)
-    dates = pd.date_range(end=_today_kst(), periods=days)
-    rows = []
-    for vi, (m, _) in enumerate(_MODELS):
-        for ai, aspect in enumerate(ASPECTS):
-            # 속성마다 점수 분포가 다르다 (뒤쪽 속성일수록 부정이 조금 많게). 새 버전은 극단 점수를 더 낸다.
-            base = np.array([0.04 + 0.01 * ai, 0.10, 0.20, 0.36 - 0.01 * ai, 0.30 - 0.03 * vi])
-            base = base + np.array([0.02 * vi, 0, 0, 0, 0.02 * vi])
-            base = base / base.sum()
-            for d in dates:
-                mentioned = int(rng.integers(20, 90))
-                counts = rng.multinomial(mentioned, base)
-                rows.extend((d, m, aspect, s, int(c)) for s, c in zip(SCORES, counts))
-    return pd.DataFrame(
-        rows, columns=["review_date", "model_version", "aspect", "score", "review_count"]
-    )
+    """작성일 × 모델 버전 × 속성 × 점수별 후기 수. 컬럼: review_date, model_version, aspect, score, review_count.
+    한 후기는 속성마다 점수가 하나이므로 review_count 의 속성별 합 = 그 속성을 언급한 후기 수. 속성끼리 더하면 후기가 여러 번 세어진다."""
+    return model_io.score_daily(_model_query, _model_cfg(), days)
 
 
-@dataset(_TTL_A)
-def get_model_score_diff(model_a: str, model_b: str) -> pd.DataFrame:
-    """같은 후기·속성에 대한 두 버전의 점수 비교. 컬럼: review_id, aspect, score_a, score_b.
-    두 버전이 모두 점수를 낸 (후기, 속성) 쌍만 있다. 후기 원문은 get_review_texts 로 따로 읽는다."""
-    rng = np.random.default_rng(_SEED + 22 + zlib.crc32(f"{model_a}|{model_b}".encode()) % 1000)
-    n = 900
-    a = rng.choice(SCORES, n, p=[0.06, 0.14, 0.2, 0.36, 0.24])
-    change = rng.random(n) < 0.18
-    step = rng.choice([-2, -1, 1, 2], n, p=[0.1, 0.4, 0.4, 0.1])
-    b = np.clip(np.where(change, a + step, a), -2, 2)
-    return pd.DataFrame(
-        {
-            "review_id": [f"R-{i // 3 + 1:05d}" for i in range(n)],
-            "aspect": rng.choice(ASPECTS, n),
-            "score_a": a,
-            "score_b": b,
-        }
-    )
+@st.cache_data(ttl=_TTL_A)
+def get_model_score_diff(model_a: str, model_b: str, days: int = 30) -> pd.DataFrame:
+    """같은 후기·속성에 대한 두 버전의 점수 비교. 컬럼: review_id, aspect, score_a, score_b, review_date. 두 버전이 모두 점수를 낸 쌍만."""
+    return model_io.score_diff(_model_query, _model_cfg(), model_a, model_b, days)
 
 
-# 더미 후기 문장 재료. 속성마다 (좋은 말, 나쁜 말). 실제 후기에서 가져온 문장이 아니다(직접 지은 예시).
-_DUMMY_PHRASES = {
-    "사이즈·핏": ("정사이즈로 잘 맞아요", "생각보다 한 치수 작게 나왔어요"),
-    "품질·내구성": ("박음질이 꼼꼼해요", "두 번 입었는데 보풀이 일어나요"),
-    "재질·촉감": ("촉감이 부드러워요", "까슬까슬해서 안에 받쳐 입어야 해요"),
-    "색상": ("화면이랑 색이 똑같아요", "사진보다 색이 많이 어두워요"),
-    "디자인": ("디자인이 깔끔해서 자주 입어요", "실물은 핏이 좀 밋밋해요"),
-    "가격": ("이 가격이면 만족해요", "가격에 비해 아쉬워요"),
-    "배송": ("배송이 빨랐어요", "배송이 일주일 넘게 걸렸어요"),
-    "포장": ("포장이 깔끔했어요", "포장이 뜯겨서 왔어요"),
-    "세탁·관리": ("세탁해도 줄지 않아요", "한 번 빨았는데 늘어났어요"),
-    "활용성·사용감": ("여기저기 잘 어울려요", "막상 입을 일이 별로 없네요"),
-}
-_DUMMY_TAILS = [
-    "",
-    " 재구매 의사 있어요.",
-    " 그래도 쓸 만해요.",
-    " 다른 색도 살까 고민 중이에요.",
-    " 교환할까 해요.",
-]
+@st.cache_data(ttl=_TTL_A)
+def get_review_meta(review_ids: tuple[str, ...]) -> pd.DataFrame:
+    """후기 id 의 상품·카테고리·별점·작성일·원문 (최근 Silver 실행에서). 원문은 팀 내부용이다(외부 서비스·Git 금지).
+    컬럼: review_id, product_id, product_name, category, rating, review_date, review_text. review_ids 는 캐시 키가 되도록 tuple 로 받는다."""
+    return model_io.review_meta(_model_query, _model_s3(), _model_cfg(), review_ids)
 
 
-@dataset(_TTL_A)
-def get_review_texts(review_ids: tuple[str, ...]) -> pd.DataFrame:
-    """후기 원문. 컬럼: review_id, review_text, rating(별점 1~5).
-
-    감성분석 모델 화면에서 '점수 차가 큰 후기'를 사람이 직접 읽고 어느 버전이 맞는지 판단하는 데 쓴다.
-    실데이터: Silver 리뷰 표에서 review_id 로 조회해 _REAL["get_review_texts"] 에 등록한다 (TODO.md B8).
-    review_ids 는 캐시 키가 되도록 tuple 로 받는다.
-    ※ 원문은 팀 내부용이다 (대시보드는 허용 IP·로그인 뒤에서만 열린다). 외부 서비스로 보내거나 Git 에 넣지 않는다.
-    ※ 더미 문장은 직접 지은 예시 문장이며 실제 후기가 아니다. 앞에 [더미] 를 붙인다.
-    """
-    keys = [a for a in ASPECTS if a in _DUMMY_PHRASES]
-    rows = []
-    for rid in review_ids:
-        rng = np.random.default_rng(_SEED + zlib.crc32(rid.encode()))
-        picked = rng.choice(keys, size=int(rng.integers(1, 4)), replace=False)
-        parts = [_DUMMY_PHRASES[a][int(rng.random() < 0.45)] for a in picked]
-        text = (
-            "[더미] "
-            + ", ".join(parts)
-            + "."
-            + _DUMMY_TAILS[int(rng.integers(0, len(_DUMMY_TAILS)))]
-        )
-        rows.append((rid, text, int(rng.integers(1, 6))))
-    return pd.DataFrame(rows, columns=["review_id", "review_text", "rating"])
+@st.cache_data(ttl=_TTL_A)
+def get_review_list(
+    days: int = 30, product_id: str = "", aspect: str = "", scores: tuple = ()
+) -> pd.DataFrame:
+    """후기 목록: 최근 Silver 실행(PASS)의 후기 원문 + Gold 가 읽는 최신 속성 점수(뷰). 후기 하나 = 한 줄, 최대 model_io.LIST_LIMIT 건.
+    컬럼: review_id, review_date, product_id, product_name, rating, review_text, scores('배송 +2 · 가격 -1'), aspect_count, model_version.
+    원문은 팀 내부용이다(외부 서비스·Git 금지). 필터는 상품 id·속성·점수(tuple, -2~2)이며 인자가 캐시 키가 된다."""
+    return model_io.review_list(_model_query, _model_s3(), _model_cfg(), days, product_id, aspect, scores)
 
 
-@dataset(_TTL_B)
-def get_model_runs(days: int = 14) -> pd.DataFrame:
-    """일별 분석 Job 실행 기록. 컬럼: run_date(작성일 KST), model_version, status(SUCCEEDED/FAILED/
-    SKIPPED_NO_INPUT), input_reviews(미점수로 고른 후기), scored_reviews(점수가 한 개 이상 나온 후기),
-    zero_aspect_reviews, parse_failed(파싱 실패. 다음 실행에서 다시 시도), unscored_left(실행 뒤 남은 미점수),
-    duration_min, finished_at(UTC). 실제로는 Airflow 실행 기록과 오류 prefix 에서 가져온다."""
-    rng = np.random.default_rng(_SEED + 23)
-    dates = pd.date_range(end=_today_kst(), periods=days)
-    cur = _MODELS[-1][0]
-    rows = []
-    for i, d in enumerate(dates):
-        inp = int(rng.integers(240, 320))
-        status, failed, scored = "SUCCEEDED", int(rng.integers(0, 3)), 0
-        if i == days - 6:
-            status, inp = "SKIPPED_NO_INPUT", 0  # 미점수 후기가 없으면 Job 을 띄우지 않는다
-        elif i == days - 3:
-            status = "FAILED"
-        zero = int(inp * rng.uniform(0.04, 0.09))
-        if status == "SUCCEEDED":
-            scored = inp - zero - failed
-        rows.append(
-            (
-                d,
-                cur,
-                status,
-                inp,
-                scored,
-                zero if status == "SUCCEEDED" else 0,
-                failed if status == "SUCCEEDED" else 0,
-                inp if status == "FAILED" else failed if status == "SUCCEEDED" else 0,
-                float(rng.uniform(9, 16)) if status != "SKIPPED_NO_INPUT" else 0.0,
-                d + pd.Timedelta(hours=16, minutes=int(rng.integers(0, 40))),
-            )
-        )
-    return pd.DataFrame(
-        rows,
-        columns=[
-            "run_date",
-            "model_version",
-            "status",
-            "input_reviews",
-            "scored_reviews",
-            "zero_aspect_reviews",
-            "parse_failed",
-            "unscored_left",
-            "duration_min",
-            "finished_at",
-        ],
-    )
+@st.cache_data(ttl=_TTL_B)
+def get_model_runs(limit: int = 60) -> pd.DataFrame:
+    """Job 실행 요약(S3 _summary_scores_*.json) 최근 limit 개. Job 한 번 = 한 줄. 컬럼은 model_io.RUN_COLS.
+    실패한 Job 은 요약이 없어 나오지 않는다."""
+    return model_io.runs(_model_s3(), _model_cfg(), limit)
 
 
 # =====================================================================
