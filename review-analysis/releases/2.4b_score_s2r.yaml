@@ -1,0 +1,37 @@
+# 비교용 모델 패치노트 (2026-10-25). 가중치와 릴리스 묶음은 2026-10-25 S3 에 올렸다.
+# 번호 0.1 은 lemin 이 직접 정했다(Gold 는 번호가 가장 큰 결과를 읽으므로 s2c 1.0 보다 낮게 해서 Gold 가 바뀌지 않게 한다).
+# release_notes.py validate 는 "가장 낮은 번호만 최초"라서, 이 파일이 최초이고 2.4b_score_s2c.yaml 은 메이저다(lemin 결정, 2026-10-25).
+# 평가 지표는 어댑터를 기본 모델에 합친 뒤 다시 잰 값이다(2026-10-25, GPU PC).
+model_version: 2.4b_score_s2r
+model_version_no: 0.1
+change_type: 최초
+released_at: 2026-10-25
+summary: 비교용 점수형 모델(s2r). s2c 이전 모델로, 팀 수집 후기를 학습에 쓰기 전 버전
+rescore_required: false
+
+changes:
+  - category: 모델
+    item: 비교용 점수형 모델 s2r
+    detail: 속성마다 -2~+2 점수를 매기는 모델. Gold 가 읽는 모델(s2c)과 점수를 나란히 비교하려고 올린다. Gold 는 번호가 큰 s2c 결과를 계속 읽는다
+  - category: 학습 데이터
+    item: 팀 수집 후기 학습 전
+    detail: 합성 학습 데이터에 정답 보정(반어, 문제없음, 뜯어짐)만 적용했다. s2c 와 달리 직접 수집한 후기 절반을 학습에 쓰지 않았다
+  - category: 속성 목록
+    item: 속성 11개
+    detail: 재질·촉감, 사이즈·핏, 색상·디자인, 품질·내구성, 가격·가성비, 냄새, 세탁·관리, 활용성·사용감, 배송, 포장, 교환·환불·CS
+  - category: 평가
+    item: 병합 모델 재측정
+    detail: 수집 후기 학습분을 뺀 사람 평가 99건 기준 F1 0.856, MAE 0.271, QWK 0.906(파싱 실패 0건). s2c 병합 모델(0.868, 0.263, 0.915)보다 조금 낮다. 정밀도 0.822, 재현율 0.892, 부호반전 3%, 이내1 0.946
+  - category: 배포
+    item: 비교 실행 전용
+    detail: SSM 의 기본 실행 버전은 바꾸지 않고 run_processing_job.py --release 2.4b_score_s2r 로 필요할 때만 돌린다
+
+evaluation:
+  eval_set: 사람 평가 hold-out (병합 모델 재측정)
+  eval_n: 99
+  f1: 0.856
+  mae: 0.271
+  qwk: 0.906
+  source: score_eval.json
+
+notes: []
