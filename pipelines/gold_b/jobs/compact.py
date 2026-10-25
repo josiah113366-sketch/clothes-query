@@ -14,6 +14,7 @@ run(day) 한 번에 하는 일
 """
 from __future__ import annotations
 
+import argparse
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from typing import Callable, Mapping, Sequence
@@ -99,15 +100,25 @@ def run(day: date, *, store: Store, tables: Sequence[str] = LEDGERS, margin: tim
 ENV_LEDGER_ROOT = "GOLD_B_LEDGER_ROOT"    # s3://<버킷>/gold_b 또는 로컬 폴더 (필수)
 
 
+def _day(value: str) -> date | None:
+    """--day 값. 비어 있으면 None(어제 UTC). Airflow DAG는 날짜 입력(day)이 비면 빈 값을 넘긴다 (2026-10-25)."""
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("합칠 날은 YYYY-MM-DD 형식이어야 한다") from None
+
+
 def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None,
          now: Callable[[], datetime] = _utc_now, log: Callable[[str], None] = _log) -> int:
     """하루치(UTC) 시간 폴더를 합친다. Airflow DAG가 하루 1번 부른다. 성공하면 0, 실패하면 1."""
-    import argparse
     import os
 
     parser = argparse.ArgumentParser(prog="python -m pipelines.gold_b.jobs.compact",
                                      description="Gold B 파일 합치기: 끝난 UTC 하루의 시간 폴더마다 파일을 하나로 합친다")
-    parser.add_argument("--day", type=date.fromisoformat, help="합칠 날 (UTC, YYYY-MM-DD). 생략하면 어제(UTC)")
+    parser.add_argument("--day", type=_day, help="합칠 날 (UTC, YYYY-MM-DD). 생략하거나 비우면 어제(UTC)")
     args = parser.parse_args(argv)
     env = os.environ if env is None else env
     root = (env.get(ENV_LEDGER_ROOT) or "").strip()

@@ -180,14 +180,14 @@ python -m pytest -q pipelines/gold_b/tests/test_reprocess.py pipelines/gold_b/te
 **재처리 잡과 같은 시간에 돌리면 안 된다.** 재처리는 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서, 폴더와 상관없이 DAG에서 둘을 한 번에 하나씩 돌린다.
 
 ```bash
-python -m pipelines.gold_b.jobs.compact                    # 어제(UTC)를 합친다
+python -m pipelines.gold_b.jobs.compact                    # 어제(UTC)를 합친다 (--day 빈 값도 어제)
 python -m pipelines.gold_b.jobs.compact --day 2026-10-21   # 그 날(UTC)을 합친다
 ```
 
 환경변수는 `GOLD_B_LEDGER_ROOT`(원장 위치: `s3://<버킷>/gold_b` 또는 로컬 폴더) 하나다. 성공하면 0, 실패하면 1로 끝난다. 그 날이 끝나고 10분이 지나지 않았으면 거부한다.
 
 DAG (재영 님께): `infra/platform/airflow/dags/gold_b.py`의 `gold_b_compact` (2026-10-24, 꺼진 채로 올라감)
-- 매일 UTC 00:30 (그 날 끝 + 10분 여유 뒤). 날짜를 주지 않아 어제(UTC)를 합친다. `max_active_runs` 1, `catchup` 끔, Airflow 재시도 2번(10분 간격, 다시 돌려도 결과가 같음)
+- 매일 UTC 00:30 (그 날 끝 + 10분 여유 뒤). 날짜 입력(`day`)이 비어서 어제(UTC)를 합친다. 손으로 실행할 때 날짜를 넣으면 그 날을 합친다 (Pod에 `--day <값>`, 2026-10-25). 적재 잡이 Kafka를 따라잡으며 쌓은 지난 날은 이렇게 합친다. `max_active_runs` 1, `catchup` 끔, Airflow 재시도 2번(10분 간격, 다시 돌려도 결과가 같음)
 - 재처리 DAG(`gold_b_reprocess`)와 같은 Airflow pool(실행 설정 `pool`, 슬롯 1개)에 넣어 두 작업이 겹치지 않게 한다. 지금 Airflow는 전체 동시 작업이 1개라 겹치지 않지만, 그 설정이 바뀌어도 막히게 한다.
 - Pod 권한: S3 원장 4개 폴더(`payment_events`, `topic_messages`, `bronze_lag_snapshots`, `malformed_events`) 읽기·쓰기·지우기
 
@@ -198,7 +198,7 @@ from datetime import date
 from pipelines.gold_b.jobs.compact import run
 from pipelines.gold_b.ledger import open_store
 
-run(date(2026, 10, 21), store=open_store(…))   # s3://<버킷>/gold_b 또는 로컬 폴더. DAG는 어제(UTC)를 넘긴다
+run(date(2026, 10, 21), store=open_store(…))   # s3://<버킷>/gold_b 또는 로컬 폴더. DAG는 날짜 입력이 비면 어제(UTC)
 ```
 
 S3 권한은 원장 4개 폴더 읽기·쓰기·지우기다. 확인은 `python -m pytest -q pipelines/gold_b/tests/test_compact.py`.

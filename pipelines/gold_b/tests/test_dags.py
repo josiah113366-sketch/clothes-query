@@ -10,6 +10,7 @@ import importlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 import sys
 import types
 
@@ -86,9 +87,16 @@ class Model:
         self.__dict__.update(kwargs)
 
 
+class FakeParam:
+    """airflow.sdk.Param: 기본값과 JSON 스키마(type, pattern 등)를 기억한다."""
+
+    def __init__(self, default=None, **schema):
+        self.default, self.schema = default, schema
+
+
 def install_fakes(monkeypatch):
     sdk = types.ModuleType("airflow.sdk")
-    sdk.dag, sdk.task = fake_dag, fake_task
+    sdk.dag, sdk.task, sdk.Param = fake_dag, fake_task, FakeParam
     pod = types.ModuleType("airflow.providers.cncf.kubernetes.operators.pod")
     pod.KubernetesPodOperator = FakePod
     models = types.ModuleType("kubernetes.client.models")
@@ -199,10 +207,25 @@ def test_compact_pod_needs_only_the_ledger(monkeypatch):
     check, pod = parts(load(monkeypatch, RUNTIME).compact_dag)
     assert check.downstream == [pod]
     k = pod.kwargs
-    assert k["cmds"] == ["python3", "-m", "pipelines.gold_b.jobs.compact"] and "arguments" not in k   # 날짜 없음 = 어제(UTC)
+    assert k["cmds"] == ["python3", "-m", "pipelines.gold_b.jobs.compact"]
+    assert k["arguments"] == ["--day", "{{ params.day }}"]   # 날짜 입력이 비면 잡이 어제(UTC)를 합친다
     assert k["env_vars"] == {"GOLD_B_LEDGER_ROOT": RUNTIME["ledger_root"], "AWS_EC2_METADATA_DISABLED": "true"}
     assert (k["volumes"], k["volume_mounts"]) == ([], [])   # Kafka를 읽지 않는다
     assert k["automount_service_account_token"] is False
+
+
+def test_compact_dag_takes_an_optional_day(monkeypatch, tmp_path):
+    """손으로 실행할 때 지난 날을 넣을 수 있다 (비우면 어제 UTC, 2026-10-25). Airflow가 형식을 막고, 잡은 빈 값과 날짜를 받는다."""
+    compact = job("compact")
+    param = load(monkeypatch, RUNTIME).compact_dag.settings["params"]["day"]
+    assert (param.default, param.schema["type"]) == ("", "string")
+    pattern = re.compile(param.schema["pattern"])
+    assert [bool(pattern.search(v)) for v in ("", "2026-10-21", "10/21", "2026-10-21 ")] == [True, True, False, False]
+    env, logs = {"GOLD_B_LEDGER_ROOT": str(tmp_path)}, []
+    now = lambda: datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)   # noqa: E731
+    assert compact.main(["--day", ""], env=env, now=now, log=logs.append) == 0           # 예약 실행: 빈 값 = 어제
+    assert compact.main(["--day", "2026-10-21"], env=env, now=now, log=logs.append) == 0
+    assert [line.split(":")[0] for line in logs] == ["파일 합치기 2026-10-24", "파일 합치기 2026-10-21"]
 
 
 def test_both_jobs_share_one_pool(monkeypatch):

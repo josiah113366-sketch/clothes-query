@@ -120,6 +120,18 @@ def test_main_compacts_yesterday_by_default(tmp_path):
     assert len(store.files(hour_folder("topic_messages", H06))) == 1
 
 
+def test_main_takes_an_empty_day_as_yesterday_and_refuses_a_bad_day(tmp_path):
+    """Airflow DAG는 날짜 입력이 비면 --day 빈 값을 넘긴다. 빈 값은 어제(UTC)이고, 형식이 틀리면 합치지 않고 멈춘다."""
+    store = LocalStore(tmp_path)
+    seed(store)
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path)}
+    with pytest.raises(SystemExit):
+        main(["--day", "10/21"], env=env, now=after_day, log=lambda _: None)
+    assert len(store.files(hour_folder("topic_messages", H06))) == 3
+    assert main(["--day", " "], env=env, now=after_day, log=lambda _: None) == 0
+    assert len(store.files(hour_folder("topic_messages", H06))) == 1
+
+
 def test_main_fails_without_root_or_for_an_unfinished_day(tmp_path):
     logs: list[str] = []
     assert main([], env={}, log=logs.append) == 1

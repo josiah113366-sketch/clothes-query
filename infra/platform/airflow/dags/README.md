@@ -25,9 +25,10 @@ namespace·Pod Identity·S3 권한·Airflow의 대상 namespace Pod RBAC·ECR �
 | DAG | 주기 | Pod 명령 | Airflow 재시도 |
 |---|---|---|---|
 | `gold_b_reprocess` | 5분마다 | `python3 -m pipelines.gold_b.jobs.reprocess` (승인된 재처리 요청 하나, 없으면 바로 끝남) | 0 (다시 돌릴지는 잡이 `reprocess_events`를 보고 정함) |
-| `gold_b_compact` | 매일 00:30 UTC | `python3 -m pipelines.gold_b.jobs.compact` (끝난 어제 UTC) | 2번, 10분 간격 |
+| `gold_b_compact` | 매일 00:30 UTC | `python3 -m pipelines.gold_b.jobs.compact --day <날짜 입력>` (비우면 끝난 어제 UTC) | 2번, 10분 간격 |
 
 - 둘 다 꺼진 채로 만들어지고, 밀린 실행은 하지 않으며(catchup 끔) 한 번에 하나만 돈다. 실행 상한은 재처리 2시간, 파일 합치기 1시간이다.
+- 파일 합치기를 손으로 실행할 때 날짜 입력(`day`, `YYYY-MM-DD`)을 넣으면 그 날을 합친다. 예약 실행은 빈 값이라 어제(UTC)다. 적재 잡이 Kafka를 따라잡으며 쌓은 지난 날이나 늦게 들어온 줄을 합칠 때 쓴다. 끝나지 않은 날(그 날 끝 + 10분 전)은 잡이 거부한다 (2026-10-25).
 - 두 DAG의 Pod는 같은 pool에 넣는다. 재처리가 승인 범위 밖 결제 시각 폴더도 고칠 수 있어서 둘이 같은 시간에 돌면 안 된다.
 - 승인 화면(`agent/approval`)은 R1·R4·R5 재처리를 Airflow로 부르지 않고, 이 DAG가 5분마다 승인 줄을 읽는다고 본다. 켜지 않으면 승인된 Gold B 재처리가 시작되지 않는다.
 - 재처리는 Kafka 보관 기간(7일)이 지난 시간대를 Bronze v2 파일에서 읽는다. `bronze_root`가 없으면 그런 요청은 시작 전에 거부한다.

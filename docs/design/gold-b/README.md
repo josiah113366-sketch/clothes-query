@@ -890,6 +890,7 @@ pipelines/gold_b/
 - [x]  `jobs/compact.py` 시간 폴더 안 작은 파일 합치기
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.compact` (날짜를 주지 않으면 어제 UTC)
 - [x]  DAG `gold_b_compact` 매일 00:30 UTC, 재처리와 같은 pool이라 같은 시간에 돌지 않음 (재처리는 범위 밖 결제 시각 폴더도 고침). `infra/platform/airflow/dags/gold_b.py` (`pipelines/gold-b-dags`, #100, 2026-10-24)
+- [x]  DAG 날짜 입력(`day`): 손으로 실행할 때 지난 날을 합친다, 비우면 어제 (`pipelines/gold-b-ops-fixes`, 2026-10-25 사용자 결정. 적재 잡이 따라잡으며 쌓은 10-20~10-23 폴더용)
 - [ ]  DAG 켜고 하루치가 합쳐지는지 확인 (재영 님 실행 설정·pool 뒤)
 - [x]  합친 뒤 조회 결과가 같은지 확인 (합치기 전후 줄이 `loaded_at`까지 같음, 시험)
 - [x]  PR 올리고 합치기 (#88, 2026-10-23)
