@@ -1,6 +1,6 @@
 # 작업 지시서: dashboard/gold-b-empty-zero
 
-> 상태: 검토 대기 · 브랜치: `dashboard/gold-b-empty-zero` (최신 `main` `df12e7f`) · 담당: 은서 (`dashboard/TODO.md` B1·B10) · 다음 작업: PR (사용자), 배포 (main 자동 배포) (2026-10-25 사용자: "없으면 0건으로 보이게 하는게 나은것 같아")
+> 상태: 완료 (#122, 2026-10-25 머지) · 브랜치: `dashboard/gold-b-empty-zero` (최신 `main` `df12e7f`) · 담당: 은서 (`dashboard/TODO.md` B1·B10) · 다음 작업: PR (사용자), 배포 (main 자동 배포) (2026-10-25 사용자: "없으면 0건으로 보이게 하는게 나은것 같아")
 
 ## 목표
 
