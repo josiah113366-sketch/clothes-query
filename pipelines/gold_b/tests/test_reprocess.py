@@ -395,6 +395,32 @@ def test_poller_rules(rows, minutes, expected):
     assert (None if found is None else (found.request.request_id, found.run_number)) == expected
 
 
+def test_poller_waits_until_the_hour_folders_are_done():
+    """시간 폴더가 끝나기 전(마지막 폴더 끝 + 10분)에 승인하면 고르지 않고 기다렸다가, 승인 만료 전에 끝나면 그때 고른다.
+    예전에는 바로 골라 시작 전 확인에서 다시 시도하지 않는 FAILED로 끝났다 (2026-10-25)."""
+    rows = [ev("rq-now", "APPROVED", 0, window=((7, 40), (7, 55)))]     # 07시 폴더: 08:10에 끝난 것으로 본다 (T = 08:00)
+    waiting: list[str] = []
+    assert next_request(rows, T + timedelta(minutes=9), waiting=waiting) is None
+    assert waiting == ["rq-now"]
+    found = next_request(rows, T + timedelta(minutes=10))
+    assert (found.request.request_id, found.run_number) == ("rq-now", 1)
+
+
+def test_poller_waiting_approval_still_expires():
+    """기다리는 동안에도 승인 만료(60분)는 그대로다. 만료되면 기다리는 목록에도 넣지 않는다 (승인 화면에서 새로 요청)."""
+    rows = [ev("rq-late", "APPROVED", 0, window=((8, 30), (9, 5)))]     # 08·09시 폴더: 10:10에 끝남, 승인은 09:00에 만료
+    waiting: list[str] = []
+    assert next_request(rows, T + timedelta(minutes=50), waiting=waiting) is None and waiting == ["rq-late"]
+    waiting.clear()
+    assert next_request(rows, T + timedelta(minutes=61), waiting=waiting) is None and waiting == []
+
+
+def test_poller_does_not_wait_for_a_broken_window():
+    """끝이 시작보다 앞인 범위는 기다리지 않고 골라서, 잡이 이유와 함께 FAILED로 남기게 한다."""
+    rows = [ev("rq-bad", "APPROVED", 0, window=((7, 30), (7, 0)))]
+    assert next_request(rows, T + timedelta(minutes=1)).request.request_id == "rq-bad"
+
+
 def test_read_events_also_reads_files_athena_wrote(tmp_path):
     """승인 화면·판정 잡은 Athena INSERT로 쓴다. 그 파일은 이름에 확장자가 없을 수 있다."""
     store = LocalStore(tmp_path)
@@ -421,11 +447,11 @@ def test_run_number_is_recorded_and_finished_request_is_not_picked_again(tmp_pat
 
 # ---------- 실행 입구 (python -m pipelines.gold_b.jobs.reprocess) ----------
 
-def write_approval(root, rid: str = "rq-1", minutes: int = 30) -> None:
+def write_approval(root, rid: str = "rq-1", minutes: int = 30, **kwargs) -> None:
     """승인 화면이 Athena INSERT로 쓴 것처럼 확장자 없는 파일에 APPROVED 줄을 둔다 (규칙 버전은 규칙표와 같은 0.2.0)."""
     folder = root / "reprocess_events"
     folder.mkdir(parents=True, exist_ok=True)
-    pq.write_table(to_arrow("reprocess_events", [ev(rid, "APPROVED", minutes)]), folder / f"approval_{rid}")
+    pq.write_table(to_arrow("reprocess_events", [ev(rid, "APPROVED", minutes, **kwargs)]), folder / f"approval_{rid}")
 
 
 def test_main_needs_ledger_root_and_reports_nothing_to_do(tmp_path):
@@ -433,6 +459,16 @@ def test_main_needs_ledger_root_and_reports_nothing_to_do(tmp_path):
     assert main([], env={}, log=logs.append) == 1
     assert main([], env={"GOLD_B_LEDGER_ROOT": str(tmp_path)}, now=lambda: NOW, log=logs.append) == 0
     assert logs[-1] == "돌릴 재처리 요청이 없다"
+
+
+def test_main_says_how_many_approvals_are_waiting(tmp_path):
+    """할 일이 없을 때 시간 폴더가 끝나길 기다리는 승인 수를 로그에 남긴다 (왜 안 도는지 Airflow 로그로 보이게)."""
+    write_approval(tmp_path, window=((8, 10), (8, 20)))                 # 08시 폴더: 09:10에 끝남
+    logs: list[str] = []
+    env = {"GOLD_B_LEDGER_ROOT": str(tmp_path)}
+    assert main([], env=env, now=lambda: T + timedelta(minutes=40), log=logs.append) == 0
+    assert logs[-1] == "돌릴 재처리 요청이 없다 (시간 폴더가 끝나길 기다리는 승인 1개)"
+    assert [row["step"] for row in read_events(LocalStore(tmp_path))] == ["APPROVED"]   # 아무것도 쓰지 않았다
 
 
 def test_main_dry_run_only_names_the_request(tmp_path):
