@@ -19,7 +19,7 @@
   KMS    버킷이 SSE-KMS 일 때만 Decrypt·GenerateDataKey
   Lake Formation  데이터 레이크 설정(기본 권한이 IAM_ALLOWED_PRINCIPALS 인지)을 보여 준다(참고용, 종료 코드에는 영향 없음)
 
-종료 코드: 0 = 모두 허용, 1 = 하나라도 막힘(또는 확인 불가), 2 = 설정을 읽지 못함
+종료 코드: 0 = 모두 허용, 1 = 하나라도 막힘(또는 확인 불가), 2 = 설정을 읽지 못함 또는 역할을 찾을 수 없음
 실행: python deploy/check_airflow_access.py [--role <역할 이름>] ... [--region ap-northeast-1]
 """
 import argparse
@@ -132,7 +132,7 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')   # 터미널 코드페이지와 관계없이 한글이 깨지지 않게
     import boto3
     ap = argparse.ArgumentParser(description='Airflow 실행 역할의 리뷰 점수화 권한 확인(읽기 전용)')
-    ap.add_argument('--role', action='append', help='확인할 IAM 역할 이름(여러 번 가능). 없으면 이름으로 찾는다')
+    ap.add_argument('--role', action='append', help='확인할 IAM 역할 이름(정책 이름이 아님. 여러 번 가능). 없으면 이름으로 찾는다')
     ap.add_argument('--region', default='ap-northeast-1')
     ap.add_argument('--ssm-sagemaker', default=SSM_SAGEMAKER)
     ap.add_argument('--ssm-athena', default=SSM_ATHENA)
@@ -179,7 +179,15 @@ def main():
 
     bad = 0
     for role in roles:
-        arn = iam.get_role(RoleName=role)['Role']['Arn']
+        try:
+            arn = iam.get_role(RoleName=role)['Role']['Arn']
+        except iam.exceptions.NoSuchEntityException:
+            # 정책 이름을 --role 에 넣는 실수가 잦아, 같은 이름의 고객 관리형 정책이 있으면 알려 준다
+            is_policy = any(p['PolicyName'] == role for page in iam.get_paginator('list_policies').paginate(Scope='Local') for p in page['Policies'])
+            print(f'\n역할을 찾을 수 없습니다: {role}')
+            if is_policy:
+                print('이건 정책 이름입니다. 정책을 붙일 역할 이름(예: clothes-query-dev-silver-gold-a-driver)을 넣으세요.')
+            return 2
         print(f'\n== 역할 {role}')
         print(f"{'그룹':<10}{'확인 항목':<52}{'동작':<36}결과")
         for group, desc, action, res, ctx in checks:
