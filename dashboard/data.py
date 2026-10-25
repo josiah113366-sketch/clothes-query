@@ -131,9 +131,11 @@ def product_options():
     return PRODUCTS
 
 
-def dataset(ttl: int):
+def dataset(ttl: int, allow_empty: bool = False):
     """Gold A 실연결은 실행별 조회, 기존 경로는 캐시·미리보기 동작을 유지한다.
-    데코레이터가 붙은 함수 본문은 더미 생성이다."""
+    데코레이터가 붙은 함수 본문은 더미 생성이다.
+    allow_empty=True면 실데이터가 비어도 더미로 바꾸지 않는다 (비어 있는 것이 정상이거나 그 자체가 신호인 화면:
+    성공 결제 중복 0건, 유입 끊김). 조회가 실패했을 때만 더미로 대체한다."""
 
     def deco(dummy_fn):
         name = dummy_fn.__name__
@@ -145,7 +147,7 @@ def dataset(ttl: int):
             if DATA_SOURCE != "dummy" and real is not None:
                 try:
                     df = real(*args, **kwargs)
-                    if df is not None and len(df) > 0:
+                    if df is not None and (len(df) > 0 or allow_empty):
                         USING_DUMMY.discard(name)
                         return df
                 except Exception:  # noqa: BLE001  조회 실패도 화면을 죽이지 않고 더미로 보여준다
@@ -503,6 +505,25 @@ def get_bronze_lag(minutes: int = 180) -> pd.DataFrame:
     )
 
 
+@dataset(_TTL_B, allow_empty=True)
+def get_topic_inflow(minutes: int = 180) -> pd.DataFrame:
+    """1분 × 토픽 Kafka 유입 메시지 수 (gold_b.topic_messages, Kafka 시각 기준). 컬럼: minute(UTC), topic, messages.
+
+    시나리오 2: 지연이 커질 때 유입도 늘었으면 폭주(사람이 몰림), 유입은 그대로면 S3 Sink(Bronze 적재) 자체의 문제다.
+    적재가 멈춰 비는 것 자체가 신호라, 실데이터가 비어도 더미로 바꾸지 않는다 (allow_empty).
+    """
+    rng = np.random.default_rng(_SEED + 11)
+    end = pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(minutes=2)
+    ts = pd.date_range(end=end, periods=minutes, freq="min")
+    base = {"clickstream": 2100, "order-items": 80, "orders": 50, "payments": 20, "members-events": 20}
+    rows = []
+    for topic, per_min in base.items():
+        for i, minute in enumerate(ts):
+            surge = 5.0 if minutes - 45 <= i < minutes - 30 else 1.0  # 더미: 45~30분 전 15분 동안 폭주
+            rows.append((minute, topic, int(per_min * surge * rng.uniform(0.85, 1.15))))
+    return pd.DataFrame(rows, columns=["minute", "topic", "messages"])
+
+
 @dataset(_TTL_B)
 def get_payment_attempts(hours: int = 6) -> pd.DataFrame:
     """결제 시도 한 건 = 한 줄 (gold_b.payment_attempts 뷰). 컬럼: payment_id, order_id, attempt_no, pg,
@@ -545,6 +566,32 @@ def get_payment_attempts(hours: int = 6) -> pd.DataFrame:
             "loaded_at": completed + pd.Timedelta(seconds=40),
         }
     ).sort_values("completed_at")
+
+
+@dataset(_TTL_B, allow_empty=True)
+def get_duplicate_success(hours: int = 6) -> pd.DataFrame:
+    """성공 결제가 2건 이상인 주문 = 한 줄 (gold_b.payment_attempts 뷰, 시나리오 3 데이터 오염·판정 R5).
+
+    최근 hours 시간에 적재된(loaded_at) 성공 결제의 주문만 본다. 중복 행의 completed_at 은 원래 결제 시각이라
+    과거일 수 있어서다. 컬럼: order_id, success_count, payment_ids(쉼표로 이음), pgs, first_completed_at(UTC),
+    last_completed_at(UTC), last_loaded_at(UTC). 평소에는 0줄이 정상이라 실데이터가 비어도 더미로 바꾸지 않는다.
+    """
+    now = pd.Timestamp.now(tz="UTC").floor("s")
+    rows = []
+    for i in range(2):  # 더미: 오염(성공 결제 중복) 주입 직후처럼 두 주문
+        done = now - pd.Timedelta(hours=3 + i)
+        rows.append(
+            {
+                "order_id": f"00000000-0000-4000-8000-00000000000{i + 1}",
+                "success_count": 2,
+                "payment_ids": f"00000000-0000-4000-9000-0000000000{i + 1}1,00000000-0000-4000-9000-0000000000{i + 1}2",
+                "pgs": "PG_A",
+                "first_completed_at": done,
+                "last_completed_at": done + pd.Timedelta(seconds=2),
+                "last_loaded_at": now - pd.Timedelta(minutes=2 + i),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 @dataset(_TTL_B)
@@ -1256,6 +1303,50 @@ def _real_reprocess_events(*, query=None, now=None) -> pd.DataFrame:
     return df
 
 
+DUPLICATE_HOURS = 6  # 성공 결제 중복을 찾는 최근 적재 시간 (시나리오 3)
+INFLOW_MINUTES = 180  # 토픽별 유입을 보는 최근 분 (시나리오 2, 지연 그래프와 같은 길이)
+
+
+def _real_duplicate_success(hours: int = 6, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.payment_attempts 뷰: 최근 hours 시간에 적재된 성공 결제의 주문 중 성공이 2건 이상인 주문 (판정 R5와 같은 방식).
+    뷰가 원장 전체를 읽어서 시간 폴더 조건은 쓸 수 없다. 대시보드 역할에 뷰(payment_states·payment_attempts) 읽기 권한이 필요하다."""
+    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(hours=hours)
+    df = (query or _athena)(
+        "SELECT t.order_id, count(*) AS success_count,"
+        " array_join(array_agg(t.payment_id ORDER BY t.completed_at), ',') AS payment_ids,"
+        " array_join(array_agg(DISTINCT t.pg), ',') AS pgs,"
+        " min(t.completed_at) AS first_completed_at, max(t.completed_at) AS last_completed_at,"
+        " max(t.loaded_at) AS last_loaded_at"
+        " FROM gold_b.payment_attempts t"
+        " WHERE t.status = 'SUCCESS' AND t.order_id IN (SELECT order_id FROM gold_b.payment_attempts"
+        f" WHERE status = 'SUCCESS' AND loaded_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}')"  # loaded_at 은 UTC
+        " GROUP BY t.order_id HAVING count(*) > 1"
+        " ORDER BY last_loaded_at DESC LIMIT 200"
+    )
+    df["success_count"] = pd.to_numeric(df["success_count"], errors="coerce")
+    for c in ("first_completed_at", "last_completed_at", "last_loaded_at"):
+        df[c] = _utc(df[c])
+    return df
+
+
+def _real_topic_inflow(minutes: int = 180, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.topic_messages 의 최근 minutes 분, 1분 × 토픽 메시지 수 (Kafka 시각, UTC). 시간 폴더 조건을 같이 준다.
+    적재 잡은 1분 묶음으로 쓰므로 지금 분과 직전 분은 아직 덜 찼을 수 있어 뺀다 (그래프 끝이 꺼져 보이지 않게)."""
+    end = (now or pd.Timestamp.now(tz="UTC")).floor("min") - pd.Timedelta(minutes=1)
+    start = end - pd.Timedelta(minutes=minutes)
+    df = (query or _athena)(
+        "SELECT date_trunc('minute', kafka_timestamp) AS minute, topic, count(*) AS messages"
+        " FROM gold_b.topic_messages"
+        f" WHERE ({_hour_partitions(start, end)})"
+        f" AND kafka_timestamp >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # kafka_timestamp 는 UTC
+        f" AND kafka_timestamp < TIMESTAMP '{end:%Y-%m-%d %H:%M:%S}'"
+        " GROUP BY 1, 2 ORDER BY 1, 2"
+    )
+    df["minute"] = _utc(df["minute"])
+    df["messages"] = pd.to_numeric(df["messages"], errors="coerce")
+    return df
+
+
 if ATHENA_WORKGROUP:
     # 파이프라인 상태 > 지연·점검 탭도 실데이터를 쓰게 한다 (못 읽으면 그 탭은 기존처럼 더미로 대체)
     _REAL["get_bronze_lag"] = _real_bronze_lag
@@ -1263,6 +1354,9 @@ if ATHENA_WORKGROUP:
     _REAL["get_payment_attempts"] = _real_payment_attempts
     _REAL["get_malformed_events"] = _real_malformed_events
     _REAL["get_reprocess_events"] = _real_reprocess_events
+    # 시나리오 2·3 (토픽별 유입, 성공 결제 중복). 비어 있는 것이 정상이거나 신호라 비어도 더미로 바꾸지 않는다
+    _REAL["get_topic_inflow"] = _real_topic_inflow
+    _REAL["get_duplicate_success"] = _real_duplicate_success
 
 
 def _ago(sec: float) -> str:
