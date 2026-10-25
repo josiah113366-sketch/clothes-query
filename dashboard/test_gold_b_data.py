@@ -122,6 +122,19 @@ st.cache_data.clear()   # 앞에서 더미 칸을 보려고 부른 결과가 남
 fallback = data.get_payment_attempts(6)
 check("조회가 실패하면 더미로 대체하고 더미 목록에 넣음",
       (len(fallback) > 0, "get_payment_attempts" in data.USING_DUMMY), (True, True))
+EMPTY = {   # 실데이터 연결은 됐는데 결과가 0건인 경우 (형식 오류·재처리 기록은 평소 0건이 정상)
+    "get_malformed_events": lambda: data._real_malformed_events(query=FakeAthena(MALFORMED_COLS, []), now=NOW),
+    "get_reprocess_events": lambda: data._real_reprocess_events(query=FakeAthena(REPROCESS_COLS, []), now=NOW),
+}
+data._REAL.update(EMPTY)
+data.USING_DUMMY.clear()
+st.cache_data.clear()
+check("빈 실데이터: 형식 오류·재처리 기록은 더미 대신 빈 표 그대로 (화면에 0건)",
+      (len(data.get_malformed_events()), len(data.get_reprocess_events()), sorted(data.USING_DUMMY)), (0, 0, []))
+data._REAL["get_malformed_events"] = broken
+st.cache_data.clear()
+check("형식 오류도 조회가 실패하면 더미로 대체",
+      (len(data.get_malformed_events()) > 0, "get_malformed_events" in data.USING_DUMMY), (True, True))
 data._REAL.clear()
 data.USING_DUMMY.clear()
 
@@ -160,6 +173,17 @@ else:
         check(f"화면 {page} ({label}): 오류 없이 열림", [str(e.value) for e in at.exception], [])
         check(f"화면 {page} ({label}): 더미 안내는 더미일 때만",
               any(c.value.startswith(note) for c in at.caption), label == "더미")
+    for page, want in (("pages_data/malformed.py", "형식 오류가 없습니다 (0건)"),
+                       ("pages_data/reprocess.py", "재처리 기록이 없습니다 (0건)")):
+        data._REAL.clear()
+        data._REAL.update(EMPTY)
+        data.USING_DUMMY.clear()
+        st.cache_data.clear()
+        at = AppTest.from_file(page, default_timeout=30).run()
+        check(f"화면 {page} (빈 실데이터): 오류 없이 열림", [str(e.value) for e in at.exception], [])
+        shown = [str(e.value) for e in list(at.success) + list(at.info)]
+        check(f"화면 {page} (빈 실데이터): 더미 대신 0건 안내, 더미 안내 없음",
+              (any(want in s for s in shown), any(c.value.startswith(note) for c in at.caption)), (True, False))
     data._REAL.clear()
     st.cache_data.clear()
     at = AppTest.from_file("pages_data/pipeline.py", default_timeout=30).run()

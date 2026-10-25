@@ -84,14 +84,14 @@ check("유입: 시간 폴더 조건(02~05시)과 덜 찬 지금 분·직전 분 
 data._REAL.update({
     "get_duplicate_success": lambda hours=6: data._real_duplicate_success(hours, query=FakeAthena(DUP_COLS, [])),
     "get_topic_inflow": lambda minutes=180: data._real_topic_inflow(minutes, query=FakeAthena(INFLOW_COLS, [])),
-    "get_malformed_events": lambda: pd.DataFrame(columns=list(data.get_malformed_events.__wrapped__().columns)),
+    "get_payment_attempts": lambda hours=6: pd.DataFrame(columns=list(data.get_payment_attempts.__wrapped__(6).columns)),
 })
 data.USING_DUMMY.clear()
 st.cache_data.clear()
 check("빈 실데이터: 성공 결제 중복·유입은 빈 표 그대로 (더미 목록에 없음)",
       (len(data.get_duplicate_success(6)), len(data.get_topic_inflow(180)), sorted(data.USING_DUMMY)), (0, 0, []))
-check("빈 실데이터: 다른 화면(형식 오류)은 지금처럼 더미로 대체",
-      (len(data.get_malformed_events()) > 0, "get_malformed_events" in data.USING_DUMMY), (True, True))
+check("빈 실데이터: 결제 시도는 지금처럼 더미로 대체 (allow_empty 아님)",
+      (len(data.get_payment_attempts(6)) > 0, "get_payment_attempts" in data.USING_DUMMY), (True, True))
 
 
 def broken(*args, **kwargs):
