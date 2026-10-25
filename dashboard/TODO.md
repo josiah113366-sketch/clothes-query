@@ -35,7 +35,7 @@
 |---|---|---|---|---|---|---|
 | B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | 은서 | 완료 (#107, #110) | 시각은 UTC 저장. workgroup 환경변수가 있을 때만 등록. 결제 관제는 대시보드 역할에 뷰 `payment_states`·`payment_attempts` 읽기 권한(F3)이 있어야 실데이터 |
 | B2 | `gold_b.anomaly` 컬럼 확정 후 이상탐지 화면 맞춤 | 탐지 담당의 표 정의 | `agent` | | 대기 | 지금 컬럼은 임시 |
-| B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | | 대기 | |
+| B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | 은서 | 검토 대기 | `dashboard/gold-b-reliability`. 최근 3시간을 Athena 조회 한 번으로 점검, 결과는 정상/확인 필요/문제, 정상이 아니면 경고. 질문은 `agent/reliability`·조사 도구 `ledger_reliability`와 같음 |
 | B4 | 파이프라인 상태의 "평소 범위" 기준(`NORMAL_MAX_SEC`, 현재 1,020초)과 경고 규칙 확정 | 실측 지연 분포 | `gold-b` / `agent` | | 대기 | 15분 파일 주기 톱니 |
 | B5 | 형식 오류 화면의 현재 `rule_version` 선택 방식 확정 | 공통 규칙 YAML 버전 운영 방식 | `gold-b` | | 대기 | |
 | B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `silver_reviews_runs` 조회 (`get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_analysis_status`, `get_model_runs`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 코드 완료, 권한 apply·이미지 배포 대기 | 2026-10-25 더미 완전 제거(`model_io.py`). 못 읽으면 '미연결'. 읽기 권한은 dashboard-access `enable_review_score_reads` |
