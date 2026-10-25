@@ -183,6 +183,7 @@ gitGraph
 | `agent/silver-conf` | [agent-silver-conf.md](tasks/agent-silver-conf.md) | 머지됨 (PR #108) | 2026-10-24 |
 | `agent/test-anomaly` | [agent-test-anomaly.md](tasks/agent-test-anomaly.md) | 머지됨 (PR #105) | 2026-10-24 |
 | `agent/r6-enable` | [agent-r6-enable.md](tasks/agent-r6-enable.md) | 진행 중 | |
+| `agent/r6-per-order` | [agent-r6-per-order.md](tasks/agent-r6-per-order.md) | 진행 중 | |
 
 
 ### dashboard
