@@ -25,3 +25,8 @@ output "latest_view_name" {
   description = "Gold 가 읽는 Athena 뷰 이름(후기마다 model_version_no 최대 결과). 데이터베이스는 database_name output."
   value       = aws_glue_catalog_table.latest_view.name
 }
+
+output "status_view_name" {
+  description = "후기 단위 점수 상태 뷰 이름(속성없음/점수있음). 데이터베이스는 database_name output."
+  value       = aws_glue_catalog_table.status_view.name
+}

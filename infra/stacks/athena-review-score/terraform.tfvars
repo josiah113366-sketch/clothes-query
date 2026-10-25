@@ -11,5 +11,7 @@ log_table_prefix               = "silver/review_score_log_iceberg"
 log_table_name                 = "review_score_log"
 staging_log_table_name         = "staging_review_score_log"
 latest_view_name               = "review_aspect_scores_latest"
+status_view_name               = "review_score_status_latest"
+comparison_model_versions      = ["2.4b_score_s2r"]
 silver_reviews_prefix          = "silver/runtime/reviews"
 silver_reviews_runs_table_name = "silver_reviews_runs"

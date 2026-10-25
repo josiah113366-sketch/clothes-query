@@ -104,6 +104,18 @@ variable "latest_view_name" {
   default     = "review_aspect_scores_latest"
 }
 
+variable "status_view_name" {
+  description = "후기 단위 점수 상태 뷰 이름(속성없음/점수있음). Terraform 이 Glue 뷰로 만든다."
+  type        = string
+  default     = "review_score_status_latest"
+}
+
+variable "comparison_model_versions" {
+  description = "비교용 모델 버전 목록. 읽기 뷰의 버전 선택에서 제외한다."
+  type        = list(string)
+  default     = ["2.4b_score_s2r"]
+}
+
 variable "bytes_scanned_cutoff" {
   description = "쿼리당 스캔 한도(바이트, 최소 10MB). 기본 10GB."
   type        = number
