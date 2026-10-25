@@ -320,7 +320,7 @@ def _spark_uri(uri):
     return "s3a://" + uri[5:] if uri.startswith("s3://") else uri
 
 
-def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
+def resolve_inputs(inputs, suffixes=(".json", ".jsonl"), *, max_inventory_files=10000):
     """Driver는 파일 메타데이터만 고정한다. 파일 내용은 Executor가 읽는다."""
     resolved, inventory = {}, []
     seen = set()
@@ -364,7 +364,7 @@ def resolve_inputs(inputs, suffixes=(".json", ".jsonl")):
             if path in seen:
                 raise ValueError("중복·겹친 입력 파일이 있습니다")
             seen.add(path)
-        if len(inventory) > 10000 or any(item["size"] > 64 * 1024 * 1024 for item in inventory):
+        if (max_inventory_files is not None and len(inventory) > max_inventory_files) or any(item["size"] > 64 * 1024 * 1024 for item in inventory):
             raise ValueError("첫 실행 한도: 10,000개 파일, 파일당 64MiB. 초과 시 임의로 자르지 않습니다")
         resolved[name] = sorted(files)
     return resolved, inventory

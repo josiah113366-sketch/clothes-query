@@ -82,7 +82,7 @@ class GoldPublisher:
                 or (digest and old.get("Parameters", {}).get("source_manifest_sha256") != digest)):
             raise PublicationError("기존 Gold 파티션이 다릅니다; 교체하지 않습니다")
 
-    def publish(self, run_id):
+    def publish(self, run_id, advertise=True):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", run_id):
             raise PublicationError("Gold run_id 오류")
         source = self.base + f"/runs/{run_id}/manifest.json"
@@ -121,6 +121,11 @@ class GoldPublisher:
             for name, table in tables.items():
                 values = [self.channel, run_id] if name == "refresh_holds" else [run_id]
                 self.register(name + "_runs", table, values, manifest["outputs"][name], digest)
+            if not advertise:
+                # Backfill drafts remain directly queryable by run_id, but do
+                # not replace the dashboard's latest complete input inventory.
+                state.update(pending_run_id=None, pending_completed_at=None)
+                return {"channel": self.channel, "run_id": run_id, "status": "STAGED"}
             registry_path = self.base + "/catalog/completed/"
             self.register("gold_runs", registry, [self.channel], self.store.uri(registry_path))
             completed_key = registry_path + run_id + ".parquet"
@@ -162,6 +167,8 @@ def main():
     parser.add_argument("--config-uri", required=True)
     parser.add_argument("--database", required=True)
     parser.add_argument("--recover-stopped-owner")
+    parser.add_argument("--athena-workgroup", default="")
+    parser.add_argument("--athena-output", default="")
     args = parser.parse_args()
     s3 = boto3.client("s3", region_name="ap-northeast-1")
     parsed = urlsplit(args.config_uri)
@@ -170,12 +177,27 @@ def main():
         config = json.loads(response["Body"].read())
     finally:
         response["Body"].close()
+    if config.get("mode") == "demo":
+        from pipelines.funnel_demo import verify_complete
+        print(encode(verify_complete(config)).decode())
+        return
+    if config.get("mode") == "incremental" and (not args.athena_workgroup or not args.athena_output.startswith("s3://")):
+        raise PublicationError("증분 공개에는 Athena 검증 작업그룹·결과 경로가 필요합니다")
     store = S3Store(config["output_root"], s3)
     publisher = GoldPublisher(store, boto3.client("glue", region_name="ap-northeast-1"),
                               args.database, config["job"])
     if args.recover_stopped_owner:
         publisher.recover(args.recover_stopped_owner)
-    print(encode(publisher.publish(config["run_id"])).decode())
+    advertise = True
+    if config.get("mode") == "incremental":
+        from pipelines.funnel_demo import read_bytes
+        manifest = json.loads(read_bytes(config["output_root"].rstrip("/") +
+            "/gold_a/runtime/funnels/runs/" + config["run_id"] + "/manifest.json"))
+        advertise = manifest["batch"]["remaining_files"] == 0
+    print(encode(publisher.publish(config["run_id"], advertise=advertise)).decode())
+    if config.get("mode") == "incremental":
+        from pipelines.funnel_control import acknowledge
+        print(encode(acknowledge(config, args.database, args.athena_workgroup, args.athena_output)).decode())
 
 
 if __name__ == "__main__":
