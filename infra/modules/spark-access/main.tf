@@ -41,6 +41,29 @@ resource "aws_iam_role_policy" "funnel_s3" {
   })
 }
 
+resource "aws_iam_role_policy" "funnel_incremental" {
+  count = local.funnel_enabled ? 1 : 0
+  name  = "funnel-incremental-control"
+  role  = aws_iam_role.this["driver"].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "WriteNextFunnelRequest"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = ["${var.bucket_arn}/pipelines/requests/funnels-incremental/*"]
+      },
+      {
+        Sid      = "ReadFunnelHoldPartitions"
+        Effect   = "Allow"
+        Action   = ["glue:GetPartitions"]
+        Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/gold_a", "${local.glue_base}:table/gold_a/refresh_holds_runs"]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "funnel_glue" {
   count = local.funnel_enabled ? 1 : 0
   name  = "funnel-existing-tables-publication"
