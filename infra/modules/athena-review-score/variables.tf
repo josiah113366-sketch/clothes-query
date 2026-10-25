@@ -133,6 +133,21 @@ variable "latest_view_name" {
   default     = "review_aspect_scores_latest"
 }
 
+variable "status_view_name" {
+  description = <<-EOT
+    후기 단위 점수 상태 뷰 이름. 점수 로그 기준 후기별 최신 버전(비교용 제외) 한 행과 score_status(속성없음/점수있음)를 보여 준다.
+    Gold 가 Silver 후기와 LEFT JOIN 해서 미분석(로그에 없음)을 판단한다.
+  EOT
+  type        = string
+  default     = "review_score_status_latest"
+}
+
+variable "comparison_model_versions" {
+  description = "비교용 모델 버전 목록. 두 읽기 뷰의 버전 선택에서 제외한다(이 모델만 점수를 낸 후기는 Gold 로 들어가지 않는다). 비어 있으면 제외하지 않는다."
+  type        = list(string)
+  default     = ["2.4b_score_s2r"]
+}
+
 variable "bytes_scanned_cutoff" {
   description = "쿼리 하나가 스캔할 수 있는 최대 바이트(비용 안전장치). 최소 10,000,000 (10MB). 기본 10GB."
   type        = number

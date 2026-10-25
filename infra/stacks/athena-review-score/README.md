@@ -108,6 +108,8 @@ aws athena get-query-execution --query-execution-id <ID> --region ap-northeast-1
 
 ## Gold 가 읽는 방법: 뷰 `review_aspect_scores_latest`
 
+> **변경(2026-10-26):** 뷰의 버전 선택을 점수 테이블 대신 점수 로그(`review_score_log`)에서 하고 비교용 모델 버전(`comparison_model_versions`, 기본 `2.4b_score_s2r`)을 뺀다. 이름·열·타입은 그대로다. 새 버전이 속성 0개로 분석한 후기에 옛 버전 점수가 되살아나지 않고, 비교용 모델만 점수를 낸 후기는 Gold 로 들어가지 않는다. 후기 단위 상태 뷰 `review_score_status_latest`(`score_status`: 속성없음/점수있음)가 추가됐다. 적용은 plan 확인 후 인프라 담당이 하고, 적용 뒤 `sql/verify_latest_view.sql` 로 확인한다. Terraform 으로 만든 뷰가 Athena 에서 정상 뷰로 읽히는지는 apply 후 확인한다.
+
 Gold 는 점수 테이블이 아니라 **뷰**를 읽는다. 뷰가 "후기마다 `model_version_no` 가 가장 큰 결과(그 번호의 속성 전부)"를 돌려준다.
 뷰 이름은 `latest_view_name` 변수(기본 `review_aspect_scores_latest`)이고 output `latest_view_name`·SSM 설정의 `latest_view` 로도 확인한다. 데이터베이스는 `clothes_query_dev_review_score`.
 

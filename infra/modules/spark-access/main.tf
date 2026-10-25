@@ -169,7 +169,9 @@ locals {
   review_scores  = "pipelines/input-manifests/review-scores/"
   review_results = "athena-results/review-score/"
   review_iceberg = "silver/review_aspect_scores_iceberg/"
-  review_db      = "clothes_query_dev_review_score"
+  # 최신 점수 뷰가 버전 선택에 읽는 점수 로그 Iceberg 테이블 위치(읽기 전용).
+  review_log_iceberg = var.review_log_iceberg_prefix
+  review_db          = "clothes_query_dev_review_score"
 }
 
 # Managed policies avoid the existing Driver's aggregate inline-policy size limit.
@@ -203,10 +205,10 @@ resource "aws_iam_policy" "review_driver" {
     Version = "2012-10-17"
     Statement = [
       { Sid = "ExistingReviewWorkgroup", Effect = "Allow", Action = ["athena:GetWorkGroup", "athena:StartQueryExecution", "athena:GetQueryExecution", "athena:GetQueryResults", "athena:StopQueryExecution"], Resource = ["arn:aws:athena:ap-northeast-1:${data.aws_caller_identity.current.account_id}:workgroup/clothes-query-dev-athena-review-score"] },
-      { Sid = "ReviewSourceMetadata", Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"], Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/${local.review_db}", "${local.glue_base}:table/${local.review_db}/review_aspect_scores_latest", "${local.glue_base}:table/${local.review_db}/review_aspect_scores"] },
-      { Sid = "ReadOnlyScoreIceberg", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/${local.review_iceberg}*"] },
+      { Sid = "ReviewSourceMetadata", Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"], Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/${local.review_db}", "${local.glue_base}:table/${local.review_db}/review_aspect_scores_latest", "${local.glue_base}:table/${local.review_db}/review_score_status_latest", "${local.glue_base}:table/${local.review_db}/review_aspect_scores", "${local.glue_base}:table/${local.review_db}/review_score_log"] },
+      { Sid = "ReadOnlyScoreIceberg", Effect = "Allow", Action = ["s3:GetObject"], Resource = ["${var.bucket_arn}/${local.review_iceberg}*", "${var.bucket_arn}/${local.review_log_iceberg}*"] },
       { Sid = "ReviewResultsAndFrozenInput", Effect = "Allow", Action = local.object_actions, Resource = ["${var.bucket_arn}/${local.review_results}*", "${var.bucket_arn}/${local.review_scores}*"] },
-      { Sid = "ReviewQueryListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in [local.review_iceberg, local.review_results, local.review_scores] : "${p}*"] } } },
+      { Sid = "ReviewQueryListing", Effect = "Allow", Action = ["s3:ListBucket"], Resource = [var.bucket_arn], Condition = { StringLike = { "s3:prefix" = [for p in [local.review_iceberg, local.review_log_iceberg, local.review_results, local.review_scores] : "${p}*"] } } },
       { Sid = "PublishExistingReviewGoldTables", Effect = "Allow", Action = ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition", "glue:CreatePartition"], Resource = ["${local.glue_base}:catalog", "${local.glue_base}:database/gold_a", "${local.glue_base}:table/gold_a/review_product_daily_runs", "${local.glue_base}:table/gold_a/review_aspect_daily_runs"] }
     ]
   })

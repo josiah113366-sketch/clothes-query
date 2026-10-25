@@ -23,3 +23,8 @@ output "latest_view_name" {
   description = "Gold 가 읽는 Athena 뷰 이름(후기마다 model_version_no 최대 결과)."
   value       = module.athena_review_score.latest_view_name
 }
+
+output "status_view_name" {
+  description = "후기 단위 점수 상태 뷰 이름(속성없음/점수있음)."
+  value       = module.athena_review_score.status_view_name
+}
