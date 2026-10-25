@@ -89,6 +89,14 @@ check("원인 리포트: 시각 2개가 UTC, claims·problems는 파이썬 목�
 check("원인 리포트: investigation_reports를 anomaly_current와 합치고, dt는 문자열 비교로 최근 7일",
       ("FROM agent.investigation_reports r" in q.sql[0], "JOIN gold_b.anomaly_current a ON a.anomaly_id = r.anomaly_id" in q.sql[0],
        "r.dt >= '2026-10-18'" in q.sql[0]), (True, True, True))
+for missing in (None, float("nan"), pd.NA, ""):
+    # Athena NULL becomes NaN in some pandas versions when mixed with JSON strings.
+    frame = FakeAthena(RCA_COLS, RCA)("fixture").astype(object)
+    frame.at[0, "problems"] = missing
+    decoded = data._real_rca_reports(7, query=lambda sql: frame.copy(), now=NOW)
+    check(f"nullable report problems: {missing!r}", decoded.problems.iloc[0], [])
+    check("nullable problems preserves claims", decoded.claims.iloc[0], rca.claims.iloc[0])
+
 empty_rca = data._real_rca_reports(7, query=FakeAthena(RCA_COLS, []), now=NOW)
 check("원인 리포트: 결과가 없으면 빈 표 (아직 조사 전 = 정상)", len(empty_rca), 0)
 
