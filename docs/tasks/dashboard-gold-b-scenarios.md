@@ -1,6 +1,6 @@
 # 작업 지시서: dashboard/gold-b-scenarios
 
-> 상태: 검토 대기 · 브랜치: `dashboard/gold-b-scenarios` (최신 `main` `25feba2`) · 담당: 은서 (`dashboard/TODO.md` B10) · 다음 작업: PR (사용자), 배포 (main 자동 배포 #113), 결제 뷰 읽기 권한 (재영 님) (2026-10-25 사용자: "2번 필요한 대시보드 만들어줘")
+> 상태: 완료 (#117, 2026-10-25 머지) · 브랜치: `dashboard/gold-b-scenarios` (최신 `main` `25feba2`) · 담당: 은서 (`dashboard/TODO.md` B10) · 다음 작업: PR (사용자), 배포 (main 자동 배포 #113), 결제 뷰 읽기 권한 (재영 님) (2026-10-25 사용자: "2번 필요한 대시보드 만들어줘")
 
 ## 목표
 

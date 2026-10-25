@@ -1,6 +1,7 @@
 """[데이터 관리] 형식 오류. 데이터: Gold B malformed_events, malformed_messages 뷰.
 
-시나리오 3(스키마 오염): 데이터 형식이 깨졌는가? 어디서, 언제부터인가?
+형식 오류(판정 R4): 데이터 형식이 깨졌는가? 어디서, 언제부터인가?
+평소 0건이 정상이다. 시나리오 3(데이터 오염)은 형식이 맞는 업무 규칙 위반이라 결제 관제에서 본다 (2026-10-23 정의).
 읽는 법 (노션):
   - 오류 사유 4가지: PARSE_ERROR / MISSING_FIELD / TYPE_MISMATCH / INVALID_VALUE.
   - malformed_events 는 '오류 하나 = 한 줄'이라 COUNT(*) 로 세면 깨진 메시지 수가 부풀어 보인다.
@@ -22,6 +23,18 @@ require_role("data")
 st.title("형식 오류")
 
 ev = data.get_malformed_events().copy()
+if ev.empty:
+    # 실데이터에 형식 오류가 없으면 더미 대신 0건을 보여 준다 (2026-10-25). 조회가 실패하면 data 가 더미로 대체한다
+    ui.kpis(
+        [
+            {"label": "깨진 메시지 수", "value": "0", "unit": "건", "sub": "위치 기준", "color": charts.GOOD},
+            {"label": "오류(필드) 건수", "value": "0", "unit": "건", "sub": "필드 기준"},
+            {"label": "오염 시작(KST)", "value": "-", "sub": "가장 이른 kafka_timestamp"},
+        ]
+    )
+    st.success(f"최근 {data.MALFORMED_HOURS}시간 동안 형식 오류가 없습니다 (0건).")
+    st.caption(f"최근 {data.MALFORMED_HOURS}시간의 형식 오류입니다.")
+    st.stop()
 # 규칙 버전: 현재 버전만 센다. 더미에서는 하나뿐이라 선택지가 하나다.
 ver = st.selectbox("규칙 버전(현재 버전만 집계)", sorted(ev.rule_version.unique()))
 ev = ev[ev.rule_version == ver]

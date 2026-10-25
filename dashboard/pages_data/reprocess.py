@@ -21,6 +21,11 @@ require_role("data")
 st.title("재처리 이력")
 
 ev = data.get_reprocess_events().copy()
+if ev.empty:
+    # 재처리 기록이 없으면 더미 대신 0건을 보여 준다 (2026-10-25). 조회가 실패하면 data 가 더미로 대체한다
+    st.info(f"최근 {data.REPROCESS_DAYS}일 동안 재처리 기록이 없습니다 (0건).")
+    st.caption(f"최근 {data.REPROCESS_DAYS}일의 재처리 기록입니다. 시각은 KST로 변환해 보여줍니다.")
+    st.stop()
 for col in ("at", "window_start", "window_end"):
     ev[col] = data.to_kst(ev[col])
 ev = ev.sort_values(["request_id", "at"])

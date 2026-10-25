@@ -594,12 +594,13 @@ def get_duplicate_success(hours: int = 6) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-@dataset(_TTL_B)
+@dataset(_TTL_B, allow_empty=True)
 def get_malformed_events() -> pd.DataFrame:
     """깨진 필드 한 건 = 한 줄 (malformed_events). 한 메시지에 오류가 여러 개면 여러 줄이다.
     컬럼: topic, kafka_partition, kafka_offset, kafka_timestamp(UTC), field, reason, rule_version.
     reason 은 PARSE_ERROR / MISSING_FIELD / TYPE_MISMATCH / INVALID_VALUE 네 가지.
-    메시지 수는 COUNT(*) 가 아니라 위치(topic, partition, offset) 기준으로 센다 (malformed_messages 뷰)."""
+    메시지 수는 COUNT(*) 가 아니라 위치(topic, partition, offset) 기준으로 센다 (malformed_messages 뷰).
+    평소 0건이 정상이라 실데이터가 비어도 더미로 바꾸지 않는다. 화면이 0건으로 보여 준다 (2026-10-25)."""
     rng = np.random.default_rng(_SEED + 8)
     end = pd.Timestamp.now(tz="UTC").floor("min")
     rows = []
@@ -677,10 +678,11 @@ def get_anomalies() -> pd.DataFrame:
     )
 
 
-@dataset(_TTL_B)
+@dataset(_TTL_B, allow_empty=True)
 def get_reprocess_events() -> pd.DataFrame:
     """재처리 단계 한 건 = 한 줄 (reprocess_events). 현재 상태 = 요청별 마지막 줄의 step.
-    step: REQUESTED, APPROVED/REJECTED, STARTED, LEDGER_REPLACED, FAILED, REDETECTED, VERIFIED"""
+    step: REQUESTED, APPROVED/REJECTED, STARTED, LEDGER_REPLACED, FAILED, REDETECTED, VERIFIED
+    요청이 없으면 0건이 정상이라 실데이터가 비어도 더미로 바꾸지 않는다. 화면이 0건으로 보여 준다 (2026-10-25)."""
     end = pd.Timestamp.now(tz="UTC").floor("60min")
     rows = [
         (
@@ -1377,7 +1379,8 @@ def _real_rca_reports(days: int = RCA_DAYS, *, query=None, now=None) -> pd.DataF
 if ATHENA_WORKGROUP:
     # 파이프라인 상태 > 지연·점검 탭도 실데이터를 쓰게 한다 (못 읽으면 그 탭은 기존처럼 더미로 대체)
     _REAL["get_bronze_lag"] = _real_bronze_lag
-    # 결제 관제·형식 오류·재처리 이력 (TODO B1). 못 읽거나 결과가 없으면 각 화면은 더미로 대체한다
+    # 결제 관제·형식 오류·재처리 이력 (TODO B1). 못 읽으면 더미로 대체한다. 결과가 없으면 결제 관제는 더미,
+    # 형식 오류·재처리 이력은 0건으로 보인다 (allow_empty, 2026-10-25)
     _REAL["get_payment_attempts"] = _real_payment_attempts
     _REAL["get_malformed_events"] = _real_malformed_events
     _REAL["get_reprocess_events"] = _real_reprocess_events
