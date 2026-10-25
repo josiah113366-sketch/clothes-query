@@ -637,26 +637,42 @@ def to_malformed_messages(events: pd.DataFrame) -> pd.DataFrame:
     return g
 
 
-@dataset(_TTL_B)
+ANOMALY_HOURS = 48  # 이상탐지 화면이 읽는 최근 시간
+RULE_LABELS = {  # 탐지 규칙 한글 이름 (data.py와 화면이 같이 쓴다)
+    "R1_PG_FAILURES": "PG 장애",
+    "R3_BRONZE_LAG": "Bronze 적재 지연",
+    "R4_MALFORMED": "형식 오류",
+    "R5_DUPLICATE_SUCCESS": "성공 결제 중복",
+    "R6_ORDER_TOTAL_MISMATCH": "총액 불일치",
+}
+
+
+@dataset(_TTL_B, allow_empty=True)
 def get_anomalies() -> pd.DataFrame:
-    """gold_b.anomaly (탐지 담당 정의). 컬럼은 임시: detected_at(UTC), scenario, target, severity, reason.
-    시나리오: PG 장애 / 트래픽 폭주 / 스키마 오염. 실제 컬럼이 정해지면 이 함수만 맞춘다."""
+    """gold_b.anomaly_current (탐지 담당 정의, 2026-10-25 확정). 이상이 없는 것(빈 표)이 정상 상태라 더미로 바꾸지 않는다.
+    컬럼: anomaly_id, rule_id, anomaly_type, scope_key, observed_value, baseline_value, status(OPEN/RESOLVED), detected_at(UTC)."""
     end = pd.Timestamp.now(tz="UTC").floor("min")
     return pd.DataFrame(
         [
             {
+                "anomaly_id": "a-3f9c01",
+                "rule_id": "R1_PG_FAILURES",
+                "anomaly_type": "PG_FAILURE_SPIKE",
+                "scope_key": "PG_A",
+                "observed_value": 12.0,
+                "baseline_value": 3.0,
+                "status": "OPEN",
                 "detected_at": end - pd.Timedelta(minutes=12),
-                "scenario": "PG 장애",
-                "target": "PG_A",
-                "severity": "높음",
-                "reason": "PG 원인 실패 비율 급증 (PG_TIMEOUT)",
             },
             {
+                "anomaly_id": "a-81be77",
+                "rule_id": "R6_ORDER_TOTAL_MISMATCH",
+                "anomaly_type": "ORDER_TOTAL_MISMATCH",
+                "scope_key": "orders",
+                "observed_value": 30.0,
+                "baseline_value": 0.0,
+                "status": "RESOLVED",
                 "detected_at": end - pd.Timedelta(minutes=95),
-                "scenario": "스키마 오염",
-                "target": "clickstream",
-                "severity": "중간",
-                "reason": "session_id 누락 증가",
             },
         ]
     )
@@ -734,79 +750,55 @@ def get_reliability_checks() -> pd.DataFrame:
     )
 
 
-@dataset(_TTL_B)
-def get_rca_reports() -> pd.DataFrame:
-    """조사 에이전트의 원인 리포트(더미). 이상(anomaly) 한 건 = 리포트 한 건.
+RCA_DAYS = 7  # 원인 리포트 화면이 읽는 최근 일수
 
-    ※ 노션에는 리포트에 무엇을 넣을지 정해진 내용이 없다 (추후 작업). 아래 컬럼은 제안이며
-      조사 에이전트 담당과 맞춘 뒤 바뀔 수 있다.
-    컬럼: anomaly_id, rule(R1~R4), scenario, target, detected_at(UTC), summary(원인 요약),
-          facts(확인된 사실 목록), assumptions(추정 목록), impact(영향 범위), evidence(근거 목록: 표, 확인 내용),
-          action_step(조치 진행: 승인 대기/승인/재처리/재판정/검증), action_at(UTC)
-    확인된 사실과 추정을 분리해 보여주는 것이 핵심이다 (노션: 지표 동시 변화는 조사 단서일 뿐 원인 단정 금지).
-    """
+
+@dataset(_TTL_B, allow_empty=True)
+def get_rca_reports() -> pd.DataFrame:
+    """조사 에이전트의 원인 리포트 (agent.investigation_reports + gold_b.anomaly_current, 2026-10-25 확정).
+    리포트가 없는 것(빈 표, 아직 조사 전)이 정상 상태라 더미로 바꾸지 않는다.
+    핵심 원칙 (노션): 같은 시기에 변한 지표는 조사 단서일 뿐 원인으로 단정하지 않는다
+      -> claims 를 FACT(확인된 사실)와 ASSUMPTION(추정)으로 나눠서 보여준다.
+    컬럼: report_id, anomaly_id, rule_id, scope_key, anomaly_detected_at(UTC), created_at(UTC),
+          cause_layer(PAYMENT/INGEST/DATA_QUALITY/UNKNOWN), conclusion, claims(목록: text, kind, evidence),
+          problems(목록, 검증을 통과하지 못한 점. 없으면 빈 목록), model_id."""
     end = pd.Timestamp.now(tz="UTC").floor("min")
     return pd.DataFrame(
         [
             {
+                "report_id": "rep-3f9c01-1",
                 "anomaly_id": "a-3f9c01",
-                "rule": "R1",
-                "scenario": "PG 장애",
-                "target": "PG_A",
-                "detected_at": end - pd.Timedelta(minutes=12),
-                "summary": "PG_A에서 PG 원인 실패(PG_TIMEOUT)가 최근 15분간 급증했습니다.",
-                "facts": [
-                    "최근 15분 PG_A 결제 중 PG 원인 실패 비율 61% (평소 약 1%)",
-                    "PG_B의 PG 원인 실패 비율은 평소 수준",
-                    "같은 시간 고객 원인 실패 비율에는 변화 없음",
+                "rule_id": "R1_PG_FAILURES",
+                "scope_key": "PG_A",
+                "anomaly_detected_at": end - pd.Timedelta(minutes=12),
+                "created_at": end - pd.Timedelta(minutes=10),
+                "cause_layer": "PAYMENT",
+                "conclusion": "PG_A에서 PG 원인 실패(PG_TIMEOUT)가 최근 15분간 급증했습니다.",
+                "claims": [
+                    {"text": "최근 15분 PG_A 결제 중 PG 원인 실패 비율 61% (평소 약 1%)", "kind": "FACT",
+                     "evidence": [{"tool": "payment_summary"}]},
+                    {"text": "같은 시간 고객 원인 실패 비율에는 변화 없음", "kind": "FACT",
+                     "evidence": [{"tool": "payment_failure_codes"}]},
+                    {"text": "PG_A 쪽 장애일 가능성이 높으나 PG 사의 공지는 확인하지 못함", "kind": "ASSUMPTION", "evidence": []},
                 ],
-                "assumptions": [
-                    "PG_A 쪽 장애일 가능성이 높으나 PG 사의 공지는 확인하지 못함",
-                    "실패한 주문이 다른 PG로 재시도되어 최종 성공했는지는 미확인",
-                ],
-                "impact": "실패 결제 시도 약 40건, 영향 주문 약 35건. 같은 시간 승인 금액 감소 여부는 Gold A 주문·매출에서 확인 필요",
-                "evidence": [
-                    {
-                        "table": "gold_b.payment_attempts",
-                        "finding": "PG_A 실패 코드 분포: PG_TIMEOUT 대부분",
-                    },
-                    {
-                        "table": "gold_b.bronze_lag_snapshots",
-                        "finding": "같은 시간 적재 지연은 평소 범위 (데이터 지연 아님)",
-                    },
-                    {
-                        "table": "gold_b.malformed_messages",
-                        "finding": "같은 시간 깨진 메시지 증가 없음",
-                    },
-                ],
-                "action_step": "승인 대기",
-                "action_at": end - pd.Timedelta(minutes=10),
+                "problems": [],
+                "model_id": "jp.anthropic.claude-haiku-4-5-v1:0",
             },
             {
+                "report_id": "rep-81be77-1",
                 "anomaly_id": "a-81be77",
-                "rule": "R4",
-                "scenario": "스키마 오염",
-                "target": "clickstream",
-                "detected_at": end - pd.Timedelta(minutes=95),
-                "summary": "clickstream 메시지에서 session_id 누락이 증가했습니다.",
-                "facts": [
-                    "최근 2시간 clickstream 깨진 메시지 중 MISSING_FIELD(session_id)가 대부분",
-                    "오염 시작 시점은 가장 이른 kafka_timestamp 기준 약 2시간 전",
+                "rule_id": "R6_ORDER_TOTAL_MISMATCH",
+                "scope_key": "orders",
+                "anomaly_detected_at": end - pd.Timedelta(minutes=95),
+                "created_at": end - pd.Timedelta(minutes=90),
+                "cause_layer": "DATA_QUALITY",
+                "conclusion": "주문 30건의 총액이 상품 합계와 10,000원씩 차이 납니다.",
+                "claims": [
+                    {"text": "대상 30건의 금액 차이가 모두 -10,000원", "kind": "FACT",
+                     "evidence": [{"tool": "reprocess_status"}]},
                 ],
-                "assumptions": ["보내는 쪽(시뮬레이터) 변경이 원인일 수 있으나 변경 이력은 미확인"],
-                "impact": "구매 퍼널 집계(첫 조회→주문 연결)에 영향 가능. 재처리 범위는 오염 시작~원인 수정 시각",
-                "evidence": [
-                    {
-                        "table": "gold_b.malformed_events",
-                        "finding": "field=session_id, reason=MISSING_FIELD 집중",
-                    },
-                    {
-                        "table": "gold_b.topic_messages",
-                        "finding": "유입량은 평소와 같음 (폭주 아님)",
-                    },
-                ],
-                "action_step": "재처리",
-                "action_at": end - pd.Timedelta(minutes=30),
+                "problems": [],
+                "model_id": "jp.anthropic.claude-haiku-4-5-v1:0",
             },
         ]
     )
@@ -1349,6 +1341,41 @@ def _real_topic_inflow(minutes: int = 180, *, query=None, now=None) -> pd.DataFr
     return df
 
 
+def _real_anomalies(hours: int = ANOMALY_HOURS, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.anomaly_current 의 최근 hours 시간. 뷰는 시간 폴더를 내보내지 않아 detected_at 조건만 쓴다."""
+    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(hours=hours)
+    df = (query or _athena)(
+        "SELECT anomaly_id, rule_id, anomaly_type, scope_key, observed_value, baseline_value, status, detected_at"
+        " FROM gold_b.anomaly_current"
+        f" WHERE detected_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # detected_at 은 UTC
+        " ORDER BY detected_at DESC"
+    )
+    for c in ("observed_value", "baseline_value"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["detected_at"] = _utc(df["detected_at"])
+    return df
+
+
+def _real_rca_reports(days: int = RCA_DAYS, *, query=None, now=None) -> pd.DataFrame:
+    """agent.investigation_reports 를 gold_b.anomaly_current 와 anomaly_id 로 합친 최근 days 일.
+    claims·problems 는 JSON 배열 문자열이라 읽은 뒤 파이썬 목록으로 바꾼다 (approval_io.load_report 와 같은 방식).
+    investigation_reports 의 dt 는 STRING 파티션(yyyy-MM-dd)이라 문자열 비교로 최근 날짜만 거른다."""
+    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(days=days)
+    df = (query or _athena)(
+        "SELECT r.report_id, r.anomaly_id, a.rule_id, a.scope_key, a.detected_at AS anomaly_detected_at,"
+        " r.created_at, r.cause_layer, r.conclusion, r.claims, r.problems, r.model_id"
+        " FROM agent.investigation_reports r"
+        " JOIN gold_b.anomaly_current a ON a.anomaly_id = r.anomaly_id"
+        f" WHERE r.dt >= '{start:%Y-%m-%d}'"
+        " ORDER BY r.created_at DESC"
+    )
+    for c in ("anomaly_detected_at", "created_at"):
+        df[c] = _utc(df[c])
+    for c in ("claims", "problems"):
+        df[c] = df[c].apply(lambda v: json.loads(v) if v else [])
+    return df
+
+
 if ATHENA_WORKGROUP:
     # 파이프라인 상태 > 지연·점검 탭도 실데이터를 쓰게 한다 (못 읽으면 그 탭은 기존처럼 더미로 대체)
     _REAL["get_bronze_lag"] = _real_bronze_lag
@@ -1360,6 +1387,9 @@ if ATHENA_WORKGROUP:
     # 시나리오 2·3 (토픽별 유입, 성공 결제 중복). 비어 있는 것이 정상이거나 신호라 비어도 더미로 바꾸지 않는다
     _REAL["get_topic_inflow"] = _real_topic_inflow
     _REAL["get_duplicate_success"] = _real_duplicate_success
+    # 이상탐지·원인 리포트 (2026-10-25, 탐지 담당 직접 연결). 이상·리포트가 없는 것이 정상이라 비어도 더미로 바꾸지 않는다
+    _REAL["get_anomalies"] = _real_anomalies
+    _REAL["get_rca_reports"] = _real_rca_reports
 
 
 def _ago(sec: float) -> str:

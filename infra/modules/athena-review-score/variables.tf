@@ -65,6 +65,18 @@ variable "log_table_prefix" {
   default     = "silver/review_score_log_iceberg"
 }
 
+variable "silver_reviews_prefix" {
+  description = <<-EOT
+    Silver 리뷰 Spark 출력의 루트 prefix(2026-10-25 기준 silver/runtime/reviews). 아래를 읽기 전용으로 쓴다.
+      <이 값>/runs/<run_id>/silver_reviews/   실행(run)별 Parquet 스냅샷 (경로가 실행마다 바뀐다)
+      <이 값>/current.json                      가장 최근 실행을 가리키는 Spark 내부 참조(run_id, status ...)
+      <이 값>/completed/<run_id>.json           실행별 완료 기록
+    이 prefix 의 읽기 권한(S3)은 인프라 담당(재영)이 확인해야 한다. 쓰기 권한은 주지 않는다.
+  EOT
+  type        = string
+  default     = "silver/runtime/reviews"
+}
+
 variable "results_prefix" {
   description = "Athena 쿼리 결과 파일이 쌓이는 prefix(워크그룹 설정). 쿼리마다 작은 파일이 생기므로 수명주기로 지우는 것을 권장(열린 질문)."
   type        = string
@@ -95,6 +107,15 @@ variable "staging_log_table_name" {
   description = "점수 로그 staging Parquet 을 읽는 Hive 외부 테이블 이름."
   type        = string
   default     = "staging_review_score_log"
+}
+
+variable "silver_reviews_runs_table_name" {
+  description = <<-EOT
+    Silver 리뷰 실행 출력을 가리키는 읽기 전용 외부 테이블 이름. run_id 는 파티션 프로젝션(injected)이라 모든 쿼리에 WHERE run_id = '<실행 ID>' 를 써야 한다.
+    나중에 Silver 쪽이 silver.reviews_runs 를 공개하면 select_unscored.py 가 읽는 이름만 바꾸면 되고, 이 테이블은 지운다.
+  EOT
+  type        = string
+  default     = "silver_reviews_runs"
 }
 
 variable "staging_table_name" {

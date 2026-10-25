@@ -200,6 +200,7 @@ gitGraph
 | `dashboard/gold-b-scenarios` | [dashboard-gold-b-scenarios.md](tasks/dashboard-gold-b-scenarios.md) (시나리오 2 토픽별 유입, 시나리오 3 성공 결제 2건 이상인 주문, TODO B10) | 머지됨 (#117) | 2026-10-25 |
 | `dashboard/gold-b-empty-zero` | [dashboard-gold-b-empty-zero.md](tasks/dashboard-gold-b-empty-zero.md) (형식 오류·재처리 이력: 결과가 비면 더미 대신 0건) | 검토 대기 | |
 
+
 ### 그 밖의 영역
 `db`, `conn`, `review-sim`, `review-model`, `gold-a`, `gold-b`, `ci`는 이 문서 도입 후 첫 브랜치를 만들 때 자기 영역 구역(`### <영역>`)을 이 아래에 추가한다.
 
