@@ -1,8 +1,8 @@
-# 소급 작성 초안 (2026-10-23). lemin 확인 후 내용을 고쳐도 된다. 아직 S3 에 올라가지 않았으므로 지금은 어느 필드든 고칠 수 있다.
+# 소급 작성 초안 (2026-10-23). lemin 확인 후 내용을 고쳐도 된다. 2026-10-23 S3 에 올렸고, 2026-10-25 change_type 을 최초에서 메이저로 바꿔 다시 올렸다(s2r 0.1 추가, lemin 승인).
 # released_at 은 합친 모델을 만든 날(2026-10-14)로 넣었다. 실제 배포일로 바꾸려면 여기만 고친다.
 model_version: 2.4b_score_s2c
 model_version_no: 1.0
-change_type: 최초
+change_type: 메이저
 released_at: 2026-10-14
 summary: 점수형 감성 모델(s2c) 첫 배포. LoRA를 기본 모델에 합쳐 SageMaker 실행
 rescore_required: true
