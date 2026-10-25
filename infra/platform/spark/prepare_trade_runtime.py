@@ -13,9 +13,11 @@ PREFIX = 'silver-gold-a'
 CONFIGMAP = PREFIX + '-runtime'
 ENV_NAME = 'AIRFLOW_PIPELINE_RUNTIME'
 IMAGE = re.compile(r'827913617635\.dkr\.ecr\.ap-northeast-1\.amazonaws\.com/clothes-query-dev/silver-gold-a@sha256:[0-9a-f]{64}')
+FUNNEL_ATHENA_WORKGROUP = 'clothes-query-dev-athena-review-score'
+FUNNEL_ATHENA_OUTPUT = 's3://clothes-query-datalake/athena-results/review-score/'
 
 
-def prepare(image=None, trade_publication=False):
+def prepare(image=None, trade_publication=False, *, funnel_athena_workgroup=None, funnel_athena_output=None):
     # ResourceQuota applies to the entire namespace. Gold B may share pipelines,
     # so do not impose the legacy four-Pod quota on unrelated shared workloads.
     objects = [obj for obj in resources('dedicated', namespace=NAMESPACE, name_prefix=PREFIX)
@@ -42,6 +44,18 @@ def prepare(image=None, trade_publication=False):
                 'variants': ['s3://hm-ecommerce-data/seed_v2/product_variant/product_variant.parquet'],
             },
         })
+    if trade_publication and funnel_athena_workgroup is None and funnel_athena_output is None:
+        funnel_athena_workgroup = FUNNEL_ATHENA_WORKGROUP
+        funnel_athena_output = FUNNEL_ATHENA_OUTPUT
+    if funnel_athena_workgroup is not None or funnel_athena_output is not None:
+        if image is None or not funnel_athena_workgroup or not funnel_athena_output:
+            raise ValueError('Funnel Athena settings require an image and both workgroup and output')
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,128}', funnel_athena_workgroup):
+            raise ValueError('Invalid Athena workgroup name')
+        if not re.fullmatch(r's3://clothes-query-datalake/athena-results/[A-Za-z0-9/_-]+/', funnel_athena_output):
+            raise ValueError('Funnel Athena output must be a dedicated datalake Athena results prefix')
+        config.update(funnel_athena_workgroup=funnel_athena_workgroup,
+                      funnel_athena_output=funnel_athena_output)
     if image is not None:
         if not IMAGE.fullmatch(image):
             raise ValueError('Use the confirmed Tokyo business repository with immutable sha256 digest')
@@ -77,10 +91,14 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--image')
     parser.add_argument('--trade-publication', action='store_true')
+    parser.add_argument('--funnel-athena-workgroup')
+    parser.add_argument('--funnel-athena-output')
     parser.add_argument('--existing-helm-values', type=Path)
     parser.add_argument('--helm-overlay', type=Path)
     args = parser.parse_args()
-    objects, config = prepare(args.image, args.trade_publication)
+    objects, config = prepare(args.image, args.trade_publication,
+                              funnel_athena_workgroup=args.funnel_athena_workgroup,
+                              funnel_athena_output=args.funnel_athena_output)
     if args.helm_overlay:
         if not args.image or not args.existing_helm_values:
             parser.error('Helm overlay requires verified image digest and actual existing values')

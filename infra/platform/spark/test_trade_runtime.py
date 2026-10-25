@@ -8,11 +8,32 @@ IMAGE = '827913617635.dkr.ecr.ap-northeast-1.amazonaws.com/clothes-query-dev/sil
 
 
 class TradeRuntimeTests(unittest.TestCase):
+    def test_funnel_athena_settings_are_paired_and_preserve_the_rest_of_the_runtime(self):
+        workgroup = 'clothes-query-dev-athena-review-score'
+        output = 's3://clothes-query-datalake/athena-results/review-score/'
+        objects, config = prepare(IMAGE, trade_publication=True,
+                                  funnel_athena_workgroup=workgroup, funnel_athena_output=output)
+        expected = prepare(IMAGE, trade_publication=True)[1]
+        expected.update(funnel_athena_workgroup=workgroup, funnel_athena_output=output)
+        self.assertEqual(config, expected)
+        cm = next(o for o in objects if o['kind'] == 'ConfigMap' and o['metadata']['namespace'] == 'airflow')
+        import json
+        self.assertEqual(json.loads(cm['data']['config']), expected)
+        for kwargs in [
+            {'funnel_athena_workgroup': workgroup},
+            {'funnel_athena_output': output},
+            {'funnel_athena_workgroup': workgroup, 'funnel_athena_output': 's3://another-bucket/results/'},
+        ]:
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                prepare(IMAGE, **kwargs)
+
     def test_trade_publication_requires_digest_and_uses_fixed_bronze_v2_inputs(self):
         with self.assertRaises(ValueError):
             prepare(trade_publication=True)
         objects, config = prepare(IMAGE, trade_publication=True)
         self.assertEqual((config['silver_database'], config['gold_database']), ('silver', 'gold_a'))
+        self.assertEqual(config['funnel_athena_workgroup'], 'clothes-query-dev-athena-review-score')
+        self.assertEqual(config['funnel_athena_output'], 's3://clothes-query-datalake/athena-results/review-score/')
         self.assertEqual(set(config['reprocess']['inputs']), {'orders', 'order_items', 'payments', 'designs', 'variants'})
         for dataset in ('orders', 'order_items', 'payments'):
             self.assertTrue(config['reprocess']['inputs'][dataset][0].startswith('s3://clothes-query-datalake/bronze_v2/'))
