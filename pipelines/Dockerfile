@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SPARK_HOME=/opt/spark \
     PYSPARK_PYTHON=/usr/bin/python3 \
     PYSPARK_DRIVER_PYTHON=/usr/bin/python3 \
-    PYTHONPATH=/opt/pipelines \
+    PYTHONPATH=/opt/pipelines:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.9-src.zip \
     PATH=/opt/java/openjdk/bin:/opt/spark/bin:$PATH
 WORKDIR /opt/pipelines
 COPY pipelines/requirements.txt /opt/pipelines/pipelines/requirements.txt
