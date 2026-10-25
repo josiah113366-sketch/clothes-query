@@ -1,6 +1,6 @@
 # pipelines/gold_b
 
-Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓고, 탐지·에이전트는 Athena에서 원장과 **정리 뷰**를 읽는다. 설계 전체는 [docs/design/gold-b/README.md](../../docs/design/gold-b/README.md), 작업 기록은 [docs/tasks/gold-b-pipelines.md](../../docs/tasks/gold-b-pipelines.md).
+Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓고, 탐지·에이전트는 Athena에서 원장과 **정리 뷰**를 읽는다. 설계 전체는 [docs/design/gold-b/README.md](../../docs/design/gold-b/README.md), 작업 기록은 [docs/tasks/gold-b-pipelines.md](../../docs/tasks/gold-b-pipelines.md). 시나리오·재처리 시연에서 무엇을 걸고 무엇을 확인하는지는 [점검표](../../docs/design/gold-b/scenario-checks.md)에 있다.
 
 ## 지금 있는 것
 
@@ -36,7 +36,7 @@ Gold B(관제용)는 Kafka 메시지를 1분마다 **원장**에 한 줄씩 쌓�
 | `tests/test_image.py` | 이미지에 넣는 파일이 잡 4개가 부르는 모듈을 모두 담고 시험·문서·로컬 파일은 빼는지, Dockerfile의 약속 (빌드 없이) |
 | `tests/test_dags.py` | Airflow DAG(`infra/platform/airflow/dags/gold_b.py`): 재처리·파일 합치기의 주기·재시도·꺼진 채로 생성, Pod 명령·환경변수·Kafka 인증서, 같은 pool, 실행 설정 확인 (가짜 Airflow 모듈) |
 
-정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena에서 만드는 것은 권한이 생긴 뒤에 한다.
+정리 뷰 SQL은 설계 문서가 원본이고 `views/`는 Athena에서 실행할 복사본이다. Athena의 표 5개와 뷰 4개는 재영 님이 만들어 두었다 (2026-10-23~24, #102).
 
 ## 저장 위치와 시간 폴더
 
@@ -47,7 +47,7 @@ s3://clothes-query-datalake/gold_b/reprocess_events/*.parquet
 
 - 원장 4개는 Athena **파티션 프로젝션**을 쓴다. 새 시간 폴더를 `MSCK REPAIR`나 `ALTER TABLE ADD PARTITION` 없이 바로 읽는다. 범위는 `2026-09-01`부터 오늘(UTC)까지다.
 - 조회할 때 `WHERE dt = '2026-10-21' AND hour = '06'`처럼 폴더 조건을 같이 주면 그 폴더만 읽는다.
-- 시각 컬럼은 모두 UTC `TIMESTAMP`다. Parquet에 시각을 어떤 형식(마이크로초 / Spark 기본 INT96)으로 쓸지는 4단계 적재 잡에서 Athena로 읽어 보고 정한다. 1단계 테스트는 마이크로초로 쓴다.
+- 시각 컬럼은 모두 UTC `TIMESTAMP`다. 잡들은 Parquet에 마이크로초로 쓰고 Athena에서 그대로 읽힌다 (2026-10-24 실제 적재로 확인). 승인 화면·판정 잡이 Athena `INSERT`로 쓴 `reprocess_events` 파일은 형식이 달라도 `ledger.from_arrow`가 맞춰 읽는다.
 
 ## 실행
 
@@ -59,7 +59,7 @@ python -m pytest -q pipelines/gold_b/tests
 
 필요한 패키지는 `requirements.txt`와 `pytest`다. Gold B 가상환경(`pipelines/gold_b/.venv`)을 만드는 방법은 [collector/README.md](collector/README.md)의 「실행」에 있다.
 
-Athena에 만들기 (권한 준비 후): `ddl/database.sql` → 나머지 5개 순서로 Athena 쿼리 편집기에서 하나씩 실행한다. 파일 맨 위의 `--` 설명 줄과 끝의 `;`는 Athena API로 실행할 때 문제가 될 수 있으니, 콘솔이 아닌 스크립트로 돌릴 때는 빼고 보낸다.
+Athena에 다시 만들 때: `ddl/database.sql` → 나머지 5개 순서로 Athena 쿼리 편집기에서 하나씩 실행한다. 파일 맨 위의 `--` 설명 줄과 끝의 `;`는 Athena API로 실행할 때 문제가 될 수 있으니, 콘솔이 아닌 스크립트로 돌릴 때는 빼고 보낸다.
 
 ## 이미지
 
@@ -78,10 +78,22 @@ docker build -f pipelines/gold_b/Dockerfile --build-arg SPARK_IMAGE=<팀 기본 
 |---|---|
 | 적재 잡 (상시) | `spark-submit local:///opt/gold_b/pipelines/gold_b/jobs/streaming_ingest.py` |
 | 재처리 잡 (Airflow `gold_b_reprocess`, 5분마다) | `python3 -m pipelines.gold_b.jobs.reprocess` |
-| 파일 합치기 (Airflow `gold_b_compact`, 매일 00:30 UTC) | `python3 -m pipelines.gold_b.jobs.compact` |
+| 파일 합치기 (Airflow `gold_b_compact`, 매일 00:30 UTC. 손으로 실행할 때 날짜 입력 → `GOLD_B_COMPACT_DAY`) | `python3 -m pipelines.gold_b.jobs.compact` |
 | Bronze 지연 수집기 (상시 또는 1분마다) | `python3 -m pipelines.gold_b.collector.bronze_lag_collector --interval 60` 또는 `--once` |
 
-환경변수와 배포에 필요한 것은 [jobs/README.md](jobs/README.md), [collector/README.md](collector/README.md)에 있다. Airflow DAG는 `infra/platform/airflow/dags/gold_b.py`이고 실행 설정은 [DAG 설명](../../infra/platform/airflow/dags/README.md)에 있다. 이미지를 ECR에 올리고 배포하는 것은 재영 님과 한다. 팀 기본 이미지가 ECR에 올라오기 전에는 실제 빌드를 하지 않는다.
+환경변수와 배포에 필요한 것은 [jobs/README.md](jobs/README.md), [collector/README.md](collector/README.md)에 있다. Airflow DAG는 `infra/platform/airflow/dags/gold_b.py`이고 실행 설정은 [DAG 설명](../../infra/platform/airflow/dags/README.md)에 있다. 지금 이미지는 ECR `clothes-query-dev/gold-b@sha256:2a8acd10…`(태그 `7d5ebd1`, 2026-10-24)이고 적재 잡과 DAG가 같은 digest를 쓴다. 잡 코드가 바뀌면 머지된 main 커밋으로 다시 빌드해 ECR에 올리고, 재영 님이 실행 설정의 digest를 바꾼다.
+
+## 지금 운영 상태 (2026-10-25)
+
+| 무엇 | 어디서 | 상태 |
+|---|---|---|
+| 적재 잡 | `pipelines/gold-b-ingest` Deployment (Driver 1 + Executor 1, 재영 님 `infra/platform/gold-b/`) | 2026-10-24 19시(KST)부터 상시. 10-25 새벽에 Kafka 4일치를 따라잡았고 지금은 1분 묶음에 약 2,300건, Kafka에 들어온 뒤 약 8초 만에 원장에 쓴다 |
+| Bronze 지연 수집기 | `pipelines/gold-b-lag-collector` Deployment (`--interval 60`) | 1분마다, S3 Sink v2 기준 |
+| 재처리·파일 합치기 | Airflow DAG `gold_b_reprocess`, `gold_b_compact` | 등록·실행 설정(`AIRFLOW_GOLD_B_RUNTIME`)·pool 준비됨, 꺼져 있음. 켜는 것은 재영 님 |
+| Athena | Glue 데이터베이스 `gold_b` | 표 5개, 뷰 4개 |
+| 대시보드 | 파이프라인 상태(지연), 결제 관제, 형식 오류, 재처리 이력 | 연결됨 (#107, #110). 결제 관제는 대시보드 역할에 뷰 `payment_states`·`payment_attempts` 읽기 권한이 생겨야 실데이터 |
+
+2026-10-25 점검: `topic_messages` 15개 파티션 모두 offset 0부터 끝까지 빠진 것·중복 0, 결제 메시지 93,804건 = `payment_events` 93,804줄, 지연 기록 10-24 하루 1,440분, 단위 시험 통과. 남은 확인(합치기·재처리 실행, 시나리오 3개)은 [점검표](../../docs/design/gold-b/scenario-checks.md)를 따른다.
 
 ## 의존하는 것
 

@@ -280,6 +280,7 @@ s3://clothes-query-datalake/gold_b/
 - poller는 `reprocess_events`를 S3에서 바로 읽는다. 승인 화면·판정 잡이 Athena `INSERT`로 쓴 파일은 이름에 확장자가 없을 수 있어서, 숨김·임시 파일이 아니면 다 읽는다.
 - `APPROVED` 줄의 `source`가 `KAFKA`·`BRONZE`인 요청만 맡는다. `SILVER` 요청은 승인 화면이 Silver DAG를 직접 부른다.
 - 아직 시작하지 않은 요청은 승인 뒤 60분 안일 때만 시작한다. 승인 화면의 "승인 만료"와 같은 값이다.
+- 승인 범위의 시간 폴더가 아직 끝나지 않았으면(마지막 폴더 끝 + 10분 전) 고르지 않고 승인 만료 전까지 기다린다 (2026-10-25 사용자 결정. 예전에는 바로 골라 다시 시도하지 않는 `FAILED`로 끝나서, 장애 직후 승인하면 폴더가 끝난 뒤 새로 요청해야 했다).
 - 다시 돌리는 경우는 둘이다: `FAILED`의 `detail.retryable`이 참일 때, 마지막 `STARTED` 뒤 시간 폴더가 다 끝나지 않은 채 멈췄을 때. 한 요청은 최대 3번(처음 1번 + 자동 재시도 2번)까지 돌린다. 그래도 안 되면 사람이 새로 요청한다 (`parent_request_id`).
 - 한 번 돌 때 승인이 가장 이른 요청 하나만 처리한다.
 
@@ -760,12 +761,12 @@ Gold B는 Kafka를, Silver는 Bronze를 읽는 별도 경로지만 규칙표는 
 | 재영 | S3 폴더(`gold_b/`), Athena 사용, Glue 데이터베이스 관리 방식(Terraform 여부) | 테이블 이름이 실제로 생기려면 필요 | 필요 |
 | 재영 | DDL·설계에 버킷 이름을 그대로 둘지, 자리표시자로 바꿀지 (`connectors/bronze-s3-sink.yaml`에는 이미 있음) | 공개 레포 규칙 | 필요 |
 | 재영 | 적재 잡·수집기 실행 위치와 자원, 배포 방식 | 상시 실행할 자리 | 필요 |
-| 재영 | 적재 잡 배포 (2026-10-24): 팀 기본 Spark 이미지 ECR digest, Gold B 이미지 ECR 저장소, namespace·Pod Identity(S3 원장 3개 쓰기, 체크포인트), Kafka `KafkaUser`·ACL(6개 토픽 읽기)·인증서 Secret·클라이언트 리스너 허용, 늘 켜 둔 Spark 스트리밍 (`jobs/README.md` 「적재 잡 배포에 필요한 것」) | 원장에 데이터가 쌓이게 (판정 R1·R4·R5) | 필요 |
+| 재영 | 적재 잡 배포 (2026-10-24): 팀 기본 Spark 이미지 ECR digest, Gold B 이미지 ECR 저장소, namespace·Pod Identity(S3 원장 3개 쓰기, 체크포인트), Kafka `KafkaUser`·ACL(6개 토픽 읽기)·인증서 Secret·클라이언트 리스너 허용, 늘 켜 둔 Spark 스트리밍 (`jobs/README.md` 「적재 잡 배포에 필요한 것」) | 원장에 데이터가 쌓이게 (판정 R1·R4·R5) | 일부: 실행 신원·Pod Identity·Kafka 사용자와 인증서 Secret·ECR `gold-b` 저장소는 적용 (2026-10-24, #102 기록). 이미지 digest·체크포인트 위치·자원은 은서가 전달할 차례 |
 | 재영 | Athena 접근 경로(NAT 또는 VPC 엔드포인트)와 권한 (주현 님, 대시보드 포함) | 탐지·에이전트·대시보드가 조회하려면 필요 | 필요 |
 | 재영 | 규칙 파일 배포 방식 (이미지 포함 / S3) | 규칙 변경을 적재 잡에 반영 | 필요 |
-| 재영 | Airflow DAG 위치, 재시도 2번, 같은 시간대 한 번에 하나씩 (재판정은 DAG로 잇지 않음, `team-inputs.md`와 같음). 재처리와 파일 합치기는 같은 시간에 돌리지 않음 (2026-10-23, 재처리가 범위 밖 결제 시각 폴더도 고침). 2026-10-24 DAG를 `infra/platform/airflow/dags/gold_b.py`로 만듦 (꺼진 채로). 켜려면 실행 설정 `AIRFLOW_GOLD_B_RUNTIME`·pool·Kafka 인증서 Secret·실행 신원 권한 (`infra/platform/airflow/dags/README.md`) | 재처리 흐름 | 필요 |
-| 재영 | Bronze 재처리 배포 (2026-10-24): 재처리 실행 신원에 S3 `bronze_v2/` 읽기, 실행 설정 `bronze_root` (`infra/platform/airflow/dags/README.md`) | 보관 기간(7일)이 지난 시간대 재처리 | 머지 뒤 |
-| 재영 | 결제 UPDATE 처리 배포 (2026-10-23): Glue `gold_b.payment_events`·`malformed_events` 칸 추가(`ALTER TABLE`), 뷰를 `payment_states` → `payment_conflicts`·`payment_attempts` 순서로 다시 만들기 (`views/README.md`) | Athena 표·뷰를 코드와 맞추기 | 머지 뒤 |
+| 재영 | Airflow DAG 위치, 재시도 2번, 같은 시간대 한 번에 하나씩 (재판정은 DAG로 잇지 않음, `team-inputs.md`와 같음). 재처리와 파일 합치기는 같은 시간에 돌리지 않음 (2026-10-23, 재처리가 범위 밖 결제 시각 폴더도 고침). 2026-10-24 DAG를 `infra/platform/airflow/dags/gold_b.py`로 만듦 (꺼진 채로). 켜려면 실행 설정 `AIRFLOW_GOLD_B_RUNTIME`·pool·Kafka 인증서 Secret·실행 신원 권한 (`infra/platform/airflow/dags/README.md`) | 재처리 흐름 | 일부: DAG는 #100으로 Airflow에 꺼진 채 등록, pool `gold_b_ledger`·실행 신원·Kafka 인증서 적용 (#102 기록). 실행 설정 공급과 켜기 남음 |
+| 재영 | Bronze 재처리 배포 (2026-10-24): 재처리 실행 신원에 S3 `bronze_v2/` 읽기, 실행 설정 `bronze_root` (`infra/platform/airflow/dags/README.md`) | 보관 기간(7일)이 지난 시간대 재처리 | 일부: `bronze_v2/` 읽기 권한 적용 (#102 기록). 실행 설정 `bronze_root` 남음 |
+| 재영 | 결제 UPDATE 처리 배포 (2026-10-23): Glue `gold_b.payment_events`·`malformed_events` 칸 추가(`ALTER TABLE`), 뷰를 `payment_states` → `payment_conflicts`·`payment_attempts` 순서로 다시 만들기 (`views/README.md`) | Athena 표·뷰를 코드와 맞추기 | 완료: 칸 5개 추가와 뷰 4개 (2026-10-24, #102 기록) |
 | 민혁 | `reviews.raw` 리뷰 컬럼, 운영에서 이 토픽을 쓰는지 | 형식 검사 규칙, 대상 토픽 목록 | 필요 |
 | 민혁 | 대시보드(#31)의 Gold B 컬럼: `bronze_lag_snapshots`는 `kafka_partition`, `payment_attempts`에는 `copies`가 없음, `payment_conflicts` 표시 (2026-10-23부터 보류 목록: `conflict_fields` 대신 `hold_reason`) | 실데이터 연결 때 화면이 깨지지 않게 | 필요 |
 | 팀 전체 | "consumer lag 수집기 없음" → 수집기 추가, Gold B는 Kafka 직접, 구조도 수정 | 주문 설계·구조도와 맞추기 | 공유 필요 |
@@ -832,8 +833,8 @@ pipelines/gold_b/
 - [x]  `tests/samples/` 샘플 메시지 만들기 (정상 결제, PG 원인 실패, 고객 원인 실패, 같은 결제 중복, 같은 결제 내용 충돌(상태가 다른 것, 금액만 다른 것), 필드 누락, 필드 이름 변경, `pg = PG_C`, 오류 여러 개, 6개 토픽 각각)
 - [x]  `ddl/` 테이블 5개 + 데이터베이스
 - [x]  시간 폴더(`dt`, `hour`)와 파티션 프로젝션 설정
-- [ ]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인 (이 PC에서는 Spark가 안 떠서 DDL과 설계 표 비교, pyarrow 시간 폴더 왕복으로 대신 확인)
-- [ ]  Athena에서 `CREATE DATABASE gold_b`, 테이블 생성, 빈 조회 확인 (권한 준비 후)
+- [x]  로컬 Spark에서 DDL 실행, 빈 조회와 샘플 파일 조회 확인 (이 PC에서는 Spark가 안 떠서 DDL과 설계 표 비교, pyarrow 시간 폴더 왕복으로 대신 확인) → 실제 Athena에서 확인해서 필요 없어짐 (아래 줄, 2026-10-25 정리)
+- [x]  Athena에서 `CREATE DATABASE gold_b`, 테이블 생성, 빈 조회 확인 (재영 님 적용, 판정 잡 역할로 조회 확인. #102 기록)
 - [x]  `reprocess_events` 최종 컬럼을 주현 님께 공유 (#29 리뷰, #36 리뷰 요청)
 - [x]  PR 올리고 합치기 (#36, 2026-10-22)
 
@@ -847,7 +848,7 @@ pipelines/gold_b/
 - [x]  형식 검사 (사유 4가지, 오류마다 한 줄, `rule_version` 기록): `format_check.py`
 - [x]  `raw_sample` 마스킹 (필드 이름 유지, 개인정보가 아닌 업무 값과 결제·주문 ID·시각만 남김. ID·시각은 2026-10-23부터)
 - [x]  `tests/test_format_check.py` 샘플로 검사 결과 확인
-- [ ]  샘플로 원장 ①②④를 S3에 쌓아 보기
+- [x]  샘플로 원장 ①②④를 S3에 쌓아 보기 → 실제 적재 잡이 S3에 쌓아서 필요 없어짐 (2026-10-24부터, 2026-10-25 정리)
 - [x]  PR 올리고 합치기 (#91, 2026-10-23)
 
 ### 3단계: 정리 뷰
@@ -855,11 +856,11 @@ pipelines/gold_b/
 - [x]  `views/payment_conflicts.sql` (지문 비교, 같은 지문 버전끼리, 충돌 필드명)
 - [x]  `views/payment_attempts.sql` (충돌 제외, 가장 먼저 쌓인 줄, 원인 분류)
 - [x]  `views/malformed_messages.sql` (필드·사유 쌍 배열, 시간 폴더 `dt`·`hour`)
-- [ ]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서는 통과)
+- [x]  Athena에서 뷰 생성, 문법 확인 (`ARRAY_AGG(CAST(ROW(...)))`, `filter(ARRAY[...])`) (로컬 Trino 484에서 통과, 2026-10-23 재영 님이 Athena에 생성. #102 기록)
 - [x]  샘플로 확인 (로컬 Trino 484): 중복이 1건으로, 충돌 결제 두 쌍이 `payment_attempts`에서 빠지고 `payment_conflicts`에 1줄씩(금액만 다른 쌍은 `[payment_content_hash]`), 오류 3개가 1줄·`error_count` 3으로
 - [x]  PR 올리고 합치기 (#70, 2026-10-23)
 - [x]  결제 UPDATE 처리 (`pipelines/gold-b-payment-update`, #95, 2026-10-23): 새 기반 뷰 `payment_states`, `payment_conflicts`는 보류 목록, `payment_attempts`는 보류 없는 결제의 마지막 이벤트. 시나리오 샘플로 SQLite 시험(`tests/test_payment_states.py`)과 로컬 Trino 484 확인
-- [ ]  Athena에서 Glue 표 칸 추가(`ALTER TABLE`)와 뷰 다시 만들기 (`payment_states` → `payment_conflicts`·`payment_attempts`, `views/README.md`)
+- [x]  Athena에서 Glue 표 칸 추가(`ALTER TABLE`)와 뷰 다시 만들기 (`payment_states` → `payment_conflicts`·`payment_attempts`, `views/README.md`) (2026-10-24 재영 님 적용: 칸 5개, 뷰 4개. #102 기록)
 
 ### 4단계: 적재 잡
 
@@ -870,8 +871,8 @@ pipelines/gold_b/
 - [x]  로컬 또는 개발 Kafka로 샘플을 흘려 원장 확인 (로컬 Kafka 3.7, 가짜 판정)
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.streaming_ingest` (설정이 틀리면 Spark를 띄우기 전에 멈춤)
 - [x]  Gold B 이미지 `pipelines/gold_b/Dockerfile` (`pipelines/gold-b-image`, #98, 2026-10-24): 팀 기본 Spark 이미지(Python 3.10.12) 위에 Gold B 코드·패키지, 넣을 파일 목록 시험. 실제 빌드는 팀 기본 이미지가 ECR에 올라온 뒤
-- [ ]  `deploy/gold_b_streaming.yaml` 배포 설정 (재영 님 규칙. 필요한 것은 `jobs/README.md` 「적재 잡 배포에 필요한 것」)
-- [ ]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인
+- [x]  배포 설정: 재영 님이 상시 Deployment `pipelines/gold-b-ingest`(Driver 1 + Executor 1)로 배포 (`infra/platform/gold-b/persistent.py`, 2026-10-24. 저장소의 `deploy/` 파일 대신)
+- [x]  EKS에 상시 실행, 시뮬레이터 메시지가 1~2분 안에 원장에 보이는지 확인 (2026-10-24 19시 KST부터 상시, 10-25 새벽 Kafka 4일치를 따라잡음. 10-25 확인: Kafka 시각 뒤 약 8초에 원장, `topic_messages` 1,130만 건 빠짐·중복 0, 결제 메시지 93,804건 = ① 93,804줄)
 - [x]  잡을 재시작해도 빠지거나 두 번 쌓이지 않는지 확인 (체크포인트, 로컬 Docker)
 - [x]  PR 올리고 합치기 (#92, 2026-10-23)
 
@@ -879,17 +880,18 @@ pipelines/gold_b/
 
 - [x]  `collector/bronze_lag_collector.py` (Kafka 관리 API로 `end_offset`·`committed_offset`, Connect REST로 상태)
 - [x]  `lag_msgs`, `lag_sec` 계산, ③에 1분마다 쌓기 (로컬 Kafka로 확인, 실제 S3 쓰기는 배포 때)
-- [ ]  `deploy/gold_b_collector.yaml` (CronJob 또는 상시 파드)
-- [ ]  정상일 때 값이 파일 전환 주기 기준선과 맞는지 확인
-- [ ]  S3 Sink를 잠깐 멈춰서 밀림·멈춤이 잡히는지 확인
+- [x]  수집기 배포: 인프라가 상시 파드로 띄움 (v2 커넥터·그룹. 배포 파일은 인프라 쪽 `infra/platform/bronze-lag-collector/`, #102 초안 기록)
+- [x]  정상일 때 값이 파일 전환 주기 기준선과 맞는지 확인 (10-24 하루 1,440분 빠짐 없음, `lag_sec` 0~약 900초 톱니, 커넥터 RUNNING. 2026-10-25 확인)
+- [ ]  S3 Sink를 잠깐 멈춰서 밀림·멈춤이 잡히는지 확인 (시나리오 2 `SINK_PAUSE`로 확인, [점검표](scenario-checks.md))
 - [x]  PR 올리고 합치기 (#78, 2026-10-23)
 
 ### 6단계: 파일 합치기
 
 - [x]  `jobs/compact.py` 시간 폴더 안 작은 파일 합치기
 - [x]  실행 입구 `python -m pipelines.gold_b.jobs.compact` (날짜를 주지 않으면 어제 UTC)
-- [x]  DAG `gold_b_compact` 매일 00:30 UTC, 재처리와 같은 pool이라 같은 시간에 돌지 않음 (재처리는 범위 밖 결제 시각 폴더도 고침). `infra/platform/airflow/dags/gold_b.py` (`pipelines/gold-b-dags`)
-- [ ]  DAG 켜고 하루치가 합쳐지는지 확인 (재영 님 실행 설정·pool 뒤)
+- [x]  DAG `gold_b_compact` 매일 00:30 UTC, 재처리와 같은 pool이라 같은 시간에 돌지 않음 (재처리는 범위 밖 결제 시각 폴더도 고침). `infra/platform/airflow/dags/gold_b.py` (`pipelines/gold-b-dags`, #100, 2026-10-24)
+- [x]  DAG 날짜 입력(`day`): 손으로 실행할 때 지난 날을 합친다, 비우면 어제 (`pipelines/gold-b-ops-fixes`, 2026-10-25 사용자 결정. 적재 잡이 따라잡으며 쌓은 10-20~10-23 폴더용)
+- [ ]  DAG 켜고 하루치가 합쳐지는지 확인 (실행 설정·pool은 2026-10-24 준비됨. 10-20~10-23은 날짜 입력으로 한 번씩)
 - [x]  합친 뒤 조회 결과가 같은지 확인 (합치기 전후 줄이 `loaded_at`까지 같음, 시험)
 - [x]  PR 올리고 합치기 (#88, 2026-10-23)
 
@@ -897,8 +899,8 @@ pipelines/gold_b/
 
 - [x]  `jobs/reprocess.py` 입력: `request_id`, `window_start`, `window_end`, `rule_version`
 - [x]  승인 범위를 시간 폴더 단위로 넓히기
-- [x]  원본 선택: 보관 기간(7일) 안은 Kafka(해당 offset부터), 넘으면 Bronze v2 (폴더마다 시각으로 고름, `pipelines/gold-b-bronze-reprocess`)
-- [ ]  실제 Bronze v2로 보관 기간이 지난 시간대 재처리 확인 (재영 님 `bronze_v2/` 읽기 권한·실행 설정 뒤)
+- [x]  원본 선택: 보관 기간(7일) 안은 Kafka(해당 offset부터), 넘으면 Bronze v2 (폴더마다 시각으로 고름, `pipelines/gold-b-bronze-reprocess`, #101, 2026-10-24)
+- [ ]  실제 Bronze v2로 보관 기간이 지난 시간대 재처리 확인 (권한·`bronze_root` 준비됨. Bronze v2가 10-20부터 있어 10-27 오후 KST부터 10-20 시간대로 가능)
 - [x]  원본을 앞뒤 몇 분 여유 있게 읽고 이벤트 시각으로 걸러 쓰기
 - [x]  원장 3개(①②④)를 폴더마다 교체 (`malformed_events`는 이번 `rule_version` 줄만), `bronze_lag_snapshots`는 건드리지 않음
 - [x]  메시지 단위 재처리 (`pipelines/gold-b-reprocess-by-message`, #99, 2026-10-24): 승인 범위 메시지만 다시 읽어 옛 결과를 새 결과로, 범위 밖 결제 시각 폴더도 고치고 `LEDGER_REPLACED`(`outside_window`), 새 결과를 먼저 더하고 정리
@@ -908,8 +910,9 @@ pipelines/gold_b/
 - [x]  `tests/test_reprocess.py` 같은 입력으로 두 번 돌려 결과가 같은지 확인
 - [x]  poller `next_request`: 5분마다 `APPROVED` 중 `source`가 `KAFKA`·`BRONZE`인 요청 하나, 승인 만료 60분, 한 요청 최대 3번
 - [x]  실행 입구(명령줄) `python -m pipelines.gold_b.jobs.reprocess`: 형식 검사기와 함께 만듦 (`pipelines/gold-b-format-check`)
-- [x]  DAG `gold_b_reprocess` 5분마다 poller 실행, 한 번에 하나, Airflow 재시도 0. `infra/platform/airflow/dags/gold_b.py` (`pipelines/gold-b-dags`). 재판정은 판정 잡이 `LEDGER_REPLACED`를 읽어 시작하므로 DAG로 잇지 않는다
-- [ ]  DAG 켜고 승인된 요청이 도는지 확인 (재영 님 실행 설정·pool·Kafka 인증서 Secret 뒤)
+- [x]  DAG `gold_b_reprocess` 5분마다 poller 실행, 한 번에 하나, Airflow 재시도 0. `infra/platform/airflow/dags/gold_b.py` (`pipelines/gold-b-dags`, #100, 2026-10-24). 재판정은 판정 잡이 `LEDGER_REPLACED`를 읽어 시작하므로 DAG로 잇지 않는다
+- [x]  poller가 시간 폴더가 끝나기 전 승인은 승인 만료 전까지 기다렸다가 고름 (`pipelines/gold-b-ops-fixes`, 2026-10-25 사용자 결정)
+- [ ]  DAG 켜고 승인된 요청이 도는지 확인 (실행 설정·pool·Kafka 인증서 준비됨 2026-10-24. 재영 님 시험 `rq-test-20261024-01`)
 - [x]  PR 올리고 합치기 (#84, 2026-10-23)
 
 ### 8단계: Silver 경로와 맞추기
@@ -918,6 +921,8 @@ pipelines/gold_b/
 - [ ]  규칙 변경 시 Gold B와 Silver가 같은 `rule_version`으로 도는지 확인
 
 ### 9단계: 재처리 검증 (필수 ③)
+
+확인 순서와 기대 결과는 [시나리오·재처리 시연 점검표](scenario-checks.md)에 모았다 (제안, 2026-10-25).
 
 - [ ]  동일 입력 재실행 → 비교 대상 컬럼이 완전히 같음
 - [ ]  규칙 변경(v1.0 → v1.1) → 새 버전 기준으로 바뀌고 옛 판정은 이력으로 남음
@@ -929,12 +934,12 @@ pipelines/gold_b/
 
 - [ ]  주현 님 신뢰성 쿼리가 Athena에서 도는지 같이 확인
 - [ ]  시나리오 1: 한 PG의 PG 원인 실패가 늘고 다른 PG·고객 원인은 평소대로
-- [ ]  시나리오 2: `bronze_lag_snapshots`의 밀린 양·시간이 늘고 `topic_messages` 유입도 늘었는지
-- [ ]  시나리오 3: `malformed_messages` 건수가 한 토픽에서 늘고, 필드·사유·시작 시각·offset이 보임
+- [ ]  시나리오 2: S3 Sink 정지(`SINK_PAUSE`)에서 `bronze_lag_snapshots`의 밀린 양·시간이 늘고 `topic_messages` 유입은 평소대로인지 (2026-10-23 정의 바뀜: 폭주 모드로는 지연이 생기지 않음)
+- [ ]  시나리오 3: 데이터 오염(성공 결제 중복)에서 `payment_attempts`에 성공 2건 주문이 보이고 R5가 잡는지 (2026-10-23 정의 바뀜: 형식 오류가 아니라 업무 규칙 위반. 형식 오류 R4·`malformed_messages`는 시연 대상 아님)
 - [ ]  `malformed_messages` 깨진 메시지 수 = ④의 위치별 고유 개수
 - [ ]  늦게 도착한 데이터가 판정 후 숫자를 바꾸는 비율 확인
-- [ ]  재처리 시연 리허설 (필드 이름 변경 → 규칙 v1.1 → 승인 → 재처리 → 재판정)
-- [ ]  `pipelines/gold_b/README.md` 정리 (원장·뷰·잡 설명, 실행 방법)
+- [ ]  재처리 시연 리허설 ([점검표](scenario-checks.md) R-1~R-4. 결과가 바로잡히는 시연은 팀 결정 필요)
+- [x]  `pipelines/gold_b/README.md` 정리 (원장·뷰·잡 설명, 실행 방법, 지금 운영 상태. `pipelines/gold-b-ops-fixes`, 2026-10-25)
 
 ### 11단계: 여유가 있으면
 

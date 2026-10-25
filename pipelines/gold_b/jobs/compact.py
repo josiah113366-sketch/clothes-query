@@ -14,6 +14,7 @@ run(day) 한 번에 하는 일
 """
 from __future__ import annotations
 
+import argparse
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from typing import Callable, Mapping, Sequence
@@ -97,24 +98,41 @@ def run(day: date, *, store: Store, tables: Sequence[str] = LEDGERS, margin: tim
 # ---------- 실행 입구 ----------
 
 ENV_LEDGER_ROOT = "GOLD_B_LEDGER_ROOT"    # s3://<버킷>/gold_b 또는 로컬 폴더 (필수)
+ENV_DAY = "GOLD_B_COMPACT_DAY"            # 합칠 날 (YYYY-MM-DD, 선택). Airflow DAG가 날짜 입력(day)을 넣는다. 비면 어제(UTC)
+
+
+def _day(value: str) -> date | None:
+    """합칠 날 (--day 또는 GOLD_B_COMPACT_DAY). 비어 있으면 None(어제 UTC). 형식이 틀리면 ArgumentTypeError."""
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("합칠 날은 YYYY-MM-DD 형식이어야 한다") from None
 
 
 def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None,
          now: Callable[[], datetime] = _utc_now, log: Callable[[str], None] = _log) -> int:
-    """하루치(UTC) 시간 폴더를 합친다. Airflow DAG가 하루 1번 부른다. 성공하면 0, 실패하면 1."""
-    import argparse
+    """하루치(UTC) 시간 폴더를 합친다. Airflow DAG가 하루 1번 부른다. 성공하면 0, 실패하면 1.
+    합칠 날은 --day, 없으면 환경변수 GOLD_B_COMPACT_DAY(DAG의 날짜 입력), 둘 다 비면 어제(UTC)다."""
     import os
 
     parser = argparse.ArgumentParser(prog="python -m pipelines.gold_b.jobs.compact",
                                      description="Gold B 파일 합치기: 끝난 UTC 하루의 시간 폴더마다 파일을 하나로 합친다")
-    parser.add_argument("--day", type=date.fromisoformat, help="합칠 날 (UTC, YYYY-MM-DD). 생략하면 어제(UTC)")
+    parser.add_argument("--day", type=_day, help="합칠 날 (UTC, YYYY-MM-DD). 생략하거나 비우면 어제(UTC)")
     args = parser.parse_args(argv)
     env = os.environ if env is None else env
     root = (env.get(ENV_LEDGER_ROOT) or "").strip()
     if not root:
         log(f"{ENV_LEDGER_ROOT}가 없다")
         return 1
-    day = args.day or (utc_naive(now()) - timedelta(days=1)).date()
+    try:
+        chosen = args.day or _day(env.get(ENV_DAY) or "")
+    except argparse.ArgumentTypeError as exc:
+        log(f"파일 합치기 실패: {ENV_DAY} - {exc}")
+        return 1
+    day = chosen or (utc_naive(now()) - timedelta(days=1)).date()
     try:
         run(day, store=open_store(root), now=now, log=log)
     except CompactError as exc:

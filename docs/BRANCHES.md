@@ -226,8 +226,9 @@ gitGraph
 | `pipelines/gold-b-payment-update` | [gold-b-payment-update.md](tasks/gold-b-payment-update.md) | 머지됨 (#95) | 2026-10-23 |
 | `pipelines/gold-b-image` | [gold-b-image.md](tasks/gold-b-image.md) | 머지됨 (#98) | 2026-10-24 |
 | `pipelines/gold-b-reprocess-by-message` | [gold-b-reprocess-by-message.md](tasks/gold-b-reprocess-by-message.md) | 머지됨 (#99) | 2026-10-24 |
-| `pipelines/gold-b-dags` | [gold-b-dags.md](tasks/gold-b-dags.md) | 검토 대기 | |
-| `pipelines/gold-b-bronze-reprocess` | [gold-b-bronze-reprocess.md](tasks/gold-b-bronze-reprocess.md) | 검토 대기 | |
+| `pipelines/gold-b-dags` | [gold-b-dags.md](tasks/gold-b-dags.md) | 머지됨 (#100) | 2026-10-24 |
+| `pipelines/gold-b-bronze-reprocess` | [gold-b-bronze-reprocess.md](tasks/gold-b-bronze-reprocess.md) | 머지됨 (#101) | 2026-10-24 |
+| `pipelines/gold-b-ops-fixes` | [gold-b-ops-fixes.md](tasks/gold-b-ops-fixes.md) (재처리 승인 대기, 합치기 날짜 입력, 시연 점검표, 문서 정리) | 검토 대기 | |
 
 ### gold-a
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |

@@ -1,6 +1,6 @@
 # 작업 지시서: pipelines/gold-b-bronze-reprocess
 
-> 상태: 검토 대기 · 브랜치: `pipelines/gold-b-bronze-reprocess` (최신 `main` `6c00ddc` 위의 `pipelines/gold-b-dags` 끝에서 만듦. DAG에 Bronze 위치 설정을 더해야 해서 DAG PR 다음에 머지) · 다음 작업: PR (사용자, DAG PR 머지 뒤), `bronze_v2/` 읽기 권한·실행 설정 (재영 님)
+> 상태: 완료 (#101, 2026-10-24 머지) · 브랜치: `pipelines/gold-b-bronze-reprocess` (최신 `main` `6c00ddc` 위의 `pipelines/gold-b-dags` 끝에서 만듦, #100 다음에 머지) · 남은 일: 이 코드가 든 Gold B 이미지와 실행 설정 `bronze_root` 뒤 실제 Bronze 재처리 확인 (`bronze_v2/` 읽기 권한은 재영 님이 적용, #102 기록)
 
 ## 목표
 

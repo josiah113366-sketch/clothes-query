@@ -18,7 +18,8 @@ run() 한 번에 하는 일
   6. 도중에 실패하면 FAILED를 쓰고 예외를 다시 올린다. 끝난 폴더의 LEDGER_REPLACED는 남는다.
 
 next_request()는 poller다. reprocess_events를 읽어 지금 돌릴 승인 요청 하나를 고른다 (source가 KAFKA·BRONZE인 것만,
-승인이 가장 이른 것부터). Airflow DAG가 5분마다 부른다.
+승인이 가장 이른 것부터). Airflow DAG가 5분마다 부른다. 승인 범위의 시간 폴더가 아직 끝나지 않았으면 고르지 않고
+승인 만료 전까지 기다린다 (2026-10-25. 예전에는 바로 골라 시작 전 확인에서 FAILED로 끝났다).
 
 Kafka와 Bronze는 읽기만 한다 (Kafka는 임시 그룹으로 assign만 하고 처리 위치를 커밋하지 않음).
 """
@@ -495,12 +496,25 @@ def _finished(runs: Sequence[Mapping], approved: Mapping) -> bool:
     return wanted <= replaced
 
 
+def _window_done(approved: Mapping, now: datetime, margin: timedelta) -> bool:
+    """승인 범위의 시간 폴더가 모두 끝났는가 (마지막 폴더 끝 + margin이 지남). 잡의 시작 전 확인과 같은 기준이다.
+    범위가 잘못됐으면 참으로 둔다: 기다리지 않고 골라서 잡이 이유와 함께 FAILED로 남긴다."""
+    try:
+        hours = hour_folders(approved["window_start"], approved["window_end"])
+    except ReprocessError:
+        return True
+    return hours[-1] + HOUR + margin <= now
+
+
 def next_request(rows: Sequence[Mapping], now: datetime, *, sources: Sequence[str] = GOLD_B_SOURCES,
-                 ttl: timedelta = APPROVAL_TTL, max_runs: int = MAX_RUNS) -> Pending | None:
+                 ttl: timedelta = APPROVAL_TTL, max_runs: int = MAX_RUNS, margin: timedelta = Options().margin,
+                 waiting: list[str] | None = None) -> Pending | None:
     """poller: 지금 돌릴 요청 하나 (승인이 가장 이른 것부터, 한 번에 하나). 없으면 None.
 
     - APPROVED 줄의 source가 sources에 있는 요청만 맡는다.
     - 아직 시작하지 않았으면 승인 뒤 ttl 안일 때만 돌린다 (지나면 승인 만료).
+      승인 범위의 시간 폴더가 아직 안 끝났으면(마지막 폴더 끝 + margin 전) 고르지 않고 기다린다.
+      기다리는 요청의 request_id는 waiting(주면)에 넣는다 (로그용).
     - 시작했으면 다시 돌려도 되는 실패(FAILED의 retryable)나 중간에 멈춘 실행(마지막 STARTED 뒤 폴더가 다 끝나지 않음)만,
       돌린 횟수(STARTED 수)가 max_runs보다 적을 때 다시 돌린다.
     """
@@ -525,6 +539,10 @@ def next_request(rows: Sequence[Mapping], now: datetime, *, sources: Sequence[st
         if not runs:
             if now - utc_naive(approved["at"]) > ttl:
                 continue                                   # 승인 만료
+            if not _window_done(approved, now, margin):
+                if waiting is not None:
+                    waiting.append(request_id)
+                continue                                   # 시간 폴더가 끝날 때까지 기다린다 (승인 만료 전까지)
         elif runs[-1]["step"] == "FAILED":
             if _detail(runs[-1]).get("retryable") is not True or run_count >= max_runs:
                 continue                                   # 다시 돌려도 소용없거나 이미 다 돌림
@@ -772,9 +790,10 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
         log(f"{ENV_LEDGER_ROOT}가 없다")
         return 1
     store = open_store(root)
-    pending = next_request(read_events(store), now())
+    waiting: list[str] = []
+    pending = next_request(read_events(store), now(), waiting=waiting)
     if pending is None:
-        log("돌릴 재처리 요청이 없다")
+        log("돌릴 재처리 요청이 없다" + (f" (시간 폴더가 끝나길 기다리는 승인 {len(waiting)}개)" if waiting else ""))
         return 0
     request = pending.request
     log(f"재처리 {request.request_id}: {request.window_start:%Y-%m-%d %H:%M}~{request.window_end:%Y-%m-%d %H:%M} UTC, "
