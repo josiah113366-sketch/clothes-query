@@ -33,7 +33,7 @@
 
 | # | 할 일 | 선행 조건 | 담당 영역 | 담당자 | 상태 | 메모 |
 |---|---|---|---|---|---|---|
-| B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | 은서 | 진행 중 | 시각은 UTC 저장. `bronze_lag_snapshots` 조회는 2026-10-24 등록(workgroup 환경변수가 있을 때만). 결제·형식 오류·재처리 조회는 `dashboard/gold-b-data` |
+| B1 | Gold B 원장·뷰(`bronze_lag_snapshots`, `payment_attempts`, `malformed_events`, `malformed_messages`, `reprocess_events`)의 Athena 조회 함수를 `_REAL`에 등록 | Gold B 적재 운영, Athena 접근 권한 | `gold-b` / `dashboard` | 은서 | 완료 (#107, #110) | 시각은 UTC 저장. workgroup 환경변수가 있을 때만 등록. 결제 관제는 대시보드 역할에 뷰 `payment_states`·`payment_attempts` 읽기 권한(F3)이 있어야 실데이터 |
 | B2 | `gold_b.anomaly` 컬럼 확정 후 이상탐지 화면 맞춤 | 탐지 담당의 표 정의 | `agent` | | 대기 | 지금 컬럼은 임시 |
 | B3 | 신뢰성 점검 3종(오프셋 빈틈, 중복, 적재 정지) 결과를 실제 점검 쿼리에서 읽도록 연결 | 점검 쿼리 Athena 실행 | `agent` / `gold-b` | | 대기 | |
 | B4 | 파이프라인 상태의 "평소 범위" 기준(`NORMAL_MAX_SEC`, 현재 1,020초)과 경고 규칙 확정 | 실측 지연 분포 | `gold-b` / `agent` | | 대기 | 15분 파일 주기 톱니 |
@@ -41,6 +41,7 @@
 | B6 | **감성분석 모델 화면** 실데이터 연결: `review_aspect_scores`, `review_score_log`, `review_aspect_scores_latest` 조회를 `_REAL`에 등록 (`get_model_review_daily`, `get_model_score_daily`, `get_model_score_diff`, `get_model_runs`, 그리고 `get_model_registry`의 분석 현황 열 `last_analyzed_at`·`analyzed_reviews`·`unscored_reviews`) | athena-review-score 적용, Athena 접근 권한 | `review-model` / `dashboard` | | 대기 | 버전·패치노트는 연결됨(B7). 점수 현황은 더미 |
 | B7 | 감성분석 모델 화면의 파싱 실패 건수와 Job 결과를 읽을 곳 확정 (오류 prefix, Airflow 기록) | Airflow 연동 | `review-model` / `gold-b` | | 대기 | 평가 지표·패치노트는 결정·연결됨(2026-10-23): `review-analysis/releases/*.yaml` → S3 `review-score/model-registry/releases/` → `MODEL_REGISTRY_URI` |
 | B8 | **감성분석 모델 화면 후기 원문**: `get_review_texts`를 Silver 리뷰 표의 review_id 조회로 `_REAL`에 등록 (점수 차가 큰 후기 표의 원문 열) | Silver 리뷰 표 위치·Athena 권한 | `dashboard` | | 대기 | 2026-10-24 원문 표시 결정(팀 내부 공유). 지금은 직접 지은 더미 문장 |
+| B10 | **시나리오 2·3 표시**: 파이프라인 상태 › 지연·점검 탭의 토픽별 유입(평소 대비 배수), 결제 관제의 성공 결제가 2건 이상인 주문 | B1, F3(결제 뷰) | `gold-b` / `dashboard` | 은서 | 검토 대기 | `dashboard/gold-b-scenarios`. 두 칸은 비어도 더미로 바꾸지 않음(`dataset(..., allow_empty=True)`). 형식 오류·재처리 이력에도 쓸지는 정할 일 |
 | B9 | **파이프라인 상태 › 데이터 흐름 탭** 미연결 단계 연결: CDC 커넥터 상태(수집기 확장), Silver 회원·클릭·상품·리뷰 완료 기록, `gold_b.anomaly`, Bronze 리뷰 최신 폴더, 감성 점수 로그 | 각 단계의 완료 기록, F3 | `dashboard` / `gold-b` / `review-model` | | 대기 | 2026-10-24 탭 추가. 더미 없음: 읽는 곳이 없으면 회색 "미연결". 지금 읽는 곳은 `bronze_lag_snapshots`, `silver.silver_runs`, `gold_a.gold_runs`, Gold B 원장 3개 (`DASHBOARD_ATHENA_WORKGROUP` 있을 때) |
 
 ## 3. 원인 리포트 / 승인
