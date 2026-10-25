@@ -62,6 +62,18 @@ variable "staging_log_table_name" {
   default     = "staging_review_score_log"
 }
 
+variable "silver_reviews_prefix" {
+  description = "Silver 리뷰 Spark 출력 루트(runs/<run_id>/silver_reviews/, current.json, completed/). 읽기 전용."
+  type        = string
+  default     = "silver/runtime/reviews"
+}
+
+variable "silver_reviews_runs_table_name" {
+  description = "Silver 리뷰 실행 출력을 가리키는 읽기 전용 외부 테이블 이름(run_id 파티션 프로젝션 injected)."
+  type        = string
+  default     = "silver_reviews_runs"
+}
+
 variable "results_prefix" {
   description = "Athena 쿼리 결과 prefix."
   type        = string

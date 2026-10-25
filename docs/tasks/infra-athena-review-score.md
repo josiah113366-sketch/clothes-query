@@ -103,3 +103,5 @@
 - **확인한 결과:** fmt·validate 통과, 첫 plan 6 create / 0 change / 0 destroy. Athena 에서의 테이블 읽기·SQL 실행은 아직 하지 않았다.
 - **추가된 결정(2026-10-22):** 빠진 속성 삭제, Gold 는 `model_version_no` 최대 결과 읽기(모델 번호 `model_version_no`("x.y", decimal(4,1)): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`.), 매일 미점수 후기만 입력(점수 로그 `review_score_log` + `select_unscored.py`).
 - **알려진 한계·남은 일:** SQL 실제 검증, SageMaker 출력 prefix 변경, Airflow 태스크, staging·결과 정리 정책(수명주기), 사라진 속성 처리, Gold 의 버전 선택 규칙, 타임스탬프 타입 확인.
+
+- **추가(2026-10-25):** Silver 리뷰가 실행별 경로로 나뉘어 쓰이므로 읽기 전용 외부 테이블 `silver_reviews_runs`(run_id 프로젝션)를 추가하고, `select_unscored.py` 는 `current.json`(PASS)의 run_id 로 이 테이블을 읽어 점수 로그와 LEFT JOIN 해 미점수 후기만 `--max-reviews`(기본 1500)건 고른다. 재영 확인 필요: Silver 경로 S3 읽기 권한, 이후 `silver.reviews_runs` 로 교체.

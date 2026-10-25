@@ -15,7 +15,7 @@
 flowchart LR
   AF["Airflow<br/>silver DAG 종료 신호"]
   SV[("S3 silver/reviews<br/>KST 작성일 파티션")]
-  SEL["select_unscored.py<br/>점수 로그에 없는 후기만 고르기"]
+  SEL["select_unscored.py<br/>Silver 실행 출력(silver_reviews_runs) 중<br/>점수 로그에 없는 후기만 고르기"]
   UN[("S3 staging/review-score-input<br/>unscored_실행시각.jsonl")]
   subgraph SM["SageMaker Processing Job (g4dn GPU)"]
     SB["score_batch.py<br/>모델: S3 review-score/model"]
@@ -53,7 +53,7 @@ flowchart LR
 - 파티션 날짜는 실행한 날이 아니라 **후기 작성일(KST)** 이다. 같은 날짜를 다시 실행하면 staging 에 새 파일이 쌓이고, `merge.sql` 이 `(review_id, aspect, model_version, review_date)` 별로 가장 최근 `analyzed_at` 만 남겨 upsert 한다.
 - **다시 점수화했을 때 빠진 속성은 지운다**(2026-10-22 결정). 이번 배치에 들어온 후기에 대해서만, 새 결과에 없는 옛 속성 행을 `merge.sql` 이 삭제한다. 이번 배치에 없는 후기는 건드리지 않는다.
 - **Gold 는 후기마다 `model_version_no` 가 가장 큰 결과를 읽는다**(`read_latest.sql`). **모델 번호 규칙** (`model_version_no`, "x.y" 형식 = decimal(4,1)): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`. `model_version`(이름)과 1:1 이다.
-- **매일 입력은 "아직 점수가 없는 후기"만**(2026-10-22 결정): `select_unscored.py` 가 Silver 하루 파일에서 점수 로그(`review_score_log`)에 이미 현재 `model_version_no` 로 기록된 후기를 빼고 남은 것만 Job 입력으로 쓴다. 0건이면 Job 을 띄우지 않는다. 모델 번호를 올리면 로그에 새 번호가 없어 모든 후기가 다시 선택된다(재점수화).
+- **매일 입력은 "아직 점수가 없는 후기"만**(2026-10-22 결정): `select_unscored.py` 가 Silver 실행 출력(읽기 전용 외부 테이블 `silver_reviews_runs`, 기본은 `current.json` 의 PASS 실행)에서 점수 로그(`review_score_log`)에 이미 현재 `model_version_no` 로 기록된 후기를 빼고 남은 것만 Job 입력으로 쓴다. 0건이면 Job 을 띄우지 않는다. 모델 번호를 올리면 로그에 새 번호가 없어 모든 후기가 다시 선택된다(재점수화).
 - 점수 로그가 필요한 이유: 속성이 0개 나온 후기는 점수 행이 없어서 점수 테이블만 보면 매일 "미점수"로 다시 잡힌다. 로그에는 그런 후기도 `n_aspects = 0` 으로 한 행 남는다. 파싱에 실패한 후기는 로그에 넣지 않아 다음 실행에서 다시 시도된다(계속 실패하면 오류 파일에 쌓인다).
 - Bronze 로 시험할 때는 Silver 대신 `review-score/code/test-input/` 에 복사한 Bronze 파일을 입력으로 쓴다(Job 역할이 `silver/reviews/*` 와 미점수 입력 prefix 만 읽을 수 있어서).
 - Airflow 연동(`Airflow` 에서 나가는 화살표)은 아직 구현 전이다. 지금은 `run_processing_job.py` 와 Athena 쿼리를 사람이 실행한다.
@@ -161,3 +161,9 @@ Job 이 쓰는 Parquet 의 열(`review_id, aspect, score, model_version, model_v
 - destroy 하면 Glue 테이블 정의는 지워지지만 Iceberg 의 S3 데이터·메타데이터 파일은 자동으로 지워지지 않는다(S3 에서 직접 정리).
 - Athena 워크그룹은 쿼리 기록이 남아 있어 `force_destroy=false` 다. 지우려면 일부러 바꾼 뒤 apply 한다.
 - 점수 스키마를 바꾸려면 Athena `ALTER TABLE` 을 쓴다. Terraform 은 `ignore_changes` 라서 스키마 변경을 적용하지 않는다.
+
+## Silver 리뷰 읽기 전용 외부 테이블 (2026-10-25)
+
+- `silver_reviews_runs`: `silver/runtime/reviews/runs/<run_id>/silver_reviews/` 를 읽는 외부 테이블. 열 16개, `run_id` 는 파티션 프로젝션(injected)이라 **모든 쿼리에 `WHERE run_id = '<실행 ID>'` 필수**. 쓰기 권한 없음.
+- 어느 실행을 읽을지는 `select_unscored.py` 가 `current.json`(status PASS)으로 정한다. `athena_runner` 정책에 `silver/runtime/reviews/*` S3 읽기가 추가됐고 SSM 설정에 `silver_reviews_runs_table`, `silver_reviews_root` 가 들어간다.
+- 임시 정의다. 계약 문서(`docs/contracts/silver-gold-a-publication.md`)의 `silver.reviews_runs` 가 공개되면 그 이름으로 바꾸고 이 테이블은 지운다. **인프라 담당(재영) 확인 필요:** 읽기 권한 범위, 테이블 이름 중복.

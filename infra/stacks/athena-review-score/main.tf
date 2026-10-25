@@ -25,6 +25,9 @@ module "athena_review_score" {
   table_prefix   = var.table_prefix
   results_prefix = var.results_prefix
 
+  silver_reviews_prefix          = var.silver_reviews_prefix
+  silver_reviews_runs_table_name = var.silver_reviews_runs_table_name
+
   staging_log_prefix     = var.staging_log_prefix
   log_table_prefix       = var.log_table_prefix
   log_table_name         = var.log_table_name

@@ -5,7 +5,9 @@ SSM 파라미터(Terraform infra/stacks/sagemaker-review-score)에서는 역할�
 실행: python deploy/run_processing_job.py --input-key <Silver 후기 파일 S3 키> [--release 2.4b_score_s2c] [--select-unscored] [--date 2026-10-20] [--wait] [--dry-run]
       --release: 실행할 모델 버전. 기본은 SSM 설정의 release. 버전을 바꾸는 것(되돌림 포함)은 SSM 값 하나만 바꾸면 된다
       실행 전에 manifest 형식과 S3 가중치(파일 이름·크기)를 대조해 어긋나면 Job 을 만들지 않는다
-      --select-unscored: 점수 로그(review_score_log)에 이미 있는 후기는 빼고 남은 후기만 점수화한다(0건이면 Job 을 만들지 않음)
+      --select-unscored: 점수 로그(review_score_log)에 이미 있는 후기는 빼고 남은 후기만 점수화한다(0건이면 Job 을 만들지 않음).
+        --input-key 없이 쓰면 Silver 실행 출력(current.json 의 run_id)에서 최대 --max-reviews 건(기본 1500)을 고른다. --run-id 로 실행을 직접 지정할 수 있다.
+        --input-key 와 같이 쓰면 그 JSONL 파일에서 고른다(시험용).
       (입력은 후기 파일 하나의 S3 키. score_batch.py가 파일 하나만 읽는다)
 결과: 각 후기를 **자기 작성일(KST)** 폴더에 쓴다: <output_prefix>year=YYYY/month=MM/day=DD/scores_<model_version>_<실행시각>.parquet (+ <output_prefix>_summary_*.json).
       output_prefix 는 Iceberg MERGE 의 입력(staging)이다. 열은 review_id,aspect,score,model_version,model_version_no,analyzed_at,review_date(후기 작성일).
@@ -129,7 +131,9 @@ def build_request(c, m, reg_uri, input_key, instance=None, max_seconds=None, nam
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--input-key', required=True, help='버킷 안의 후기 파일 키(CSV review_id,text 또는 JSONL)')
+    ap.add_argument('--input-key', default=None, help='버킷 안의 후기 파일 키(CSV review_id,text 또는 JSONL). --select-unscored 와 함께 쓰면 그 파일에서 미점수 후기를 고르고(시험용), 없으면 Silver 실행 출력에서 고른다')
+    ap.add_argument('--run-id', default=None, help='--select-unscored(Silver 방식)가 읽을 Silver 실행 ID. 기본은 current.json 의 run_id')
+    ap.add_argument('--max-reviews', type=int, default=1500, help='--select-unscored(Silver 방식)에서 이번 Job 에 넣을 최대 후기 수. Job 한 번의 한계(약 2,200건, 최대 실행시간 3600초) 안쪽으로 둔다')
     ap.add_argument('--date', default=None, help='작성일을 알 수 없는 후기에 쓸 날짜(KST, YYYY-MM-DD). 기본은 입력 키의 year=/month=/day=')
     ap.add_argument('--release', default=None, help='실행할 모델 버전(릴리스 묶음 이름). 기본은 SSM 설정의 release')
     ap.add_argument('--registry-uri', default=None, help='릴리스 묶음 위치. 기본은 SSM 설정(registry_prefix 또는 model_prefix 옆 model-registry/releases/)')
@@ -151,20 +155,36 @@ def main():
     m = load_release(boto3.client('s3', region_name=a.region), c, release, reg_uri)
     print(f'버전 {release} (번호 {m["model_version_no"]}' + (f', {m["based_on"]} 되돌림' if m.get('based_on') else '') + ')', flush=True)
     input_key = a.input_key
-    if a.select_unscored:
-        # 이미 점수가 매겨진 후기는 빼고 남은 것만 새 입력 파일로 만든다(모델 번호가 바뀌면 전부 남는다 = 재점수화)
+    selected_info = None
+    if a.select_unscored and not a.input_key:
+        # (A) Silver 실행 출력에서 점수 없는 후기만 골라 최대 --max-reviews 건을 새 입력으로 쓴다(Athena 읽기 전용 외부 테이블 사용)
         import select_unscored as su
         ssm = boto3.client('ssm', region_name=a.region)
-        sm_cfg = c
         at_cfg = json.loads(ssm.get_parameter(Name=a.athena_ssm_name)['Parameter']['Value'])
-        no = m['model_version_no']
-        res = su.select_unscored(boto3.client('s3', region_name=a.region), boto3.client('athena', region_name=a.region), sm_cfg['bucket'],
-                                 a.input_key, sm_cfg['unscored_prefix'], at_cfg, no, a.date, a.dry_run)
+        no = a.model_version_no if a.model_version_no is not None else m['model_version_no']   # 번호는 릴리스 묶음(manifest)에서 온다
+        selected_info = su.select_unscored_from_silver(boto3.client('s3', region_name=a.region), boto3.client('athena', region_name=a.region),
+                                                       c, at_cfg, no, a.run_id, a.max_reviews, a.dry_run)
+        print(f"Silver 실행 {selected_info['run_id']}: 전체 {selected_info['silver_total']}건, 이미 점수 있음 {selected_info['scored']}건, "
+              f"점수 필요 {selected_info['unscored_total']}건 → 이번에 {selected_info['selected']}건, 남음 {selected_info['remaining']}건", flush=True)
+        if not selected_info['selected']:
+            print('남은 후기가 없어 Job 을 만들지 않습니다.')
+            return
+        input_key = selected_info['output_key']
+    elif a.select_unscored:
+        # (B) 시험용: 주어진 JSONL 파일에서 이미 점수가 있는 후기를 뺀다
+        import select_unscored as su
+        ssm = boto3.client('ssm', region_name=a.region)
+        at_cfg = json.loads(ssm.get_parameter(Name=a.athena_ssm_name)['Parameter']['Value'])
+        no = a.model_version_no if a.model_version_no is not None else m['model_version_no']   # 번호는 릴리스 묶음(manifest)에서 온다
+        res = su.select_unscored(boto3.client('s3', region_name=a.region), boto3.client('athena', region_name=a.region), c['bucket'],
+                                 a.input_key, c['unscored_prefix'], at_cfg, no, a.date, a.dry_run)
         print(f"입력 {res['input']}건(입력 안 중복 {res['duplicate']}건), 이미 점수 있음 {res['scored']}건, 점수 필요 {res['unscored']}건", flush=True)
         if not res['unscored']:
             print('남은 후기가 없어 Job 을 만들지 않습니다.')
             return
         input_key = res['output_key'] if res['output_key'] else a.input_key
+    elif not a.input_key:
+        raise SystemExit('--input-key 가 필요합니다(또는 --select-unscored 로 Silver 실행 출력에서 고르기)')
     req = build_request(c, m, reg_uri, input_key, a.instance, a.max_seconds, date=a.date)
     if a.dry_run:
         print(json.dumps(req, ensure_ascii=False, indent=2))
@@ -173,6 +193,8 @@ def main():
     sm.create_processing_job(**req)
     name = req['ProcessingJobName']
     print('시작:', name, flush=True)
+    if selected_info:
+        print(f"Job 이 끝나면 작성일 {', '.join(selected_info['review_dates'])} 에 대해 merge.sql → merge_log.sql 을 실행하세요 (남은 후기 {selected_info['remaining']}건)", flush=True)
     while a.wait:
         d = sm.describe_processing_job(ProcessingJobName=name)
         print(time.strftime('%H:%M:%S'), d['ProcessingJobStatus'], d.get('FailureReason', ''), flush=True)

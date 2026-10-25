@@ -19,4 +19,28 @@
 
 모델 번호(`model_version_no`, "x.y" 형식): 평가 모델/로직이 바뀌면 메이저를 올리고(0.0→1.0), 작은 수정·버그 수정이면 마이너를 올린다(0.0→0.1). 마이너는 0~9 까지이고 x.9 다음 변경은 메이저를 올린다. 현재 `2.4b_score_s2c` = `1.0`. 번호는 패치노트에 쓰고 manifest 에 복사되며, `run_processing_job.py` 가 manifest 에서 읽어 `score_batch.py --model-version-no` 로 넘긴다.
 
-미점수 후기만 점수화하기: `python deploy/select_unscored.py --input-key <Silver 후기 파일 S3 키>`(개수만 보려면 `--dry-run`) 또는 `python deploy/run_processing_job.py --input-key <키> --select-unscored --wait`. 점수 로그(`review_score_log`)에 현재 모델 번호로 이미 기록된 후기를 빼고 남은 것만 입력으로 쓰며, 남은 후기가 0건이면 Job 을 만들지 않는다. Job 이 끝난 뒤 `merge.sql` → `merge_log.sql` 을 실행해야 다음 실행에서 "이미 점수 있음"으로 인식된다.
+미점수 후기만 점수화하기(시험용, 파일 하나 지정): `python deploy/select_unscored.py --input-key <JSONL 후기 파일 S3 키>`(개수만 보려면 `--dry-run`) 또는 `python deploy/run_processing_job.py --input-key <키> --select-unscored --wait`. 점수 로그(`review_score_log`)에 현재 모델 번호로 이미 기록된 후기를 빼고 남은 것만 입력으로 쓰며, 남은 후기가 0건이면 Job 을 만들지 않는다. Job 이 끝난 뒤 `merge.sql` → `merge_log.sql` 을 실행해야 다음 실행에서 "이미 점수 있음"으로 인식된다.
+
+### Silver 실행 출력에서 미점수 후기 점수화 (2026-10-25)
+
+Silver 리뷰는 Spark 가 실행(run)별 경로(`silver/runtime/reviews/runs/<run_id>/silver_reviews/`, Parquet)에 쓰므로 경로가 계속 바뀐다.
+그래서 athena 스택의 **읽기 전용 외부 테이블 `silver_reviews_runs`**(run_id 파티션 프로젝션)를 Athena 로 읽는다.
+`select_unscored.py`(`--input-key` 없이)가 `silver/runtime/reviews/current.json` 의 `run_id`(status 가 PASS 일 때만)를 정하고, 그 실행의 후기 중 점수 로그에 현재 모델 번호가 없는 후기를 `--max-reviews`(기본 1500)건만 골라 JSONL 로 쓴다. `--run-id` 로 실행을 직접 지정할 수 있다.
+
+```powershell
+python deploy/select_unscored.py --dry-run            # 개수만 보기 (파일 안 씀)
+python deploy/run_processing_job.py --select-unscored --wait   # 선택 → Job. 끝나면 출력된 작성일에 대해 merge.sql → merge_log.sql 실행
+```
+
+- 한 번에 1500건인 이유: Job 한 번(최대 3600초)이 처리량(초당 약 0.6~0.7건)상 약 2,200건이 한계라 여유를 둔다. 첫 Silver 실행은 약 1.85만 건이라 **선택 → Job → merge → merge_log 를 남은 건수가 0 이 될 때까지 반복**한다(약 13회).
+- 반복은 스크립트로 묶지 않았다: merge 에 SQL 템플릿과 날짜 목록이 필요해서다. 자동화는 Airflow DAG 에서 한다.
+- merge_log 반영 전에 다시 선택하면 같은 후기가 다시 뽑힌다.
+- `silver_reviews_runs` 는 임시 읽기 전용 정의다. Silver 쪽이 `silver.reviews_runs` 를 공개하면 읽는 이름만 바꾸고 이 테이블은 지운다. **S3 읽기 권한(`silver/runtime/reviews/*`)은 인프라 담당(재영) 확인이 필요하다.**
+
+### Airflow 실행 역할 권한 확인 (읽기 전용)
+
+```powershell
+python deploy/check_airflow_access.py --role <Airflow 업무 Pod 의 IAM 역할 이름>   # 여러 번 줄 수 있음
+```
+
+IAM policy simulator 로 "이 역할이 Silver 경로 읽기·staging 쓰기·Athena 쿼리·Glue 테이블 조회·SageMaker Job 생성·PassRole 을 할 수 있는가"를 표로 보여 준다(버킷 이름, 워크그룹, 테이블, Job 역할은 SSM 설정에서 읽는다). 버킷이 SSE-KMS 일 때만 KMS 항목을 보고, Lake Formation 기본 권한 설정도 알려 준다. AWS 를 바꾸는 호출은 하지 않는다. 종료 코드: 0 모두 허용, 1 막힌 항목 있음, 2 설정/역할을 못 찾음. athena 스택 apply 후 다시 돌려 "없음"이 "있음"으로 바뀌는지 확인한다.
