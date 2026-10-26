@@ -37,6 +37,8 @@ class Athena:
         if " AS order_without_cart" in sql:
             return ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions",
                     "cart_order_sessions", "order_without_cart", "order_with_cart", "invalid_rows"], [["1", "1", "1", "1", "1", "0", "1", "0"]]
+        if "GROUP BY funnel_date_kst" in sql:
+            return ["funnel_date_kst", "view_sessions", "cart_sessions", "order_sessions", "paid_sessions", "cart_order_sessions"], [["2026-10-24", "1", "1", "1", "1", "1"]]
         if ".gold_runs " in sql:
             columns = [
                 "run_id",
@@ -206,6 +208,9 @@ def test_real_pages(monkeypatch, name):
     assert not at.exception
     assert not at.error
     assert any("run-a" in c.value for c in at.caption)
+    if name == "funnel":
+        at.checkbox[0].set_value(True).run()
+        assert not at.error and not at.exception
     if name != "orders":
         widgets = at.multiselect or at.selectbox
         assert "0000000001" in str(widgets[0].options)
@@ -317,3 +322,23 @@ def test_trade_query_limit_does_not_change_review_or_generic_query_limit():
         r.read("review_product_daily", days=3)
     with pytest.raises(GoldAError, match="한도"):
         r.query("SELECT article_id FROM gold_a.product_sales_daily_runs")
+
+
+def test_funnel_summary_reads_daily_sums_without_product_catalog():
+    r = reader()
+    f = r.funnel_summary(14)
+    assert f.view_sessions.sum() == 1
+    assert f.attrs["run_id"] == "run-a"
+    assert any("sum(view_sessions)" in sql and "GROUP BY funnel_date_kst" in sql for sql in r.client.sql)
+    assert not any("SELECT DISTINCT" in sql for sql in r.client.sql)
+    r.funnel_order_paths(14, None, {n: 1 for n in ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions", "cart_order_sessions"]})
+    assert not any("SELECT DISTINCT" in sql for sql in r.client.sql)
+
+
+def test_funnel_summary_uses_same_scope_and_limits_selected_products():
+    r = reader()
+    r.funnel_summary(7, ["0000000001"])
+    assert "article_id IN ('0000000001')" in r.client.sql[-1]
+    assert "run_id = 'run-a'" in r.client.sql[-1]
+    with pytest.raises(GoldAError):
+        r.funnel_summary(7, [str(i) for i in range(501)])

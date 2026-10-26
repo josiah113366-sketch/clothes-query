@@ -246,3 +246,5 @@ gitGraph
 | `codex/dashboard-trade-query-20261026` | [dashboard-trade-query-limit.md](tasks/dashboard-trade-query-limit.md) | 운영 갱신 준비 | |
 
 | `codex/dashboard-funnel-partial-20261026` | [dashboard-funnel-partial-read.md](tasks/dashboard-funnel-partial-read.md) | 운영 부분 조회 준비 | |
+
+| `codex/dashboard-funnel-fast-20261026` | [dashboard-funnel-fast-read.md](tasks/dashboard-funnel-fast-read.md) | 운영 조회 지연 보완 | |

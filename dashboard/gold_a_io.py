@@ -356,23 +356,55 @@ class GoldAReader:
         self.cache[key] = df
         return df.copy()
 
+    def funnel_summary(self, days, article_ids=None):
+        """차트에 필요한 날짜별 합계만 읽는다. 상품별 비율을 평균내지 않는다."""
+        if type(days) is not int or not 1 <= days <= 366:
+            raise GoldAError("퍼널 조회 기간을 확인해 주세요.")
+        if article_ids is not None and (not article_ids or len(article_ids) > 500
+                or any(not isinstance(a, str) or not a.strip() for a in article_ids)):
+            raise GoldAError("개별 상품은 1~500개를 선택하거나 전체 상품을 사용하세요.")
+        fields = ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions", "cart_order_sessions"]
+        run = self.run("funnels")
+        self.holds("funnels")
+        if not run:
+            result = pd.DataFrame(columns=["funnel_date_kst", *fields])
+            result.attrs.update(state="NO_RUN", channel="funnels", run_id=None)
+            return result
+        start = self.today - timedelta(days=days - 1)
+        where = (f"run_id = {literal(run['run_id'])} AND CAST(funnel_date_kst AS date) "
+                 f"BETWEEN DATE '{start}' AND DATE '{self.today}'")
+        if article_ids is not None:
+            where += " AND article_id IN (" + ",".join(map(literal, sorted(set(article_ids)))) + ")"
+        key = ("funnel_summary", days, None if article_ids is None else tuple(sorted(set(article_ids))))
+        if key not in self.cache:
+            result = self.query("SELECT funnel_date_kst, " + ", ".join(f"sum({f}) AS {f}" for f in fields)
+                                + f" FROM {self.database}.funnel_daily_runs WHERE {where} GROUP BY funnel_date_kst ORDER BY funnel_date_kst")
+            if list(result.columns) != ["funnel_date_kst", *fields]:
+                raise GoldAError("퍼널 날짜별 합계의 형식이 다릅니다.")
+            result["funnel_date_kst"] = pd.to_datetime(result["funnel_date_kst"])
+            for field in fields:
+                result[field] = pd.to_numeric(result[field], errors="raise").astype("Int64")
+            result.attrs.update(state="OK", channel="funnels", run_id=run["run_id"])
+            self.cache[key] = result
+        return self.cache[key].copy()
+
     def funnel_order_paths(self, days, article_ids, expected):
         """동일 실행·첫 조회일·상품의 상세를 집계해 일별 표와 대조한다. 원본 행은 반환하지 않는다."""
-        if type(days) is not int or not 1 <= days <= 366 or not article_ids:
+        if type(days) is not int or not 1 <= days <= 366 or (article_ids is not None and not article_ids):
             raise GoldAError("주문 경로 분석 불가: 기간·상품을 확인해 주세요.")
         run = self.run("funnels")
         self.holds("funnels")
         if not run or "funnel_session_product" not in run["tables"]:
             raise GoldAError("주문 경로 분석 불가: 같은 실행의 상세가 없습니다.")
-        selected = set(article_ids)
-        known = set(self.products(("funnels",)).article_id)
-        if not selected <= known:
+        selected = set(article_ids) if article_ids is not None else None
+        known = set(self.products(("funnels",)).article_id) if selected is not None else None
+        if selected is not None and not selected <= known:
             raise GoldAError("주문 경로 분석 불가: 공개 상품 범위와 다릅니다.")
         start = self.today - timedelta(days=days - 1)
         where = (f"run_id = {literal(run['run_id'])} AND "
                  "CAST(substr(CAST(first_view_at_kst AS varchar),1,10) AS date) "
                  f"BETWEEN DATE '{start}' AND DATE '{self.today}'")
-        if selected != known:
+        if selected is not None and selected != known:
             where += " AND article_id IN (" + ",".join(map(literal, sorted(selected))) + ")"
         expressions = {
             "view_sessions": "count_if(has_view)",
@@ -384,7 +416,7 @@ class GoldAReader:
             "order_with_cart": "count_if(has_order AND has_cart)",
             "invalid_rows": "count_if(has_view IS NULL OR has_cart IS NULL OR has_order IS NULL OR has_paid IS NULL OR ordered_after_cart IS NULL OR NOT has_view OR (has_paid AND NOT has_order) OR (ordered_after_cart AND NOT (has_cart AND has_order)))",
         }
-        key = ("order_paths", days, tuple(sorted(selected)))
+        key = ("order_paths", days, None if selected is None else tuple(sorted(selected)))
         if key not in self.cache:
             self.cache[key] = self.query(
                 "SELECT " + ", ".join(f"{expr} AS {name}" for name, expr in expressions.items())
