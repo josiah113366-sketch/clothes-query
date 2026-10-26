@@ -185,24 +185,31 @@ class GoldAReader:
                 "Gold A 실데이터를 조회하지 못했습니다. 연결·권한·테이블 설정을 확인해 주세요."
             ) from error
 
+    def _acknowledged_funnel(self):
+        if self.funnel_evidence is None:
+            raise GoldAError("퍼널 부분 결과 근거 조회 설정이 없습니다.")
+        row = self.funnel_evidence.latest()
+        actual = self.query(" UNION ALL ".join(
+            f"SELECT '{name}' AS metric, count(*) AS n FROM {self.database}.{name}_runs "
+            f"WHERE run_id = {literal(row['run_id'])}" + (" AND channel = 'funnels'" if name == "refresh_holds" else "")
+            for name in ("funnel_daily", "funnel_session_product", "refresh_holds")
+        ))
+        if (list(actual.columns) != ["metric", "n"] or len(actual) != 3
+                or dict(zip(actual.metric, actual.n.astype(int), strict=True)) != row["tables"]):
+            raise GoldAError("부분 퍼널의 Athena 건수가 완료 manifest와 다릅니다.")
+        if self.mode == "operation" and (row["quality_status"] != "PARTIAL" or row.get("coverage_status") != "BACKFILL_IN_PROGRESS"):
+            raise GoldAError("완료 퍼널은 정식 공개 목록에서 확인해야 합니다.")
+        row["demo_only"] = self.mode == "demo"
+        row["partial_publication"] = self.mode == "operation"
+        self.runs["funnels"] = row
+        return row
+
     def run(self, channel):
         if channel not in {"trade", "funnels", "reviews"}:
             raise GoldAError("지원하지 않는 Gold A 업무입니다.")
         if channel not in self.runs:
             if self.mode == "demo" and channel == "funnels":
-                if self.funnel_evidence is None:
-                    raise GoldAError("퍼널 시연 근거 조회 설정이 없습니다.")
-                row = self.funnel_evidence.latest()
-                actual = self.query(" UNION ALL ".join(
-                    f"SELECT '{name}' AS metric, count(*) AS n FROM {self.database}.{name}_runs "
-                    f"WHERE run_id = {literal(row['run_id'])}" + (" AND channel = 'funnels'" if name == "refresh_holds" else "")
-                    for name in ("funnel_daily", "funnel_session_product", "refresh_holds")
-                ))
-                if (list(actual.columns) != ["metric", "n"] or len(actual) != 3
-                        or dict(zip(actual.metric, actual.n.astype(int), strict=True)) != row["tables"]):
-                    raise GoldAError("시연 퍼널의 Athena 건수가 완료 manifest와 다릅니다.")
-                self.runs[channel] = row
-                return row
+                return self._acknowledged_funnel()
             selection = self.selected_runs.get(channel) if self.mode == "demo" and channel == "trade" else None
             if selection and not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", selection):
                 raise GoldAError("선택한 Gold 실행 ID가 올바르지 않습니다.")
@@ -213,6 +220,8 @@ class GoldAReader:
                 + "ORDER BY completed_at DESC, run_id DESC LIMIT 1"
             )
             if df.empty:
+                if channel == "funnels" and self.funnel_evidence is not None:
+                    return self._acknowledged_funnel()
                 self.runs[channel] = None
             else:
                 row = df.iloc[0].to_dict()
@@ -308,8 +317,10 @@ class GoldAReader:
                 where = f"run_id = {literal(run['run_id'])} AND article_id = {literal(article_id)}"
                 suffix = f" ORDER BY first_view_at_kst DESC, session_id LIMIT {n}"
             sql = f"SELECT {', '.join(columns)} FROM {self.database}.{table}_runs WHERE {where}{suffix}"
+            expanded_limit = channel == "trade" or (
+                table == "funnel_daily" and run.get("coverage_status") == "BACKFILL_IN_PROGRESS")
             df = (self.query(sql, max_rows=max(self.max_rows, 250000))
-                  if channel == "trade" else self.query(sql))
+                  if expanded_limit else self.query(sql))
             if list(df.columns) != columns:
                 raise GoldAError("Gold A 조회 컬럼이 배포 명세와 다릅니다.")
         for column in columns:

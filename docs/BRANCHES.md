@@ -244,3 +244,5 @@ gitGraph
 | `pipelines/gold-a` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | main 동기화 완료·PR #67 검토 대기 (#34는 Silver에 머지) | |
 
 | `codex/dashboard-trade-query-20261026` | [dashboard-trade-query-limit.md](tasks/dashboard-trade-query-limit.md) | 운영 갱신 준비 | |
+
+| `codex/dashboard-funnel-partial-20261026` | [dashboard-funnel-partial-read.md](tasks/dashboard-funnel-partial-read.md) | 운영 부분 조회 준비 | |
