@@ -1100,6 +1100,8 @@ FLOW_NO_INFLOW_MIN = 10  # Kafka 유입이 이만큼(분) 없으면 지연
 FLOW_GOLD_B_WARN = 10 * 60  # Gold B 적재 잡은 1분마다 쌓는다
 FLOW_BATCH_WARN = 26 * 3600  # 하루 1회 배치(Silver·Gold A): 마지막 완료가 26시간보다 오래되면 지연
 FLOW_REVIEW_WARN = 26 * 3600  # 리뷰 시뮬레이터는 하루 1번(UTC 00:30) S3 에 바로 쓴다
+FLOW_ANOMALY_DAYS = 14  # 이상 탐지 단계가 보는 기간 (gold_b.anomaly_current)
+FLOW_SCORE_DAYS = 7  # 감성 점수 단계가 보는 후기 기간 (review_score_log 의 review_date, KST). 리뷰는 0~7일 뒤에 쓰이므로 7일
 # CDC 커넥터(connectors/cdc-source.yaml)가 RDS 표를 옮겨 쓰는 토픽. clickstream 은 CDC 가 아니라서 뺀다
 _CDC_TOPICS = ("members-events", "orders", "order-items", "payments")
 # 데이터 레이크 버킷 (리뷰 Bronze 목록 조회용). 저장소에 적어도 되는 이름이라 기본값으로 둔다
@@ -1715,6 +1717,90 @@ def _flow_from_review_bronze(now: pd.Timestamp) -> dict:
     }
 
 
+def _flow_from_anomaly(now: pd.Timestamp) -> dict:
+    """gold_b.anomaly_current (탐지 담당 정의, 2026-10-25 확정) 최근 FLOW_ANOMALY_DAYS 일의 OPEN 건수.
+    이상이 없는 것(빈 표)이 정상이라 0건은 ok 다. OPEN 이 있으면 '이상이 났다'는 뜻이라 warn 으로 눈에 띄게 한다
+    (파이프라인 고장이 아니라 탐지 결과다. 내용은 이상 탐지 화면에서 본다).
+    표가 비어 있는 것만으로는 탐지 잡이 도는지 알 수 없으므로 설명에 그 한계를 적는다."""
+    since = now - pd.Timedelta(days=FLOW_ANOMALY_DAYS)
+    df = _athena(
+        "SELECT count_if(status = 'OPEN') AS open_n, count(*) AS total_n, max(detected_at) AS last_at"
+        f" FROM gold_b.anomaly_current WHERE detected_at >= TIMESTAMP '{since:%Y-%m-%d %H:%M:%S}'"
+    )
+    open_n = int(float(df.at[0, "open_n"] or 0))
+    total_n = int(float(df.at[0, "total_n"] or 0))
+    at = _utc(pd.Series([df.at[0, "last_at"]])).iloc[0]
+    if not total_n:
+        return {
+            "anomaly": (
+                "ok",
+                "이상 없음",
+                f"gold_b.anomaly_current 최근 {FLOW_ANOMALY_DAYS}일 탐지 0건\n"
+                "이상이 없으면 표가 비는 것이 정상입니다. 탐지 잡이 도는지는 이 표만으로 알 수 없습니다",
+            )
+        }
+    return {
+        "anomaly": (
+            "warn" if open_n else "ok",
+            f"OPEN {open_n}건" if open_n else "OPEN 없음",
+            f"gold_b.anomaly_current 최근 {FLOW_ANOMALY_DAYS}일 {total_n:,}건 중 OPEN {open_n:,}건"
+            f"\n마지막 탐지 {_kst_hm(at)} · 내용은 이상 탐지 화면에서 확인",
+        )
+    }
+
+
+def _flow_from_review_silver(now: pd.Timestamp) -> dict:
+    """S3 silver/runtime/reviews/current.json (Silver 리뷰가 실행을 마치면 교체하는 포인터).
+    리뷰 Silver 는 거래용 silver.silver_runs 에 섞지 않는 계약이라(docs/contracts/silver-gold-a-publication.md)
+    Athena 표가 없다. 그래서 S3 에서 포인터를 직접 읽고, 파일 수정 시각(LastModified)을 공개 시각으로 본다."""
+    import boto3  # 실데이터를 쓸 때만 필요하다
+
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    key = "silver/runtime/reviews/current.json"
+    obj = s3.get_object(Bucket=DATALAKE_BUCKET, Key=key)
+    info = json.loads(obj["Body"].read())
+    at = pd.Timestamp(obj["LastModified"])
+    age = (now - at).total_seconds()
+    run_id, state = info.get("run_id", "?"), info.get("status", "?")
+    # PASS 가 아니면 점수 모델도 이 실행을 읽지 않는다 (model_io.current_silver_run). 오래된 것은 지연
+    status = "ok" if state == "PASS" and age <= FLOW_BATCH_WARN else "warn"
+    return {
+        "r_silver": (
+            status,
+            f"{_kst_hm(at)} 공개",
+            f"{key}\nrun {run_id} · 품질 {state}",
+        )
+    }
+
+
+def _flow_from_review_score(now: pd.Timestamp) -> dict:
+    """review_score_log (후기별 점수 로그, Iceberg) 의 마지막 분석 시각. 하루 1번 SageMaker 배치가 쌓는다.
+    review_date 파티션(KST)으로 최근 FLOW_SCORE_DAYS 일만 읽는다. 읽기 권한은 dashboard-access 의 enable_review_score_reads."""
+    cfg = model_io.Config(database=os.getenv("REVIEW_SCORE_DATABASE", "clothes_query_dev_review_score"))
+    cfg.check()  # 이름 형식 검사 (SQL 에 붙이기 전에)
+    df = _athena(
+        "SELECT max(analyzed_at) AS last_at, count(DISTINCT review_id) AS n, max_by(model_version, analyzed_at) AS ver"
+        f" FROM {cfg.database}.{cfg.log_table} WHERE review_date >= DATE '{model_io._since(FLOW_SCORE_DAYS)}'"
+    )
+    at = _utc(pd.Series([df.at[0, "last_at"]])).iloc[0]
+    if pd.isna(at):
+        return {
+            "r_score": (
+                "warn",
+                "점수 기록 없음",
+                f"{cfg.database}.{cfg.log_table} 최근 {FLOW_SCORE_DAYS}일에 행이 없습니다",
+            )
+        }
+    n = int(float(df.at[0, "n"] or 0))
+    return {
+        "r_score": (
+            "warn" if (now - at).total_seconds() > FLOW_BATCH_WARN else "ok",
+            f"{_kst_hm(at)} 분석",
+            f"{cfg.database}.{cfg.log_table}\n최근 {FLOW_SCORE_DAYS}일 후기 {n:,}건 · 최신 모델 {df.at[0, 'ver']}",
+        )
+    }
+
+
 # 단계 묶음별 조회 함수. 한 묶음이 실패해도 다른 묶음은 그린다
 _FLOW_READERS = [
     (_flow_from_lag, ["rds", "cdc", "collector", "kafka", "sink", "bronze"]),
@@ -1722,6 +1808,9 @@ _FLOW_READERS = [
     (_flow_from_silver, ["s_trade"]),
     (_flow_from_gold_a, list(_GOLD_A_STAGES)),
     (_flow_from_gold_b, ["b_ledger", "b_pay", "b_malformed"]),
+    (_flow_from_anomaly, ["anomaly"]),
+    (_flow_from_review_silver, ["r_silver"]),
+    (_flow_from_review_score, ["r_score"]),
 ]
 
 

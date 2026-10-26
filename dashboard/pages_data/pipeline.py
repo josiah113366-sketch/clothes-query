@@ -204,9 +204,9 @@ with t_lag:
 _NEED_ATHENA = (
     "대시보드 Athena 연결 필요 (DASHBOARD_ATHENA_WORKGROUP + 읽기 권한 Pod Identity, TODO F3)"
 )
-_NEED_SILVER_RUNS = (
-    "Silver 완료 기록 표가 거래(silver.silver_runs)만 있음. 이 모듈도 같은 형식의 완료 기록이 필요"
-)
+_NO_SILVER_MEMBERS = "회원 Silver 출력이 아직 없음 (회원 Spark 모듈 미구현)"
+_NO_SILVER_PRODUCTS = "상품은 실행 manifest 만 있고 Athena 완료 목록이 없음 (필요한 소비자·범위를 정한 뒤 공개)"
+_NO_SILVER_CLICKS = "클릭 Silver 완료 목록 표와 대시보드 읽기 권한이 없음 (silver_runs 에 섞지 않는 계약)"
 STAGES = [
     # 거래 줄: RDS -> CDC -> Kafka -> S3 Sink -> Bronze
     {
@@ -228,10 +228,10 @@ STAGES = [
     {"id": "sink", "name": "S3 Sink v2", "x": 3, "y": 3.4, "hint": _NEED_ATHENA},
     {"id": "bronze", "name": "Bronze", "x": 4, "y": 3.4, "hint": _NEED_ATHENA},
     # Silver (모듈별)
-    {"id": "s_mem", "name": "회원", "x": 5.6, "y": 2.9, "hint": _NEED_SILVER_RUNS},
+    {"id": "s_mem", "name": "회원", "x": 5.6, "y": 2.9, "hint": _NO_SILVER_MEMBERS},
     {"id": "s_trade", "name": "거래", "x": 5.6, "y": 3.9, "hint": _NEED_ATHENA},
-    {"id": "s_click", "name": "클릭", "x": 5.6, "y": 4.9, "hint": _NEED_SILVER_RUNS},
-    {"id": "s_prod", "name": "상품", "x": 5.6, "y": 1.9, "hint": _NEED_SILVER_RUNS},
+    {"id": "s_click", "name": "클릭", "x": 5.6, "y": 4.9, "hint": _NO_SILVER_CLICKS},
+    {"id": "s_prod", "name": "상품", "x": 5.6, "y": 1.9, "hint": _NO_SILVER_PRODUCTS},
     # Gold A (표별. 같은 channel 실행에서 만들어진다)
     {"id": "a_sales", "name": "주문·매출", "x": 7.4, "y": 3.9, "hint": _NEED_ATHENA},
     {"id": "a_prod", "name": "상품 판매", "x": 7.4, "y": 2.9, "hint": _NEED_ATHENA},
@@ -248,7 +248,7 @@ STAGES = [
         "name": "이상 탐지",
         "x": 6,
         "y": 0.5,
-        "hint": "gold_b.anomaly 표 확정 후 연결 (이상 탐지 화면과 같은 데이터)",
+        "hint": _NEED_ATHENA + ". 이상 탐지 화면과 같은 gold_b.anomaly_current",
     },
     # 리뷰 줄 (Kafka 를 거치지 않고 S3 로 바로 들어온다)
     {
@@ -258,13 +258,13 @@ STAGES = [
         "y": 6.6,
         "hint": "대시보드 S3 읽기 권한 필요 (bronze_v2/reviews/ 목록)",
     },
-    {"id": "r_silver", "name": "Silver 리뷰", "x": 5.6, "y": 6.1, "hint": _NEED_SILVER_RUNS},
+    {"id": "r_silver", "name": "Silver 리뷰", "x": 5.6, "y": 6.1, "hint": "대시보드 S3 읽기 권한 필요 (silver/runtime/reviews/current.json)"},
     {
         "id": "r_score",
         "name": "감성 점수",
         "x": 5.6,
         "y": 7.1,
-        "hint": "점수 로그 review_score_log(Iceberg) 연결 필요 (TODO B6·B7)",
+        "hint": "review_score_log(Iceberg) 읽기 권한 필요 (dashboard-access 의 enable_review_score_reads 적용)",
     },
 ]
 EDGES = [
