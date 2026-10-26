@@ -1,6 +1,6 @@
 # 작업 지시서: dashboard/gold-b-reliability
 
-> 상태: 검토 대기 · 브랜치: `dashboard/gold-b-reliability` (최신 `main` `97d33df`) · 담당: 은서 (`dashboard/TODO.md` B3) · 다음 작업: PR (사용자), 배포 (main 자동 배포) (2026-10-25 사용자: "원장 신뢰성 점검 칸을 실제 점검 쿼리로 연결해줘 (TODO B3)")
+> 상태: 검토 대기 · 브랜치: `dashboard/gold-b-reliability` (최신 `main` `97d33df`에서 만들고 2026-10-26 `78ae762` 위로 다시 올림) · 담당: 은서 (`dashboard/TODO.md` B3) · 다음 작업: PR (사용자), 배포 (main 자동 배포) (2026-10-25 사용자: "원장 신뢰성 점검 칸을 실제 점검 쿼리로 연결해줘 (TODO B3)")
 
 ## 목표
 
@@ -53,6 +53,7 @@
 ### 확인한 결과
 
 - `python test_gold_b_reliability.py` 24개 통과. 기존 `test_gold_b_data.py` 36개, `test_gold_b_scenarios.py` 28개, `test_approval_page.py` 28개, `test_anomaly_rca_data.py` 19개, `test_gold_a_io.py` 19개 통과 (로컬 Python 3.12, streamlit 1.59.2, `streamlit_echarts`는 가짜 모듈).
+- 2026-10-26 최신 `main`(`78ae762`, 이상탐지·원인 리포트·감성분석 화면 실데이터 연결 포함) 위로 다시 올린 뒤(충돌 없음) 다시 돌림: `test_gold_b_reliability.py` 24개, `test_gold_b_data.py` 37개, `test_gold_b_scenarios.py` 29개, `test_approval_page.py` 29개, `test_anomaly_rca_data.py` 28개, `python -m pytest -q test_gold_a_io.py test_model_io.py` 33개 모두 통과.
 - 코드를 일부러 틀리게 바꾼 7가지(등록 빠짐, 빠진 파티션 판정, 기록 없음 판정, 결제 번호로 중복 판정, 경고 빠짐, 더미 안내 고정, 빈 더미 안내)를 시험이 모두 잡았다.
 - 실제 Athena (은서 님 AWS 자격, 대시보드 workgroup, SELECT만, 2026-10-25 17:5x KST): 빈틈 0건(파티션 15개), 같은 위치 중복 0건, 같은 결제 번호 6건(모두 같은 결제의 생성 이벤트가 두 번 온 것: Debezium 재전송, 참고), 마지막 기록 적재 잡 57초 전·지연 수집기 16초 전 → 세 점검 모두 정상.
 
