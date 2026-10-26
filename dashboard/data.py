@@ -104,8 +104,22 @@ def gold_reader():
             boto3.client("athena", region_name=os.getenv("AWS_REGION", "ap-northeast-1")),
             os.getenv("GOLD_A_ATHENA_WORKGROUP", ""),
             database=os.getenv("GOLD_A_DATABASE", "gold_a"),
+            mode=st.session_state.get("_gold_a_mode", "operation"),
+            selected_runs=st.session_state.get("_gold_a_selected_runs", {}),
+            funnel_evidence=_funnel_evidence(),
+            max_rows=250000 if st.session_state.get("_gold_a_mode") == "demo" else 100000,
         )
     return st.session_state["_gold_a_reader"]
+
+
+def _funnel_evidence():
+    if st.session_state.get("_gold_a_mode") != "demo":
+        return None
+    import boto3
+    from gold_a_evidence import FunnelEvidence
+
+    return FunnelEvidence(boto3.client("s3", region_name=os.getenv("AWS_REGION", "ap-northeast-1")),
+                          os.getenv("GOLD_A_OUTPUT_ROOT", "s3://clothes-query-datalake"))
 
 
 def gold_call(method, *args, **kwargs):
@@ -160,6 +174,20 @@ def dataset(ttl: int, allow_empty: bool = False):
             from gold_a_io import TABLES
 
             table = name.removeprefix("get_")
+            if name == "get_data_status" and gold_a_real():
+                USING_DUMMY.discard(name)
+                rows = []
+                for channel in st.session_state.get("_gold_a_channels", ("trade", "funnels", "reviews")):
+                    run = gold_call("run", channel)
+                    if run:
+                        gold_call("holds", channel)
+                    rows.append({"dataset": channel, "run_id": run["run_id"] if run else None,
+                                 "updated_at": run["completed_at"] if run else None,
+                                 "quality": run["quality_status"] if run else "미공개",
+                                 "scope": run.get("scope", "범위 미검증") if run else "공개 완료 실행 없음",
+                                 "held_scope_count": run["held_scope_count"] if run else None,
+                                 "processed_until_kst": "미검증 — 완료 시각은 데이터 처리 범위가 아님"})
+                return pd.DataFrame(rows)
             if table in TABLES and gold_a_real():
                 USING_DUMMY.discard(name)
                 if table == "funnel_session_product":
@@ -719,7 +747,6 @@ def get_reprocess_events() -> pd.DataFrame:
     )
 
 
-@dataset(_TTL_B)
 def get_reliability_checks() -> pd.DataFrame:
     """원장 신뢰성 점검 3종 (오프셋 빈틈 / 중복 / 적재 정지). 문제가 나오면 그 시간대 탐지 결과는 믿지 않는다.
     컬럼: check, target, result(정상 / 확인 필요 / 문제), detail, checked_at(UTC). 실데이터는 _real_reliability_checks (TODO B3)."""

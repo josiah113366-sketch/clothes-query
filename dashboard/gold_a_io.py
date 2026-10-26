@@ -101,6 +101,9 @@ class GoldAReader:
         sleep=time.sleep,
         clock=time.monotonic,
         max_rows=100000,
+        mode="operation",
+        selected_runs=None,
+        funnel_evidence=None,
     ):
         if not workgroup or not re.fullmatch(r"[a-z][a-z0-9_]*", database):
             raise GoldAError("Gold A의 Athena 작업그룹·DB 설정을 확인해 주세요.")
@@ -108,6 +111,17 @@ class GoldAReader:
         self.timeout, self.sleep, self.clock, self.max_rows = timeout, sleep, clock, max_rows
         self.today = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
         self.runs, self.cache, self.holds_cache = {}, {}, {}
+        if mode not in {"operation", "demo"}:
+            raise GoldAError("Gold 조회 모드가 올바르지 않습니다.")
+        self.mode, self.selected_runs, self.funnel_evidence = mode, selected_runs or {}, funnel_evidence
+
+    def run_options(self, channel):
+        if channel != "trade":
+            raise GoldAError("실행 선택은 거래 공개 결과만 지원합니다.")
+        return self.query(
+            f"SELECT run_id, completed_at, quality_status FROM {self.database}.gold_runs "
+            "WHERE channel = 'trade' AND status = 'COMPLETED' ORDER BY completed_at DESC, run_id DESC LIMIT 20"
+        )
 
     def query(self, sql):
         qid = None
@@ -173,10 +187,28 @@ class GoldAReader:
         if channel not in {"trade", "funnels", "reviews"}:
             raise GoldAError("지원하지 않는 Gold A 업무입니다.")
         if channel not in self.runs:
+            if self.mode == "demo" and channel == "funnels":
+                if self.funnel_evidence is None:
+                    raise GoldAError("퍼널 시연 근거 조회 설정이 없습니다.")
+                row = self.funnel_evidence.latest()
+                actual = self.query(" UNION ALL ".join(
+                    f"SELECT '{name}' AS metric, count(*) AS n FROM {self.database}.{name}_runs "
+                    f"WHERE run_id = {literal(row['run_id'])}" + (" AND channel = 'funnels'" if name == "refresh_holds" else "")
+                    for name in ("funnel_daily", "funnel_session_product", "refresh_holds")
+                ))
+                if (list(actual.columns) != ["metric", "n"] or len(actual) != 3
+                        or dict(zip(actual.metric, actual.n.astype(int), strict=True)) != row["tables"]):
+                    raise GoldAError("시연 퍼널의 Athena 건수가 완료 manifest와 다릅니다.")
+                self.runs[channel] = row
+                return row
+            selection = self.selected_runs.get(channel) if self.mode == "demo" and channel == "trade" else None
+            if selection and not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", selection):
+                raise GoldAError("선택한 Gold 실행 ID가 올바르지 않습니다.")
             df = self.query(
-                f"SELECT run_id, completed_at, quality_status, held_scope_count, available_tables_json "
+                f"SELECT run_id, completed_at, quality_status, held_scope_count, available_tables_json, source_manifest, silver_run_id "
                 f"FROM {self.database}.gold_runs WHERE channel = {literal(channel)} AND status = 'COMPLETED' "
-                "ORDER BY completed_at DESC, run_id DESC LIMIT 1"
+                + (f"AND run_id = {literal(selection)} " if selection else "")
+                + "ORDER BY completed_at DESC, run_id DESC LIMIT 1"
             )
             if df.empty:
                 self.runs[channel] = None
@@ -207,6 +239,8 @@ class GoldAReader:
                 except (ValueError, TypeError, KeyError):
                     raise GoldAError("Gold A 완료 목록의 형식이 계약과 다릅니다.") from None
                 self.runs[channel] = row
+                row["scope"] = "공개 실행의 집계 범위 · 전체 원천 처리 범위는 미검증"
+                row["demo_only"] = self.mode == "demo" and channel == "trade"
         return self.runs[channel]
 
     def holds(self, channel):
@@ -308,6 +342,56 @@ class GoldAReader:
         df.attrs.update(state=state, channel=channel, run_id=run["run_id"] if run else None)
         self.cache[key] = df
         return df.copy()
+
+    def funnel_order_paths(self, days, article_ids, expected):
+        """동일 실행·첫 조회일·상품의 상세를 집계해 일별 표와 대조한다. 원본 행은 반환하지 않는다."""
+        if type(days) is not int or not 1 <= days <= 366 or not article_ids:
+            raise GoldAError("주문 경로 분석 불가: 기간·상품을 확인해 주세요.")
+        run = self.run("funnels")
+        self.holds("funnels")
+        if not run or "funnel_session_product" not in run["tables"]:
+            raise GoldAError("주문 경로 분석 불가: 같은 실행의 상세가 없습니다.")
+        selected = set(article_ids)
+        known = set(self.products(("funnels",)).article_id)
+        if not selected <= known:
+            raise GoldAError("주문 경로 분석 불가: 공개 상품 범위와 다릅니다.")
+        start = self.today - timedelta(days=days - 1)
+        where = (f"run_id = {literal(run['run_id'])} AND "
+                 "CAST(substr(CAST(first_view_at_kst AS varchar),1,10) AS date) "
+                 f"BETWEEN DATE '{start}' AND DATE '{self.today}'")
+        if selected != known:
+            where += " AND article_id IN (" + ",".join(map(literal, sorted(selected))) + ")"
+        expressions = {
+            "view_sessions": "count_if(has_view)",
+            "cart_sessions": "count_if(has_cart)",
+            "order_sessions": "count_if(has_order)",
+            "paid_sessions": "count_if(has_paid)",
+            "cart_order_sessions": "count_if(ordered_after_cart)",
+            "order_without_cart": "count_if(has_order AND NOT has_cart)",
+            "order_with_cart": "count_if(has_order AND has_cart)",
+            "invalid_rows": "count_if(has_view IS NULL OR has_cart IS NULL OR has_order IS NULL OR has_paid IS NULL OR ordered_after_cart IS NULL OR NOT has_view OR (has_paid AND NOT has_order) OR (ordered_after_cart AND NOT (has_cart AND has_order)))",
+        }
+        key = ("order_paths", days, tuple(sorted(selected)))
+        if key not in self.cache:
+            self.cache[key] = self.query(
+                "SELECT " + ", ".join(f"{expr} AS {name}" for name, expr in expressions.items())
+                + f" FROM {self.database}.funnel_session_product_runs WHERE {where}"
+            )
+        df = self.cache[key]
+        if len(df) != 1 or list(df.columns) != list(expressions):
+            raise GoldAError("주문 경로 분석 불가: 상세 집계 형식이 다릅니다.")
+        try:
+            values = {name: int(df.iloc[0][name]) for name in expressions}
+        except (ValueError, TypeError, OverflowError) as error:
+            raise GoldAError("주문 경로 분석 불가: 집계 건수를 확인할 수 없습니다.") from error
+        if (any(v < 0 for v in values.values()) or values["invalid_rows"]
+                or any(values[name] != expected.get(name) for name in list(expressions)[:5])
+                or values["order_with_cart"] + values["order_without_cart"] != values["order_sessions"]
+                or values["cart_order_sessions"] > values["order_with_cart"]
+                or values["order_sessions"] == 0):
+            raise GoldAError("주문 경로 분석 불가: 같은 범위의 상세·일별 건수가 일치하지 않거나 주문이 없습니다.")
+        values["without_cart_rate"] = values["order_without_cart"] / values["order_sessions"]
+        return values
 
     def products(self, channels):
         key = ("products", tuple(channels))
