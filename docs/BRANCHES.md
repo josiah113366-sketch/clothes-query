@@ -200,6 +200,7 @@ gitGraph
 | `dashboard/gold-b-scenarios` | [dashboard-gold-b-scenarios.md](tasks/dashboard-gold-b-scenarios.md) (시나리오 2 토픽별 유입, 시나리오 3 성공 결제 2건 이상인 주문, TODO B10) | 머지됨 (#117) | 2026-10-25 |
 | `dashboard/gold-b-empty-zero` | [dashboard-gold-b-empty-zero.md](tasks/dashboard-gold-b-empty-zero.md) (형식 오류·재처리 이력: 결과가 비면 더미 대신 0건) | 머지됨 (#122) | 2026-10-25 |
 | `dashboard/gold-b-reliability` | [dashboard-gold-b-reliability.md](tasks/dashboard-gold-b-reliability.md) (파이프라인 상태의 원장 신뢰성 점검을 실제 점검 쿼리로, TODO B3) | 검토 대기 | |
+| `dashboard/gold-b-time-range` | [dashboard-gold-b-time-range.md](tasks/dashboard-gold-b-time-range.md) (파이프라인 상태·결제 관제·형식 오류에 조회 구간 선택(과거 조회), TODO B11. `dashboard/gold-b-reliability` 위에서 만듦) | 진행 중 | |
 
 
 ### 그 밖의 영역
