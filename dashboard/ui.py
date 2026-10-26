@@ -26,20 +26,49 @@ DEFAULT_DAYS = 14
 def begin_gold_page(*channels):
     """화면을 다시 실행할 때 업무별 완료 실행을 한 번만 선택한다."""
     st.session_state.pop("_gold_a_reader", None)
+    st.session_state.pop("_gold_a_context", None)
     st.session_state["_gold_a_channels"] = channels
     if not data.gold_a_real():
         st.warning("Gold A 미리보기: 더미 데이터입니다.")
         return
+    mode = st.sidebar.radio("Gold 조회 모드", ["운영", "시연·검증"],
+                            index=1 if st.session_state.get("_gold_a_mode") == "demo" else 0,
+                            key="gold_a_view_mode")
+    st.session_state["_gold_a_mode"] = "demo" if mode == "시연·검증" else "operation"
+    st.session_state["_gold_a_selected_runs"] = {}
+    if mode == "시연·검증":
+        st.warning("시연·검증 모드: 실행별 검증 결과입니다. 전체 운영 데이터 완료를 의미하지 않습니다.")
+        if "trade" in channels:
+            options = data.gold_call("run_options", "trade")
+            if not options.empty:
+                labels = {r.run_id: f"{r.run_id} · {r.quality_status}" for r in options.itertuples()}
+                chosen = st.sidebar.selectbox("거래 Gold 실행", list(labels), format_func=labels.get)
+                st.session_state["_gold_a_selected_runs"] = {"trade": chosen}
+        # Discard the options reader so selected run IDs are applied to all metrics.
+        st.session_state.pop("_gold_a_reader", None)
+    st.session_state["_gold_a_context"] = []
+    st.caption("데이터 출처: AWS Athena Gold A 실행별 지표·보류 테이블. 시연 퍼널은 S3 checkpoint·완료 manifest도 대조합니다.")
     for channel in channels:
         run = data.gold_call("run", channel)
         if not run:
             st.info(f"{channel}: 아직 공개된 완료 실행이 없습니다.")
             continue
         st.caption(
-            f"{channel} · 실행 {run['run_id']} · 완료 {run['completed_at']} UTC · {run['quality_status']}"
+            f"{channel} · 실행 {run['run_id']} · 기록 시각 {run['completed_at']} · {run['quality_status']}"
         )
+        scope = run.get("scope", "공개 실행 범위; 전체 원천 처리 범위 미검증")
+        st.caption(scope)
+        context = f"{channel} / {run['run_id']} / {run['quality_status']} / {scope} / 기록 {run['completed_at']}"
+        st.session_state["_gold_a_context"].append(context)
+        if run["quality_status"] == "PARTIAL":
+            st.warning(f"{channel}: PARTIAL — 부분 데이터 기준 지표·전환율입니다. 정상 완료된 전체 결과가 아닙니다.")
+        if run.get("source_manifest"):
+            st.caption(f"출처: {run['source_manifest']} · 확인: {run.get('verification_query_id', 'Athena 공개 완료 목록')}")
+        if run.get("silver_run_id"):
+            st.caption(f"기준 Silver 실행: {run['silver_run_id']}")
         holds = data.gold_call("holds", channel)
         if not holds.empty:
+            st.info("보류 범위의 신규 오류 데이터는 집계에 반영하지 않습니다. 이전 정상 결과가 있으면 그 값을 유지하고, 없으면 제외합니다. 퍼널 백필 미처리는 아직 읽지 않은 범위입니다.")
             st.warning(
                 f"{channel}: 갱신 보류 {len(holds)}개. 이전 정상 결과가 유지된 범위와 결과가 없는 범위를 확인하세요."
             )
@@ -132,9 +161,19 @@ def pick_products(key: str, multi: bool = True) -> list[str]:
         st.info("공개 결과에 조회할 상품이 없습니다.")
         st.stop()
     if multi:
+        # Keep the same all-products calculation without rendering tens of
+        # thousands of selected chips for a real funnel snapshot.
+        all_products = "__gold_a_all_products__"
         picked = st.multiselect(
-            "상품", list(labels), default=list(labels), format_func=labels.get, key=f"prod_{key}"
+            "상품", [all_products, *labels], default=[all_products],
+            format_func=lambda value: "전체 상품" if value == all_products else labels[value],
+            help="전체 상품을 해제하면 개별 상품을 선택할 수 있습니다.", key=f"prod_{key}"
         )
+        if not picked:
+            st.info("조회할 상품을 하나 이상 선택하세요.")
+            st.stop()
+        if all_products in picked:
+            return list(labels)
     else:
         picked = [st.selectbox("상품", list(labels), format_func=labels.get, key=f"prod_{key}")]
     return picked
@@ -219,6 +258,7 @@ h2 {font-size: 1.25rem !important;} h3 {font-size: 1.1rem !important;}
 
 
 def style() -> None:
+    st.session_state.pop("_gold_a_context", None)
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
@@ -264,6 +304,8 @@ def kpis(cards: list[dict]) -> None:
     color  : 왼쪽 띠·추이선 색. 없으면 카드 순서대로 charts.PALETTE
     배지는 ▲▼ 글자와 부호를 같이 보여 주므로 색만으로 판단하지 않는다.
     """
+    for context in st.session_state.get("_gold_a_context", []):
+        st.caption(context)
     cols = st.columns(len(cards))
     nospark = '<div class="kpi-nospark"></div>'
     for i, (col, c) in enumerate(zip(cols, cards, strict=True)):
@@ -296,6 +338,8 @@ def panel(title: str, note: str = ""):
     st.container(border=True) 를 돌려주므로 with 블록 안의 모든 요소가 패널 안에 들어간다.
     """
     box = st.container(border=True)
+    for context in st.session_state.get("_gold_a_context", []):
+        box.caption(context)
     box.markdown(
         f'<div class="panel-h"><span class="panel-t">{html.escape(title)}</span>'
         f'<span class="panel-n">{html.escape(note)}</span></div>',
