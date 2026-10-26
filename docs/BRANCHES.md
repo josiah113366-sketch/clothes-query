@@ -242,3 +242,5 @@ gitGraph
 | 브랜치 | 작업 지시서 | 상태 | 머지일 |
 |---|---|---|---|
 | `pipelines/gold-a` | [gold-a-metrics.md](tasks/gold-a-metrics.md) | main 동기화 완료·PR #67 검토 대기 (#34는 Silver에 머지) | |
+
+| `codex/dashboard-trade-query-20261026` | [dashboard-trade-query-limit.md](tasks/dashboard-trade-query-limit.md) | 운영 갱신 준비 | |

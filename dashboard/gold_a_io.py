@@ -123,7 +123,9 @@ class GoldAReader:
             "WHERE channel = 'trade' AND status = 'COMPLETED' ORDER BY completed_at DESC, run_id DESC LIMIT 20"
         )
 
-    def query(self, sql):
+    def query(self, sql, *, max_rows=None):
+        # 거래 상품 집계 140,807행을 지원하되 다른 업무의 기존 한도는 유지한다.
+        row_limit = self.max_rows if max_rows is None else max_rows
         qid = None
         try:
             qid = self.client.start_query_execution(
@@ -164,7 +166,7 @@ class GoldAReader:
                     if len(values) != len(columns):
                         raise GoldAError("Athena 결과의 열 개수가 잘못됐습니다.")
                     records.append(values)
-                    if len(records) > self.max_rows:
+                    if len(records) > row_limit:
                         raise GoldAError(
                             "조회 결과 한도를 초과했습니다. 기간을 줄이거나 조회 구성을 확인해 주세요."
                         )
@@ -305,9 +307,9 @@ class GoldAReader:
                     raise GoldAError("퍼널 상세의 상품·조회 건수를 확인해 주세요.")
                 where = f"run_id = {literal(run['run_id'])} AND article_id = {literal(article_id)}"
                 suffix = f" ORDER BY first_view_at_kst DESC, session_id LIMIT {n}"
-            df = self.query(
-                f"SELECT {', '.join(columns)} FROM {self.database}.{table}_runs WHERE {where}{suffix}"
-            )
+            sql = f"SELECT {', '.join(columns)} FROM {self.database}.{table}_runs WHERE {where}{suffix}"
+            df = (self.query(sql, max_rows=max(self.max_rows, 250000))
+                  if channel == "trade" else self.query(sql))
             if list(df.columns) != columns:
                 raise GoldAError("Gold A 조회 컬럼이 배포 명세와 다릅니다.")
         for column in columns:

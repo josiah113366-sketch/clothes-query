@@ -300,3 +300,20 @@ def test_review_page_does_not_merge_model_numbers(monkeypatch):
     at.selectbox[0].select("s2c · 2.0").run()
     assert not at.exception and not at.error
     assert at.dataframe[0].value["분석 점수 건수"].sum() == 20
+
+
+def test_trade_query_limit_does_not_change_review_or_generic_query_limit():
+    class MoreRows(Athena):
+        def result(self, sql):
+            columns, rows = super().result(sql)
+            if "SELECT DISTINCT" not in sql and any(name in sql for name in (
+                    ".product_sales_daily_runs", ".review_product_daily_runs")):
+                rows = rows * 3
+            return columns, rows
+
+    r = reader(MoreRows(), max_rows=2)
+    assert len(r.read("product_sales_daily", days=3)) == 3
+    with pytest.raises(GoldAError, match="한도"):
+        r.read("review_product_daily", days=3)
+    with pytest.raises(GoldAError, match="한도"):
+        r.query("SELECT article_id FROM gold_a.product_sales_daily_runs")
