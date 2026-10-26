@@ -47,7 +47,7 @@ def begin_gold_page(*channels):
         # Discard the options reader so selected run IDs are applied to all metrics.
         st.session_state.pop("_gold_a_reader", None)
     st.session_state["_gold_a_context"] = []
-    st.caption("데이터 출처: AWS Athena Gold A 실행별 지표·보류 테이블. 시연 퍼널은 S3 checkpoint·완료 manifest도 대조합니다.")
+    st.caption("데이터 출처: AWS Athena Gold A 실행별 지표·보류 테이블. 부분 퍼널은 S3 checkpoint·완료 manifest도 대조합니다.")
     for channel in channels:
         run = data.gold_call("run", channel)
         if not run:
@@ -60,7 +60,9 @@ def begin_gold_page(*channels):
         st.caption(scope)
         context = f"{channel} / {run['run_id']} / {run['quality_status']} / {scope} / 기록 {run['completed_at']}"
         st.session_state["_gold_a_context"].append(context)
-        if run["quality_status"] == "PARTIAL":
+        if run.get("coverage_status") == "BACKFILL_IN_PROGRESS":
+            st.warning("PARTIAL / 백필 진행 중 — 처리한 파일의 부분 데이터 집계입니다. 전체 퍼널 완료 결과가 아닙니다.")
+        elif run["quality_status"] == "PARTIAL":
             st.warning(f"{channel}: PARTIAL — 부분 데이터 기준 지표·전환율입니다. 정상 완료된 전체 결과가 아닙니다.")
         if run.get("source_manifest"):
             st.caption(f"출처: {run['source_manifest']} · 확인: {run.get('verification_query_id', 'Athena 공개 완료 목록')}")

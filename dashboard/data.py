@@ -113,7 +113,8 @@ def gold_reader():
 
 
 def _funnel_evidence():
-    if st.session_state.get("_gold_a_mode") != "demo":
+    if (st.session_state.get("_gold_a_mode") != "demo"
+            and "funnels" not in st.session_state.get("_gold_a_channels", ())):
         return None
     import boto3
     from gold_a_evidence import FunnelEvidence
