@@ -228,3 +228,4 @@ def test_operation_partial_page_shows_scope_and_backfill_warning(monkeypatch):
     assert any("처리 2/3파일" in c.value for c in at.caption)
     assert any(RUN in c.value for c in at.caption)
     assert any("세션" in k.value for k in at.markdown)
+    assert not any("SELECT DISTINCT" in sql for sql in r.client.sql)

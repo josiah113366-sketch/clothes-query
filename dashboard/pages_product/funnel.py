@@ -22,12 +22,23 @@ st.title("구매 퍼널")
 ui.date_note("funnel")
 c1, c2 = st.columns([2, 1])
 with c1:
-    arts = ui.pick_products("fn")
+    arts = None
+    if st.checkbox("상품별 필터 사용", value=False, key="fn_product_filter"):
+        arts = ui.pick_products("fn")
+        if "__gold_a_all_products__" in st.session_state.get("prod_fn", []):
+            arts = None
+    else:
+        st.caption("전체 상품 · 날짜별 합계 조회")
 with c2:
     days = ui.pick_period("fn")
 
-df = ui.last_days(data.get_funnel_daily(), "funnel_date_kst", days)
-df = df[df.article_id.isin(arts)]
+if data.gold_a_real():
+    with st.spinner("검증된 퍼널 집계 조회 중…"):
+        df = data.gold_call("funnel_summary", days, arts)
+else:
+    df = ui.last_days(data.get_funnel_daily(), "funnel_date_kst", days)
+    if arts is not None:
+        df = df[df.article_id.isin(arts)]
 ui.require_rows(df)
 s = df[
     ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions", "cart_order_sessions"]
@@ -114,6 +125,9 @@ with ui.panel("일별 조회→결제 전환율", "첫 조회일(KST) 기준"):
 
 # 근거 상세: 방문별로 어디까지 진행했는지
 with st.expander("근거: 방문별 진행 단계 (funnel_session_product)"):
-    one = st.selectbox("상품", arts, key="fn_detail")
-    st.dataframe(data.get_funnel_session_product(one), hide_index=True, width="stretch")
+    if arts is None:
+        st.info("방문별 상세는 상품별 필터에서 개별 상품을 선택하면 조회할 수 있습니다.")
+    else:
+        one = st.selectbox("상품", arts, key="fn_detail")
+        st.dataframe(data.get_funnel_session_product(one), hide_index=True, width="stretch")
 ui.dummy_note()
