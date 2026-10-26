@@ -1100,6 +1100,8 @@ FLOW_NO_INFLOW_MIN = 10  # Kafka 유입이 이만큼(분) 없으면 지연
 FLOW_GOLD_B_WARN = 10 * 60  # Gold B 적재 잡은 1분마다 쌓는다
 FLOW_BATCH_WARN = 26 * 3600  # 하루 1회 배치(Silver·Gold A): 마지막 완료가 26시간보다 오래되면 지연
 FLOW_REVIEW_WARN = 26 * 3600  # 리뷰 시뮬레이터는 하루 1번(UTC 00:30) S3 에 바로 쓴다
+# 흐름도에서 품질이 이 값이면 정상 색(초록)으로 그린다. PARTIAL(일부 범위 보류)도 경고로 바꾸지 않고 설명에 '품질 PARTIAL'만 표시한다 (lemin 2026-10-26)
+FLOW_QUALITY_OK = ("PASS", "PARTIAL")
 FLOW_ANOMALY_DAYS = 14  # 이상 탐지 단계가 보는 기간 (gold_b.anomaly_current)
 FLOW_SCORE_DAYS = 7  # 감성 점수 단계가 보는 후기 기간 (review_score_log 의 review_date, KST). 리뷰는 0~7일 뒤에 쓰이므로 7일
 # CDC 커넥터(connectors/cdc-source.yaml)가 RDS 표를 옮겨 쓰는 토픽. clickstream 은 CDC 가 아니라서 뺀다
@@ -1587,7 +1589,7 @@ def _flow_from_silver(now: pd.Timestamp) -> dict:
     detail = f"run {r.run_id} · 품질 {r.quality_status} · {int(float(r.row_count or 0)):,}행"
     if r.status != "COMPLETED":
         status = "bad"
-    elif age > FLOW_BATCH_WARN or r.quality_status != "PASS":
+    elif age > FLOW_BATCH_WARN or r.quality_status not in FLOW_QUALITY_OK:
         status = "warn"
     else:
         status = "ok"
@@ -1634,7 +1636,7 @@ def _flow_from_gold_a(now: pd.Timestamp) -> dict:
             detail += f"\n이번 실행에 없음: {', '.join(missing)}"
         if r.status != "COMPLETED":
             status = "bad"
-        elif missing or r.quality_status != "PASS" or (now - at).total_seconds() > FLOW_BATCH_WARN:
+        elif missing or r.quality_status not in FLOW_QUALITY_OK or (now - at).total_seconds() > FLOW_BATCH_WARN:
             status = "warn"
         else:
             status = "ok"
@@ -1762,8 +1764,8 @@ def _flow_from_review_silver(now: pd.Timestamp) -> dict:
     at = pd.Timestamp(obj["LastModified"])
     age = (now - at).total_seconds()
     run_id, state = info.get("run_id", "?"), info.get("status", "?")
-    # PASS 가 아니면 점수 모델도 이 실행을 읽지 않는다 (model_io.current_silver_run). 오래된 것은 지연
-    status = "ok" if state == "PASS" and age <= FLOW_BATCH_WARN else "warn"
+    # PASS·PARTIAL 은 그대로 보여 준다(품질은 설명에 표시). 그 밖의 값이거나 오래된 것은 주의
+    status = "ok" if state in FLOW_QUALITY_OK and age <= FLOW_BATCH_WARN else "warn"
     return {
         "r_silver": (
             status,

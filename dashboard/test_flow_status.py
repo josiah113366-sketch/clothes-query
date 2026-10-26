@@ -91,10 +91,22 @@ check("Silver 리뷰: 읽는 키", fake.keys, [(data.DATALAKE_BUCKET, "silver/ru
 check("Silver 리뷰: run_id 가 설명에", "reviews-v2-20261026T001000Z" in detail, True)
 
 with_s3(FakeS3({"run_id": "x", "status": "PARTIAL"}, datetime(2026, 10, 26, 1, 0, tzinfo=timezone.utc)))
-check("Silver 리뷰: PASS 가 아니면 warn", data._flow_from_review_silver(NOW)["r_silver"][0], "warn")
+st_, _, detail = data._flow_from_review_silver(NOW)["r_silver"]
+check("Silver 리뷰: PARTIAL 도 그대로 ok, 품질은 설명에", (st_, "품질 PARTIAL" in detail), ("ok", True))
+
+with_s3(FakeS3({"run_id": "x", "status": "FAIL"}, datetime(2026, 10, 26, 1, 0, tzinfo=timezone.utc)))
+check("Silver 리뷰: 그 밖의 값이면 warn", data._flow_from_review_silver(NOW)["r_silver"][0], "warn")
 
 with_s3(FakeS3({"run_id": "x", "status": "PASS"}, datetime(2026, 10, 24, 1, 0, tzinfo=timezone.utc)))
 check("Silver 리뷰: 오래되면 warn", data._flow_from_review_silver(NOW)["r_silver"][0], "warn")
+
+# --- 거래 Silver·Gold A: PARTIAL 도 ok ---
+data._athena = FakeAthena(["run_id", "completed_at", "status", "quality_status", "row_count"], [["r1", "2026-10-26 01:00:00.000", "COMPLETED", "PARTIAL", 10]])
+check("거래 Silver: PARTIAL 도 ok", data._flow_from_silver(NOW)["s_trade"][0], "ok")
+data._athena = FakeAthena(["run_id", "completed_at", "status", "quality_status", "row_count"], [["r1", "2026-10-26 01:00:00.000", "COMPLETED", "FAIL", 10]])
+check("거래 Silver: 그 밖의 품질은 warn", data._flow_from_silver(NOW)["s_trade"][0], "warn")
+data._athena = FakeAthena(["channel", "run_id", "completed_at", "status", "quality_status", "available_tables_json"], [["trade", "g1", "2026-10-26 01:00:00.000", "COMPLETED", "PARTIAL", '{"order_sales_hourly": 5, "product_sales_daily": 3}']])
+check("Gold A: PARTIAL 도 ok", data._flow_from_gold_a(NOW)["a_sales"][0], "ok")
 
 # --- 묶음 등록 ---
 ids = [i for _, group in data._FLOW_READERS for i in group]

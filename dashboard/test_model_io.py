@@ -116,6 +116,8 @@ def silver_s3(status="PASS", run_id="reviews-v2-20261024T155307Z"):
 
 def test_current_run_requires_pass():
     assert model_io.current_silver_run(silver_s3(), CFG).startswith("reviews-v2")
+    # PARTIAL 도 숨기지 않고 읽는다
+    assert model_io.current_silver_run(silver_s3(status="PARTIAL"), CFG).startswith("reviews-v2")
     with pytest.raises(model_io.ModelDataUnavailable):
         model_io.current_silver_run(silver_s3(status="FAIL"), CFG)
     with pytest.raises(model_io.ModelDataUnavailable):
@@ -253,4 +255,4 @@ def test_review_list_rejects_bad_filters_and_empty_result_is_ok():
     with pytest.raises(model_io.ModelDataUnavailable):
         model_io.review_list(
             q, silver_s3(status="FAIL"), CFG, 30
-        )  # PASS 가 아닌 실행은 읽지 않는다
+        )  # PASS·PARTIAL 이 아닌 실행은 읽지 않는다

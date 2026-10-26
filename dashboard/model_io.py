@@ -33,6 +33,8 @@ import pandas as pd
 ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
 RUN_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,100}")
+# 화면에 보여 줄 수 있는 실행 품질. PARTIAL 도 숨기지 않고 그대로 표시한다 (그 밖의 값은 읽지 않는다)
+READABLE_STATUS = {"PASS", "PARTIAL"}
 ASPECT_ORDER = [  # 표시 순서(모델 속성 11개, review-analysis/deploy/score_batch.py 의 ASPECTS 와 같다)
     "재질·촉감", "사이즈·핏", "색상·디자인", "품질·내구성", "가격·가성비", "냄새",
     "세탁·관리", "활용성·사용감", "배송", "포장", "교환·환불·CS",
@@ -152,7 +154,8 @@ def score_diff(query, cfg: Config, model_a: str, model_b: str, days: int) -> pd.
 
 # ------------------------------------------------------------------ Silver 리뷰 실행 (상품·작성일·별점·원문)
 def current_silver_run(s3, cfg: Config) -> str:
-    """silver/runtime/reviews/current.json 의 run_id. status 가 PASS 가 아니면 읽지 않는다."""
+    """silver/runtime/reviews/current.json 의 run_id. status 가 PASS·PARTIAL 이 아니면 읽지 않는다.
+    PARTIAL(일부 범위가 보류된 실행)도 그대로 읽어 화면에 보여 준다 (lemin 2026-10-26)."""
     if not cfg.silver_root_uri:
         raise ModelDataUnavailable("Silver 리뷰 위치(REVIEW_SILVER_ROOT_URI)가 설정되지 않았습니다")
     bucket, root = split_s3(cfg.silver_root_uri)
@@ -167,9 +170,9 @@ def current_silver_run(s3, cfg: Config) -> str:
     run_id = info.get("run_id")
     if not isinstance(run_id, str) or not RUN_ID_RE.fullmatch(run_id):
         raise ModelDataUnavailable("current.json 에 올바른 run_id 가 없습니다")
-    if info.get("status") != "PASS":
+    if info.get("status") not in READABLE_STATUS:
         raise ModelDataUnavailable(
-            f"최근 Silver 실행 {run_id} 의 status 가 PASS 가 아닙니다 ({info.get('status')!r})"
+            f"최근 Silver 실행 {run_id} 의 status 가 PASS·PARTIAL 이 아닙니다 ({info.get('status')!r})"
         )
     return run_id
 
