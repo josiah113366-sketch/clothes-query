@@ -66,7 +66,8 @@ check("성공 결제 중복: 건수는 숫자, 시각 3개는 UTC 시각",
       (pd.api.types.is_numeric_dtype(dup.success_count), [is_utc(dup[c]) for c in DUP_COLS[4:]]), (True, [True] * 3))
 check("성공 결제 중복: 뷰에서 최근 6시간 '적재'된 성공 결제의 주문, 성공 2건 이상 (판정 R5와 같은 방식)",
       ("FROM gold_b.payment_attempts" in q.sql[0], "loaded_at >= TIMESTAMP '2026-10-23 23:30:20'" in q.sql[0],
-       "HAVING count(*) > 1" in q.sql[0], "completed_at >=" in q.sql[0]), (True, True, True, False))
+       "loaded_at < TIMESTAMP '2026-10-24 05:30:20'" in q.sql[0], "HAVING count(*) > 1" in q.sql[0],
+       "completed_at >=" in q.sql[0]), (True, True, True, True, False))
 
 # --- 토픽별 유입 ---
 q = FakeAthena(INFLOW_COLS, INFLOW)
@@ -82,9 +83,12 @@ check("유입: 시간 폴더 조건(02~05시)과 덜 찬 지금 분·직전 분 
 
 # --- 비어도 더미로 바꾸지 않음 (allow_empty), 실패하면 더미 ---
 data._REAL.update({
-    "get_duplicate_success": lambda hours=6: data._real_duplicate_success(hours, query=FakeAthena(DUP_COLS, [])),
-    "get_topic_inflow": lambda minutes=180: data._real_topic_inflow(minutes, query=FakeAthena(INFLOW_COLS, [])),
-    "get_payment_attempts": lambda hours=6: pd.DataFrame(columns=list(data.get_payment_attempts.__wrapped__(6).columns)),
+    "get_duplicate_success": lambda hours=6, end=None: data._real_duplicate_success(
+        hours, end, query=FakeAthena(DUP_COLS, [])),
+    "get_topic_inflow": lambda minutes=180, end=None: data._real_topic_inflow(
+        minutes, end, query=FakeAthena(INFLOW_COLS, [])),
+    "get_payment_attempts": lambda hours=6, end=None: pd.DataFrame(
+        columns=list(data.get_payment_attempts.__wrapped__(6).columns)),
 })
 data.USING_DUMMY.clear()
 st.cache_data.clear()
@@ -130,8 +134,10 @@ else:
         return [str(e.value) for e in elements]
 
     dup_note = "※ 이 칸은 더미 데이터입니다."
-    real_dup = {"get_duplicate_success": lambda hours=6: data._real_duplicate_success(hours, query=FakeAthena(DUP_COLS, DUP))}
-    empty_dup = {"get_duplicate_success": lambda hours=6: data._real_duplicate_success(hours, query=FakeAthena(DUP_COLS, []))}
+    real_dup = {"get_duplicate_success": lambda hours=6, end=None: data._real_duplicate_success(
+        hours, end, query=FakeAthena(DUP_COLS, DUP))}
+    empty_dup = {"get_duplicate_success": lambda hours=6, end=None: data._real_duplicate_success(
+        hours, end, query=FakeAthena(DUP_COLS, []))}
     for label, registered, want in (("더미", {}, ("2건", True)), ("실데이터 모양", real_dup, ("1건", False)),
                                     ("빈 실데이터", empty_dup, (None, False))):
         at = page("pages_data/payments.py", registered)
@@ -142,8 +148,10 @@ else:
         if label == "빈 실데이터":
             check("결제 관제 (빈 실데이터): 정상 안내", any("없습니다 (정상)" in t for t in texts(at.success)), True)
 
-    real_inflow = {"get_topic_inflow": lambda minutes=180: data._real_topic_inflow(minutes, query=FakeAthena(INFLOW_COLS, INFLOW))}
-    empty_inflow = {"get_topic_inflow": lambda minutes=180: data._real_topic_inflow(minutes, query=FakeAthena(INFLOW_COLS, []))}
+    real_inflow = {"get_topic_inflow": lambda minutes=180, end=None: data._real_topic_inflow(
+        minutes, end, query=FakeAthena(INFLOW_COLS, INFLOW))}
+    empty_inflow = {"get_topic_inflow": lambda minutes=180, end=None: data._real_topic_inflow(
+        minutes, end, query=FakeAthena(INFLOW_COLS, []))}
     for label, registered in (("더미", {}), ("실데이터 모양", real_inflow), ("빈 실데이터", empty_inflow)):
         at = page("pages_data/pipeline.py", registered)
         check(f"파이프라인 상태 ({label}): 오류 없이 열림", texts(at.exception), [])
