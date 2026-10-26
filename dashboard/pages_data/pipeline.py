@@ -370,6 +370,12 @@ def flow_tab():
         )
 
     problems = [n for n in nodes if n["status"] in ("warn", "bad", "unknown")]
+    with ui.panel("거래 실행·공개 기록", "완료와 품질은 별개입니다. 매출 보류 시 이전 결과가 유지될 수 있습니다."):
+        trade_nodes = [n for n in nodes if n["id"] in ("s_trade", "a_sales", "a_prod")]
+        st.dataframe(pd.DataFrame([
+            {"단계": n["name"], "완료 기록": n["value"], "실행·품질·공개 건수": n["detail"].replace("\n", " · ")}
+            for n in trade_nodes
+        ]), hide_index=True, width="stretch")
     if problems:
         with ui.panel("확인할 단계", "지연·멈춤·확인 불가만 모았습니다"):
             st.dataframe(
