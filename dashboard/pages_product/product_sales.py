@@ -17,6 +17,40 @@ ui.begin_gold_page("trade")
 
 st.title("상품 판매")
 ui.date_note("sales")
+if data.gold_a_real():
+    days = ui.pick_period("ps")
+    with st.spinner("검증된 상품 판매 집계 조회 중…"):
+        overview = data.gold_call("product_sales_overview", days)
+    if overview is None:
+        st.info("조회할 상품 판매 Gold 실행이 없습니다.")
+        st.stop()
+    daily, products, designs = overview
+    current = ui.last_days(daily, "sales_date_kst", days)
+    ui.require_rows(current)
+    previous = ui.prev_days(daily, "sales_date_kst", days)
+    note = f"직전 {days}일 대비 · 전체 상품"
+    ui.kpis([
+        {"label": "판매 수량", "value": f"{int(current.sold_quantity.sum()):,}",
+         "unit": "개", "delta": ui.delta(current.sold_quantity.sum(), previous.sold_quantity.sum()),
+         "good": "up", "sub": note, "spark": current.sold_quantity},
+        {"label": "판매 금액", "value": f"{int(current.item_sales_amount.sum()):,}",
+         "unit": "원", "delta": ui.delta(current.item_sales_amount.sum(), previous.item_sales_amount.sum()),
+         "good": "up", "sub": note, "spark": current.item_sales_amount},
+    ])
+    metric = st.radio("지표", ["sold_quantity", "item_sales_amount"], horizontal=True,
+                      format_func={"sold_quantity": "판매 수량", "item_sales_amount": "판매 금액(원)"}.get)
+    with ui.panel("전체 상품 판매 추이", "결제일(KST) 기준"):
+        charts.line(current.set_index("sales_date_kst")[[metric]].rename(columns={metric: "전체 상품"}),
+                    key="ps_trend", fmt="won" if metric == "item_sales_amount" else None,
+                    colors=[charts.color(0)], area=False)
+    st.subheader("상품별 합계 · 판매 금액 상위 20개")
+    st.dataframe(products, hide_index=True, width="stretch")
+    st.subheader("디자인(product_code)별 합계 · 판매 금액 상위 20개")
+    st.dataframe(designs, hide_index=True, width="stretch")
+    st.caption("상위 목록은 선택 기간 기준입니다. 디자인별 주문 수는 상품별 주문 수의 합이 아니므로 표시하지 않습니다.")
+    ui.dummy_note()
+    st.stop()
+
 c1, c2 = st.columns([2, 1])
 with c1:
     arts = ui.pick_products("ps")

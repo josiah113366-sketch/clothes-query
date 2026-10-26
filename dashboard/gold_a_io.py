@@ -356,6 +356,56 @@ class GoldAReader:
         self.cache[key] = df
         return df.copy()
 
+    def product_sales_overview(self, days):
+        """완료된 거래 Gold의 날짜별 합계와 상위 상품·디자인만 조회한다."""
+        if type(days) is not int or not 1 <= days <= 183:
+            raise GoldAError("상품 판매 조회 기간을 확인해 주세요.")
+        run = self.run("trade")
+        self.holds("trade")
+        if not run or "product_sales_daily" not in run["tables"]:
+            return None
+        key = ("product_sales_overview", days)
+        if key in self.cache:
+            return tuple(frame.copy() for frame in self.cache[key])
+        start = self.today - timedelta(days=2 * days - 1)
+        where = (f"run_id = {literal(run['run_id'])} AND "
+                 f"CAST(sales_date_kst AS date) BETWEEN DATE '{start}' AND DATE '{self.today}'")
+        source = f"{self.database}.product_sales_daily_runs WHERE {where}"
+        daily = self.query(
+            "SELECT sales_date_kst, sum(sold_quantity) AS sold_quantity, "
+            f"sum(item_sales_amount) AS item_sales_amount FROM {source} "
+            "GROUP BY sales_date_kst ORDER BY sales_date_kst"
+        )
+        current_start = self.today - timedelta(days=days - 1)
+        current_source = (f"{self.database}.product_sales_daily_runs WHERE "
+                          f"run_id = {literal(run['run_id'])} AND "
+                          f"CAST(sales_date_kst AS date) BETWEEN DATE '{current_start}' AND DATE '{self.today}'")
+        products = self.query(
+            "SELECT article_id, CAST(product_code AS varchar) AS product_code, "
+            "sum(sold_quantity) AS sold_quantity, sum(item_sales_amount) AS item_sales_amount "
+            f"FROM {current_source} GROUP BY article_id, product_code "
+            "ORDER BY item_sales_amount DESC LIMIT 20"
+        )
+        designs = self.query(
+            "SELECT CAST(product_code AS varchar) AS product_code, "
+            "sum(sold_quantity) AS sold_quantity, sum(item_sales_amount) AS item_sales_amount "
+            f"FROM {current_source} GROUP BY product_code "
+            "ORDER BY item_sales_amount DESC LIMIT 20"
+        )
+        expected = [
+            ["sales_date_kst", "sold_quantity", "item_sales_amount"],
+            ["article_id", "product_code", "sold_quantity", "item_sales_amount"],
+            ["product_code", "sold_quantity", "item_sales_amount"],
+        ]
+        for frame, columns in zip((daily, products, designs), expected):
+            if list(frame.columns) != columns:
+                raise GoldAError("상품 판매 집계의 컬럼이 배포 명세와 다릅니다.")
+            for column in ("sold_quantity", "item_sales_amount"):
+                frame[column] = pd.to_numeric(frame[column], errors="raise").astype("Int64")
+        daily["sales_date_kst"] = pd.to_datetime(daily["sales_date_kst"])
+        self.cache[key] = (daily, products, designs)
+        return tuple(frame.copy() for frame in self.cache[key])
+
     def funnel_summary(self, days, article_ids=None):
         """차트에 필요한 날짜별 합계만 읽는다. 상품별 비율을 평균내지 않는다."""
         if type(days) is not int or not 1 <= days <= 366:
