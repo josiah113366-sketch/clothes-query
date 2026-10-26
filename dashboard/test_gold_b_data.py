@@ -77,9 +77,10 @@ att = data._real_payment_attempts(6, query=q, now=NOW)
 check("결제 시도: 더미와 같은 칸", list(att.columns), dummy_columns["get_payment_attempts"])
 check("결제 시도: 시각은 UTC 시각, 시도 번호는 숫자",
       (is_utc(att.completed_at), is_utc(att.loaded_at), pd.api.types.is_numeric_dtype(att.attempt_no)), (True, True, True))
-check("결제 시도: 뷰에서 최근 6시간",
-      ("FROM gold_b.payment_attempts" in q.sql[0], "completed_at >= TIMESTAMP '2026-10-23 23:30:00'" in q.sql[0]),
-      (True, True))
+check("결제 시도: 뷰에서 최근 6시간 (지금까지)",
+      ("FROM gold_b.payment_attempts" in q.sql[0], "completed_at >= TIMESTAMP '2026-10-23 23:30:00'" in q.sql[0],
+       "completed_at < TIMESTAMP '2026-10-24 05:30:00'" in q.sql[0]),
+      (True, True, True))
 empty = data._real_payment_attempts(6, query=FakeAthena(ATTEMPT_COLS, []), now=NOW)
 check("결제 시도: 결과가 없으면 칸만 있는 빈 표", (len(empty), list(empty.columns)), (0, dummy_columns["get_payment_attempts"]))
 
@@ -123,7 +124,8 @@ fallback = data.get_payment_attempts(6)
 check("조회가 실패하면 더미로 대체하고 더미 목록에 넣음",
       (len(fallback) > 0, "get_payment_attempts" in data.USING_DUMMY), (True, True))
 EMPTY = {   # 실데이터 연결은 됐는데 결과가 0건인 경우 (형식 오류·재처리 기록은 평소 0건이 정상)
-    "get_malformed_events": lambda: data._real_malformed_events(query=FakeAthena(MALFORMED_COLS, []), now=NOW),
+    "get_malformed_events": lambda hours=6, end=None: data._real_malformed_events(
+        hours, end, query=FakeAthena(MALFORMED_COLS, []), now=NOW),
     "get_reprocess_events": lambda: data._real_reprocess_events(query=FakeAthena(REPROCESS_COLS, []), now=NOW),
 }
 data._REAL.update(EMPTY)
@@ -154,12 +156,14 @@ except ImportError:
 else:
     only_success = [r for r in ATTEMPTS if r[4] == "SUCCESS"]
     real = {
-        "get_payment_attempts": lambda hours=6: data._real_payment_attempts(hours, query=FakeAthena(ATTEMPT_COLS, ATTEMPTS), now=NOW),
-        "get_malformed_events": lambda: data._real_malformed_events(query=FakeAthena(MALFORMED_COLS, MALFORMED), now=NOW),
+        "get_payment_attempts": lambda hours=6, end=None: data._real_payment_attempts(
+            hours, end, query=FakeAthena(ATTEMPT_COLS, ATTEMPTS), now=NOW),
+        "get_malformed_events": lambda hours=6, end=None: data._real_malformed_events(
+            hours, end, query=FakeAthena(MALFORMED_COLS, MALFORMED), now=NOW),
         "get_reprocess_events": lambda: data._real_reprocess_events(query=FakeAthena(REPROCESS_COLS, REPROCESS), now=NOW),
     }
-    no_failures = {"get_payment_attempts": lambda hours=6: data._real_payment_attempts(
-        hours, query=FakeAthena(ATTEMPT_COLS, only_success), now=NOW)}
+    no_failures = {"get_payment_attempts": lambda hours=6, end=None: data._real_payment_attempts(
+        hours, end, query=FakeAthena(ATTEMPT_COLS, only_success), now=NOW)}
     note = "※ 현재는 더미 데이터입니다"
     cases = [(page, label, registered) for label, registered in (("더미", {}), ("실데이터 모양", real))
              for page in ("pages_data/payments.py", "pages_data/malformed.py", "pages_data/reprocess.py")]

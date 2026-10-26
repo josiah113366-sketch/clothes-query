@@ -18,9 +18,12 @@ import data
 ok = True
 NOW = pd.Timestamp("2026-10-24 05:30:20", tz="UTC")
 COLS = ["missing_offsets", "gap_partitions", "partitions_seen", "partitions_expected", "duplicate_rows",
-        "duplicate_payment_ids", "last_loaded", "last_collected"]
+        "duplicate_payment_ids", "load_late_sec", "load_late_at", "collect_gap_sec", "collect_gap_end",
+        "last_loaded", "last_collected"]
 NORMAL = {"missing_offsets": 0, "gap_partitions": 0, "partitions_seen": 15, "partitions_expected": 15,
           "duplicate_rows": 0, "duplicate_payment_ids": 0,
+          "load_late_sec": 68, "load_late_at": "2026-10-24 05:20:00.000",   # 평소: 1분 묶음 + 처리 = 최대 약 68초
+          "collect_gap_sec": 60, "collect_gap_end": "2026-10-24 05:30:01.000",
           "last_loaded": "2026-10-24 05:29:50.000", "last_collected": "2026-10-24 05:30:01.000"}
 
 
@@ -71,13 +74,18 @@ check("빈틈은 offset 칸 수 - 고유 offset 수, 중복은 같은 위치 기
       ("(max(kafka_offset) - min(kafka_offset) + 1) - count(DISTINCT kafka_offset)" in sql,
        "count(DISTINCT concat(topic, '-', CAST(kafka_partition AS varchar), '-', CAST(kafka_offset AS varchar)))" in sql),
       (True, True))
+check("적재 정지: 늦게 쓴 정도(loaded_at - kafka_timestamp), 지연 수집기 측정 간격(구간 시작·지금을 끝점으로)",
+      ("max(date_diff('second', kafka_timestamp, loaded_at))" in sql, "lag(t) OVER (ORDER BY t)" in sql,
+       "UNION ALL SELECT TIMESTAMP '2026-10-24 02:29:00' UNION ALL SELECT TIMESTAMP '2026-10-24 05:30:20'" in sql),
+      (True, True, True))
 
 # --- 판정 ---
 check("더미와 같은 칸", list(normal.columns), list(data.get_reliability_checks.__wrapped__().columns))
 r = normal.set_index("check")
 check("정상: 세 점검 모두 정상", list(r.result), ["정상"] * 3)
 check("정상: 설명에 숫자", (r.detail[GAP], r.detail[STALL]),
-      ("최근 3시간 빈틈 0건 (파티션 15개)", "마지막 기록 적재 잡 30초 전, 지연 수집기 19초 전"))
+      ("최근 3시간 빈틈 0건 (파티션 15개)",
+       "가장 늦게 쓴 메시지 68초 · 지연 수집기 측정 간격 최대 60초 · 마지막 기록 적재 잡 30초 전, 지연 수집기 19초 전"))
 r = run(missing_offsets=3, gap_partitions=1)
 check("빈틈이 있으면 문제", (r.result[GAP], r.detail[GAP]), ("문제", "최근 3시간 빈틈 3건 (파티션 1개)"))
 r = run(partitions_seen=14)
@@ -88,7 +96,16 @@ check("같은 위치가 두 줄이면 문제", r.result[DUP], "문제")
 r = run(duplicate_payment_ids=6)
 check("같은 결제 번호만 겹치면 정상 (참고로만 적음)", (r.result[DUP], "같은 결제 번호 6건" in r.detail[DUP]), ("정상", True))
 r = run(last_loaded="2026-10-24 05:25:20.000")
-check("적재 잡이 2분 넘게 안 쓰면 문제", (r.result[STALL], r.detail[STALL].startswith("멈춤: 적재 잡 ·")), ("문제", True))
+check("적재 잡이 2분 넘게 안 쓰면 문제", (r.result[STALL], r.detail[STALL].startswith("적재 잡 5분째 안 씀")), ("문제", True))
+r = run(load_late_sec=420, load_late_at="2026-10-24 04:12:00.000")
+check("구간 메시지를 2분 넘게 늦게 썼으면 문제 (지금은 다시 쓰고 있어도)",
+      (r.result[STALL], r.detail[STALL].split(" · ")[0]), ("문제", "적재 잡이 10-24 13:12 KST 메시지를 7분 늦게 씀"))
+r = run(collect_gap_sec=300, collect_gap_end="2026-10-24 04:00:00.000")
+check("지연 수집기 측정 간격이 2분 넘은 적이 있으면 문제",
+      (r.result[STALL], r.detail[STALL].split(" · ")[0]), ("문제", "지연 수집기 측정 간격 5분 (10-24 12:55~13:00 KST)"))
+r = run(collect_gap_sec=300, collect_gap_end="2026-10-24 05:30:20.000", last_collected="2026-10-24 05:25:20.000")
+check("지금까지 빈 측정은 한 번만 적음 (몇 분째 안 씀)",
+      (r.result[STALL], r.detail[STALL].split(" · ")[0]), ("문제", "지연 수집기 5분째 안 씀"))
 r = run(last_collected=None)
 check("지연 수집기 기록이 없으면 문제", (r.result[STALL], "지연 수집기 최근 3시간 기록 없음" in r.detail[STALL]), ("문제", True))
 r = run(last_loaded="2026-10-24 05:28:21.000")
@@ -119,7 +136,8 @@ else:
         return [str(e.value) for e in elements]
 
     def reliability(**changes):
-        return {"get_reliability_checks": lambda: data._real_reliability_checks(query=FakeAthena(**changes), now=NOW)}
+        return {"get_reliability_checks": lambda minutes=180, end=None: data._real_reliability_checks(
+            minutes, end, query=FakeAthena(**changes), now=NOW)}
 
     warn = "원장 점검에 정상이 아닌 항목이 있습니다"
     note = "※ 지금 더미 데이터"
@@ -138,8 +156,8 @@ else:
             check("파이프라인 상태 (실데이터 문제): 경고에 정상이 아닌 점검 이름",
                   (DUP in warnings[0], STALL in warnings[0], GAP in warnings[0]), (True, True, False))
     real_all = {**reliability(),
-                "get_bronze_lag": lambda minutes=180: data.get_bronze_lag.__wrapped__(minutes),
-                "get_topic_inflow": lambda minutes=180: data.get_topic_inflow.__wrapped__(minutes)}
+                "get_bronze_lag": lambda minutes=180, end=None: data.get_bronze_lag.__wrapped__(minutes, end),
+                "get_topic_inflow": lambda minutes=180, end=None: data.get_topic_inflow.__wrapped__(minutes, end)}
     at = page(real_all)
     check("파이프라인 상태 (지연·유입·점검 모두 실데이터): 빈 더미 안내를 띄우지 않음",
           [c for c in texts(at.caption) if c.startswith(note)], [])

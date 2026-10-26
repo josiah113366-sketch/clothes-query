@@ -8,6 +8,8 @@
         이 모양이 '평소'다. 톱니 꼭대기가 계속 높아지거나 connector_state 가 RUNNING 이 아니면 이상.
         유입(topic_messages)은 그대로인데 지연만 커졌다면 폭주가 아니라 Bronze 적재 자체의 문제다.
         「토픽별 유입」 그래프가 그 구분을 보여 준다 (토픽마다 조회 구간 중앙값 = 1).
+조회 구간 (TODO B11): 지연·점검 탭 위에서 '최근 N시간' 또는 '날짜 지정'(KST 날짜 + 시간 범위)을 고른다.
+        지연·유입·신뢰성 점검이 같은 구간을 본다. 날짜 지정이면 카드는 마지막 측정 대신 구간에서 가장 나빴던 값이다.
 시각은 UTC 로 저장되어 있어 화면에서는 KST 로 바꿔 보여준다.
 """
 
@@ -28,90 +30,122 @@ t_lag, t_flow = st.tabs(["지연·점검", "데이터 흐름"])
 # 지연 톱니의 '평소' 상한(초). 15분 파일 주기 + 여유. 운영하면서 조정한다. (흐름도 판정도 같은 값: data.FLOW_SINK_LAG_WARN)
 NORMAL_MAX_SEC = 900 + 120
 
+
+def _states(s: pd.Series) -> str:
+    """커넥터 상태 값들을 이어 붙인다 (전부 RUNNING 이면 "RUNNING" 하나). 이미 이어 붙인 값도 다시 나눠 모은다."""
+    return ",".join(sorted(set(",".join(s.dropna()).split(",")) - {""}))
+
+
 with t_lag:
-    lag = data.get_bronze_lag(180).copy()
-    lag["collected_at_kst"] = data.to_kst(lag.collected_at)
+    win = ui.pick_window("pipeline", default_hours=3)
+    past = win.end is not None  # 날짜 지정: 카드는 마지막 측정 대신 구간에서 가장 나빴던 값
+    lag = data.get_bronze_lag(win.minutes, win.end).copy()
+    if lag.empty:  # 날짜 지정 구간에 기록이 없을 때만 (실시간은 비면 더미로 대체된다)
+        st.info(f"{win.label}에 지연 측정 기록이 없습니다. 지연 수집기가 그때 돌고 있었는지 확인하세요.")
+    else:
+        lag["collected_at_kst"] = data.to_kst(lag.collected_at)
+        # 한 토픽에 파티션이 여러 개라(실데이터: 토픽 5개 · 15파티션) 같은 시각·토픽 행이 여러 줄이다.
+        # 1분 × 토픽으로 모은다: 지연 초는 가장 느린 파티션(max), 밀린 메시지는 합계(sum), 커넥터 상태는 이어 붙인다.
+        by_topic = (
+            lag.groupby(["collected_at_kst", "topic"])
+            .agg(
+                lag_sec=("lag_sec", "max"),
+                lag_msgs=("lag_msgs", "sum"),
+                connector_state=("connector_state", _states),
+            )
+            .reset_index()
+        )
+        # 1분 추이: 지연은 토픽 중 최대, 밀린 메시지는 전체 합계
+        per_min = by_topic.groupby("collected_at_kst").agg(
+            lag_sec=("lag_sec", "max"), lag_msgs=("lag_msgs", "sum")
+        )
+        last_at = per_min.index.max()
+        # 실시간은 마지막 측정, 날짜 지정은 구간 전체에서 토픽마다 가장 나빴던 값
+        scope = by_topic if past else by_topic[by_topic.collected_at_kst == last_at]
+        latest_t = (
+            scope.groupby("topic")
+            .agg(
+                lag_sec=("lag_sec", "max"),
+                lag_msgs=("lag_msgs", "max"),
+                connector_state=("connector_state", _states),
+            )
+            .reset_index()
+        )
+        bad = latest_t[(latest_t.connector_state != "RUNNING") | (latest_t.lag_sec > NORMAL_MAX_SEC)]
+        if past:
+            # 측정할 수 있었던 분 = 구간 시작부터 (구간 끝과 지금 중 이른 쪽)까지
+            covered = int(
+                (min(win.end, pd.Timestamp.now(tz="UTC")) - win.end + pd.Timedelta(minutes=win.minutes))
+                / pd.Timedelta(minutes=1)
+            )
+            lag_card = {
+                "value": f"{per_min.lag_sec.max():,.0f}",
+                "sub": f"구간 최대 · {per_min.lag_sec.idxmax():%m-%d %H:%M}",
+            }
+            msg_card = {
+                "value": f"{int(per_min.lag_msgs.max()):,}",
+                "sub": f"구간 최대, 토픽 합계 · {per_min.lag_msgs.idxmax():%m-%d %H:%M}",
+            }
+            time_card = {
+                "label": "측정한 분",
+                "value": f"{len(per_min):,}",
+                "unit": f"/ {covered:,}분",
+                "sub": "빈 분 = 지연 수집기가 재지 못한 분",
+            }
+        else:
+            lag_card = {"value": f"{per_min.lag_sec[last_at]:,.0f}", "sub": "마지막 측정, 토픽 중 최대"}
+            msg_card = {"value": f"{int(per_min.lag_msgs[last_at]):,}", "sub": "마지막 측정, 토픽 합계"}
+            time_card = {"label": "마지막 측정(KST)", "value": last_at.strftime("%H:%M"), "sub": "1분마다 측정"}
+        ui.kpis(
+            [
+                {
+                    "label": "지연/이상 토픽",
+                    "value": f"{len(bad)}",
+                    "unit": f"/ {lag.topic.nunique()}개",
+                    "color": charts.BAD if len(bad) else charts.GOOD,
+                    "sub": ("구간 중 " if past else "") + "평소 범위 초과 또는 RUNNING 아님",
+                },
+                {"label": "최대 지연", "unit": "초", "spark": per_min.lag_sec, **lag_card},
+                {"label": "밀린 메시지", "unit": "건", "spark": per_min.lag_msgs, **msg_card},
+                time_card,
+            ]
+        )
+        if len(bad):
+            st.warning(
+                "구간 중 평소 범위를 넘었거나 커넥터가 RUNNING 이 아니었던 토픽이 있습니다."
+                if past
+                else "평소 범위를 넘었거나 커넥터가 RUNNING 이 아닌 토픽이 있습니다."
+            )
+            st.dataframe(
+                bad[["topic", "lag_sec", "lag_msgs", "connector_state"]],
+                hide_index=True,
+                width="stretch",
+            )
 
-    latest = lag[lag.collected_at == lag.collected_at.max()]
-    # 한 토픽에 파티션이 여러 개라(실데이터: 토픽 5개 · 15파티션) 같은 시각·토픽 행이 여러 줄이다.
-    # 토픽 단위로 모은다: 지연 초는 가장 느린 파티션(max), 밀린 메시지는 합계(sum),
-    # 커넥터 상태는 파티션 값들을 이어 붙인다(전부 RUNNING 이면 "RUNNING" 하나).
-    latest_t = (
-        latest.groupby("topic")
-        .agg(
-            lag_sec=("lag_sec", "max"),
-            lag_msgs=("lag_msgs", "sum"),
-            connector_state=("connector_state", lambda s: ",".join(sorted(set(s.dropna())))),
-        )
-        .reset_index()
-    )
-    bad = latest_t[(latest_t.connector_state != "RUNNING") | (latest_t.lag_sec > NORMAL_MAX_SEC)]
-    # 1분 추이: 지연은 토픽·파티션 중 최대, 밀린 메시지는 전체 합계
-    per_min = lag.groupby("collected_at_kst").agg(
-        lag_sec=("lag_sec", "max"), lag_msgs=("lag_msgs", "sum")
-    )
-    ui.kpis(
-        [
-            {
-                "label": "지연/이상 토픽",
-                "value": f"{len(bad)}",
-                "unit": f"/ {latest.topic.nunique()}개",
-                "color": charts.BAD if len(bad) else charts.GOOD,
-                "sub": "평소 범위 초과 또는 RUNNING 아님",
-            },
-            {
-                "label": "최대 지연",
-                "value": f"{latest.lag_sec.max():,.0f}",
-                "unit": "초",
-                "sub": "마지막 측정, 토픽 중 최대",
-                "spark": per_min.lag_sec,
-            },
-            {
-                "label": "밀린 메시지",
-                "value": f"{int(latest.lag_msgs.sum()):,}",
-                "unit": "건",
-                "sub": "마지막 측정, 토픽 합계",
-                "spark": per_min.lag_msgs,
-            },
-            {
-                "label": "마지막 측정(KST)",
-                "value": latest.collected_at_kst.max().strftime("%H:%M"),
-                "sub": "1분마다 측정",
-            },
-        ]
-    )
-    if len(bad):
-        st.warning("평소 범위를 넘었거나 커넥터가 RUNNING 이 아닌 토픽이 있습니다.")
-        st.dataframe(
-            bad[["topic", "lag_sec", "lag_msgs", "connector_state"]],
-            hide_index=True,
-            width="stretch",
-        )
-
-    with ui.panel("토픽별 Bronze 적재 지연", "1분 측정 · KST · 초"):
-        # pivot 대신 pivot_table(max): 같은 시각·토픽에 파티션 행이 여러 개라 가장 느린 파티션 값을 쓴다
-        pv = lag.pivot_table(
-            index="collected_at_kst", columns="topic", values="lag_sec", aggfunc="max"
-        )
-        pv = pv[sorted(pv.columns)]  # 토픽 이름 순서 = 색 순서 (고정)
-        charts.line(
-            pv,
-            key="pl_lag",
-            fmt="sec",
-            area=False,
-            threshold=NORMAL_MAX_SEC,
-            threshold_label="경고 기준",
-            height="340px",
-        )
-        st.caption(
-            f"평소 모양: 0~약 900초 톱니. 점선 경고 기준은 {NORMAL_MAX_SEC}초(코드 NORMAL_MAX_SEC)."
-        )
+        with ui.panel("토픽별 Bronze 적재 지연", "1분 측정 · KST · 초"):
+            # pivot 대신 pivot_table(max): 같은 시각·토픽에 파티션 행이 여러 개라 가장 느린 파티션 값을 쓴다
+            pv = lag.pivot_table(
+                index="collected_at_kst", columns="topic", values="lag_sec", aggfunc="max"
+            )
+            pv = pv[sorted(pv.columns)]  # 토픽 이름 순서 = 색 순서 (고정)
+            charts.line(
+                pv,
+                key="pl_lag",
+                fmt="sec",
+                area=False,
+                threshold=NORMAL_MAX_SEC,
+                threshold_label="경고 기준",
+                height="340px",
+            )
+            st.caption(
+                f"평소 모양: 0~약 900초 톱니. 점선 경고 기준은 {NORMAL_MAX_SEC}초(코드 NORMAL_MAX_SEC)."
+            )
 
     with ui.panel("토픽별 유입 (평소 대비)", "1분 · KST · 1 = 조회 구간 중앙값"):
-        inflow = data.get_topic_inflow(data.INFLOW_MINUTES).copy()
+        inflow = data.get_topic_inflow(win.minutes, win.end).copy()
         if inflow.empty:
             st.warning(
-                f"최근 {data.INFLOW_MINUTES // 60}시간 동안 원장에 들어온 메시지가 없습니다. 적재 잡이 멈췄는지 확인하세요."
+                f"{win.label} 동안 원장에 들어온 메시지가 없습니다. 적재 잡이 멈췄는지 확인하세요."
             )
         else:
             inflow["minute_kst"] = data.to_kst(inflow.minute)
@@ -131,13 +165,13 @@ with t_lag:
             )
             last = per_topic.iloc[-1].astype(int)
             st.caption(
-                "최근 1분 건수: "
+                ("구간 마지막 1분 건수: " if past else "최근 1분 건수: ")
                 + ", ".join(f"{topic} {count:,}" for topic, count in last.items())
                 + ". 지연과 함께 유입도 늘었으면 폭주, 유입은 그대로인데 지연만 커지면 S3 Sink(Bronze 적재)의 문제입니다."
             )
 
-    with ui.panel("원장 신뢰성 점검", f"최근 {data.RELIABILITY_MINUTES // 60}시간 · 빠짐·중복·멈춤"):
-        checks = data.get_reliability_checks()
+    with ui.panel("원장 신뢰성 점검", f"{win.label} · 빠짐·중복·멈춤"):
+        checks = data.get_reliability_checks(win.minutes, win.end)
         not_ok = checks[checks.result != "정상"]
         if len(not_ok):
             st.warning(

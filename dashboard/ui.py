@@ -8,8 +8,10 @@
 색은 charts.PALETTE(계열)와 GOOD/WARN/BAD(상태)를 쓴다. 바탕색은 .streamlit/config.toml [theme].
 """
 
+import datetime
 import html
 import math
+from typing import NamedTuple
 
 import pandas as pd
 import streamlit as st
@@ -100,6 +102,52 @@ def select_model(df, key):
 def pick_period(key: str, max_days: int = 30, default: int = DEFAULT_DAYS) -> int:
     """최근 N일 선택. 더미 데이터가 30일치라 최대 30. 실데이터 연결 후 늘려도 된다."""
     return st.slider("조회 기간(최근 N일)", 3, max_days, default, key=f"days_{key}")
+
+
+class Window(NamedTuple):
+    """Gold B 화면의 조회 구간 (pick_window 결과). 조회 함수에는 (길이, end) 로 넘긴다."""
+
+    hours: int  # 길이(시간)
+    end: pd.Timestamp | None  # 끝(UTC). None = 지금까지 (실시간)
+    label: str  # 화면 문구. 예: "최근 3시간", "10-25 15:00~17:00 KST"
+
+    @property
+    def minutes(self) -> int:
+        return self.hours * 60
+
+
+def pick_window(key: str, default_hours: int, max_hours: int = 24, history_days: int = 30) -> Window:
+    """Gold B 화면(파이프라인 상태 › 지연·점검, 결제 관제, 형식 오류)의 조회 구간 (TODO B11, 2026-10-26).
+
+    최근     : 최근 N시간(1 ~ max_hours). 지금까지라 화면을 다시 읽을 때마다 새 값이 보인다.
+    날짜 지정: KST 날짜(최근 history_days 일) + 시간 범위(0~24시, 최대 하루). 지나간 시간대를 다시 본다.
+              끝이 지금보다 늦으면 지금까지만 있다. 자정을 넘는 구간은 날짜를 나눠 본다.
+    """
+    mode_col, pick_col = st.columns([1, 3], vertical_alignment="bottom")
+    mode = mode_col.radio("조회 구간", ["최근", "날짜 지정"], horizontal=True, key=f"win_{key}")
+    if mode == "최근":
+        hours = pick_col.slider("최근 N시간", 1, max_hours, default_hours, key=f"win_{key}_hours")
+        return Window(hours, None, f"최근 {hours}시간")
+    now = pd.Timestamp.now(tz="Asia/Seoul")
+    today = now.date()
+    day_col, hour_col = pick_col.columns([1, 2])
+    day = day_col.date_input(
+        "날짜(KST)",
+        value=today,
+        min_value=today - datetime.timedelta(days=history_days),
+        max_value=today,
+        key=f"win_{key}_day",
+    )
+    first, last = hour_col.slider("시간(KST)", 0, 24, (0, 24), format="%d시", key=f"win_{key}_range")
+    if first == last:  # 같은 시각을 고르면 그 시각부터 한 시간
+        first, last = (first, first + 1) if first < 24 else (23, 24)
+    midnight = pd.Timestamp(day).tz_localize("Asia/Seoul")
+    start, end = midnight + pd.Timedelta(hours=first), midnight + pd.Timedelta(hours=last)
+    if start >= now:
+        st.info("아직 오지 않은 시간입니다. 지금보다 앞선 시간을 고르세요.")
+        st.stop()
+    label = f"{day:%m-%d} {first:02d}:00~{last:02d}:00 KST" + (" (지금까지)" if end > now else "")
+    return Window(last - first, end.tz_convert("UTC"), label)
 
 
 def pick_products(key: str, multi: bool = True) -> list[str]:

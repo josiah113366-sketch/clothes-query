@@ -43,6 +43,7 @@
 | B8 | **감성분석 모델 화면 후기 원문**: 모델별 리뷰 분석 탭의 '후기 목록'(원문 + Gold 가 읽는 최신 속성 점수, 기간·상품·속성·점수 필터, 최대 200건, `get_review_list`)과 점수 차가 큰 후기 표·상세에 Silver 최근 실행(`silver_reviews_runs`)의 원문을 보여 준다 | Silver 리뷰 표 위치·Athena 권한 | `dashboard` | | 코드 완료, 권한 apply·배포 대기 | 2026-10-24 원문 표시 결정(팀 내부 공유)을 실데이터로 구현(2026-10-25). 더미 문장 제거 |
 | B10 | **시나리오 2·3 표시**: 파이프라인 상태 › 지연·점검 탭의 토픽별 유입(평소 대비 배수), 결제 관제의 성공 결제가 2건 이상인 주문 | B1, F3(결제 뷰) | `gold-b` / `dashboard` | 은서 | 검토 대기 | `dashboard/gold-b-scenarios`. 두 칸은 비어도 더미로 바꾸지 않음(`dataset(..., allow_empty=True)`). 형식 오류·재처리 이력도 비면 0건으로 보임 (`dashboard/gold-b-empty-zero`, 2026-10-25 사용자 결정) |
 | B9 | **파이프라인 상태 › 데이터 흐름 탭** 미연결 단계 연결: CDC 커넥터 상태(수집기 확장), Silver 회원·클릭·상품·리뷰 완료 기록, `gold_b.anomaly`, Bronze 리뷰 최신 폴더, 감성 점수 로그 | 각 단계의 완료 기록, F3 | `dashboard` / `gold-b` / `review-model` | | 대기 | 2026-10-24 탭 추가. 더미 없음: 읽는 곳이 없으면 회색 "미연결". 지금 읽는 곳은 `bronze_lag_snapshots`, `silver.silver_runs`, `gold_a.gold_runs`, Gold B 원장 3개 (`DASHBOARD_ATHENA_WORKGROUP` 있을 때) |
+| B11 | **조회 구간(과거 조회)**: 파이프라인 상태 › 지연·점검, 결제 관제, 형식 오류에서 최근 N시간 / 날짜 지정(KST 날짜 + 시간 범위, 최대 하루)으로 지나간 시간대를 다시 본다 | B1, B3, B10 | `gold-b` / `dashboard` | 은서 | 검토 대기 | `dashboard/gold-b-time-range` (`dashboard/gold-b-reliability` 위에서 만듦, 그 브랜치 다음에 머지). 신뢰성 점검의 적재 정지는 늦게 쓴 메시지·측정 간격으로 잰다 (2026-10-26) |
 
 ## 3. 원인 리포트 / 승인
 

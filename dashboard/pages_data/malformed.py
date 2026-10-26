@@ -9,6 +9,7 @@
   - 규칙이 바뀌면 rule_version 별로 쌓이므로 '현재 버전'만 센다.
   - 오염이 시작된 시점 = 가장 이른 kafka_timestamp (재처리 범위의 시작점이 된다).
   - raw_sample(원문 일부)은 이 대시보드에 올리지 않는다 (조회 권한 제한 대상).
+조회 구간 (TODO B11): 화면 위에서 '최근 N시간'(기본 6시간) 또는 '날짜 지정'(KST 날짜 + 시간 범위)을 고른다.
 """
 
 import streamlit as st
@@ -21,8 +22,9 @@ from auth import require_role
 require_role("data")
 
 st.title("형식 오류")
+win = ui.pick_window("malformed", default_hours=data.MALFORMED_HOURS)
 
-ev = data.get_malformed_events().copy()
+ev = data.get_malformed_events(win.hours, win.end).copy()
 if ev.empty:
     # 실데이터에 형식 오류가 없으면 더미 대신 0건을 보여 준다 (2026-10-25). 조회가 실패하면 data 가 더미로 대체한다
     ui.kpis(
@@ -32,8 +34,8 @@ if ev.empty:
             {"label": "오염 시작(KST)", "value": "-", "sub": "가장 이른 kafka_timestamp"},
         ]
     )
-    st.success(f"최근 {data.MALFORMED_HOURS}시간 동안 형식 오류가 없습니다 (0건).")
-    st.caption(f"최근 {data.MALFORMED_HOURS}시간의 형식 오류입니다.")
+    st.success(f"{win.label} 동안 형식 오류가 없습니다 (0건).")
+    st.caption(f"{win.label}의 형식 오류입니다.")
     st.stop()
 # 규칙 버전: 현재 버전만 센다. 더미에서는 하나뿐이라 선택지가 하나다.
 ver = st.selectbox("규칙 버전(현재 버전만 집계)", sorted(ev.rule_version.unique()))
@@ -84,4 +86,4 @@ with st.expander("깨진 메시지 목록 (위치 기준)"):
 if "get_malformed_events" in data.USING_DUMMY:
     st.caption("※ 현재는 더미 데이터입니다.")
 else:
-    st.caption(f"최근 {data.MALFORMED_HOURS}시간의 형식 오류입니다.")
+    st.caption(f"{win.label}의 형식 오류입니다.")

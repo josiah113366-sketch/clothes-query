@@ -145,11 +145,12 @@ def product_options():
     return PRODUCTS
 
 
-def dataset(ttl: int, allow_empty: bool = False):
+def dataset(ttl: int, allow_empty=False):
     """Gold A 실연결은 실행별 조회, 기존 경로는 캐시·미리보기 동작을 유지한다.
     데코레이터가 붙은 함수 본문은 더미 생성이다.
     allow_empty=True면 실데이터가 비어도 더미로 바꾸지 않는다 (비어 있는 것이 정상이거나 그 자체가 신호인 화면:
-    성공 결제 중복 0건, 유입 끊김). 조회가 실패했을 때만 더미로 대체한다."""
+    성공 결제 중복 0건, 유입 끊김). 조회가 실패했을 때만 더미로 대체한다.
+    함수를 주면 호출 인자로 정한다 (_picked_window: 날짜를 지정한 구간은 비어도 '그때 기록 없음'이 답이다)."""
 
     def deco(dummy_fn):
         name = dummy_fn.__name__
@@ -161,7 +162,8 @@ def dataset(ttl: int, allow_empty: bool = False):
             if DATA_SOURCE != "dummy" and real is not None:
                 try:
                     df = real(*args, **kwargs)
-                    if df is not None and (len(df) > 0 or allow_empty):
+                    keep_empty = allow_empty(*args, **kwargs) if callable(allow_empty) else allow_empty
+                    if df is not None and (len(df) > 0 or keep_empty):
                         USING_DUMMY.discard(name)
                         return df
                 except Exception:  # noqa: BLE001  조회 실패도 화면을 죽이지 않고 더미로 보여준다
@@ -501,23 +503,41 @@ def get_data_status() -> pd.DataFrame:
 _TOPICS = ["payments", "orders", "order-items", "members-events"]
 
 
-@dataset(_TTL_B)
-def get_bronze_lag(minutes: int = 180) -> pd.DataFrame:
+# 조회 구간 (TODO B11, 2026-10-26). Gold B 조회 함수는 모두 (길이, end) 를 받는다. 화면 위 '조회 구간'(ui.pick_window)이 고른다.
+#   end=None : 지금까지 길이만큼 (실시간, '최근 N시간')
+#   end=시각 : 그 시각(UTC)까지 길이만큼 ('날짜 지정'). 지금보다 늦으면 지금까지만 있다.
+def _span(length: pd.Timedelta, end=None, now=None) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """조회 구간 [시작, 끝) (UTC). 시작 = (고른 끝 또는 지금) - 길이, 끝 = 고른 끝과 지금 중 이른 쪽."""
+    now = now if now is not None else pd.Timestamp.now(tz="UTC")
+    if end is None:
+        return now - length, now
+    end = pd.Timestamp(end)
+    return end - length, min(end, now)
+
+
+def _picked_window(length=None, end=None) -> bool:
+    """날짜를 지정한 조회인가 (dataset 의 allow_empty). 그런 조회는 비어도 더미로 바꾸지 않는다."""
+    return end is not None
+
+
+@dataset(_TTL_B, allow_empty=_picked_window)
+def get_bronze_lag(minutes: int = 180, end: pd.Timestamp | None = None) -> pd.DataFrame:
     """1분 × 토픽 × 파티션 Bronze 적재 지연. 컬럼: collected_at(UTC), topic, partition, end_offset,
-    committed_offset, lag_msgs, lag_sec, connector_state.
+    committed_offset, lag_msgs, lag_sec, connector_state. end: 구간 끝(UTC, 없으면 지금. 위 '조회 구간').
 
     S3 Sink 는 15분마다 파일을 쓰므로 정상일 때도 lag_sec 이 0~약 900초를 톱니 모양으로 반복한다.
     이 모양이 '평소'다. 그보다 계속 커지면 이상으로 본다.
     """
     rng = np.random.default_rng(_SEED + 6)
-    ts = pd.date_range(end=pd.Timestamp.now(tz="UTC").floor("min"), periods=minutes, freq="min")
+    start, stop = _span(pd.Timedelta(minutes=minutes), end)
+    ts = pd.date_range(start.ceil("min"), stop, freq="min", inclusive="left")
     rows = []
     for t in _TOPICS:
         for i, c in enumerate(ts):
             lag_sec = float((i % 15) * 60 + rng.integers(0, 40))
             lag_msgs = int(lag_sec * rng.uniform(0.8, 1.4))
-            end = 10_000 + i * 20
-            rows.append((c, t, 0, end, end - lag_msgs, lag_msgs, lag_sec, "RUNNING"))
+            end_offset = 10_000 + i * 20
+            rows.append((c, t, 0, end_offset, end_offset - lag_msgs, lag_msgs, lag_sec, "RUNNING"))
     return pd.DataFrame(
         rows,
         columns=[
@@ -534,37 +554,40 @@ def get_bronze_lag(minutes: int = 180) -> pd.DataFrame:
 
 
 @dataset(_TTL_B, allow_empty=True)
-def get_topic_inflow(minutes: int = 180) -> pd.DataFrame:
+def get_topic_inflow(minutes: int = 180, end: pd.Timestamp | None = None) -> pd.DataFrame:
     """1분 × 토픽 Kafka 유입 메시지 수 (gold_b.topic_messages, Kafka 시각 기준). 컬럼: minute(UTC), topic, messages.
 
     시나리오 2: 지연이 커질 때 유입도 늘었으면 폭주(사람이 몰림), 유입은 그대로면 S3 Sink(Bronze 적재) 자체의 문제다.
     적재가 멈춰 비는 것 자체가 신호라, 실데이터가 비어도 더미로 바꾸지 않는다 (allow_empty).
     """
     rng = np.random.default_rng(_SEED + 11)
-    end = pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(minutes=2)
-    ts = pd.date_range(end=end, periods=minutes, freq="min")
+    start, stop = _span(pd.Timedelta(minutes=minutes), end)
+    last = min(stop, pd.Timestamp.now(tz="UTC").floor("min") - pd.Timedelta(minutes=1))  # 덜 찬 분은 뺀다
+    ts = pd.date_range(start.ceil("min"), last, freq="min", inclusive="left")
     base = {"clickstream": 2100, "order-items": 80, "orders": 50, "payments": 20, "members-events": 20}
     rows = []
     for topic, per_min in base.items():
         for i, minute in enumerate(ts):
-            surge = 5.0 if minutes - 45 <= i < minutes - 30 else 1.0  # 더미: 45~30분 전 15분 동안 폭주
+            surge = 5.0 if len(ts) - 45 <= i < len(ts) - 30 else 1.0  # 더미: 45~30분 전 15분 동안 폭주
             rows.append((minute, topic, int(per_min * surge * rng.uniform(0.85, 1.15))))
     return pd.DataFrame(rows, columns=["minute", "topic", "messages"])
 
 
-@dataset(_TTL_B)
-def get_payment_attempts(hours: int = 6) -> pd.DataFrame:
+@dataset(_TTL_B, allow_empty=_picked_window)
+def get_payment_attempts(hours: int = 6, end: pd.Timestamp | None = None) -> pd.DataFrame:
     """결제 시도 한 건 = 한 줄 (gold_b.payment_attempts 뷰). 컬럼: payment_id, order_id, attempt_no, pg,
     status, failure_code, failure_cause(PG/CUSTOMER/UNKNOWN), completed_at(UTC), loaded_at(UTC).
-    failure_cause 는 뷰가 분류한다. 실패 = PG + CUSTOMER + UNKNOWN 이 항상 성립한다."""
+    failure_cause 는 뷰가 분류한다. 실패 = PG + CUSTOMER + UNKNOWN 이 항상 성립한다. end: 구간 끝(UTC, 없으면 지금)."""
     rng = np.random.default_rng(_SEED + 7)
     n = hours * 90
-    end = pd.Timestamp.now(tz="UTC").floor("min")
-    completed = end - pd.to_timedelta(rng.integers(0, hours * 60, n), unit="min")
+    start, stop = _span(pd.Timedelta(hours=hours), end)
+    last = stop.floor("min")
+    span = max(int((last - start).total_seconds() // 60), 1)
+    completed = last - pd.to_timedelta(rng.integers(0, span, n), unit="min")
     pg = rng.choice(["PG_A", "PG_B"], n)
     fail = rng.random(n) < 0.08
     # 더미: 최근 30분 PG_A 에서 PG 원인 실패가 늘어난 장면 (시나리오 1 흉내)
-    recent_pg_a = (completed > end - pd.Timedelta(minutes=30)) & (pg == "PG_A")
+    recent_pg_a = (completed > last - pd.Timedelta(minutes=30)) & (pg == "PG_A")
     fail = fail | (recent_pg_a & (rng.random(n) < 0.6))
     codes = np.where(
         recent_pg_a,
@@ -597,14 +620,15 @@ def get_payment_attempts(hours: int = 6) -> pd.DataFrame:
 
 
 @dataset(_TTL_B, allow_empty=True)
-def get_duplicate_success(hours: int = 6) -> pd.DataFrame:
+def get_duplicate_success(hours: int = 6, end: pd.Timestamp | None = None) -> pd.DataFrame:
     """성공 결제가 2건 이상인 주문 = 한 줄 (gold_b.payment_attempts 뷰, 시나리오 3 데이터 오염·판정 R5).
 
-    최근 hours 시간에 적재된(loaded_at) 성공 결제의 주문만 본다. 중복 행의 completed_at 은 원래 결제 시각이라
-    과거일 수 있어서다. 컬럼: order_id, success_count, payment_ids(쉼표로 이음), pgs, first_completed_at(UTC),
-    last_completed_at(UTC), last_loaded_at(UTC). 평소에는 0줄이 정상이라 실데이터가 비어도 더미로 바꾸지 않는다.
+    조회 구간(최근 hours 시간, 또는 end 까지)에 적재된(loaded_at) 성공 결제의 주문만 본다. 중복 행의 completed_at 은
+    원래 결제 시각이라 과거일 수 있어서다. 컬럼: order_id, success_count, payment_ids(쉼표로 이음), pgs,
+    first_completed_at(UTC), last_completed_at(UTC), last_loaded_at(UTC). 평소에는 0줄이 정상이라 실데이터가 비어도
+    더미로 바꾸지 않는다.
     """
-    now = pd.Timestamp.now(tz="UTC").floor("s")
+    now = _span(pd.Timedelta(hours=hours), end)[1].floor("s")  # 더미의 '지금' = 구간 끝
     rows = []
     for i in range(2):  # 더미: 오염(성공 결제 중복) 주입 직후처럼 두 주문
         done = now - pd.Timedelta(hours=3 + i)
@@ -623,18 +647,21 @@ def get_duplicate_success(hours: int = 6) -> pd.DataFrame:
 
 
 @dataset(_TTL_B, allow_empty=True)
-def get_malformed_events() -> pd.DataFrame:
+def get_malformed_events(hours: int = 6, end: pd.Timestamp | None = None) -> pd.DataFrame:
     """깨진 필드 한 건 = 한 줄 (malformed_events). 한 메시지에 오류가 여러 개면 여러 줄이다.
     컬럼: topic, kafka_partition, kafka_offset, kafka_timestamp(UTC), field, reason, rule_version.
     reason 은 PARSE_ERROR / MISSING_FIELD / TYPE_MISMATCH / INVALID_VALUE 네 가지.
     메시지 수는 COUNT(*) 가 아니라 위치(topic, partition, offset) 기준으로 센다 (malformed_messages 뷰).
-    평소 0건이 정상이라 실데이터가 비어도 더미로 바꾸지 않는다. 화면이 0건으로 보여 준다 (2026-10-25)."""
+    평소 0건이 정상이라 실데이터가 비어도 더미로 바꾸지 않는다. 화면이 0건으로 보여 준다 (2026-10-25).
+    조회 구간: 최근 hours 시간, 또는 end(UTC) 까지 (TODO B11)."""
     rng = np.random.default_rng(_SEED + 8)
-    end = pd.Timestamp.now(tz="UTC").floor("min")
+    start, stop = _span(pd.Timedelta(hours=hours), end)
+    last = stop.floor("min")
+    span = max(min(120, int((last - start).total_seconds() // 60)), 1)
     rows = []
     for i in range(40):
         topic = rng.choice(["clickstream", "payments", "orders"], p=[0.7, 0.15, 0.15])
-        ts = end - pd.Timedelta(minutes=int(rng.integers(0, 120)))
+        ts = last - pd.Timedelta(minutes=int(rng.integers(0, span)))
         for f, r in [("session_id", "MISSING_FIELD")] + (
             [("event_time", "TYPE_MISMATCH")] if i % 4 == 0 else []
         ):
@@ -747,9 +774,11 @@ def get_reprocess_events() -> pd.DataFrame:
     )
 
 
-def get_reliability_checks() -> pd.DataFrame:
+@dataset(_TTL_B)
+def get_reliability_checks(minutes: int = 180, end: pd.Timestamp | None = None) -> pd.DataFrame:
     """원장 신뢰성 점검 3종 (오프셋 빈틈 / 중복 / 적재 정지). 문제가 나오면 그 시간대 탐지 결과는 믿지 않는다.
-    컬럼: check, target, result(정상 / 확인 필요 / 문제), detail, checked_at(UTC). 실데이터는 _real_reliability_checks (TODO B3)."""
+    컬럼: check, target, result(정상 / 확인 필요 / 문제), detail, checked_at(UTC). 실데이터는 _real_reliability_checks (TODO B3).
+    조회 구간: 최근 minutes 분, 또는 end(UTC) 까지 (TODO B11)."""
     now = pd.Timestamp.now(tz="UTC").floor("min")
     return pd.DataFrame(
         [
@@ -771,7 +800,7 @@ def get_reliability_checks() -> pd.DataFrame:
                 "check": "적재 정지(2분 초과)",
                 "target": "loaded_at / collected_at",
                 "result": "정상",
-                "detail": "마지막 적재 1분 전",
+                "detail": "가장 늦게 쓴 메시지 68초 · 지연 수집기 측정 간격 최대 60초",
                 "checked_at": now,
             },
         ]
@@ -1118,20 +1147,29 @@ def _utc(s: pd.Series) -> pd.Series:
 
 
 def _hour_partitions(start: pd.Timestamp, end: pd.Timestamp) -> str:
-    """UTC dt/hour 파티션 조건. projection 표라서 이 조건이 있어야 스캔량이 KB 단위로 끝난다."""
-    hours = pd.date_range(start.floor("h"), end.floor("h"), freq="h")
+    """UTC dt/hour 파티션 조건 [start, end). projection 표라서 이 조건이 있어야 스캔량이 KB 단위로 끝난다.
+    끝 시각은 들어가지 않는다(정각에 끝나는 구간은 그 시간 폴더를 읽지 않는다).
+    빈 구간(끝이 시작과 같거나 앞, 예: 아직 오지 않은 시간)이면 아무 폴더도 읽지 않는다."""
+    if end <= start:
+        return "FALSE"
+    hours = pd.date_range(start.floor("h"), (end - pd.Timedelta(microseconds=1)).floor("h"), freq="h")
     return " OR ".join(f"(dt = '{h:%Y-%m-%d}' AND hour = '{h:%H}')" for h in hours)
 
 
-def _real_bronze_lag(minutes: int = 180) -> pd.DataFrame:
-    """gold_b.bronze_lag_snapshots 최근 minutes 분. 컬럼 이름 kafka_partition 은 화면 규칙(partition)으로 바꾼다."""
-    now = pd.Timestamp.now(tz="UTC")
-    start = now - pd.Timedelta(minutes=minutes)
-    df = _athena(
+def _ts(t: pd.Timestamp) -> str:
+    """SQL 시각 값 (원장 시각은 모두 UTC)."""
+    return f"TIMESTAMP '{t:%Y-%m-%d %H:%M:%S}'"
+
+
+def _real_bronze_lag(minutes: int = 180, end: pd.Timestamp | None = None, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.bronze_lag_snapshots 의 조회 구간(최근 minutes 분, 또는 end 까지).
+    컬럼 이름 kafka_partition 은 화면 규칙(partition)으로 바꾼다."""
+    start, stop = _span(pd.Timedelta(minutes=minutes), end, now)
+    df = (query or _athena)(
         "SELECT collected_at, topic, kafka_partition, end_offset, committed_offset, lag_msgs, lag_sec,"
         " connector_state FROM gold_b.bronze_lag_snapshots"
-        f" WHERE ({_hour_partitions(start, now)})"
-        f" AND collected_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # collected_at 은 UTC
+        f" WHERE ({_hour_partitions(start, stop)})"
+        f" AND collected_at >= {_ts(start)} AND collected_at < {_ts(stop)}"  # collected_at 은 UTC
     ).rename(columns={"kafka_partition": "partition"})
     df["collected_at"] = _utc(df.collected_at)
     for c in ["partition", "end_offset", "committed_offset", "lag_msgs", "lag_sec"]:
@@ -1139,18 +1177,18 @@ def _real_bronze_lag(minutes: int = 180) -> pd.DataFrame:
     return df
 
 
-MALFORMED_HOURS = 6  # 형식 오류 화면이 읽는 최근 시간 (TODO B1)
+MALFORMED_HOURS = 6  # 형식 오류 화면의 기본 조회 길이(시간). 화면 위 '조회 구간'에서 바꾼다 (TODO B1, B11)
 REPROCESS_DAYS = 7  # 재처리 이력 화면이 읽는 최근 날짜 (TODO B1)
 
 
-def _real_payment_attempts(hours: int = 6, *, query=None, now=None) -> pd.DataFrame:
-    """gold_b.payment_attempts 뷰의 최근 hours 시간(completed_at). 보류 안 된 결제 하나 = 한 줄.
+def _real_payment_attempts(hours: int = 6, end: pd.Timestamp | None = None, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.payment_attempts 뷰의 조회 구간(최근 hours 시간, 또는 end 까지. completed_at). 보류 안 된 결제 하나 = 한 줄.
     뷰가 원장 전체를 읽어서 시간 폴더 조건은 쓸 수 없다. 대시보드 역할에 뷰(payment_states·payment_attempts) 읽기 권한이 필요하다."""
-    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(hours=hours)
+    start, stop = _span(pd.Timedelta(hours=hours), end, now)
     df = (query or _athena)(
         "SELECT payment_id, order_id, attempt_no, pg, status, failure_code, failure_cause,"
         " completed_at, loaded_at FROM gold_b.payment_attempts"
-        f" WHERE completed_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # completed_at 은 UTC
+        f" WHERE completed_at >= {_ts(start)} AND completed_at < {_ts(stop)}"  # completed_at 은 UTC
         " ORDER BY completed_at"
     )
     df["attempt_no"] = pd.to_numeric(df["attempt_no"], errors="coerce")
@@ -1159,15 +1197,15 @@ def _real_payment_attempts(hours: int = 6, *, query=None, now=None) -> pd.DataFr
     return df
 
 
-def _real_malformed_events(*, query=None, now=None) -> pd.DataFrame:
-    """gold_b.malformed_events 의 최근 MALFORMED_HOURS 시간(kafka_timestamp). 오류 하나 = 한 줄."""
-    end = now or pd.Timestamp.now(tz="UTC")
-    start = end - pd.Timedelta(hours=MALFORMED_HOURS)
+def _real_malformed_events(hours: int = MALFORMED_HOURS, end: pd.Timestamp | None = None, *, query=None,
+                           now=None) -> pd.DataFrame:
+    """gold_b.malformed_events 의 조회 구간(최근 hours 시간, 또는 end 까지. kafka_timestamp). 오류 하나 = 한 줄."""
+    start, stop = _span(pd.Timedelta(hours=hours), end, now)
     df = (query or _athena)(
         "SELECT topic, kafka_partition, kafka_offset, kafka_timestamp, field, reason, rule_version"
         " FROM gold_b.malformed_events"
-        f" WHERE ({_hour_partitions(start, end)})"
-        f" AND kafka_timestamp >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # kafka_timestamp 는 UTC
+        f" WHERE ({_hour_partitions(start, stop)})"
+        f" AND kafka_timestamp >= {_ts(start)} AND kafka_timestamp < {_ts(stop)}"  # kafka_timestamp 는 UTC
         " ORDER BY kafka_timestamp"
     )
     for c in ("kafka_partition", "kafka_offset"):
@@ -1190,14 +1228,15 @@ def _real_reprocess_events(*, query=None, now=None) -> pd.DataFrame:
     return df
 
 
-DUPLICATE_HOURS = 6  # 성공 결제 중복을 찾는 최근 적재 시간 (시나리오 3)
-INFLOW_MINUTES = 180  # 토픽별 유입을 보는 최근 분 (시나리오 2, 지연 그래프와 같은 길이)
+DUPLICATE_HOURS = 6  # 성공 결제 중복을 찾는 기본 적재 시간 (시나리오 3). 화면은 결제 관제의 조회 구간을 쓴다 (B11)
+INFLOW_MINUTES = 180  # 토픽별 유입의 기본 길이(분) (시나리오 2, 지연 그래프와 같은 길이)
 
 
-def _real_duplicate_success(hours: int = 6, *, query=None, now=None) -> pd.DataFrame:
-    """gold_b.payment_attempts 뷰: 최근 hours 시간에 적재된 성공 결제의 주문 중 성공이 2건 이상인 주문 (판정 R5와 같은 방식).
+def _real_duplicate_success(hours: int = 6, end: pd.Timestamp | None = None, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.payment_attempts 뷰: 조회 구간(최근 hours 시간, 또는 end 까지)에 적재된 성공 결제의 주문 중
+    성공이 2건 이상인 주문 (판정 R5와 같은 방식).
     뷰가 원장 전체를 읽어서 시간 폴더 조건은 쓸 수 없다. 대시보드 역할에 뷰(payment_states·payment_attempts) 읽기 권한이 필요하다."""
-    start = (now or pd.Timestamp.now(tz="UTC")) - pd.Timedelta(hours=hours)
+    start, stop = _span(pd.Timedelta(hours=hours), end, now)
     df = (query or _athena)(
         "SELECT t.order_id, count(*) AS success_count,"
         " array_join(array_agg(t.payment_id ORDER BY t.completed_at), ',') AS payment_ids,"
@@ -1206,7 +1245,7 @@ def _real_duplicate_success(hours: int = 6, *, query=None, now=None) -> pd.DataF
         " max(t.loaded_at) AS last_loaded_at"
         " FROM gold_b.payment_attempts t"
         " WHERE t.status = 'SUCCESS' AND t.order_id IN (SELECT order_id FROM gold_b.payment_attempts"
-        f" WHERE status = 'SUCCESS' AND loaded_at >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}')"  # loaded_at 은 UTC
+        f" WHERE status = 'SUCCESS' AND loaded_at >= {_ts(start)} AND loaded_at < {_ts(stop)})"  # loaded_at 은 UTC
         " GROUP BY t.order_id HAVING count(*) > 1"
         " ORDER BY last_loaded_at DESC LIMIT 200"
     )
@@ -1216,17 +1255,19 @@ def _real_duplicate_success(hours: int = 6, *, query=None, now=None) -> pd.DataF
     return df
 
 
-def _real_topic_inflow(minutes: int = 180, *, query=None, now=None) -> pd.DataFrame:
-    """gold_b.topic_messages 의 최근 minutes 분, 1분 × 토픽 메시지 수 (Kafka 시각, UTC). 시간 폴더 조건을 같이 준다.
-    적재 잡은 1분 묶음으로 쓰므로 지금 분과 직전 분은 아직 덜 찼을 수 있어 뺀다 (그래프 끝이 꺼져 보이지 않게)."""
-    end = (now or pd.Timestamp.now(tz="UTC")).floor("min") - pd.Timedelta(minutes=1)
-    start = end - pd.Timedelta(minutes=minutes)
+def _real_topic_inflow(minutes: int = 180, end: pd.Timestamp | None = None, *, query=None, now=None) -> pd.DataFrame:
+    """gold_b.topic_messages 의 조회 구간(최근 minutes 분, 또는 end 까지), 1분 × 토픽 메시지 수 (Kafka 시각, UTC).
+    시간 폴더 조건을 같이 준다. 적재 잡은 1분 묶음으로 쓰므로 지금 분과 직전 분은 아직 덜 찼을 수 있어 뺀다
+    (그래프 끝이 꺼져 보이지 않게). 고른 끝이 그보다 늦으면 거기서 자른다."""
+    edge = (now if now is not None else pd.Timestamp.now(tz="UTC")).floor("min") - pd.Timedelta(minutes=1)
+    start = (edge if end is None else pd.Timestamp(end)) - pd.Timedelta(minutes=minutes)
+    until = edge if end is None else min(pd.Timestamp(end), edge)
     df = (query or _athena)(
         "SELECT date_trunc('minute', kafka_timestamp) AS minute, topic, count(*) AS messages"
         " FROM gold_b.topic_messages"
-        f" WHERE ({_hour_partitions(start, end)})"
-        f" AND kafka_timestamp >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'"  # kafka_timestamp 는 UTC
-        f" AND kafka_timestamp < TIMESTAMP '{end:%Y-%m-%d %H:%M:%S}'"
+        f" WHERE ({_hour_partitions(start, until)})"
+        f" AND kafka_timestamp >= {_ts(start)}"  # kafka_timestamp 는 UTC
+        f" AND kafka_timestamp < {_ts(until)}"
         " GROUP BY 1, 2 ORDER BY 1, 2"
     )
     df["minute"] = _utc(df["minute"])
@@ -1269,47 +1310,69 @@ def _real_rca_reports(days: int = RCA_DAYS, *, query=None, now=None) -> pd.DataF
     return df
 
 
-RELIABILITY_MINUTES = 180  # 원장 신뢰성 점검이 보는 최근 분 (지연·유입 그래프와 같은 길이, TODO B3)
+RELIABILITY_MINUTES = 180  # 원장 신뢰성 점검의 기본 길이(분) (지연·유입 그래프와 같은 길이, TODO B3)
 STALE_SEC = 120  # 적재 잡·지연 수집기가 이보다 오래 쓰지 않으면 멈춤으로 본다 (Gold B 설계의 고장 기준 2분)
 
 
-def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, *, query=None, now=None) -> pd.DataFrame:
+def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, end: pd.Timestamp | None = None, *, query=None,
+                             now=None) -> pd.DataFrame:
     """원장 신뢰성 점검 3종을 Athena 조회 한 번으로 계산한다 (agent/reliability 쿼리, 조사 도구 ledger_reliability와 같은 질문).
 
-    ① 오프셋 빈틈: 최근 minutes 분(Kafka 시각. 덜 찬 지금 분과 직전 분은 뺀다)에 파티션마다 offset이 이어지는가.
+    조회 구간: 최근 minutes 분(실시간), 또는 end 까지 minutes 분(날짜 지정, TODO B11).
+    ① 오프셋 빈틈: 구간(Kafka 시각. 덜 찬 지금 분과 직전 분은 뺀다)에 파티션마다 offset이 이어지는가.
        메시지가 보인 파티션 수가 지연 수집기가 재는 파티션 수보다 적으면 '확인 필요'.
     ② 중복: 같은 메시지 위치(토픽, 파티션, offset)가 두 줄인가. 같은 결제 번호는 Debezium 재전송 등으로 생기고
        뷰가 걸러 주므로 참고로만 적는다.
-    ③ 적재 정지: 적재 잡의 마지막 loaded_at, 지연 수집기의 마지막 collected_at 이 STALE_SEC 넘게 지났는가.
+    ③ 적재 정지: 적재 잡은 구간 메시지가 Kafka 에 들어온 뒤 STALE_SEC 넘게 늦게 쓰였는가(loaded_at - kafka_timestamp).
+       평소 최대 약 68초다 (1분 묶음 + 처리). 지연 수집기는 측정 간격(collected_at)이 STALE_SEC 를 넘은 적이 있는가
+       (구간 시작·끝도 끝점으로 넣는다). 구간이 지금까지 이어지면(실시간, 오늘 날짜 지정) 둘의 마지막 기록이
+       지금부터 STALE_SEC 를 넘었는지도 본다. 멈춘 동안 쓰지 못한 메시지는 원장에 없어 늦게 쓴 정도로는 안 잡혀서다.
+       그래서 지나간 구간도 그 안에서 멈췄거나 밀렸던 것이 잡힌다 (B11). 쓴 시각 사이의 쉼으로 재지 않는 것은,
+       밀린 메시지를 따라잡는 동안에는 구간 밖의 옛 메시지만 써서 멈춘 것처럼 보이기 때문이다.
     한계: ①은 관측된 처음~끝 offset 사이만 본다. 구간 경계에서 Kafka 시각 순서가 뒤바뀐 메시지가 있으면 빈틈으로 보일 수 있다.
+         ③의 적재 잡은 메시지가 2분 넘게 안 오면 잡이 멀쩡해도 실시간 기준으로는 멈춘 것으로 보인다.
     """
-    now = now or pd.Timestamp.now(tz="UTC")
-    end = now.floor("min") - pd.Timedelta(minutes=1)
-    start = end - pd.Timedelta(minutes=minutes)
-    window, recent = f"({_hour_partitions(start, end)})", f"({_hour_partitions(start, now)})"
-    since, until = (f"TIMESTAMP '{t:%Y-%m-%d %H:%M:%S}'" for t in (start, end))  # 원장 시각은 UTC
+    now = now if now is not None else pd.Timestamp.now(tz="UTC")
+    live = end is None
+    edge = now.floor("min") - pd.Timedelta(minutes=1)  # 덜 찬 지금 분과 직전 분을 뺀 끝
+    start = (edge if live else pd.Timestamp(end)) - pd.Timedelta(minutes=minutes)
+    until = edge if live else min(pd.Timestamp(end), edge)  # ①② 의 끝 (Kafka 시각)
+    stop = now if live else min(pd.Timestamp(end), now)  # ③ 의 끝 (쓴 시각)
+    to_now = stop == now  # 구간이 지금까지 이어지는가 (실시간, 또는 오늘 날짜 지정)
+    window, recent = f"({_hour_partitions(start, until)})", f"({_hour_partitions(start, stop)})"
+    since, upto, halt = _ts(start), _ts(until), _ts(stop)
     partition = "concat(topic, '-', CAST(kafka_partition AS varchar))"
     position = "concat(topic, '-', CAST(kafka_partition AS varchar), '-', CAST(kafka_offset AS varchar))"
+    late = "date_diff('second', kafka_timestamp, loaded_at)"
     row = (query or _athena)(
-        "WITH m AS (SELECT topic, kafka_partition, kafka_offset FROM gold_b.topic_messages"
-        f" WHERE {window} AND kafka_timestamp >= {since} AND kafka_timestamp < {until}),"
+        "WITH m AS (SELECT topic, kafka_partition, kafka_offset, kafka_timestamp, loaded_at FROM gold_b.topic_messages"
+        f" WHERE {window} AND kafka_timestamp >= {since} AND kafka_timestamp < {upto}),"
         " g AS (SELECT topic, kafka_partition,"
         " (max(kafka_offset) - min(kafka_offset) + 1) - count(DISTINCT kafka_offset) AS missing"
-        " FROM m GROUP BY topic, kafka_partition)"
+        " FROM m GROUP BY topic, kafka_partition),"
+        " c AS (SELECT t, date_diff('second', lag(t) OVER (ORDER BY t), t) AS gap FROM"
+        " (SELECT DISTINCT collected_at AS t FROM gold_b.bronze_lag_snapshots"
+        f" WHERE {recent} AND collected_at >= {since} AND collected_at < {halt}"
+        f" UNION ALL SELECT {since} UNION ALL SELECT {halt}))"
         " SELECT (SELECT coalesce(sum(missing), 0) FROM g) AS missing_offsets,"
         " (SELECT count(*) FROM g WHERE missing > 0) AS gap_partitions,"
         " (SELECT count(*) FROM g) AS partitions_seen,"
         f" (SELECT count(DISTINCT {partition}) FROM gold_b.bronze_lag_snapshots"
-        f" WHERE {window} AND collected_at >= {since}) AS partitions_expected,"
+        f" WHERE {window} AND collected_at >= {since} AND collected_at < {upto}) AS partitions_expected,"
         f" (SELECT count(*) - count(DISTINCT {position}) FROM m) AS duplicate_rows,"
         " (SELECT count(*) - count(DISTINCT payment_id) FROM gold_b.payment_events"
-        f" WHERE {window} AND completed_at >= {since} AND completed_at < {until}) AS duplicate_payment_ids,"
-        f" (SELECT max(loaded_at) FROM gold_b.topic_messages WHERE {recent}) AS last_loaded,"
-        f" (SELECT max(collected_at) FROM gold_b.bronze_lag_snapshots WHERE {recent}) AS last_collected"
+        f" WHERE {window} AND completed_at >= {since} AND completed_at < {upto}) AS duplicate_payment_ids,"
+        f" (SELECT max({late}) FROM m) AS load_late_sec,"
+        f" (SELECT max_by(kafka_timestamp, {late}) FROM m) AS load_late_at,"
+        " (SELECT max(gap) FROM c) AS collect_gap_sec,"
+        " (SELECT max_by(t, gap) FROM c) AS collect_gap_end,"
+        f" (SELECT max(loaded_at) FROM gold_b.topic_messages WHERE {recent} AND loaded_at < {halt}) AS last_loaded,"
+        f" (SELECT max(collected_at) FROM gold_b.bronze_lag_snapshots WHERE {recent} AND collected_at < {halt})"
+        " AS last_collected"
     ).iloc[0]
     n = {k: int(float(row[k] or 0)) for k in ("missing_offsets", "gap_partitions", "partitions_seen",
                                               "partitions_expected", "duplicate_rows", "duplicate_payment_ids")}
-    span = f"최근 {minutes // 60}시간" if minutes % 60 == 0 else f"최근 {minutes}분"
+    span = (f"최근 {minutes // 60}시간" if minutes % 60 == 0 else f"최근 {minutes}분") if live else "구간"
     if n["missing_offsets"]:
         gap = ("문제", f"{span} 빈틈 {n['missing_offsets']:,}건 (파티션 {n['gap_partitions']}개)")
     elif n["partitions_seen"] < n["partitions_expected"]:
@@ -1320,13 +1383,39 @@ def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, *, query=None, 
     dup = ("문제" if n["duplicate_rows"] else "정상",
            f"같은 위치 {n['duplicate_rows']:,}건 · 같은 결제 번호 {n['duplicate_payment_ids']:,}건"
            "(참고: Debezium 재전송 등, 뷰가 걸러 줌)")
-    ages = {}
-    for name, col in (("적재 잡", "last_loaded"), ("지연 수집기", "last_collected")):
-        at = _utc(pd.Series([row[col]])).iloc[0]
-        ages[name] = None if pd.isna(at) else max((now - at).total_seconds(), 0.0)
-    stopped = [name for name, sec in ages.items() if sec is None or sec > STALE_SEC]
-    last = ", ".join(f"{name} {_ago(sec)}" if sec is not None else f"{name} {span} 기록 없음" for name, sec in ages.items())
-    stall = ("문제" if stopped else "정상", (f"멈춤: {', '.join(stopped)} · " if stopped else "") + f"마지막 기록 {last}")
+
+    def at(col):
+        return _utc(pd.Series([row[col]])).iloc[0]
+
+    problems, seen, latest = [], [], []
+    if to_now:  # 지금 멈췄는가: 마지막 기록이 STALE_SEC 를 넘었는가
+        for name, col in (("적재 잡", "last_loaded"), ("지연 수집기", "last_collected")):
+            age = None if pd.isna(at(col)) else max((now - at(col)).total_seconds(), 0.0)
+            latest.append(f"{name} {span} 기록 없음" if age is None else f"{name} {_ago(age)}")
+            if age is None or age > STALE_SEC:
+                problems.append(f"{name} " + (f"{span} 기록 없음" if age is None else f"{_dur(age)}째 안 씀"))
+    if row["load_late_sec"] is None or pd.isna(row["load_late_sec"]):
+        if not to_now:
+            problems.append(f"적재 잡 {span} 기록 없음")
+    else:
+        late_sec = float(row["load_late_sec"])
+        seen.append(f"가장 늦게 쓴 메시지 {_dur(late_sec)}")
+        if late_sec > STALE_SEC:
+            problems.append(f"적재 잡이 {_kst_hm(at('load_late_at'))} KST 메시지를 {_dur(late_sec)} 늦게 씀")
+    if row["last_collected"] is None or pd.isna(at("last_collected")):
+        if not to_now:
+            problems.append(f"지연 수집기 {span} 기록 없음")
+    else:
+        gap_sec = float(row["collect_gap_sec"] or 0)
+        seen.append(f"지연 수집기 측정 간격 최대 {_dur(gap_sec)}")
+        if gap_sec > STALE_SEC and not (to_now and at("collect_gap_end") >= stop.floor("s")):  # 지금까지 빈 것은 위에서 셌다
+            resumed = at("collect_gap_end")
+            problems.append(f"지연 수집기 측정 간격 {_dur(gap_sec)} ({_kst_hm(resumed - pd.Timedelta(seconds=gap_sec))}"
+                            f"~{_kst_hm(resumed)[-5:]} KST)")
+    detail = "; ".join(problems) if problems else " · ".join(seen)
+    if latest:
+        detail += f" · 마지막 기록 {', '.join(latest)}"
+    stall = ("문제" if problems else "정상", detail)
     return pd.DataFrame(
         [
             {"check": "오프셋 빈틈", "target": "topic_messages", "result": gap[0], "detail": gap[1], "checked_at": now},
@@ -1358,11 +1447,16 @@ if ATHENA_WORKGROUP:
 
 def _ago(sec: float) -> str:
     """'n초 전 / n분 전 / n시간 전' 문구."""
+    return f"{_dur(sec)} 전"
+
+
+def _dur(sec: float) -> str:
+    """'n초 / n분 / n시간' 문구 (길이)."""
     if sec < 120:
-        return f"{sec:,.0f}초 전"
+        return f"{sec:,.0f}초"
     if sec < 2 * 3600:
-        return f"{sec / 60:,.0f}분 전"
-    return f"{sec / 3600:,.1f}시간 전"
+        return f"{sec / 60:,.0f}분"
+    return f"{sec / 3600:,.1f}시간"
 
 
 def _kst_hm(ts: pd.Timestamp) -> str:
