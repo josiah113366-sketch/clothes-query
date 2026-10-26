@@ -131,6 +131,11 @@ check("신뢰성 점검(날짜 지정): 그때 2분 넘게 늦게 쓴 메시지�
 r, _ = past_checks(collect_gap_sec=600, collect_gap_end="2026-10-23 06:00:00.000")
 check("신뢰성 점검(날짜 지정): 구간 끝까지 빈 측정도 측정 간격으로 적음 (지금 기준이 아님)",
       (r.result[STALL], r.detail[STALL]), ("문제", "지연 수집기 측정 간격 10분 (10-23 14:50~15:00 KST)"))
+q = FakeRow(last_loaded="2026-10-24 05:25:20.000", last_collected="2026-10-24 05:30:01.000",
+            load_late_at="2026-10-24 05:20:00.000", collect_gap_end="2026-10-24 05:30:01.000")
+r = data._real_reliability_checks(120, later, query=q, now=NOW).set_index("check")
+check("신뢰성 점검(오늘 날짜 지정, 지금까지 이어지는 구간): 지금 멈춘 것도 잡음 (못 쓴 메시지는 원장에 없어서)",
+      (r.result[STALL], r.detail[STALL].split(" · ")[0]), ("문제", "적재 잡 5분째 안 씀"))
 r, _ = past_checks(load_late_sec=None, load_late_at=None, last_loaded=None, partitions_seen=0)
 check("신뢰성 점검(날짜 지정): 그 구간에 원장 기록이 없으면 빈틈은 확인 필요, 적재 정지는 문제",
       (r.result[GAP], r.result[STALL], r.detail[STALL]), ("확인 필요", "문제", "적재 잡 구간 기록 없음"))

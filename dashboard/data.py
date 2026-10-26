@@ -1297,7 +1297,8 @@ def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, end: pd.Timesta
        뷰가 걸러 주므로 참고로만 적는다.
     ③ 적재 정지: 적재 잡은 구간 메시지가 Kafka 에 들어온 뒤 STALE_SEC 넘게 늦게 쓰였는가(loaded_at - kafka_timestamp).
        평소 최대 약 68초다 (1분 묶음 + 처리). 지연 수집기는 측정 간격(collected_at)이 STALE_SEC 를 넘은 적이 있는가
-       (구간 시작·끝도 끝점으로 넣는다). 실시간이면 둘의 마지막 기록이 지금부터 STALE_SEC 를 넘었는지도 본다.
+       (구간 시작·끝도 끝점으로 넣는다). 구간이 지금까지 이어지면(실시간, 오늘 날짜 지정) 둘의 마지막 기록이
+       지금부터 STALE_SEC 를 넘었는지도 본다. 멈춘 동안 쓰지 못한 메시지는 원장에 없어 늦게 쓴 정도로는 안 잡혀서다.
        그래서 지나간 구간도 그 안에서 멈췄거나 밀렸던 것이 잡힌다 (B11). 쓴 시각 사이의 쉼으로 재지 않는 것은,
        밀린 메시지를 따라잡는 동안에는 구간 밖의 옛 메시지만 써서 멈춘 것처럼 보이기 때문이다.
     한계: ①은 관측된 처음~끝 offset 사이만 본다. 구간 경계에서 Kafka 시각 순서가 뒤바뀐 메시지가 있으면 빈틈으로 보일 수 있다.
@@ -1309,6 +1310,7 @@ def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, end: pd.Timesta
     start = (edge if live else pd.Timestamp(end)) - pd.Timedelta(minutes=minutes)
     until = edge if live else min(pd.Timestamp(end), edge)  # ①② 의 끝 (Kafka 시각)
     stop = now if live else min(pd.Timestamp(end), now)  # ③ 의 끝 (쓴 시각)
+    to_now = stop == now  # 구간이 지금까지 이어지는가 (실시간, 또는 오늘 날짜 지정)
     window, recent = f"({_hour_partitions(start, until)})", f"({_hour_partitions(start, stop)})"
     since, upto, halt = _ts(start), _ts(until), _ts(stop)
     partition = "concat(topic, '-', CAST(kafka_partition AS varchar))"
@@ -1353,18 +1355,19 @@ def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, end: pd.Timesta
     dup = ("문제" if n["duplicate_rows"] else "정상",
            f"같은 위치 {n['duplicate_rows']:,}건 · 같은 결제 번호 {n['duplicate_payment_ids']:,}건"
            "(참고: Debezium 재전송 등, 뷰가 걸러 줌)")
+
     def at(col):
         return _utc(pd.Series([row[col]])).iloc[0]
 
     problems, seen, latest = [], [], []
-    if live:  # 지금 멈췄는가: 마지막 기록이 STALE_SEC 를 넘었는가
+    if to_now:  # 지금 멈췄는가: 마지막 기록이 STALE_SEC 를 넘었는가
         for name, col in (("적재 잡", "last_loaded"), ("지연 수집기", "last_collected")):
             age = None if pd.isna(at(col)) else max((now - at(col)).total_seconds(), 0.0)
             latest.append(f"{name} {span} 기록 없음" if age is None else f"{name} {_ago(age)}")
             if age is None or age > STALE_SEC:
                 problems.append(f"{name} " + (f"{span} 기록 없음" if age is None else f"{_dur(age)}째 안 씀"))
     if row["load_late_sec"] is None or pd.isna(row["load_late_sec"]):
-        if not live:
+        if not to_now:
             problems.append(f"적재 잡 {span} 기록 없음")
     else:
         late_sec = float(row["load_late_sec"])
@@ -1372,12 +1375,12 @@ def _real_reliability_checks(minutes: int = RELIABILITY_MINUTES, end: pd.Timesta
         if late_sec > STALE_SEC:
             problems.append(f"적재 잡이 {_kst_hm(at('load_late_at'))} KST 메시지를 {_dur(late_sec)} 늦게 씀")
     if row["last_collected"] is None or pd.isna(at("last_collected")):
-        if not live:
+        if not to_now:
             problems.append(f"지연 수집기 {span} 기록 없음")
     else:
         gap_sec = float(row["collect_gap_sec"] or 0)
         seen.append(f"지연 수집기 측정 간격 최대 {_dur(gap_sec)}")
-        if gap_sec > STALE_SEC and not (live and at("collect_gap_end") >= stop.floor("s")):  # 지금까지 빈 것은 위에서 셌다
+        if gap_sec > STALE_SEC and not (to_now and at("collect_gap_end") >= stop.floor("s")):  # 지금까지 빈 것은 위에서 셌다
             resumed = at("collect_gap_end")
             problems.append(f"지연 수집기 측정 간격 {_dur(gap_sec)} ({_kst_hm(resumed - pd.Timedelta(seconds=gap_sec))}"
                             f"~{_kst_hm(resumed)[-5:]} KST)")
