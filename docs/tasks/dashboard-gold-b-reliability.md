@@ -43,7 +43,7 @@
 
 - `dashboard/data.py`: `_real_reliability_checks(분)`. 최근 180분 원장(`topic_messages`, `bronze_lag_snapshots`, `payment_events`)을 Athena 조회 한 번으로 읽어 점검 3줄을 만든다. workgroup 환경변수가 있을 때 `_REAL["get_reliability_checks"]`에 등록한다. 상수 `RELIABILITY_MINUTES`(180), `STALE_SEC`(120).
 - `dashboard/pages_data/pipeline.py`: 원장 신뢰성 점검 칸에 범위 부제, 정상이 아닌 항목이 있으면 경고. 탭 아래 더미 안내는 실제로 더미인 칸만, 모두 실데이터면 띄우지 않는다.
-- `dashboard/test_gold_b_reliability.py` (24개): 등록, SQL(원장 3개, 시간 폴더, 덜 찬 분 빼기, 빈틈·중복 계산식), 판정(정상, 빈틈 → 문제, 빠진 파티션 → 확인 필요, 같은 위치 중복 → 문제, 같은 결제 번호만 → 정상, 2분 넘게 안 씀·기록 없음 → 문제, 119초 → 정상), 화면(더미·정상·문제·모두 실데이터).
+- `dashboard/test_gold_b_reliability.py` (23개): 등록, SQL(원장 3개, 시간 폴더, 덜 찬 분 빼기, 빈틈·중복 계산식), 판정(정상, 빈틈 → 문제, 빠진 파티션 → 확인 필요, 같은 위치 중복 → 문제, 같은 결제 번호만 → 정상, 2분 넘게 안 씀·기록 없음 → 문제, 119초 → 정상), 화면(더미·정상·문제·모두 실데이터).
 - 문서: `dashboard/README.md` 배포 8번, `dashboard/TODO.md` B3, #122 머지 표시.
 
 ### 왜
@@ -52,8 +52,8 @@
 
 ### 확인한 결과
 
-- `python test_gold_b_reliability.py` 24개 통과. 기존 `test_gold_b_data.py` 36개, `test_gold_b_scenarios.py` 28개, `test_approval_page.py` 28개, `test_anomaly_rca_data.py` 19개, `test_gold_a_io.py` 19개 통과 (로컬 Python 3.12, streamlit 1.59.2, `streamlit_echarts`는 가짜 모듈).
-- 2026-10-26 최신 `main`(`78ae762`, 이상탐지·원인 리포트·감성분석 화면 실데이터 연결 포함) 위로 다시 올린 뒤(충돌 없음) 다시 돌림: `test_gold_b_reliability.py` 24개, `test_gold_b_data.py` 37개, `test_gold_b_scenarios.py` 29개, `test_approval_page.py` 29개, `test_anomaly_rca_data.py` 28개, `python -m pytest -q test_gold_a_io.py test_model_io.py` 33개 모두 통과.
+- `python test_gold_b_reliability.py` 23개 통과. 기존 `test_gold_b_data.py` 36개, `test_gold_b_scenarios.py` 28개, `test_approval_page.py` 28개, `test_anomaly_rca_data.py` 19개, `test_gold_a_io.py` 19개 통과 (로컬 Python 3.12, streamlit 1.59.2, `streamlit_echarts`는 가짜 모듈).
+- 2026-10-26 최신 `main`(`78ae762`, 이상탐지·원인 리포트·감성분석 화면 실데이터 연결 포함) 위로 다시 올린 뒤(충돌 없음) 다시 돌림: `test_gold_b_reliability.py` 23개, `test_gold_b_data.py` 36개, `test_gold_b_scenarios.py` 28개, `test_approval_page.py` 28개, `test_anomaly_rca_data.py` 27개, `python -m pytest -q test_gold_a_io.py test_model_io.py` 33개 모두 통과.
 - 코드를 일부러 틀리게 바꾼 7가지(등록 빠짐, 빠진 파티션 판정, 기록 없음 판정, 결제 번호로 중복 판정, 경고 빠짐, 더미 안내 고정, 빈 더미 안내)를 시험이 모두 잡았다.
 - 실제 Athena (은서 님 AWS 자격, 대시보드 workgroup, SELECT만, 2026-10-25 17:5x KST): 빈틈 0건(파티션 15개), 같은 위치 중복 0건, 같은 결제 번호 6건(모두 같은 결제의 생성 이벤트가 두 번 온 것: Debezium 재전송, 참고), 마지막 기록 적재 잡 57초 전·지연 수집기 16초 전 → 세 점검 모두 정상.
 
