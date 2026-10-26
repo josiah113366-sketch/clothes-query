@@ -136,9 +136,17 @@ with t_lag:
                 + ". 지연과 함께 유입도 늘었으면 폭주, 유입은 그대로인데 지연만 커지면 S3 Sink(Bronze 적재)의 문제입니다."
             )
 
-    with ui.panel("원장 신뢰성 점검"):
+    with ui.panel("원장 신뢰성 점검", f"최근 {data.RELIABILITY_MINUTES // 60}시간 · 빠짐·중복·멈춤"):
+        checks = data.get_reliability_checks()
+        not_ok = checks[checks.result != "정상"]
+        if len(not_ok):
+            st.warning(
+                "원장 점검에 정상이 아닌 항목이 있습니다: "
+                + ", ".join(not_ok.check)
+                + ". 이 시간대 탐지 결과는 믿지 말고 Gold B(적재 잡·지연 수집기)부터 확인하세요."
+            )
         st.dataframe(
-            data.get_reliability_checks().assign(checked_at=lambda d: data.to_kst(d.checked_at)),
+            checks.assign(checked_at=lambda d: data.to_kst(d.checked_at)),
             hide_index=True,
             width="stretch",
         )
@@ -146,11 +154,12 @@ with t_lag:
         "점검에 문제가 나오면 그 시간대의 탐지 결과는 믿지 않고 Gold B부터 고친 뒤 재판정합니다."
     )
     dummy = (
-        ["원장 신뢰성 점검"]
+        (["원장 신뢰성 점검"] if "get_reliability_checks" in data.USING_DUMMY else [])
         + (["지연 측정"] if "get_bronze_lag" in data.USING_DUMMY else [])
         + (["유입"] if "get_topic_inflow" in data.USING_DUMMY else [])
     )
-    st.caption(f"※ 지금 더미 데이터: {', '.join(dummy)}.")
+    if dummy:
+        st.caption(f"※ 지금 더미 데이터: {', '.join(dummy)}.")
 
 
 # ---------------------------------------------------------------------
