@@ -10,10 +10,10 @@
     여러 파티션에 나뉘었거나 순서가 이상하거나 마지막이 형식 오류인 결제는 보류되어 빠진다 (payment_conflicts 뷰).
   - 이상 판정(묶어 세기)은 탐지 담당의 일이다. 이 화면은 원장을 읽기 쉽게 보여주는 용도다.
   - 성공 결제 중복은 형식은 맞고 업무 규칙만 어기는 데이터라 형식 오류 화면에는 나오지 않는다 (판정 R5).
-    중복 행의 결제 시각은 과거일 수 있어 최근 '적재' 시각으로 찾는다. 평소 0건이 정상이다.
+    중복 행의 결제 시각은 과거일 수 있어 조회 구간의 '적재' 시각으로 찾는다. 평소 0건이 정상이다.
+조회 구간 (TODO B11): 화면 위에서 '최근 N시간' 또는 '날짜 지정'(KST 날짜 + 시간 범위)을 고른다. 아래 모든 칸이 같은 구간을 본다.
 """
 
-import pandas as pd
 import streamlit as st
 
 import charts
@@ -24,114 +24,116 @@ from auth import require_role
 require_role("data")
 
 st.title("결제 관제")
-hours = st.slider("조회 기간(최근 N시간)", 1, 6, 3)
+win = ui.pick_window("payments", default_hours=3)
 
-df = data.get_payment_attempts(6).copy()
+df = data.get_payment_attempts(win.hours, win.end).copy()
 df["completed_at_kst"] = data.to_kst(df.completed_at)
-df = df[df.completed_at > df.completed_at.max() - pd.Timedelta(hours=hours)]
-
-fail = df[df.status == "FAILED"]
-pgf = df.assign(
-    bucket=df.completed_at_kst.dt.floor("10min"),
-    pg_fail=(df.failure_cause == "PG"),
-    failed=(df.status == "FAILED"),
-)
-by10 = pgf.groupby("bucket")[["pg_fail", "failed"]].agg(["sum", "count"])
-ui.kpis(
-    [
-        {
-            "label": "결제 시도",
-            "value": f"{len(df):,}",
-            "unit": "건",
-            "sub": f"최근 {hours}시간",
-            "spark": by10[("failed", "count")],
-        },
-        {
-            "label": "실패",
-            "value": f"{len(fail):,}",
-            "unit": "건",
-            "sub": "실패율 " + ui.pct(len(fail) / len(df) if len(df) else float("nan")),
-            "spark": by10[("failed", "sum")],
-        },
-        {
-            "label": "PG 원인 실패",
-            "value": f"{int((fail.failure_cause == 'PG').sum()):,}",
-            "unit": "건",
-            "sub": "PG_TIMEOUT · PG_ERROR",
-            "spark": by10[("pg_fail", "sum")],
-        },
-        {
-            "label": "고객 원인 실패",
-            "value": f"{int((fail.failure_cause == 'CUSTOMER').sum()):,}",
-            "unit": "건",
-            "sub": "장애 아님 (잔액·한도·거절)",
-        },
-    ]
-)
-
-left, right = st.columns([1.6, 1])
-with left, ui.panel("PG별 PG 원인 실패 비율", "10분 단위 · KST"):
-    rate = pgf.groupby(["bucket", "pg"]).pg_fail.mean().unstack("pg")
-    # PG 색은 PG 이름 순서로 고정 (조회 기간을 바꿔도 같은 PG 는 같은 색)
-    pgs = sorted(df.pg.unique())
-    charts.line(
-        rate[[p for p in pgs if p in rate.columns]],
-        key="pay_rate",
-        fmt="pct",
-        colors=[charts.color(pgs.index(p)) for p in pgs if p in rate.columns],
+if df.empty:  # 날짜 지정 구간에 결제가 없을 때만 (실시간은 비면 더미로 대체된다)
+    st.info(f"{win.label}에 결제가 없습니다.")
+else:
+    fail = df[df.status == "FAILED"]
+    pgf = df.assign(
+        bucket=df.completed_at_kst.dt.floor("10min"),
+        pg_fail=(df.failure_cause == "PG"),
+        failed=(df.status == "FAILED"),
     )
-    st.caption("고객 원인 실패는 제외하고 PG 원인 실패만 비율로 봅니다.")
-with right:
-    by_pg = pgf.groupby("pg").pg_fail.mean()
-    worst = float(by_pg.max()) if len(by_pg) else None
-    # 상태 색 기준(임시): 5% 미만 정상, 15% 미만 주의, 그 이상 위험.
-    # 탐지 규칙의 기준이 아니라 화면 색 구분용이다.
-    tone = (
-        charts.GOOD
-        if worst is None or worst < 0.05
-        else charts.WARN
-        if worst < 0.15
-        else charts.BAD
+    by10 = pgf.groupby("bucket")[["pg_fail", "failed"]].agg(["sum", "count"])
+    ui.kpis(
+        [
+            {
+                "label": "결제 시도",
+                "value": f"{len(df):,}",
+                "unit": "건",
+                "sub": win.label,
+                "spark": by10[("failed", "count")],
+            },
+            {
+                "label": "실패",
+                "value": f"{len(fail):,}",
+                "unit": "건",
+                "sub": "실패율 " + ui.pct(len(fail) / len(df) if len(df) else float("nan")),
+                "spark": by10[("failed", "sum")],
+            },
+            {
+                "label": "PG 원인 실패",
+                "value": f"{int((fail.failure_cause == 'PG').sum()):,}",
+                "unit": "건",
+                "sub": "PG_TIMEOUT · PG_ERROR",
+                "spark": by10[("pg_fail", "sum")],
+            },
+            {
+                "label": "고객 원인 실패",
+                "value": f"{int((fail.failure_cause == 'CUSTOMER').sum()):,}",
+                "unit": "건",
+                "sub": "장애 아님 (잔액·한도·거절)",
+            },
+        ]
     )
-    with ui.panel("가장 높은 PG 원인 실패 비율", f"최근 {hours}시간"):
-        charts.gauge(worst, key="pay_gauge", label=by_pg.idxmax() if len(by_pg) else "", tone=tone)
-    with ui.panel("PG별 PG 원인 실패 비율", f"최근 {hours}시간 · 시도 수"):
-        cnt = pgf.groupby("pg").size()
-        charts.rank(
-            [
-                (f"{p} ({int(cnt[p]):,}건)", float(by_pg[p]), charts.color(pgs.index(p)))
-                for p in pgs
-            ],
-            key="pay_rank",
-            max_value=max(worst or 0, 0.01),
+
+    left, right = st.columns([1.6, 1])
+    with left, ui.panel("PG별 PG 원인 실패 비율", "10분 단위 · KST"):
+        rate = pgf.groupby(["bucket", "pg"]).pg_fail.mean().unstack("pg")
+        # PG 색은 PG 이름 순서로 고정 (조회 기간을 바꿔도 같은 PG 는 같은 색)
+        pgs = sorted(df.pg.unique())
+        charts.line(
+            rate[[p for p in pgs if p in rate.columns]],
+            key="pay_rate",
+            fmt="pct",
+            colors=[charts.color(pgs.index(p)) for p in pgs if p in rate.columns],
+        )
+        st.caption("고객 원인 실패는 제외하고 PG 원인 실패만 비율로 봅니다.")
+    with right:
+        by_pg = pgf.groupby("pg").pg_fail.mean()
+        worst = float(by_pg.max()) if len(by_pg) else None
+        # 상태 색 기준(임시): 5% 미만 정상, 15% 미만 주의, 그 이상 위험.
+        # 탐지 규칙의 기준이 아니라 화면 색 구분용이다.
+        tone = (
+            charts.GOOD
+            if worst is None or worst < 0.05
+            else charts.WARN
+            if worst < 0.15
+            else charts.BAD
+        )
+        with ui.panel("가장 높은 PG 원인 실패 비율", win.label):
+            charts.gauge(worst, key="pay_gauge", label=by_pg.idxmax() if len(by_pg) else "", tone=tone)
+        with ui.panel("PG별 PG 원인 실패 비율", f"{win.label} · 시도 수"):
+            cnt = pgf.groupby("pg").size()
+            charts.rank(
+                [
+                    (f"{p} ({int(cnt[p]):,}건)", float(by_pg[p]), charts.color(pgs.index(p)))
+                    for p in pgs
+                ],
+                key="pay_rank",
+                max_value=max(worst or 0, 0.01),
+            )
+
+    with ui.panel("실패 원인별 건수", "PG별 · 원인 쌓기"):
+        charts.bar(
+            fail.groupby(["pg", "failure_cause"]).size().unstack("failure_cause").fillna(0),
+            key="pay_cause",
+            stacked=True,
+            height="260px",
         )
 
-with ui.panel("실패 원인별 건수", "PG별 · 원인 쌓기"):
-    charts.bar(
-        fail.groupby(["pg", "failure_cause"]).size().unstack("failure_cause").fillna(0),
-        key="pay_cause",
-        stacked=True,
-        height="260px",
-    )
+    with st.expander("실패 결제 목록"):
+        st.dataframe(
+            fail[
+                [
+                    "payment_id",
+                    "order_id",
+                    "attempt_no",
+                    "pg",
+                    "failure_code",
+                    "failure_cause",
+                    "completed_at_kst",
+                ]
+            ],
+            hide_index=True,
+            width="stretch",
+        )
 
-with st.expander("실패 결제 목록"):
-    st.dataframe(
-        fail[
-            [
-                "payment_id",
-                "order_id",
-                "attempt_no",
-                "pg",
-                "failure_code",
-                "failure_cause",
-                "completed_at_kst",
-            ]
-        ],
-        hide_index=True,
-        width="stretch",
-    )
-with ui.panel("성공 결제가 2건 이상인 주문", f"시나리오 3 · 최근 {data.DUPLICATE_HOURS}시간 적재 기준"):
-    dup = data.get_duplicate_success(data.DUPLICATE_HOURS).copy()
+with ui.panel("성공 결제가 2건 이상인 주문", f"시나리오 3 · {win.label} 적재 기준"):
+    dup = data.get_duplicate_success(win.hours, win.end).copy()
     if dup.empty:
         st.success("성공 결제가 2건 이상인 주문이 없습니다 (정상).")
     else:
