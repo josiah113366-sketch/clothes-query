@@ -34,6 +34,13 @@ class Athena:
         return self
 
     def result(self, sql):
+        if "FROM gold_a.product_sales_daily_runs" in sql and "sum(sold_quantity)" in sql:
+            if "GROUP BY sales_date_kst" in sql:
+                return ["sales_date_kst", "sold_quantity", "item_sales_amount"], [["2026-10-24", "2", "100"]]
+            if "GROUP BY article_id, product_code" in sql:
+                return ["article_id", "product_code", "sold_quantity", "item_sales_amount"], [["0000000001", "1", "2", "100"]]
+            if "GROUP BY product_code" in sql:
+                return ["product_code", "sold_quantity", "item_sales_amount"], [["1", "2", "100"]]
         if " AS order_without_cart" in sql:
             return ["view_sessions", "cart_sessions", "order_sessions", "paid_sessions",
                     "cart_order_sessions", "order_without_cart", "order_with_cart", "invalid_rows"], [["1", "1", "1", "1", "1", "0", "1", "0"]]
@@ -191,6 +198,19 @@ def test_products_are_real_ids_and_cached():
     assert len([q for q in client.sql if "SELECT DISTINCT" in q]) == 1
 
 
+def test_product_sales_overview_reads_aggregates_from_one_gold_run():
+    client = Athena(partial=True)
+    daily, products, designs = reader(client).product_sales_overview(14)
+    assert int(daily.sold_quantity.sum()) == 2
+    assert int(products.item_sales_amount.sum()) == 100
+    assert int(designs.sold_quantity.sum()) == 2
+    sales_queries = [q for q in client.sql if "FROM gold_a.product_sales_daily_runs" in q]
+    assert len(sales_queries) == 3
+    assert all("run_id = 'run-a'" in q and "LIMIT 20" in q if "GROUP BY sales_date_kst" not in q
+               else "run_id = 'run-a'" in q for q in sales_queries)
+    assert not any("SELECT DISTINCT" in q for q in client.sql)
+
+
 @pytest.mark.parametrize("name", ["orders", "product_sales", "funnel", "reviews", "overview"])
 def test_real_pages(monkeypatch, name):
     from streamlit.testing.v1 import AppTest
@@ -211,7 +231,7 @@ def test_real_pages(monkeypatch, name):
     if name == "funnel":
         at.checkbox[0].set_value(True).run()
         assert not at.error and not at.exception
-    if name != "orders":
+    if name not in {"orders", "product_sales"}:
         widgets = at.multiselect or at.selectbox
         assert "0000000001" in str(widgets[0].options)
 
