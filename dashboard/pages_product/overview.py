@@ -150,17 +150,17 @@ if ui.has_rows(asp):
 
 # ---- 관련 장애 (Gold B 기록, 같은 기간) ----
 st.subheader("관련 장애")
-st.caption("이 영역은 기존 관제 미리보기 데이터입니다.")
 an = data.get_anomalies().copy()
-an["detected_at(KST)"] = data.to_kst(an.detected_at)
-st.dataframe(an.drop(columns="detected_at"), hide_index=True, width="stretch")
-st.caption(
-    "Gold B의 장애 기록입니다. 같은 기간에 겹친다고 판매 변화의 원인이라고 단정하지 않습니다."
-)
+if "get_anomalies" in data.USING_DUMMY:
+    st.info("관련 장애: 실제 조회가 연결되지 않았거나 실패하여 미검증입니다. 미리보기 장애 수치는 표시하지 않습니다.")
+else:
+    an["detected_at(KST)"] = data.to_kst(an.detected_at)
+    st.dataframe(an.drop(columns="detected_at"), hide_index=True, width="stretch")
+    st.caption("Gold B의 실제 장애 기록입니다. 같은 기간에 겹친다고 판매 변화의 원인이라고 단정하지 않습니다.")
 
 # ---- 데이터 상태 ----
 st.subheader("데이터 상태")
-st.caption("아래 처리 현황은 미리보기이며, 실제 Gold A 실행·보류 정보는 화면 상단을 확인하세요.")
+st.caption("선택한 Gold 실행의 실제 공개·보류 상태입니다. 완료 시각을 원천 데이터 처리 완료 범위로 해석하지 마세요.")
 st.dataframe(data.get_data_status(), hide_index=True, width="stretch")
 st.caption("처리 완료 범위 밖의 낮은 값은 판매 감소가 아니라 데이터 지연일 수 있습니다.")
 ui.dummy_note()

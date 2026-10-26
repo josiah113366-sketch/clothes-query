@@ -123,6 +123,24 @@ streamlit run app.py
 7. 시나리오 2·3 (TODO B10): 같은 workgroup 환경변수가 있으면 파이프라인 상태 › 지연·점검 탭이 `gold_b.topic_messages`에서 토픽별 1분 유입(최근 180분, 시간 폴더 조건)을, 결제 관제가 `gold_b.payment_attempts` 뷰에서 최근 6시간에 적재된 성공 결제의 주문 중 성공이 2건 이상인 주문(판정 R5와 같은 방식)을 읽는다. 이 두 칸은 비어 있는 것이 정상이거나 신호라 결과가 비어도 더미로 바꾸지 않고(`dataset(..., allow_empty=True)`), 조회가 실패할 때만 더미로 대체한다. 성공 결제 중복도 결제 뷰 읽기 권한이 필요하다.
 
 ## 추후 할 일
+### Gold A 시연·검증 조회
+
+Windows 로컬 실행(실제 AWS 인증 재사용, 키 저장 없음): 저장소 루트에서 `.\dashboard\run-local.ps1 -Setup`, 이후 `.\dashboard\run-local.ps1`. 접속은 `http://localhost:8501`이며 로컬에만 바인딩한다. 기존 프로필 선택은 `-Profile <프로필>`을 사용한다. 로컬 dev 로그인 모드는 운영 설정에 반영되지 않는다. [검증 및 내일 배포 순서](../docs/tasks/dashboard-gold-demo.md)를 참고한다. 인프라 #131 적용 후 앱 PR을 머지해야 기존 자동 이미지 배포와 충돌하지 않는다.
+
+- 기본 `운영` 모드는 기존 `gold_runs` 완료 공개 정책을 유지한다. `시연·검증` 모드는 사이드바에서 선택한다.
+- 거래는 공개된 실행 중 하나를 선택한다. PARTIAL 보류 범위는 신규 오류 데이터를 반영하지 않고, 이전 정상 결과가 있으면 유지하며 없으면 제외한다.
+- 퍼널은 checkpoint의 **검증 완료 tip**만 읽는다. SHA256, 고정 manifest와 완료 기록, 전체 inventory 대비 처리 목록, Athena 지표·보류 건수를 대조한다. 잠금 owner의 미완료 실행은 선택하지 않는다.
+- 부분 퍼널의 전환율·세션 수는 처리된 입력 범위 기준이다. 파일 처리 비율은 이벤트·세션 완전성이나 전환율의 신뢰구간이 아니다. 운영 current·완료 목록·checkpoint는 쓰지 않는다.
+- 각 패널에 실행·상태·범위를 표시한다. S3/Athena 검증 실패는 오류로 중단하고 더미나 다른 실행으로 대체하지 않는다. 리뷰는 기존 공개 PASS 경로를 사용한다.
+- 시연 모드의 행 조회 상한은 250,000행(운영은 기존 100,000행)이다. 초과 시 잘라내지 않고 조회를 중단한다. 퍼널 세션 상세는 기존 상품별 최대 500행 제한을 유지한다.
+- 배포 선행 조건: **대시보드 이미지** 반영 및 실행 역할의 아래 `s3:GetObject` 권한. Spark 이미지·DAG 변경은 없다. 출력 root는 `GOLD_A_OUTPUT_ROOT`(기본 `s3://clothes-query-datalake`)다.
+  - `silver/runtime/clicks/catalog-control/incremental.json`
+  - `gold_a/runtime/funnels/runs/*/manifest.json`
+  - `gold_a/runtime/funnels/completed/*.json`
+  - `pipelines/input-manifests/funnels-incremental/*/inventory.json`
+  - 기존 Athena `gold_a` 실행별 표 SELECT·결과 읽기 권한을 사용한다. S3 목록·쓰기, Athena DDL은 필요 없다.
+- 통합 조회의 데이터 상태는 실제 선택 실행을 사용한다. Gold B 원장 신뢰성 검사 결과는 아직 연결되지 않았으므로 `미검증`으로 표시하며 정상·0건을 생성하지 않는다. Gold B 계약은 변경하지 않는다.
+
 baseline 이후 영역별 할 일(담당자·상태 기록용)은 [`TODO.md`](TODO.md)에 정리한다. 아래는 그중 핵심.
 - [ ] **원인 리포트에 담을 내용 정하기**: 지금 `원인 리포트` 화면은 임시 구성(제안)이다. 노션에 리포트 항목이 정해져 있지 않아, 조사 에이전트 담당과 맞춰 확정한 뒤 `data.get_rca_reports()`와 `pages_data/rca_report.py`를 고친다.
 - [ ] 슬랙 알림 연동 여부, 재처리 승인 화면 호출 방식(Airflow 결정 이후)
