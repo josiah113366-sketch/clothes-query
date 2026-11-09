@@ -99,6 +99,12 @@ class GoldPublisher:
         silver_run_id = manifest.get("silver_run_id", run_id)
         if not isinstance(silver_run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", silver_run_id):
             raise PublicationError("Gold 기준 Silver 실행 ID 오류")
+        if manifest.get("trade_recovery"):
+            from pipelines.trade_gold_recovery import validate_publication
+
+            if self.channel != "trade" or manifest.get("gold_only"):
+                raise PublicationError("거래 복구 공개 채널 오류")
+            validate_publication(self.store, manifest)
         if manifest.get("gold_only"):
             silver_key = f"silver/runtime/reviews/runs/{silver_run_id}/manifest.json"
             silver_raw, _ = self.store.get(silver_key)
